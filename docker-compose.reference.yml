@@ -1,0 +1,219 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: vocabapp-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vocabapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-vocabapp_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vocabapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vocabapp-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: vocabapp-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - vocabapp-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vocabapp-backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=development
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:5173,http://host.docker.internal:3000,http://host.docker.internal:3001,http://admin-frontend:3001
+      # TTS Configuration
+      - TTS_PRIMARY_PROVIDER=${TTS_PRIMARY_PROVIDER:-minimax}
+      - TTS_PROVIDER_WORD=${TTS_PROVIDER_WORD:-google}
+      - TTS_PROVIDER_DEFINITION=${TTS_PROVIDER_DEFINITION:-google}
+      - TTS_PROVIDER_EXAMPLE=${TTS_PROVIDER_EXAMPLE:-azure}
+      # MiniMax
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - MINIMAX_GROUP_ID=${MINIMAX_GROUP_ID:-}
+      - MINIMAX_VOICE_ID=${MINIMAX_VOICE_ID:-female-tianmei}
+      # ElevenLabs
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      - ELEVENLABS_VOICE_AMERICAN_FEMALE=${ELEVENLABS_VOICE_AMERICAN_FEMALE:-21m00Tcm4TlvDq8ikWAM}
+      - ELEVENLABS_VOICE_BRITISH_MALE=${ELEVENLABS_VOICE_BRITISH_MALE:-onwK4e9ZLuTAKqWW03F9}
+      # Google Cloud TTS
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/anz-demo-host-4138a9548c34.json
+      - GOOGLE_TTS_CREDENTIALS_BASE64=${GOOGLE_TTS_CREDENTIALS_BASE64:-}
+      - GOOGLE_TTS_API_KEY=${GOOGLE_TTS_API_KEY:-}
+      # Azure AI Speech
+      - AZURE_SPEECH_KEY=${AZURE_SPEECH_KEY:-}
+      - AZURE_SPEECH_REGION=${AZURE_SPEECH_REGION:-eastus}
+      # Audio storage
+      - AUDIO_STORAGE_BACKEND=${AUDIO_STORAGE_BACKEND:-local}
+      - AUDIO_LOCAL_PATH=${AUDIO_LOCAL_PATH:-uploads/audio}
+      # Image Generation Configuration
+      - IMAGE_PRIMARY_PROVIDER=${IMAGE_PRIMARY_PROVIDER:-leonardo}
+      - IMAGE_DEFAULT_STYLE=${IMAGE_DEFAULT_STYLE:-simple}
+      - IMAGE_STORAGE_BACKEND=${IMAGE_STORAGE_BACKEND:-local}
+      - IMAGE_LOCAL_PATH=${IMAGE_LOCAL_PATH:-uploads/images}
+      # Leonardo.ai
+      - LEONARDO_API_KEY=${LEONARDO_API_KEY:-}
+      # Replicate (FLUX)
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN:-}
+      - REPLICATE_MODEL=${REPLICATE_MODEL:-schnell}
+      # OpenAI (DALL-E) - may share key with other OpenAI services
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_IMAGE_MODEL=${OPENAI_IMAGE_MODEL:-dall-e-3}
+      # LLM / Story Generation
+      - LLM_PRIMARY_PROVIDER=${LLM_PRIMARY_PROVIDER:-anthropic}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_GEMINI_API_KEY=${GOOGLE_GEMINI_API_KEY:-}
+      - STORY_STORAGE_PATH=${STORY_STORAGE_PATH:-uploads/stories}
+    volumes:
+      - ./backend:/app
+      - ./secrets:/app/secrets:ro
+      - backend_uploads:/app/uploads
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vocabapp-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vocabapp-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api}
+      - BACKEND_URL=${BACKEND_URL:-http://backend:8000/api}
+      - NEXT_DISABLE_TURBOPACK=1
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - vocabapp-network
+
+  # Admin Frontend
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+      dockerfile: Dockerfile
+    container_name: vocabapp-admin-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api}
+      - BACKEND_URL=${BACKEND_URL:-http://backend:8000/api}
+      - NEXT_DISABLE_TURBOPACK=1
+    volumes:
+      - ./admin-frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3001:3001"
+    depends_on:
+      - backend
+    networks:
+      - vocabapp-network
+
+  # Playwright E2E (run with --profile tests)
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.58.2-jammy
+    container_name: vocabapp-playwright
+    working_dir: /work
+    shm_size: "1gb"
+    volumes:
+      - ./e2e:/work
+    environment:
+      - E2E_BASE_URL=http://frontend:3000
+      - E2E_API_URL=http://backend:8000/api
+      - E2E_ADMIN_URL=http://admin-frontend:3001
+    depends_on:
+      - frontend
+      - admin-frontend
+      - backend
+    networks:
+      - vocabapp-network
+    profiles:
+      - tests
+
+  # pgAdmin (Optional - Database Management UI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: vocabapp-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_CHECK_EMAIL_DELIVERABILITY: 'False'
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - vocabapp-network
+    profiles:
+      - tools
+
+  # Redis Commander (Optional - Redis Management UI)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: vocabapp-redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "${REDIS_COMMANDER_PORT:-8081}:8081"
+    depends_on:
+      - redis
+    networks:
+      - vocabapp-network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  backend_uploads:
+    driver: local
+
+networks:
+  vocabapp-network:
+    driver: bridge

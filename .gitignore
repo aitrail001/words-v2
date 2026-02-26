@@ -1,0 +1,58 @@
+# Words-Codex v2
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+postgres_data/
+redis_data/
+
+# Uploads (local dev)
+uploads/
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/
+coverage/
+
+# Secrets
+secrets/
+*.pem
+*.key
+
+# Playwright
+e2e/test-results/
+e2e/playwright-report/
