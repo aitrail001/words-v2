@@ -1,10 +1,17 @@
 import os
+import sys
 from logging.config import fileConfig
+from pathlib import Path
+
+# Add backend dir to path so 'app' is importable
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.core.database import Base
+# Import all models so Base.metadata is populated
+import app.models  # noqa: F401
 
 config = context.config
 
