@@ -1,4 +1,4 @@
-import { ApiError } from "./api-client";
+import { ApiError } from "../api-client";
 
 describe("ApiError", () => {
   it("captures status code and message", () => {

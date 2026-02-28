@@ -5,9 +5,13 @@ const config = {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
   transform: {
-    "^.+\\.tsx?$": "ts-jest",
+    "^.+\\.tsx?$": ["ts-jest", {
+      tsconfig: {
+        jsx: "react-jsx",
+      },
+    }],
   },
   testPathIgnorePatterns: ["<rootDir>/node_modules/", "<rootDir>/.next/"],
 };
 
-export default config;
+module.exports = config;
