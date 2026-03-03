@@ -58,6 +58,7 @@ class ReviewCard(Base):
     time_spent_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ease_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
     interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    repetitions: Mapped[int | None] = mapped_column(Integer, nullable=True)  # SM-2 repetition count
     next_review: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ def calculate_next_review(
     new_ease_factor = max(MIN_EASE_FACTOR, new_ease_factor)
 
     # Calculate next review date
-    next_review = datetime.utcnow() + timedelta(days=new_interval)
+    next_review = datetime.now(timezone.utc) + timedelta(days=new_interval)
 
     # Consider mastered if interval is > 21 days (3 weeks)
     is_mastered = new_interval > 21 and quality >= QUALITY_THRESHOLD

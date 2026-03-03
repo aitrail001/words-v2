@@ -39,6 +39,7 @@ def upgrade() -> None:
         sa.Column("time_spent_ms", sa.Integer(), nullable=True),
         sa.Column("ease_factor", sa.Float(), nullable=True),
         sa.Column("interval_days", sa.Integer(), nullable=True),
+        sa.Column("repetitions", sa.Integer(), nullable=True),
         sa.Column("next_review", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
