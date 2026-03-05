@@ -5,6 +5,7 @@
   "scripts": {
     "test": "playwright test",
     "test:smoke": "playwright test --grep @smoke",
+    "test:smoke:ci": "playwright test --grep @smoke --max-failures=1",
     "test:full": "playwright test",
     "typecheck": "tsc --noEmit"
   },
