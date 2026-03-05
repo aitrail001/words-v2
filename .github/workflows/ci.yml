@@ -95,7 +95,6 @@ jobs:
     name: E2E Smoke (required)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [backend, frontend]
 
     steps:
       - uses: actions/checkout@v4
