@@ -4,11 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 
+if [[ -f "${ROOT_DIR}/.env" ]]; then
+  env_postgres_user="$(grep -E '^POSTGRES_USER=' "${ROOT_DIR}/.env" | tail -n1 | cut -d'=' -f2- || true)"
+  env_postgres_password="$(grep -E '^POSTGRES_PASSWORD=' "${ROOT_DIR}/.env" | tail -n1 | cut -d'=' -f2- || true)"
+  env_postgres_db="$(grep -E '^POSTGRES_DB=' "${ROOT_DIR}/.env" | tail -n1 | cut -d'=' -f2- || true)"
+fi
+
 export E2E_BASE_URL="${E2E_BASE_URL:-http://frontend:3000}"
 export E2E_API_URL="${E2E_API_URL:-http://backend:8000/api}"
-export POSTGRES_USER="${POSTGRES_USER:-vocabapp}"
-export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-devpassword}"
-export POSTGRES_DB="${POSTGRES_DB:-vocabapp_dev}"
+export POSTGRES_USER="${POSTGRES_USER:-${env_postgres_user:-vocabapp}}"
+export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-${env_postgres_password:-devpassword}}"
+export POSTGRES_DB="${POSTGRES_DB:-${env_postgres_db:-vocabapp_dev}}"
 export E2E_DB_URL="${E2E_DB_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}"
 export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://backend:8000/api}"
 export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000}"
