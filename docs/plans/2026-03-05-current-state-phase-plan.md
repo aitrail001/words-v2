@@ -11,6 +11,7 @@
 - Import API reliability improvements are implemented (status-aware dedupe returns, enqueue-failure handling, and cleanup path hardening).
 - Worker runtime now exists in `docker-compose.yml` (`worker` service) and was runtime-validated.
 - `backend/tests/test_epub_processing.py` placeholder tests were replaced with real stop-word and lemmatization coverage.
+- Learning queue models/migration, queue review APIs, and queue-based frontend review flow are implemented.
 - Backend and frontend test suites are green.
 
 ---
@@ -126,16 +127,21 @@
 - `backend/tests/test_imports_api.py`
 - `backend/tests/test_epub_processing.py`
 
-### Slice 2: Bridge review to a real learning queue
+### Slice 2: Bridge review to a real learning queue (COMPLETED - 2026-03-05)
 
 **Outcome**
 - Users can add meanings to a persistent queue, then review due items from that queue (not only pre-created raw cards).
 
-**Acceptance criteria**
-- New persistence for queue membership + review history exists via migration.
-- API provides: add-to-queue, due-items-from-queue, submit-review, and basic stats.
-- Review submission writes history and updates scheduling fields deterministically.
-- Frontend review UI consumes due items that include enough prompt metadata to review meaningfully.
+**Evidence of completion**
+- New persistence for queue membership + review history added via migration `004` (`backend/alembic/versions/004_add_learning_queue.py`).
+- Queue APIs implemented in `backend/app/api/reviews.py`:
+  - `POST /api/reviews/queue`
+  - `GET /api/reviews/queue/due`
+  - `POST /api/reviews/queue/{item_id}/submit`
+  - `GET /api/reviews/queue/stats`
+- Queue service logic implemented in `backend/app/services/review.py` with SM-2 submission handling and history writes.
+- Frontend review flow now consumes queue due items and submits queue ratings (`frontend/src/app/review/page.tsx`).
+- Backend and frontend tests are green after integration (`100 passed` backend, `5 suites / 16 tests passed` frontend).
 
 **Files to touch**
 - `backend/alembic/versions/004_add_learning_queue.py` (new)
