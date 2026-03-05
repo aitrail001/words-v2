@@ -41,3 +41,4 @@ docs/
 ### Runbooks (`docs/runbooks/`)
 - Pre-prod readiness: `docs/runbooks/preprod-readiness-checklist.md`
 - Rollback procedure: `docs/runbooks/rollback.md`
+- Promotion flow: `docs/runbooks/release-promotion.md`

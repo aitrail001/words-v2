@@ -2,6 +2,8 @@
 
 Use this checklist before promoting a release candidate to pre-prod test window.
 
+For end-to-end promotion order (merge -> tag -> deploy -> verify -> promote), see [`release-promotion.md`](./release-promotion.md).
+
 ## 1. Prerequisites
 
 - Release candidate commit SHA is frozen and shared.
@@ -64,4 +66,3 @@ Go only if all are true:
 - No open Sev-1/Sev-2 defects tied to the candidate.
 
 No-Go if any item above is false.
-
