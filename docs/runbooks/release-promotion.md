@@ -1,57 +1,88 @@
 # Release Promotion Runbook
 
-Use this runbook to promote a candidate from PR merge to pre-prod and production with reproducible steps.
+Use this runbook to promote a release candidate from `main` to pre-prod and then production.
 
-## 1. Recommended Gate Model
+## 1. Required Repository Configuration
 
-Use a two-gate model:
+Configure repository variables in:
+`Settings -> Secrets and variables -> Actions -> Variables (Repository)`
 
-1. Pre-merge gate on PR:
-   - `Backend (lint + test)`
-   - `Frontend (lint + test)`
-   - `E2E Smoke (required)`
-2. Post-merge gate on `main`:
-   - manual `Preprod Readiness` workflow on the exact `main` commit to deploy
+Required vars:
 
-This keeps PR feedback fast while validating rollback and operational checks on the deployable artifact.
+- `PREPROD_DEPLOY_COMMAND`
+- `PROD_PROMOTE_COMMAND`
+- `PREPROD_API_URL`
+- `PREPROD_WEB_URL`
+- `PROD_API_URL`
+- `PROD_WEB_URL`
 
-## 2. Why Run Readiness After Merge
+Command vars must execute the deploy/promote action for the exact release artifact (`SHA` or tag).
 
-Pros:
+## 2. Required Gates Before Promotion
 
-- Validates the exact `main` commit that will be deployed.
-- Catches merge-commit integration effects.
-- Improves auditability (`main` SHA -> release tag -> deployed artifact).
+- PR gate must be green:
+  - `Backend (lint + test)`
+  - `Frontend (lint + test)`
+  - `E2E Smoke (required)`
+- Post-merge gate must be green:
+  - `Preprod Readiness` on the same `release_ref` (tag or SHA) that will be deployed and promoted
 
-Cons:
+## 3. Strict Promotion Sequence (UI)
 
-- A bad change can land in `main` before readiness fails.
-- Adds a manual promotion step.
-- Requires disciplined release operations (no auto-promote on merge).
+1. Merge release PR to `main`.
+2. Create and push release tag from `origin/main` (for example `release-YYYYMMDD-HHMM-<sha7>`).
+3. Run workflow `Preprod Readiness` using **Use workflow from** = `<release_tag_or_sha>`; require green and record run URL.
+4. Run workflow `Deploy Preprod` with `release_ref=<release_tag_or_sha>`.
+5. Record the successful `Deploy Preprod` run id (numeric id in the run URL: `/actions/runs/<id>`).
+6. Run workflow `Production Promote` with:
+   - `release_ref=<same_release_tag_or_sha>`
+   - `preprod_run_id=<run_id_from_step_5>`
+7. Approve required environment prompts (always production; preprod only if required reviewers are configured).
+8. Verify production health and close release.
 
-Required mitigation:
+## 4. Manual Workflow Inputs
 
-- Do not auto-deploy to pre-prod/prod from PR merge.
-- Promote only after `Preprod Readiness` is green for the target `main` SHA.
+`Deploy Preprod`:
 
-## 3. Strict Promotion Sequence (8 Commands)
+- `release_ref`: tag, SHA, or branch to deploy (recommended: release tag)
 
-If PR is already merged, skip command 1.
+`Production Promote`:
+
+- `release_ref`: must match the artifact used in `Deploy Preprod`
+- `preprod_run_id`: numeric id from the successful `Deploy Preprod` run URL (`.../actions/runs/<id>`) for the same SHA
+
+## 5. Environment Approval Control
+
+Enable required reviewers for the production GitHub Environment:
+
+- `Settings -> Environments -> production -> Required reviewers`
+- Keep approval mandatory before any production promotion job executes.
+
+Optional: if you also configure required reviewers for `preprod`, expect an approval prompt during `Deploy Preprod`.
+
+## 6. Operator Verification Commands
+
+Before running these checks, set shell variables to your actual environment URLs:
 
 ```bash
-gh pr merge <PR_NUMBER> --merge --delete-branch
-git fetch origin main && SHA="$(git rev-parse origin/main)" && TAG="release-$(date +%Y%m%d-%H%M)-${SHA:0:7}"
-git tag -a "$TAG" "$SHA" -m "Release $TAG ($SHA)"
-git push origin "$TAG"
-gh workflow run "Preprod Readiness" --ref main
-gh run watch "$(gh run list --workflow 'Preprod Readiness' --branch main --limit 1 --json databaseId -q '.[0].databaseId')"
-<DEPLOY_TO_PREPROD_COMMAND_USING_TAG_OR_SHA> && curl -fsS "$PREPROD_API_URL/api/health" && curl -fsS -o /dev/null -w "%{http_code}\n" "$PREPROD_WEB_URL/register"
-<PROMOTE_TO_PROD_COMMAND_USING_SAME_TAG_OR_SHA> && curl -fsS "$PROD_API_URL/api/health" && curl -fsS -o /dev/null -w "%{http_code}\n" "$PROD_WEB_URL/register"
+export PREPROD_API_URL="https://<preprod-api-host>"
+export PREPROD_WEB_URL="https://<preprod-web-host>"
+export PROD_API_URL="https://<prod-api-host>"
+export PROD_WEB_URL="https://<prod-web-host>"
 ```
 
-## 4. Non-Negotiable Controls
+Run after pre-prod deploy:
 
-- Promote the same immutable artifact (`TAG`/`SHA`) from pre-prod to prod.
-- If `Preprod Readiness` fails, do not promote.
-- If production verification fails, execute [`rollback.md`](./rollback.md) immediately.
+```bash
+curl -fsS "${PREPROD_API_URL}/api/health"
+curl -fsS -o /dev/null -w "%{http_code}\n" "${PREPROD_WEB_URL}/register"
+```
 
+Run after production promotion:
+
+```bash
+curl -fsS "${PROD_API_URL}/api/health"
+curl -fsS -o /dev/null -w "%{http_code}\n" "${PROD_WEB_URL}/register"
+```
+
+If production verification fails, execute [`rollback.md`](./rollback.md) immediately.

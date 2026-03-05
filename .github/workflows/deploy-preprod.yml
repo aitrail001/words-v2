@@ -1,0 +1,200 @@
+name: Deploy Preprod
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: "Branch, tag, or commit to deploy"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-preprod
+  cancel-in-progress: false
+
+jobs:
+  deploy-preprod:
+    name: Deploy to preprod
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: preprod
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve immutable release SHA
+        id: resolve
+        uses: actions/github-script@v7
+        env:
+          RELEASE_REF: ${{ inputs.release_ref }}
+        with:
+          script: |
+            const releaseRef = process.env.RELEASE_REF;
+            try {
+              const { data } = await github.rest.repos.getCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: releaseRef,
+              });
+              core.setOutput("release_sha", data.sha);
+              core.info(`Resolved ${releaseRef} to ${data.sha}`);
+            } catch (error) {
+              core.setFailed(
+                `Failed to resolve release_ref '${releaseRef}' to an immutable commit SHA: ${error.message}`
+              );
+            }
+
+      - name: Checkout resolved release SHA
+        run: |
+          set -euo pipefail
+          git checkout --detach "${{ steps.resolve.outputs.release_sha }}"
+          echo "Checked out release SHA $(git rev-parse HEAD)"
+
+      - name: Validate required repository variables
+        env:
+          PREPROD_DEPLOY_COMMAND: ${{ vars.PREPROD_DEPLOY_COMMAND }}
+          PREPROD_API_URL: ${{ vars.PREPROD_API_URL }}
+          PREPROD_WEB_URL: ${{ vars.PREPROD_WEB_URL }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in PREPROD_DEPLOY_COMMAND PREPROD_API_URL PREPROD_WEB_URL; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Required repository variable '${name}' is not set."
+              missing=1
+            fi
+          done
+
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+          if printf '%s' "${PREPROD_DEPLOY_COMMAND}" | grep -q '[[:cntrl:]]'; then
+            echo "::error::PREPROD_DEPLOY_COMMAND contains control characters."
+            exit 1
+          fi
+
+      - name: Execute preprod deploy command
+        env:
+          PREPROD_DEPLOY_COMMAND: ${{ vars.PREPROD_DEPLOY_COMMAND }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          echo "Executing deploy command from PREPROD_DEPLOY_COMMAND"
+          bash -euo pipefail -c "${PREPROD_DEPLOY_COMMAND}"
+
+      - name: Verify preprod API health
+        id: api_health
+        env:
+          PREPROD_API_URL: ${{ vars.PREPROD_API_URL }}
+        run: |
+          set -euo pipefail
+
+          api_base="${PREPROD_API_URL%/}"
+          if [[ "${api_base}" == */api ]]; then
+            api_url="${api_base}/health"
+          else
+            api_url="${api_base}/api/health"
+          fi
+
+          api_status="$(curl --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 5 --max-time 15 -sS -o /dev/null -w '%{http_code}' "${api_url}")"
+          if [ "${api_status}" != "200" ]; then
+            echo "::error::Preprod API health check failed for ${api_url}. Expected HTTP 200, got ${api_status}."
+            exit 1
+          fi
+
+      - name: Verify preprod web availability
+        id: web_health
+        env:
+          PREPROD_WEB_URL: ${{ vars.PREPROD_WEB_URL }}
+        run: |
+          set -euo pipefail
+          web_url="${PREPROD_WEB_URL%/}/register"
+          web_status="$(curl --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 5 --max-time 15 -sS -o /dev/null -w '%{http_code}' "${web_url}")"
+          case "${web_status}" in
+            2*|3*)
+              ;;
+            *)
+              echo "::error::Preprod web check failed for ${web_url}. Expected HTTP 2xx/3xx, got ${web_status}."
+              exit 1
+              ;;
+          esac
+
+      - name: Create release attestation
+        id: attestation
+        env:
+          RELEASE_REF: ${{ inputs.release_ref }}
+          RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          mkdir -p .github-artifacts
+          attestation_path=".github-artifacts/release-attestation.json"
+          ATTESTATION_PATH="${attestation_path}" python3 - <<'PY'
+          import json
+          import os
+
+          payload = {
+              "release_ref": os.environ["RELEASE_REF"],
+              "release_sha": os.environ["RELEASE_SHA"],
+              "run_id": os.environ["RUN_ID"],
+              "run_attempt": os.environ["RUN_ATTEMPT"],
+              "workflow_path": ".github/workflows/deploy-preprod.yml",
+          }
+          with open(os.environ["ATTESTATION_PATH"], "w", encoding="utf-8") as f:
+              json.dump(payload, f, indent=2, sort_keys=True)
+              f.write("\n")
+          PY
+          echo "artifact_name=preprod-release-attestation-${RUN_ID}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload release attestation
+        uses: actions/upload-artifact@v4
+        with:
+          name: preprod-release-attestation-${{ github.run_id }}
+          path: .github-artifacts/release-attestation.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Write preprod deploy summary
+        if: always()
+        env:
+          RELEASE_REF: ${{ inputs.release_ref }}
+          RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
+          PREPROD_API_URL: ${{ vars.PREPROD_API_URL }}
+          PREPROD_WEB_URL: ${{ vars.PREPROD_WEB_URL }}
+          API_HEALTH_OUTCOME: ${{ steps.api_health.outcome }}
+          WEB_HEALTH_OUTCOME: ${{ steps.web_health.outcome }}
+          ATTESTATION_ARTIFACT_NAME: ${{ steps.attestation.outputs.artifact_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          api_base="${PREPROD_API_URL%/}"
+          if [[ "${api_base}" == */api ]]; then
+            api_url="${api_base}/health"
+          else
+            api_url="${api_base}/api/health"
+          fi
+
+          {
+            echo "## Preprod Deploy"
+            echo
+            echo "- Release ref: \`${RELEASE_REF}\`"
+            echo "- Resolved immutable SHA: \`${RELEASE_SHA}\`"
+            echo "- API health URL: \`${api_url}\`"
+            echo "- Web check URL: \`${PREPROD_WEB_URL%/}/register\`"
+            echo "- API health step outcome: \`${API_HEALTH_OUTCOME}\`"
+            echo "- Web check step outcome: \`${WEB_HEALTH_OUTCOME}\`"
+            echo "- Release attestation artifact: \`${ATTESTATION_ARTIFACT_NAME}\`"
+            echo
+            echo "Run details: ${RUN_URL}"
+          } >> "${GITHUB_STEP_SUMMARY}"
