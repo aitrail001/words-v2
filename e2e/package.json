@@ -6,12 +6,15 @@
     "test": "playwright test",
     "test:smoke": "playwright test --grep @smoke",
     "test:smoke:ci": "playwright test --grep @smoke --max-failures=1",
+    "smoke:local": "bash ./scripts/run-local-smoke.sh",
     "test:full": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@playwright/test": "1.52.0",
     "@types/node": "^22.13.10",
+    "@types/pg": "^8.18.0",
+    "pg": "^8.20.0",
     "typescript": "^5.8.2"
   }
 }
