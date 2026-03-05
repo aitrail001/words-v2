@@ -111,10 +111,14 @@ jobs:
 
           access_log_found=0
           for _ in {1..10}; do
-            if docker compose -f docker-compose.yml --profile tests logs --tail=400 backend | grep -q "http_access"; then
+            backend_logs_file="$(mktemp)"
+            docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${backend_logs_file}"
+            if grep -q "http_access" "${backend_logs_file}"; then
               access_log_found=1
+              rm -f "${backend_logs_file}"
               break
             fi
+            rm -f "${backend_logs_file}"
             sleep 1
           done
 
