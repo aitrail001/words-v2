@@ -234,3 +234,30 @@ curl -s http://localhost:8000/api/health
 # Local smoke bootstrap runner (starts stack, waits readiness, migrates, runs smoke)
 cd e2e && npm run smoke:local
 ```
+
+---
+
+## Deferred Until First Beta Release
+
+**Status:** PENDING (intentional defer)
+
+- Wire real deployment commands into GitHub repository variables:
+  - `PREPROD_DEPLOY_COMMAND`
+  - `PROD_PROMOTE_COMMAND`
+- Wire real environment URLs into GitHub repository variables:
+  - `PREPROD_API_URL`
+  - `PREPROD_WEB_URL`
+  - `PROD_API_URL`
+  - `PROD_WEB_URL`
+- Replace placeholder command bodies with infra-specific, immutable-sha deployment commands.
+- Execute a full tagged promotion dry run:
+  - `Preprod Readiness` (on release tag)
+  - `Deploy Preprod` (same release tag)
+  - `Production Promote` (same release tag + deploy run id)
+- Capture dry-run evidence in release notes:
+  - release tag
+  - release SHA
+  - preprod readiness run URL
+  - deploy-preprod run URL/id
+  - production promote run URL
+- Confirm production environment approval policy is enabled and tested.
