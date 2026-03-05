@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     refresh_token_expiration_days: int = 7
 
     # Environment
-    environment: Literal["development", "staging", "production"] = "development"
+    environment: Literal["development", "staging", "production", "test"] = (
+        "development"
+    )
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
