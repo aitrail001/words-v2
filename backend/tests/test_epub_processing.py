@@ -1,7 +1,6 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pytest
 import ebooklib
 
 from app.models.epub_import import EpubImport

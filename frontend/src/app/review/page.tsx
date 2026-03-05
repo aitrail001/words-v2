@@ -186,7 +186,7 @@ export default function ReviewPage() {
             </button>
           ))}
         </div>
-        <p className="text-xs text-gray-500">0 = Didn't know, 5 = Perfect recall</p>
+        <p className="text-xs text-gray-500">0 = Didn&apos;t know, 5 = Perfect recall</p>
       </div>
     </div>
   );

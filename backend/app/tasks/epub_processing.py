@@ -1,4 +1,3 @@
-import hashlib
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -15,7 +14,6 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models.epub_import import EpubImport
 from app.models.word import Word
-from app.models.meaning import Meaning
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -50,7 +48,7 @@ def extract_epub_vocabulary(self, import_id: str, user_id: str, file_path: str) 
         dict with status, total_words, words_created, or error
     """
     import_uuid = uuid.UUID(import_id)
-    user_uuid = uuid.UUID(user_id)
+    uuid.UUID(user_id)
 
     with Session(sync_engine) as db:
         # Update status to processing

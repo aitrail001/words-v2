@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -9,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.redis import get_redis
 from app.core.security import (
     create_access_token,
     decode_token,
