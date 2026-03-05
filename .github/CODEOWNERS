@@ -1,0 +1,13 @@
+# Critical automation and delivery gates
+/.github/workflows/** @aitrail001
+
+# Product code
+/backend/** @aitrail001
+/frontend/** @aitrail001
+/e2e/** @aitrail001
+
+# Documentation
+/docs/** @aitrail001
+
+# Fallback ownership for all remaining files
+* @aitrail001

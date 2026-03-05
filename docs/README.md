@@ -25,6 +25,7 @@ docs/
 - Template: Context → Decision → Consequences → Status
 - Status: `PROPOSED`, `ACCEPTED`, `DEPRECATED`, `SUPERSEDED`
 - Never delete — mark as superseded with link to replacement
+- Current governance policy: `docs/decisions/ADR-002-branch-governance.md`
 
 ### Lessons Learned (`docs/lessons/`)
 - Capture what went wrong, why, and what to do differently
