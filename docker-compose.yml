@@ -62,6 +62,30 @@ services:
     networks:
       - words-network
 
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: words-worker
+    command: celery -A app.celery_app:celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=development
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - words-network
+
   frontend:
     build:
       context: ./frontend
