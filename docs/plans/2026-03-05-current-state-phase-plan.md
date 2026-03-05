@@ -12,6 +12,9 @@
 - Worker runtime now exists in `docker-compose.yml` (`worker` service) and was runtime-validated.
 - `backend/tests/test_epub_processing.py` placeholder tests were replaced with real stop-word and lemmatization coverage.
 - Learning queue models/migration, queue review APIs, and queue-based frontend review flow are implemented.
+- Frontend auth token persistence now survives reload/navigation (`localStorage`-backed API client token storage).
+- Playwright E2E project is implemented under `e2e/` with smoke and full scenarios.
+- CI now includes required `e2e-smoke` on PR and `e2e-full` on push/workflow dispatch using Docker Compose stack + seeded fixtures.
 - Backend and frontend test suites are green.
 
 ---
@@ -47,7 +50,7 @@
 **Current gaps vs roadmap**
 - No refresh/logout endpoints yet.
 - `POST /api/words/lookup` explicitly returns 404 for misses (Dictionary API integration not implemented yet).
-- Frontend auth token is in-memory only via `apiClient.setToken(...)`; no durable session/protected route enforcement.
+- No protected-route enforcement yet (token persistence exists, but route guards/session lifecycle are still basic).
 
 ---
 
@@ -101,7 +104,7 @@
 
 - Phase ordering drift from the roadmap: review functionality landed before full word-list import workflow, creating integration mismatch.
 - Working tree is currently dirty (tracked modifications and untracked files), so phase boundaries are not yet cleanly committed.
-- Verification status improved: backend and frontend tests are currently green (2026-03-05).
+- Verification status improved: backend, frontend, Playwright smoke, and Playwright full suites are green in Docker-based verification (2026-03-05).
 - ePub processing depends on `en_core_web_sm`; missing model will fail runtime imports.
 - Frontend/backend version intent drift exists (`docs` mention Next.js 16, `frontend/package.json` is Next.js 15.1.0).
 
@@ -153,6 +156,47 @@
 - `backend/tests/test_review_api.py`
 - `frontend/src/app/review/page.tsx`
 - `frontend/src/app/review/__tests__/page.test.tsx`
+
+### Slice 3: Add required PR E2E smoke gate + full suite (COMPLETED - 2026-03-05)
+
+**Outcome**
+- Playwright E2E verification is now part of delivery gates: smoke on PR (required), full suite on main/workflow dispatch.
+
+**Evidence of completion**
+- New E2E project and tests:
+  - `@smoke` register -> review empty-state flow
+  - `@smoke` seeded due-item review submit flow
+  - full dashboard seeded-word search flow
+- Deterministic test data seeding SQL added for reproducible queue/search assertions.
+- Docker Compose includes `playwright` test profile service.
+- CI includes:
+  - `e2e-smoke` (PR + push main, intended required check)
+  - `e2e-full` (push main + workflow_dispatch)
+  - artifacts upload + teardown on `always()`.
+- Frontend got E2E-hardening updates:
+  - token persistence in `api-client`
+  - stable `data-testid` hooks and header navigation links.
+
+**Files touched**
+- `e2e/package.json`
+- `e2e/package-lock.json`
+- `e2e/playwright.config.ts`
+- `e2e/tsconfig.json`
+- `e2e/.gitignore`
+- `e2e/scripts/seed.sql`
+- `e2e/tests/helpers/auth.ts`
+- `e2e/tests/helpers/review-seed.ts`
+- `e2e/tests/smoke/register-review-empty.smoke.spec.ts`
+- `e2e/tests/smoke/review-submit.smoke.spec.ts`
+- `e2e/tests/full/dashboard-search.spec.ts`
+- `.github/workflows/ci.yml`
+- `docker-compose.yml`
+- `frontend/src/lib/api-client.ts`
+- `frontend/src/app/layout.tsx`
+- `frontend/src/app/page.tsx`
+- `frontend/src/app/login/page.tsx`
+- `frontend/src/app/register/page.tsx`
+- `frontend/src/app/review/page.tsx`
 
 ---
 

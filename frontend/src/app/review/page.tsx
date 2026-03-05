@@ -88,11 +88,16 @@ export default function ReviewPage() {
 
   if (completed) {
     return (
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold">Session Complete!</h2>
-        <p className="text-gray-600">You reviewed {cards.length} cards.</p>
+      <div className="space-y-4" data-testid="review-complete-state">
+        <h2 className="text-2xl font-bold" data-testid="review-complete-title">
+          Session Complete!
+        </h2>
+        <p className="text-gray-600" data-testid="review-complete-summary">
+          You reviewed {cards.length} cards.
+        </p>
         <button
           onClick={() => router.push("/")}
+          data-testid="review-back-home-button"
           className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
         >
           Back to Home
@@ -103,11 +108,14 @@ export default function ReviewPage() {
 
   if (!started) {
     return (
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold">Review Session</h2>
+      <div className="space-y-4" data-testid="review-start-state">
+        <h2 className="text-2xl font-bold" data-testid="review-page-title">
+          Review Session
+        </h2>
         <button
           onClick={startReview}
           disabled={loading}
+          data-testid="review-start-button"
           className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {loading ? "Starting..." : "Start Review"}
@@ -118,11 +126,16 @@ export default function ReviewPage() {
 
   if (cards.length === 0) {
     return (
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold">No Cards Due</h2>
-        <p className="text-gray-600">You have no cards to review right now.</p>
+      <div className="space-y-4" data-testid="review-empty-state">
+        <h2 className="text-2xl font-bold" data-testid="review-empty-title">
+          No Cards Due
+        </h2>
+        <p className="text-gray-600" data-testid="review-empty-description">
+          You have no cards to review right now.
+        </p>
         <button
           onClick={() => router.push("/")}
+          data-testid="review-empty-back-home-button"
           className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
         >
           Back to Home
@@ -136,28 +149,37 @@ export default function ReviewPage() {
   const promptDefinition = getPromptDefinition(currentCard);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="review-active-state">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Review Session</h2>
-        <span className="text-sm text-gray-500">
+        <h2 className="text-2xl font-bold" data-testid="review-active-title">
+          Review Session
+        </h2>
+        <span className="text-sm text-gray-500" data-testid="review-progress">
           Card {currentIndex + 1} of {cards.length}
         </span>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="mb-2 text-2xl font-semibold">{promptWord}</p>
-        <p className="mb-4 text-base text-gray-700">{promptDefinition}</p>
-        <p className="text-sm text-gray-500">Type: {currentCard.card_type ?? "review"}</p>
+      <div className="rounded-lg border border-gray-200 bg-white p-6" data-testid="review-card">
+        <p className="mb-2 text-2xl font-semibold" data-testid="review-card-word">
+          {promptWord}
+        </p>
+        <p className="mb-4 text-base text-gray-700" data-testid="review-card-definition">
+          {promptDefinition}
+        </p>
+        <p className="text-sm text-gray-500" data-testid="review-card-type">
+          Type: {currentCard.card_type ?? "review"}
+        </p>
       </div>
 
       <div className="space-y-2">
         <p className="text-sm font-medium text-gray-700">How well did you know this?</p>
-        <div className="flex gap-2">
+        <div className="flex gap-2" data-testid="review-rating-buttons">
           {[0, 1, 2, 3, 4, 5].map((quality) => (
             <button
               key={quality}
               onClick={() => submitRating(quality)}
               disabled={loading}
+              data-testid={`review-rating-${quality}`}
               className="flex-1 rounded-md border border-gray-300 px-4 py-2 hover:bg-gray-100 disabled:opacity-50"
             >
               {quality}

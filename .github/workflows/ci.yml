@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -89,3 +90,154 @@ jobs:
 
       - name: Test
         run: npm test
+
+  e2e-smoke:
+    name: E2E Smoke (required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start app stack (docker compose)
+        env:
+          NEXT_PUBLIC_API_URL: http://backend:8000/api
+          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000
+        run: |
+          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend
+
+      - name: Wait for backend and frontend
+        run: |
+          set -euo pipefail
+
+          backend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+              backend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${backend_ready}" -ne 1 ]; then
+            echo "Backend health endpoint did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 backend
+            exit 1
+          fi
+
+          frontend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
+              frontend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${frontend_ready}" -ne 1 ]; then
+            echo "Frontend did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 frontend
+            exit 1
+          fi
+
+      - name: Apply migrations
+        run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
+
+      - name: Seed E2E vocabulary fixtures
+        run: cat e2e/scripts/seed.sql | docker compose -f docker-compose.yml exec -T postgres psql -U vocabapp -d vocabapp_dev
+
+      - name: Run Playwright smoke tests
+        run: |
+          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+            -e E2E_BASE_URL=http://frontend:3000 \
+            -e E2E_API_URL=http://backend:8000/api \
+            playwright sh -lc "cd /workspace/e2e && npm ci && npm run test:smoke"
+
+      - name: Upload Playwright smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-smoke-artifacts
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          if-no-files-found: ignore
+
+      - name: Tear down app stack
+        if: always()
+        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
+
+  e2e-full:
+    name: E2E Full
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [e2e-smoke]
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start app stack (docker compose)
+        env:
+          NEXT_PUBLIC_API_URL: http://backend:8000/api
+          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000
+        run: |
+          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend
+
+      - name: Wait for backend and frontend
+        run: |
+          set -euo pipefail
+
+          backend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+              backend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${backend_ready}" -ne 1 ]; then
+            echo "Backend health endpoint did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 backend
+            exit 1
+          fi
+
+          frontend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
+              frontend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${frontend_ready}" -ne 1 ]; then
+            echo "Frontend did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 frontend
+            exit 1
+          fi
+
+      - name: Apply migrations
+        run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
+
+      - name: Seed E2E vocabulary fixtures
+        run: cat e2e/scripts/seed.sql | docker compose -f docker-compose.yml exec -T postgres psql -U vocabapp -d vocabapp_dev
+
+      - name: Run Playwright full suite
+        run: |
+          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+            -e E2E_BASE_URL=http://frontend:3000 \
+            -e E2E_API_URL=http://backend:8000/api \
+            playwright sh -lc "cd /workspace/e2e && npm ci && npm run test:full"
+
+      - name: Upload Playwright full artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-full-artifacts
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          if-no-files-found: ignore
+
+      - name: Tear down app stack
+        if: always()
+        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans

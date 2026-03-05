@@ -47,20 +47,31 @@ export default function HomePage() {
       <div className="rounded-lg border border-gray-200 bg-white p-4">
         <h3 className="mb-2 font-medium">Search Words</h3>
         <input
+          data-testid="home-search-input"
           type="text"
           placeholder="Search words..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="w-full rounded-md border border-gray-300 px-3 py-2"
         />
-        {loading && <p className="mt-2 text-sm text-gray-500">Searching...</p>}
+        {loading && (
+          <p className="mt-2 text-sm text-gray-500" data-testid="home-search-loading">
+            Searching...
+          </p>
+        )}
         {searched && results.length === 0 && (
-          <p className="mt-2 text-sm text-gray-500">No words found</p>
+          <p className="mt-2 text-sm text-gray-500" data-testid="home-no-results">
+            No words found
+          </p>
         )}
         {results.length > 0 && (
-          <ul className="mt-4 space-y-2">
+          <ul className="mt-4 space-y-2" data-testid="home-search-results">
             {results.map((word) => (
-              <li key={word.id} className="rounded border border-gray-200 p-2">
+              <li
+                key={word.id}
+                className="rounded border border-gray-200 p-2"
+                data-testid="home-search-result-item"
+              >
                 <span className="font-medium">{word.word}</span>
                 {word.frequency_rank && (
                   <span className="ml-2 text-sm text-gray-500">

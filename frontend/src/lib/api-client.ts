@@ -1,5 +1,34 @@
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const TOKEN_STORAGE_KEY = "words_access_token";
+
+const canUseLocalStorage = (): boolean =>
+  typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+
+const readPersistedToken = (): string | null => {
+  if (!canUseLocalStorage()) return null;
+
+  try {
+    return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const persistToken = (token: string | null): void => {
+  if (!canUseLocalStorage()) return;
+
+  try {
+    if (token) {
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      return;
+    }
+
+    window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore storage write errors and keep in-memory token as fallback.
+  }
+};
 
 class ApiClient {
   private baseUrl: string;
@@ -7,10 +36,12 @@ class ApiClient {
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
+    this.token = readPersistedToken();
   }
 
   setToken(token: string | null) {
     this.token = token;
+    persistToken(token);
   }
 
   private async request<T>(
