@@ -7,6 +7,7 @@ docs/
 ├── plans/        # Implementation plans (YYYY-MM-DD-<topic>.md)
 ├── decisions/    # Architecture Decision Records (ADR-NNN-<topic>.md)
 ├── lessons/      # Lessons learned during rebuild (YYYY-MM-DD-<topic>.md)
+├── runbooks/     # Operator runbooks (pre-prod readiness, rollback, verification)
 └── api/          # API documentation (auto-generated + manual)
 ```
 
@@ -36,3 +37,7 @@ docs/
 ### API Documentation (`docs/api/`)
 - OpenAPI spec auto-generated from FastAPI
 - Manual docs for complex flows (import pipeline, review algorithm, etc.)
+
+### Runbooks (`docs/runbooks/`)
+- Pre-prod readiness: `docs/runbooks/preprod-readiness-checklist.md`
+- Rollback procedure: `docs/runbooks/rollback.md`

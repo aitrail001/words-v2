@@ -170,6 +170,9 @@
   - full dashboard seeded-word search flow
 - Deterministic test data seeding SQL added for reproducible queue/search assertions.
 - E2E smoke/full tests now self-seed required vocabulary fixture at runtime via DB upsert helper, removing reliance on pre-seeded state.
+- Operator runbooks added for pre-prod go/no-go and rollback verification:
+  - `docs/runbooks/preprod-readiness-checklist.md`
+  - `docs/runbooks/rollback.md`
 - Docker Compose includes `playwright` test profile service.
 - CI includes:
   - `e2e-smoke` (PR + push main, intended required check)
@@ -195,6 +198,7 @@
 - `e2e/tests/smoke/review-submit.smoke.spec.ts`
 - `e2e/tests/full/dashboard-search.spec.ts`
 - `.github/workflows/ci.yml`
+- `.github/workflows/preprod-readiness.yml`
 - `docker-compose.yml`
 - `frontend/src/lib/api-client.ts`
 - `frontend/src/app/layout.tsx`
@@ -202,6 +206,8 @@
 - `frontend/src/app/login/page.tsx`
 - `frontend/src/app/register/page.tsx`
 - `frontend/src/app/review/page.tsx`
+- `docs/runbooks/preprod-readiness-checklist.md`
+- `docs/runbooks/rollback.md`
 
 ---
 

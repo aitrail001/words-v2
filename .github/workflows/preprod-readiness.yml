@@ -1,0 +1,161 @@
+name: Preprod Readiness
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: preprod-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preprod-readiness:
+    name: Rollback + Smoke Health
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      POSTGRES_USER: vocabapp
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: vocabapp_dev
+      NEXT_PUBLIC_API_URL: http://backend:8000/api
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000
+      E2E_BASE_URL: http://frontend:3000
+      E2E_API_URL: http://backend:8000/api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install E2E dependencies
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm ci --prefix e2e
+
+      - name: Start app stack (docker compose)
+        id: start_stack
+        run: |
+          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend
+
+      - name: Wait for backend and frontend readiness
+        id: readiness
+        run: |
+          set -euo pipefail
+
+          backend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+              backend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${backend_ready}" -ne 1 ]; then
+            echo "Backend health endpoint did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 backend
+            exit 1
+          fi
+
+          frontend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
+              frontend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${frontend_ready}" -ne 1 ]; then
+            echo "Frontend did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 frontend
+            exit 1
+          fi
+
+      - name: Rollback drill (upgrade/downgrade/upgrade)
+        id: rollback_drill
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml exec -T backend sh -lc "alembic upgrade head"
+          docker compose -f docker-compose.yml exec -T backend sh -lc "alembic downgrade -1"
+          docker compose -f docker-compose.yml exec -T backend sh -lc "alembic upgrade head"
+
+      - name: Run Playwright smoke tests
+        id: smoke
+        run: |
+          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+            -e E2E_BASE_URL="${E2E_BASE_URL}" \
+            -e E2E_API_URL="${E2E_API_URL}" \
+            -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}" \
+            playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"
+
+      - name: Validate observability signal
+        id: observability
+        run: |
+          set -euo pipefail
+
+          request_id="preprod-obs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          headers_file="$(mktemp)"
+          trap 'rm -f "${headers_file}"' EXIT
+
+          curl -fsS -D "${headers_file}" \
+            -H "X-Request-ID: ${request_id}" \
+            http://localhost:8000/api/health >/dev/null
+
+          grep -qi "^x-request-id: ${request_id}$" "${headers_file}"
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend | grep -q "http_access"
+
+      - name: Upload Playwright smoke artifacts
+        id: artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preprod-playwright-smoke-artifacts
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          if-no-files-found: ignore
+
+      - name: Tear down app stack
+        id: teardown
+        if: always()
+        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
+
+      - name: Write readiness checklist summary
+        if: always()
+        env:
+          START_OUTCOME: ${{ steps.start_stack.outcome }}
+          READY_OUTCOME: ${{ steps.readiness.outcome }}
+          ROLLBACK_OUTCOME: ${{ steps.rollback_drill.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          OBS_OUTCOME: ${{ steps.observability.outcome }}
+          ARTIFACT_OUTCOME: ${{ steps.artifacts.outcome }}
+          TEARDOWN_OUTCOME: ${{ steps.teardown.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          checkbox() {
+            if [ "$1" = "success" ]; then
+              echo "[x]"
+            else
+              echo "[ ]"
+            fi
+          }
+
+          {
+            echo "## Pre-prod Readiness Checklist"
+            echo
+            echo "- $(checkbox "${START_OUTCOME}") Start docker compose stack (postgres/redis/backend/worker/frontend)"
+            echo "- $(checkbox "${READY_OUTCOME}") Backend/frontend readiness checks"
+            echo "- $(checkbox "${ROLLBACK_OUTCOME}") Rollback drill (alembic upgrade -> downgrade -1 -> upgrade)"
+            echo "- $(checkbox "${SMOKE_OUTCOME}") Playwright smoke run in container"
+            echo "- $(checkbox "${OBS_OUTCOME}") Observability signal check (X-Request-ID + access log)"
+            echo "- $(checkbox "${ARTIFACT_OUTCOME}") Smoke artifacts uploaded"
+            echo "- $(checkbox "${TEARDOWN_OUTCOME}") Stack teardown (always)"
+            echo
+            echo "Run details: ${RUN_URL}"
+          } >> "${GITHUB_STEP_SUMMARY}"
