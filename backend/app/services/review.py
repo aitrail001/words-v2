@@ -6,8 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.models.review import ReviewCard, ReviewSession
-from app.models.word import Word
-from app.models.meaning import Meaning
 from app.spaced_repetition import calculate_next_review
 
 logger = get_logger(__name__)
@@ -76,10 +74,13 @@ class ReviewService:
         card_id: uuid.UUID,
         quality: int,
         time_spent_ms: int,
+        user_id: uuid.UUID,
     ) -> ReviewCard:
         """Submit a review for a card and update SM-2 parameters."""
         result = await self.db.execute(
-            select(ReviewCard).where(ReviewCard.id == card_id)
+            select(ReviewCard)
+            .join(ReviewSession)
+            .where(ReviewCard.id == card_id, ReviewSession.user_id == user_id)
         )
         card = result.scalar_one_or_none()
         if card is None:
@@ -112,10 +113,14 @@ class ReviewService:
 
         return card
 
-    async def complete_session(self, session_id: uuid.UUID) -> ReviewSession:
+    async def complete_session(
+        self, session_id: uuid.UUID, user_id: uuid.UUID
+    ) -> ReviewSession:
         """Mark a review session as completed."""
         result = await self.db.execute(
-            select(ReviewSession).where(ReviewSession.id == session_id)
+            select(ReviewSession).where(
+                ReviewSession.id == session_id, ReviewSession.user_id == user_id
+            )
         )
         session = result.scalar_one_or_none()
         if session is None:

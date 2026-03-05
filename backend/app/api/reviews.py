@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -39,8 +39,8 @@ class CardResponse(BaseModel):
 
 
 class SubmitReviewRequest(BaseModel):
-    quality: int  # 0-5
-    time_spent_ms: int
+    quality: int = Field(..., ge=0, le=5)
+    time_spent_ms: int = Field(..., ge=0)
 
 
 @router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
@@ -104,6 +104,7 @@ async def submit_review(
             card_id=card_id,
             quality=request.quality,
             time_spent_ms=request.time_spent_ms,
+            user_id=current_user.id,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -132,7 +133,7 @@ async def complete_session(
     service = ReviewService(db)
 
     try:
-        session = await service.complete_session(session_id)
+        session = await service.complete_session(session_id, current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
