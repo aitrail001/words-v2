@@ -166,8 +166,10 @@
 - New E2E project and tests:
   - `@smoke` register -> review empty-state flow
   - `@smoke` seeded due-item review submit flow
+  - `@smoke` import API happy-path coverage now exists in smoke suite
   - full dashboard seeded-word search flow
 - Deterministic test data seeding SQL added for reproducible queue/search assertions.
+- E2E smoke/full tests now self-seed required vocabulary fixture at runtime via DB upsert helper, removing reliance on pre-seeded state.
 - Docker Compose includes `playwright` test profile service.
 - CI includes:
   - `e2e-smoke` (PR + push main, intended required check)
@@ -184,8 +186,11 @@
 - `e2e/tsconfig.json`
 - `e2e/.gitignore`
 - `e2e/scripts/seed.sql`
+- `e2e/scripts/run-local-smoke.sh`
 - `e2e/tests/helpers/auth.ts`
 - `e2e/tests/helpers/review-seed.ts`
+- `e2e/tests/helpers/vocabulary-fixture.ts`
+- `e2e/tests/smoke/import-create.smoke.spec.ts`
 - `e2e/tests/smoke/register-review-empty.smoke.spec.ts`
 - `e2e/tests/smoke/review-submit.smoke.spec.ts`
 - `e2e/tests/full/dashboard-search.spec.ts`
@@ -219,4 +224,7 @@ npm test -- --runInBand --watch=false
 cd ..
 docker compose up -d postgres redis backend frontend
 curl -s http://localhost:8000/api/health
+
+# Local smoke bootstrap runner (starts stack, waits readiness, migrates, runs smoke)
+cd e2e && npm run smoke:local
 ```

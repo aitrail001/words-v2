@@ -116,6 +116,9 @@ jobs:
 
       - name: Start app stack (docker compose)
         env:
+          POSTGRES_USER: vocabapp
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000
         run: |
@@ -156,14 +159,14 @@ jobs:
       - name: Apply migrations
         run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
 
-      - name: Seed E2E vocabulary fixtures
-        run: cat e2e/scripts/seed.sql | docker compose -f docker-compose.yml exec -T postgres psql -U vocabapp -d vocabapp_dev
-
       - name: Run Playwright smoke tests
+        env:
+          E2E_DB_URL: postgresql://vocabapp:devpassword@postgres:5432/vocabapp_dev
         run: |
           docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
             -e E2E_API_URL=http://backend:8000/api \
+            -e E2E_DB_URL=${E2E_DB_URL} \
             playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"
 
       - name: Upload Playwright smoke artifacts
@@ -203,6 +206,9 @@ jobs:
 
       - name: Start app stack (docker compose)
         env:
+          POSTGRES_USER: vocabapp
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000
         run: |
@@ -243,14 +249,14 @@ jobs:
       - name: Apply migrations
         run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
 
-      - name: Seed E2E vocabulary fixtures
-        run: cat e2e/scripts/seed.sql | docker compose -f docker-compose.yml exec -T postgres psql -U vocabapp -d vocabapp_dev
-
       - name: Run Playwright full suite
+        env:
+          E2E_DB_URL: postgresql://vocabapp:devpassword@postgres:5432/vocabapp_dev
         run: |
           docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
             -e E2E_API_URL=http://backend:8000/api \
+            -e E2E_DB_URL=${E2E_DB_URL} \
             playwright sh -lc "cd /workspace/e2e && npm run test:full"
 
       - name: Upload Playwright full artifacts
