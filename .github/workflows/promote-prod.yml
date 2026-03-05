@@ -1,0 +1,308 @@
+name: Production Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: "Release ref to promote (branch, tag, or SHA)"
+        required: true
+        type: string
+      preprod_run_id:
+        description: "Successful Deploy Preprod workflow run id"
+        required: true
+        type: string
+
+concurrency:
+  group: promote-prod-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  promote:
+    name: Promote To Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      RELEASE_REF: ${{ inputs.release_ref }}
+      PREPROD_RUN_ID: ${{ inputs.preprod_run_id }}
+      PROD_PROMOTE_COMMAND: ${{ vars.PROD_PROMOTE_COMMAND }}
+      PROD_API_URL: ${{ vars.PROD_API_URL }}
+      PROD_WEB_URL: ${{ vars.PROD_WEB_URL }}
+
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_ref }}
+          fetch-depth: 0
+
+      - name: Resolve immutable release SHA
+        id: resolve_sha
+        run: |
+          set -euo pipefail
+
+          release_sha="$(git rev-parse HEAD)"
+          echo "release_sha=${release_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify referenced preprod run
+        id: verify_preprod
+        env:
+          RELEASE_SHA: ${{ steps.resolve_sha.outputs.release_sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "${PREPROD_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid preprod_run_id: ${PREPROD_RUN_ID}"
+            exit 1
+          fi
+
+          run_api_url="${{ github.api_url }}/repos/${{ github.repository }}/actions/runs/${PREPROD_RUN_ID}"
+          run_json="$(curl -fsS \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${run_api_url}")"
+
+          parsed="$(RUN_JSON="${run_json}" python3 - <<'PY'
+          import json
+          import os
+
+          data = json.loads(os.environ["RUN_JSON"])
+          name = (data.get("name") or "").strip()
+          path = (data.get("path") or "").strip()
+          status = (data.get("status") or "").strip()
+          conclusion = (data.get("conclusion") or "").strip()
+          head_sha = (data.get("head_sha") or "").strip()
+          html_url = (data.get("html_url") or "").strip()
+
+          print(f"name={name}")
+          print(f"path={path}")
+          print(f"status={status}")
+          print(f"conclusion={conclusion}")
+          print(f"head_sha={head_sha}")
+          print(f"html_url={html_url}")
+          PY
+          )"
+
+          while IFS='=' read -r key value; do
+            case "${key}" in
+              name) run_name="${value}" ;;
+              path) run_path="${value}" ;;
+              status) run_status="${value}" ;;
+              conclusion) run_conclusion="${value}" ;;
+              head_sha) run_head_sha="${value}" ;;
+              html_url) run_html_url="${value}" ;;
+            esac
+          done <<< "${parsed}"
+
+          if [[ "${run_status}" != "completed" ]]; then
+            echo "::error::Preprod run ${PREPROD_RUN_ID} status is '${run_status}', expected 'completed'."
+            exit 1
+          fi
+
+          if [[ "${run_conclusion}" != "success" ]]; then
+            echo "::error::Preprod run ${PREPROD_RUN_ID} conclusion is '${run_conclusion}', expected 'success'."
+            exit 1
+          fi
+
+          if [[ "${run_path}" != ".github/workflows/deploy-preprod.yml" ]]; then
+            echo "::error::Run ${PREPROD_RUN_ID} is not from deploy-preprod workflow path. Found: '${run_path}'."
+            exit 1
+          fi
+
+          artifacts_api_url="${{ github.api_url }}/repos/${{ github.repository }}/actions/runs/${PREPROD_RUN_ID}/artifacts"
+          artifacts_json="$(curl -fsS \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${artifacts_api_url}")"
+
+          attestation_artifact_name="preprod-release-attestation-${PREPROD_RUN_ID}"
+          attestation_archive_url="$(ARTIFACTS_JSON="${artifacts_json}" ARTIFACT_NAME="${attestation_artifact_name}" python3 - <<'PY'
+          import json
+          import os
+
+          artifacts = json.loads(os.environ["ARTIFACTS_JSON"]).get("artifacts", [])
+          target = os.environ["ARTIFACT_NAME"]
+          for artifact in artifacts:
+              if (artifact.get("name") or "").strip() == target:
+                  print((artifact.get("archive_download_url") or "").strip())
+                  break
+          PY
+          )"
+
+          if [[ -z "${attestation_archive_url}" ]]; then
+            echo "::error::Attestation artifact '${attestation_artifact_name}' not found on run ${PREPROD_RUN_ID}."
+            exit 1
+          fi
+
+          attestation_zip="$(mktemp)"
+          attestation_dir="$(mktemp -d)"
+          trap 'rm -f "${attestation_zip}"; rm -rf "${attestation_dir}"' EXIT
+
+          curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${attestation_archive_url}" \
+            -o "${attestation_zip}"
+
+          unzip -qq "${attestation_zip}" -d "${attestation_dir}"
+          attestation_file="${attestation_dir}/release-attestation.json"
+          if [[ ! -f "${attestation_file}" ]]; then
+            echo "::error::release-attestation.json was not found in artifact '${attestation_artifact_name}'."
+            exit 1
+          fi
+
+          attested_release_sha="$(ATTESTATION_FILE="${attestation_file}" python3 - <<'PY'
+          import json
+          import os
+
+          with open(os.environ["ATTESTATION_FILE"], encoding="utf-8") as f:
+              data = json.load(f)
+          print((data.get("release_sha") or "").strip())
+          PY
+          )"
+
+          if [[ -z "${attested_release_sha}" ]]; then
+            echo "::error::Attestation payload did not include release_sha."
+            exit 1
+          fi
+
+          if [[ "${attested_release_sha}" != "${RELEASE_SHA}" ]]; then
+            echo "::error::SHA mismatch. attested_release_sha='${attested_release_sha}', release_sha='${RELEASE_SHA}'."
+            exit 1
+          fi
+
+          if [[ "${run_head_sha}" != "${RELEASE_SHA}" ]]; then
+            echo "::warning::Preprod run head_sha '${run_head_sha}' differs from release_sha '${RELEASE_SHA}', but attestation matched."
+          fi
+
+          echo "run_html_url=${run_html_url}" >> "${GITHUB_OUTPUT}"
+          echo "run_name=${run_name}" >> "${GITHUB_OUTPUT}"
+          echo "run_path=${run_path}" >> "${GITHUB_OUTPUT}"
+          echo "run_head_sha=${run_head_sha}" >> "${GITHUB_OUTPUT}"
+          echo "attested_release_sha=${attested_release_sha}" >> "${GITHUB_OUTPUT}"
+          echo "attestation_artifact_name=${attestation_artifact_name}" >> "${GITHUB_OUTPUT}"
+
+      - name: Execute production promote command
+        id: promote
+        env:
+          RELEASE_SHA: ${{ steps.resolve_sha.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${PROD_PROMOTE_COMMAND}" ]]; then
+            echo "::error::Repository variable PROD_PROMOTE_COMMAND is required."
+            exit 1
+          fi
+
+          if printf '%s' "${PROD_PROMOTE_COMMAND}" | grep -q '[[:cntrl:]]'; then
+            echo "::error::PROD_PROMOTE_COMMAND contains control characters."
+            exit 1
+          fi
+
+          bash -euo pipefail -c "${PROD_PROMOTE_COMMAND}"
+
+      - name: Verify production health
+        id: health
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${PROD_API_URL}" ]]; then
+            echo "::error::Repository variable PROD_API_URL is required."
+            exit 1
+          fi
+          if [[ -z "${PROD_WEB_URL}" ]]; then
+            echo "::error::Repository variable PROD_WEB_URL is required."
+            exit 1
+          fi
+
+          api_base="${PROD_API_URL%/}"
+          if [[ "${api_base}" == */api ]]; then
+            api_health_url="${api_base}/health"
+          else
+            api_health_url="${api_base}/api/health"
+          fi
+          web_health_url="${PROD_WEB_URL%/}/register"
+
+          wait_for_status() {
+            local label="$1"
+            local url="$2"
+            local expected="$3"
+            local max_attempts="${4:-30}"
+            local sleep_seconds="${5:-5}"
+            local attempt=0
+            local status_code=""
+
+            for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+              status_code="$(curl --connect-timeout 5 --max-time 15 -sS -o /dev/null -w '%{http_code}' "${url}" || true)"
+              case "${expected}" in
+                200)
+                  if [[ "${status_code}" == "200" ]]; then
+                    return 0
+                  fi
+                  ;;
+                2xx3xx)
+                  if [[ "${status_code}" =~ ^[23][0-9][0-9]$ ]]; then
+                    return 0
+                  fi
+                  ;;
+                *)
+                  echo "::error::Unsupported expected status '${expected}' for ${label}"
+                  return 1
+                  ;;
+              esac
+              sleep "${sleep_seconds}"
+            done
+
+            echo "::error::${label} health check failed: ${url} (last status=${status_code}, expected=${expected})"
+            return 1
+          }
+
+          wait_for_status "Production API" "${api_health_url}" "200" 30 5
+          wait_for_status "Production Web" "${web_health_url}" "2xx3xx" 30 5
+
+      - name: Write promotion summary
+        if: always()
+        env:
+          RELEASE_SHA: ${{ steps.resolve_sha.outputs.release_sha }}
+          PREPROD_VERIFY_OUTCOME: ${{ steps.verify_preprod.outcome }}
+          PROMOTE_OUTCOME: ${{ steps.promote.outcome }}
+          HEALTH_OUTCOME: ${{ steps.health.outcome }}
+          PREPROD_RUN_URL: ${{ steps.verify_preprod.outputs.run_html_url }}
+          ATTESTED_RELEASE_SHA: ${{ steps.verify_preprod.outputs.attested_release_sha }}
+          ATTESTATION_ARTIFACT_NAME: ${{ steps.verify_preprod.outputs.attestation_artifact_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          checkbox() {
+            if [ "$1" = "success" ]; then
+              echo "[x]"
+            else
+              echo "[ ]"
+            fi
+          }
+
+          {
+            echo "## Production Promotion Summary"
+            echo
+            echo "- Release ref: \`${RELEASE_REF}\`"
+            echo "- Release SHA: \`${RELEASE_SHA}\`"
+            echo "- Deploy-preprod run id: \`${PREPROD_RUN_ID}\`"
+            echo "- Attestation artifact: \`${ATTESTATION_ARTIFACT_NAME}\`"
+            echo "- Attested preprod SHA: \`${ATTESTED_RELEASE_SHA}\`"
+            echo "- $(checkbox "${PREPROD_VERIFY_OUTCOME}") Deploy-preprod run verified (success + attested SHA match)"
+            echo "- $(checkbox "${PROMOTE_OUTCOME}") Promote command executed"
+            echo "- $(checkbox "${HEALTH_OUTCOME}") Production API/web health checks"
+            echo
+            if [ -n "${PREPROD_RUN_URL}" ]; then
+              echo "Deploy-preprod run URL: ${PREPROD_RUN_URL}"
+            else
+              echo "Deploy-preprod run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${PREPROD_RUN_ID}"
+            fi
+            echo "Promotion run URL: ${RUN_URL}"
+          } >> "${GITHUB_STEP_SUMMARY}"
