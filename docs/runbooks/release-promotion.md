@@ -40,7 +40,89 @@ Command vars must execute the deploy/promote action for the exact release artifa
 7. Approve required environment prompts (always production; preprod only if required reviewers are configured).
 8. Verify production health and close release.
 
-## 4. Manual Workflow Inputs
+## 4. Detailed `gh` Command Sequence
+
+Use this when GitHub CLI is installed and authenticated (`gh auth status`).
+
+```bash
+# 0) Set repo context
+OWNER="aitrail001"
+REPO="words-v2"
+
+# 1) Tag the exact release commit from origin/main
+git fetch origin main
+SHA="$(git rev-parse origin/main)"
+TAG="release-$(date -u +%Y%m%d-%H%M)-${SHA:0:7}"
+git tag -a "${TAG}" "${SHA}" -m "Release ${TAG} (${SHA})"
+git push origin "${TAG}"
+
+# 2) Helper to get most recent workflow_dispatch run id for a workflow + SHA
+latest_run_id() {
+  local workflow_name="$1"
+  local release_sha="$2"
+  gh run list \
+    --repo "${OWNER}/${REPO}" \
+    --workflow "${workflow_name}" \
+    --json databaseId,headSha,event,createdAt \
+    --limit 50 \
+    --jq ".[] | select(.event==\"workflow_dispatch\" and .headSha==\"${release_sha}\") | .databaseId" \
+    | head -n 1
+}
+
+# 3) Run Preprod Readiness on the same release tag, then wait
+gh workflow run "Preprod Readiness" --repo "${OWNER}/${REPO}" --ref "${TAG}"
+PREPROD_READINESS_RUN_ID="$(latest_run_id "Preprod Readiness" "${SHA}")"
+gh run watch "${PREPROD_READINESS_RUN_ID}" --repo "${OWNER}/${REPO}" --exit-status
+
+# 4) Run Deploy Preprod on the same release tag, then wait
+gh workflow run "Deploy Preprod" --repo "${OWNER}/${REPO}" --ref "${TAG}" -f release_ref="${TAG}"
+DEPLOY_PREPROD_RUN_ID="$(latest_run_id "Deploy Preprod" "${SHA}")"
+gh run watch "${DEPLOY_PREPROD_RUN_ID}" --repo "${OWNER}/${REPO}" --exit-status
+
+# 5) Run Production Promote with same release_ref + deploy-preprod run id
+gh workflow run "Production Promote" \
+  --repo "${OWNER}/${REPO}" \
+  --ref "${TAG}" \
+  -f release_ref="${TAG}" \
+  -f preprod_run_id="${DEPLOY_PREPROD_RUN_ID}"
+PROMOTE_PROD_RUN_ID="$(latest_run_id "Production Promote" "${SHA}")"
+gh run watch "${PROMOTE_PROD_RUN_ID}" --repo "${OWNER}/${REPO}" --exit-status
+
+# 6) Operator verification
+echo "Release tag: ${TAG}"
+echo "Release SHA: ${SHA}"
+echo "Deploy-preprod run id: ${DEPLOY_PREPROD_RUN_ID}"
+```
+
+## 5. Detailed `git` + UI Sequence (No `gh`)
+
+Use this when you do not want to install GitHub CLI.
+
+```bash
+# 1) Tag the exact release commit from origin/main
+git fetch origin main
+SHA="$(git rev-parse origin/main)"
+TAG="release-$(date -u +%Y%m%d-%H%M)-${SHA:0:7}"
+git tag -a "${TAG}" "${SHA}" -m "Release ${TAG} (${SHA})"
+git push origin "${TAG}"
+
+# 2) Keep these values for workflow inputs and audit notes
+echo "Release tag: ${TAG}"
+echo "Release SHA: ${SHA}"
+```
+
+Then dispatch workflows in GitHub UI (same repository):
+
+1. `Actions` -> `Preprod Readiness` -> `Run workflow`
+   Set `Use workflow from` to `${TAG}`.
+2. `Actions` -> `Deploy Preprod` -> `Run workflow`
+   Set `Use workflow from` to `${TAG}` and `release_ref=${TAG}`.
+3. Open the successful `Deploy Preprod` run and copy numeric run id from URL:
+   `.../actions/runs/<id>`.
+4. `Actions` -> `Production Promote` -> `Run workflow`
+   Set `Use workflow from` to `${TAG}`, `release_ref=${TAG}`, and `preprod_run_id=<id>`.
+
+## 6. Manual Workflow Inputs
 
 `Deploy Preprod`:
 
@@ -51,7 +133,7 @@ Command vars must execute the deploy/promote action for the exact release artifa
 - `release_ref`: must match the artifact used in `Deploy Preprod`
 - `preprod_run_id`: numeric id from the successful `Deploy Preprod` run URL (`.../actions/runs/<id>`) for the same SHA
 
-## 5. Environment Approval Control
+## 7. Environment Approval Control
 
 Enable required reviewers for the production GitHub Environment:
 
@@ -60,7 +142,7 @@ Enable required reviewers for the production GitHub Environment:
 
 Optional: if you also configure required reviewers for `preprod`, expect an approval prompt during `Deploy Preprod`.
 
-## 6. Operator Verification Commands
+## 8. Operator Verification Commands
 
 Before running these checks, set shell variables to your actual environment URLs:
 
