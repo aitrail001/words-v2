@@ -1,28 +1,46 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
 
-type ReviewCard = {
-  id: string;
-  word_id: string;
-  meaning_id: string;
-  card_type: string;
+type DueQueueItem = {
+  item_id?: string;
+  id?: string;
+  card_type?: string;
+  prompt?: {
+    word?: string;
+    definition?: string;
+  };
+  word?: string;
+  definition?: string;
+  meaning?: {
+    definition?: string;
+    word?: string | { word?: string };
+  };
 };
 
-type ReviewSession = {
-  id: string;
-  user_id: string;
-  started_at: string;
-  completed_at: string | null;
-  cards_reviewed: number;
+const getPromptWord = (item: DueQueueItem): string => {
+  if (item.prompt?.word) return item.prompt.word;
+  if (item.word) return item.word;
+  if (typeof item.meaning?.word === "string") return item.meaning.word;
+  if (item.meaning?.word && typeof item.meaning.word === "object" && item.meaning.word.word) {
+    return item.meaning.word.word;
+  }
+  return "Unknown word";
+};
+
+const getPromptDefinition = (item: DueQueueItem): string => {
+  if (item.prompt?.definition) return item.prompt.definition;
+  if (item.definition) return item.definition;
+  if (item.meaning?.definition) return item.meaning.definition;
+  return "No definition available.";
 };
 
 export default function ReviewPage() {
   const router = useRouter();
-  const [session, setSession] = useState<ReviewSession | null>(null);
-  const [cards, setCards] = useState<ReviewCard[]>([]);
+  const [started, setStarted] = useState(false);
+  const [cards, setCards] = useState<DueQueueItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [completed, setCompleted] = useState(false);
@@ -30,12 +48,11 @@ export default function ReviewPage() {
   const startReview = async () => {
     setLoading(true);
     try {
-      const newSession = await apiClient.post<ReviewSession>("/reviews/sessions");
-      setSession(newSession);
-
-      const dueCards = await apiClient.get<ReviewCard[]>("/reviews/due");
+      const dueCards = await apiClient.get<DueQueueItem[]>("/reviews/queue/due");
       setCards(dueCards);
       setCurrentIndex(0);
+      setCompleted(false);
+      setStarted(true);
     } catch (error) {
       console.error("Failed to start review:", error);
     } finally {
@@ -44,13 +61,15 @@ export default function ReviewPage() {
   };
 
   const submitRating = async (quality: number) => {
-    if (!session || currentIndex >= cards.length) return;
+    if (currentIndex >= cards.length) return;
 
     const card = cards[currentIndex];
+    const itemId = card.item_id ?? card.id;
+    if (!itemId) return;
     setLoading(true);
 
     try {
-      await apiClient.post(`/reviews/cards/${card.id}/submit`, {
+      await apiClient.post(`/reviews/queue/${itemId}/submit`, {
         quality,
         time_spent_ms: 5000,
       });
@@ -58,8 +77,6 @@ export default function ReviewPage() {
       if (currentIndex + 1 < cards.length) {
         setCurrentIndex(currentIndex + 1);
       } else {
-        // All cards reviewed, complete session
-        await apiClient.post(`/reviews/sessions/${session.id}/complete`);
         setCompleted(true);
       }
     } catch (error) {
@@ -84,7 +101,7 @@ export default function ReviewPage() {
     );
   }
 
-  if (!session) {
+  if (!started) {
     return (
       <div className="space-y-4">
         <h2 className="text-2xl font-bold">Review Session</h2>
@@ -115,6 +132,8 @@ export default function ReviewPage() {
   }
 
   const currentCard = cards[currentIndex];
+  const promptWord = getPromptWord(currentCard);
+  const promptDefinition = getPromptDefinition(currentCard);
 
   return (
     <div className="space-y-4">
@@ -126,8 +145,9 @@ export default function ReviewPage() {
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="mb-4 text-lg">Card ID: {currentCard.id}</p>
-        <p className="text-sm text-gray-500">Type: {currentCard.card_type}</p>
+        <p className="mb-2 text-2xl font-semibold">{promptWord}</p>
+        <p className="mb-4 text-base text-gray-700">{promptDefinition}</p>
+        <p className="text-sm text-gray-500">Type: {currentCard.card_type ?? "review"}</p>
       </div>
 
       <div className="space-y-2">
