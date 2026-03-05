@@ -166,6 +166,7 @@
 - New E2E project and tests:
   - `@smoke` register -> review empty-state flow
   - `@smoke` seeded due-item review submit flow
+  - `@smoke` import API happy-path coverage now exists in smoke suite
   - full dashboard seeded-word search flow
 - Deterministic test data seeding SQL added for reproducible queue/search assertions.
 - Docker Compose includes `playwright` test profile service.
@@ -186,6 +187,7 @@
 - `e2e/scripts/seed.sql`
 - `e2e/tests/helpers/auth.ts`
 - `e2e/tests/helpers/review-seed.ts`
+- `e2e/tests/smoke/import-create.smoke.spec.ts`
 - `e2e/tests/smoke/register-review-empty.smoke.spec.ts`
 - `e2e/tests/smoke/review-submit.smoke.spec.ts`
 - `e2e/tests/full/dashboard-search.spec.ts`
