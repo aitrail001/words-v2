@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -75,3 +75,71 @@ class ReviewCard(Base):
 
     def __repr__(self) -> str:
         return f"<ReviewCard {self.card_type} word={self.word_id}>"
+
+
+class LearningQueueItem(Base):
+    __tablename__ = "learning_queue_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, insert_default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    meaning_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("meanings.id", ondelete="CASCADE"), nullable=False
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
+    review_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "meaning_id", name="uq_learning_queue_user_meaning"),
+    )
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("priority", 0)
+        kwargs.setdefault("review_count", 0)
+        kwargs.setdefault("created_at", datetime.now(timezone.utc))
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return f"<LearningQueueItem user={self.user_id} meaning={self.meaning_id}>"
+
+
+class ReviewHistory(Base):
+    __tablename__ = "review_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, insert_default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    meaning_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("meanings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    card_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    quality_rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    time_spent_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ease_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    repetitions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("created_at", datetime.now(timezone.utc))
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ReviewHistory user={self.user_id} meaning={self.meaning_id} "
+            f"rating={self.quality_rating}>"
+        )

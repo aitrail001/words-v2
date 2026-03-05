@@ -158,6 +158,172 @@ class TestSubmitReview:
             )
 
 
+class TestQueueAdd:
+    @pytest.mark.asyncio
+    async def test_add_to_queue_is_idempotent_per_user_and_meaning(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        existing_card = ReviewCard(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            word_id=uuid.uuid4(),
+            meaning_id=uuid.uuid4(),
+            card_type="flashcard",
+        )
+
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = existing_card
+        mock_db.execute.return_value = result
+
+        created = await review_service.add_to_queue(user_id, existing_card.meaning_id)
+
+        assert created.id == existing_card.id
+        mock_db.add.assert_not_called()
+        mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_add_to_queue_creates_item_when_missing(self, review_service, mock_db):
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        meaning = Meaning(id=uuid.uuid4(), word_id=word_id, definition="queue meaning")
+        session = ReviewSession(id=uuid.uuid4(), user_id=user_id)
+
+        existing_result = MagicMock()
+        existing_result.scalar_one_or_none.return_value = None
+        meaning_result = MagicMock()
+        meaning_result.scalar_one_or_none.return_value = meaning
+        session_result = MagicMock()
+        session_result.scalar_one_or_none.return_value = session
+        mock_db.execute.side_effect = [existing_result, meaning_result, session_result]
+
+        created = await review_service.add_to_queue(user_id, meaning.id)
+
+        assert created.meaning_id == meaning.id
+        if hasattr(created, "word_id"):
+            assert created.word_id == word_id
+        assert created.card_type == "flashcard"
+        mock_db.add.assert_called_once()
+        mock_db.commit.assert_awaited_once()
+
+
+class TestQueueDue:
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_includes_prompt_metadata(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        card = ReviewCard(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            word_id=uuid.uuid4(),
+            meaning_id=uuid.uuid4(),
+            card_type="flashcard",
+            next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+
+        result = MagicMock()
+        result.all.return_value = [(card, "serendipity", "lucky chance")]
+        mock_db.execute.return_value = result
+
+        due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
+
+        assert len(due_items) == 1
+        assert due_items[0]["id"] == card.id
+        assert due_items[0]["word"] == "serendipity"
+        assert due_items[0]["definition"] == "lucky chance"
+
+
+class TestQueueSubmit:
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_applies_sm2_and_increments_counters(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        card = ReviewCard(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            word_id=uuid.uuid4(),
+            meaning_id=uuid.uuid4(),
+            card_type="flashcard",
+            ease_factor=2.5,
+            interval_days=1,
+            repetitions=1,
+        )
+        card.review_count = 2
+        card.correct_count = 1
+
+        class FakeHistory:
+            def __init__(self, **kwargs):
+                self.payload = kwargs
+
+        review_service.history_model = FakeHistory
+
+        card_result = MagicMock()
+        card_result.scalar_one_or_none.return_value = card
+        mock_db.execute.return_value = card_result
+
+        updated = await review_service.submit_queue_review(
+            item_id=card.id,
+            quality=5,
+            time_spent_ms=1500,
+            user_id=user_id,
+            card_type="listening",
+        )
+
+        assert updated.ease_factor > 2.5
+        assert updated.interval_days > 1
+        assert updated.repetitions == 2
+        assert updated.review_count == 3
+        assert updated.correct_count == 2
+        assert updated.card_type == "listening"
+        mock_db.commit.assert_awaited_once()
+        assert any(
+            isinstance(call.args[0], FakeHistory) for call in mock_db.add.call_args_list
+        )
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_raises_when_item_not_found_for_user(
+        self, review_service, mock_db
+    ):
+        item_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = result
+
+        with pytest.raises(ValueError, match=f"Queue item {item_id} not found"):
+            await review_service.submit_queue_review(
+                item_id=item_id,
+                quality=4,
+                time_spent_ms=1000,
+                user_id=user_id,
+            )
+
+
+class TestQueueStats:
+    @pytest.mark.asyncio
+    async def test_get_queue_stats_returns_counts_and_accuracy(self, review_service, mock_db):
+        user_id = uuid.uuid4()
+
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 5
+        due_result = MagicMock()
+        due_result.scalar_one.return_value = 2
+        aggregate_result = MagicMock()
+        aggregate_result.one.return_value = (10, 7)
+        mock_db.execute.side_effect = [total_result, due_result, aggregate_result]
+
+        stats = await review_service.get_queue_stats(user_id=user_id)
+
+        assert stats["total_items"] == 5
+        assert stats["due_items"] == 2
+        assert stats["review_count"] == 10
+        assert stats["correct_count"] == 7
+        assert stats["accuracy"] == 0.7
+
+
 class TestCompleteSession:
     @pytest.mark.asyncio
     async def test_complete_session(self, review_service, mock_db):
