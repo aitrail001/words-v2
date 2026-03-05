@@ -99,14 +99,30 @@ jobs:
 
           request_id="preprod-obs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           headers_file="$(mktemp)"
-          trap 'rm -f "${headers_file}"' EXIT
+          normalized_headers_file="$(mktemp)"
+          trap 'rm -f "${headers_file}" "${normalized_headers_file}"' EXIT
 
-          curl -fsS -D "${headers_file}" \
+          curl --retry 5 --retry-delay 1 --retry-connrefused -fsS -D "${headers_file}" \
             -H "X-Request-ID: ${request_id}" \
             http://localhost:8000/api/health >/dev/null
 
-          grep -qi "^x-request-id: ${request_id}$" "${headers_file}"
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend | grep -q "http_access"
+          tr -d '\r' < "${headers_file}" > "${normalized_headers_file}"
+          grep -qi "^x-request-id: ${request_id}$" "${normalized_headers_file}"
+
+          access_log_found=0
+          for _ in {1..10}; do
+            if docker compose -f docker-compose.yml --profile tests logs --tail=400 backend | grep -q "http_access"; then
+              access_log_found=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "${access_log_found}" -ne 1 ]; then
+            echo "Expected http_access entry was not found in backend logs."
+            docker compose -f docker-compose.yml --profile tests logs --tail=400 backend
+            exit 1
+          fi
 
       - name: Upload Playwright smoke artifacts
         id: artifacts
