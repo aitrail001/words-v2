@@ -1,28 +1,46 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
 
-type ReviewCard = {
-  id: string;
-  word_id: string;
-  meaning_id: string;
-  card_type: string;
+type DueQueueItem = {
+  item_id?: string;
+  id?: string;
+  card_type?: string;
+  prompt?: {
+    word?: string;
+    definition?: string;
+  };
+  word?: string;
+  definition?: string;
+  meaning?: {
+    definition?: string;
+    word?: string | { word?: string };
+  };
 };
 
-type ReviewSession = {
-  id: string;
-  user_id: string;
-  started_at: string;
-  completed_at: string | null;
-  cards_reviewed: number;
+const getPromptWord = (item: DueQueueItem): string => {
+  if (item.prompt?.word) return item.prompt.word;
+  if (item.word) return item.word;
+  if (typeof item.meaning?.word === "string") return item.meaning.word;
+  if (item.meaning?.word && typeof item.meaning.word === "object" && item.meaning.word.word) {
+    return item.meaning.word.word;
+  }
+  return "Unknown word";
+};
+
+const getPromptDefinition = (item: DueQueueItem): string => {
+  if (item.prompt?.definition) return item.prompt.definition;
+  if (item.definition) return item.definition;
+  if (item.meaning?.definition) return item.meaning.definition;
+  return "No definition available.";
 };
 
 export default function ReviewPage() {
   const router = useRouter();
-  const [session, setSession] = useState<ReviewSession | null>(null);
-  const [cards, setCards] = useState<ReviewCard[]>([]);
+  const [started, setStarted] = useState(false);
+  const [cards, setCards] = useState<DueQueueItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [completed, setCompleted] = useState(false);
@@ -30,12 +48,11 @@ export default function ReviewPage() {
   const startReview = async () => {
     setLoading(true);
     try {
-      const newSession = await apiClient.post<ReviewSession>("/reviews/sessions");
-      setSession(newSession);
-
-      const dueCards = await apiClient.get<ReviewCard[]>("/reviews/due");
+      const dueCards = await apiClient.get<DueQueueItem[]>("/reviews/queue/due");
       setCards(dueCards);
       setCurrentIndex(0);
+      setCompleted(false);
+      setStarted(true);
     } catch (error) {
       console.error("Failed to start review:", error);
     } finally {
@@ -44,13 +61,15 @@ export default function ReviewPage() {
   };
 
   const submitRating = async (quality: number) => {
-    if (!session || currentIndex >= cards.length) return;
+    if (currentIndex >= cards.length) return;
 
     const card = cards[currentIndex];
+    const itemId = card.item_id ?? card.id;
+    if (!itemId) return;
     setLoading(true);
 
     try {
-      await apiClient.post(`/reviews/cards/${card.id}/submit`, {
+      await apiClient.post(`/reviews/queue/${itemId}/submit`, {
         quality,
         time_spent_ms: 5000,
       });
@@ -58,8 +77,6 @@ export default function ReviewPage() {
       if (currentIndex + 1 < cards.length) {
         setCurrentIndex(currentIndex + 1);
       } else {
-        // All cards reviewed, complete session
-        await apiClient.post(`/reviews/sessions/${session.id}/complete`);
         setCompleted(true);
       }
     } catch (error) {
@@ -71,11 +88,16 @@ export default function ReviewPage() {
 
   if (completed) {
     return (
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold">Session Complete!</h2>
-        <p className="text-gray-600">You reviewed {cards.length} cards.</p>
+      <div className="space-y-4" data-testid="review-complete-state">
+        <h2 className="text-2xl font-bold" data-testid="review-complete-title">
+          Session Complete!
+        </h2>
+        <p className="text-gray-600" data-testid="review-complete-summary">
+          You reviewed {cards.length} cards.
+        </p>
         <button
           onClick={() => router.push("/")}
+          data-testid="review-back-home-button"
           className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
         >
           Back to Home
@@ -84,13 +106,16 @@ export default function ReviewPage() {
     );
   }
 
-  if (!session) {
+  if (!started) {
     return (
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold">Review Session</h2>
+      <div className="space-y-4" data-testid="review-start-state">
+        <h2 className="text-2xl font-bold" data-testid="review-page-title">
+          Review Session
+        </h2>
         <button
           onClick={startReview}
           disabled={loading}
+          data-testid="review-start-button"
           className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {loading ? "Starting..." : "Start Review"}
@@ -101,11 +126,16 @@ export default function ReviewPage() {
 
   if (cards.length === 0) {
     return (
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold">No Cards Due</h2>
-        <p className="text-gray-600">You have no cards to review right now.</p>
+      <div className="space-y-4" data-testid="review-empty-state">
+        <h2 className="text-2xl font-bold" data-testid="review-empty-title">
+          No Cards Due
+        </h2>
+        <p className="text-gray-600" data-testid="review-empty-description">
+          You have no cards to review right now.
+        </p>
         <button
           onClick={() => router.push("/")}
+          data-testid="review-empty-back-home-button"
           className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
         >
           Back to Home
@@ -115,36 +145,48 @@ export default function ReviewPage() {
   }
 
   const currentCard = cards[currentIndex];
+  const promptWord = getPromptWord(currentCard);
+  const promptDefinition = getPromptDefinition(currentCard);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="review-active-state">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Review Session</h2>
-        <span className="text-sm text-gray-500">
+        <h2 className="text-2xl font-bold" data-testid="review-active-title">
+          Review Session
+        </h2>
+        <span className="text-sm text-gray-500" data-testid="review-progress">
           Card {currentIndex + 1} of {cards.length}
         </span>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="mb-4 text-lg">Card ID: {currentCard.id}</p>
-        <p className="text-sm text-gray-500">Type: {currentCard.card_type}</p>
+      <div className="rounded-lg border border-gray-200 bg-white p-6" data-testid="review-card">
+        <p className="mb-2 text-2xl font-semibold" data-testid="review-card-word">
+          {promptWord}
+        </p>
+        <p className="mb-4 text-base text-gray-700" data-testid="review-card-definition">
+          {promptDefinition}
+        </p>
+        <p className="text-sm text-gray-500" data-testid="review-card-type">
+          Type: {currentCard.card_type ?? "review"}
+        </p>
       </div>
 
       <div className="space-y-2">
         <p className="text-sm font-medium text-gray-700">How well did you know this?</p>
-        <div className="flex gap-2">
+        <div className="flex gap-2" data-testid="review-rating-buttons">
           {[0, 1, 2, 3, 4, 5].map((quality) => (
             <button
               key={quality}
               onClick={() => submitRating(quality)}
               disabled={loading}
+              data-testid={`review-rating-${quality}`}
               className="flex-1 rounded-md border border-gray-300 px-4 py-2 hover:bg-gray-100 disabled:opacity-50"
             >
               {quality}
             </button>
           ))}
         </div>
-        <p className="text-xs text-gray-500">0 = Didn't know, 5 = Perfect recall</p>
+        <p className="text-xs text-gray-500">0 = Didn&apos;t know, 5 = Perfect recall</p>
       </div>
     </div>
   );

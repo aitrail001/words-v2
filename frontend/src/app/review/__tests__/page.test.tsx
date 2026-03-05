@@ -17,6 +17,14 @@ jest.mock("@/lib/api-client", () => ({
 describe("ReviewPage", () => {
   const mockPush = jest.fn();
   const mockApiClient = require("@/lib/api-client").apiClient;
+  const queueItem = {
+    item_id: "queue-item-1",
+    card_type: "word_to_definition",
+    prompt: {
+      word: "bank",
+      definition: "A financial institution that manages money.",
+    },
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -28,102 +36,86 @@ describe("ReviewPage", () => {
     expect(screen.getByRole("button", { name: /start review/i })).toBeInTheDocument();
   });
 
-  it("creates session and loads due cards", async () => {
+  it("loads due queue items when review starts", async () => {
     const user = userEvent.setup();
-    mockApiClient.post.mockResolvedValue({ id: "session-123" });
-    mockApiClient.get.mockResolvedValue([
-      {
-        id: "card-1",
-        word_id: "word-1",
-        meaning_id: "meaning-1",
-        card_type: "flashcard",
-      },
-    ]);
+    mockApiClient.get.mockResolvedValue([queueItem]);
 
     render(<ReviewPage />);
 
     await user.click(screen.getByRole("button", { name: /start review/i }));
 
     await waitFor(() => {
-      expect(mockApiClient.post).toHaveBeenCalledWith("/reviews/sessions");
-      expect(mockApiClient.get).toHaveBeenCalledWith("/reviews/due");
+      expect(mockApiClient.get).toHaveBeenCalledWith("/reviews/queue/due");
     });
+
+    expect(mockApiClient.post).not.toHaveBeenCalledWith("/reviews/sessions");
   });
 
-  it("displays flashcard with quality buttons", async () => {
+  it("displays prompt metadata from due queue item", async () => {
     const user = userEvent.setup();
-    mockApiClient.post.mockResolvedValue({ id: "session-123" });
-    mockApiClient.get.mockResolvedValue([
-      {
-        id: "card-1",
-        word_id: "word-1",
-        meaning_id: "meaning-1",
-        card_type: "flashcard",
-      },
-    ]);
+    mockApiClient.get.mockResolvedValue([queueItem]);
 
     render(<ReviewPage />);
 
     await user.click(screen.getByRole("button", { name: /start review/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/flashcard/i)).toBeInTheDocument();
+      expect(screen.getByText("bank")).toBeInTheDocument();
+      expect(
+        screen.getByText("A financial institution that manages money.")
+      ).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /1/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /5/i })).toBeInTheDocument();
     });
   });
 
-  it("submits quality rating and moves to next card", async () => {
+  it("submits rating to queue endpoint and moves to next card", async () => {
     const user = userEvent.setup();
-    mockApiClient.post.mockResolvedValueOnce({ id: "session-123" });
     mockApiClient.get.mockResolvedValue([
       {
-        id: "card-1",
-        word_id: "word-1",
-        meaning_id: "meaning-1",
-        card_type: "flashcard",
+        item_id: "queue-item-1",
+        card_type: "word_to_definition",
+        prompt: {
+          word: "bank",
+          definition: "A financial institution that manages money.",
+        },
       },
       {
-        id: "card-2",
-        word_id: "word-2",
-        meaning_id: "meaning-2",
-        card_type: "flashcard",
+        item_id: "queue-item-2",
+        card_type: "word_to_definition",
+        prompt: {
+          word: "branch",
+          definition: "A local office of a larger bank.",
+        },
       },
     ]);
-    mockApiClient.post.mockResolvedValueOnce({ quality_rating: 4 });
+    mockApiClient.post.mockResolvedValue({ quality_rating: 4 });
 
     render(<ReviewPage />);
 
     await user.click(screen.getByRole("button", { name: /start review/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/card 1/i)).toBeInTheDocument();
+      expect(screen.getByText(/card 1 of 2/i)).toBeInTheDocument();
+      expect(screen.getByText("bank")).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: /^4$/i }));
 
     await waitFor(() => {
       expect(mockApiClient.post).toHaveBeenCalledWith(
-        "/reviews/cards/card-1/submit",
+        "/reviews/queue/queue-item-1/submit",
         expect.objectContaining({ quality: 4 })
       );
-      expect(screen.getByText(/card 2/i)).toBeInTheDocument();
+      expect(screen.getByText(/card 2 of 2/i)).toBeInTheDocument();
+      expect(screen.getByText("branch")).toBeInTheDocument();
     });
   });
 
-  it("completes session when all cards reviewed", async () => {
+  it("shows completion state when all queue items are reviewed", async () => {
     const user = userEvent.setup();
-    mockApiClient.post.mockResolvedValueOnce({ id: "session-123" });
-    mockApiClient.get.mockResolvedValue([
-      {
-        id: "card-1",
-        word_id: "word-1",
-        meaning_id: "meaning-1",
-        card_type: "flashcard",
-      },
-    ]);
-    mockApiClient.post.mockResolvedValueOnce({ quality_rating: 5 });
-    mockApiClient.post.mockResolvedValueOnce({ completed_at: new Date().toISOString() });
+    mockApiClient.get.mockResolvedValue([queueItem]);
+    mockApiClient.post.mockResolvedValue({ quality_rating: 5 });
 
     render(<ReviewPage />);
 
@@ -132,8 +124,27 @@ describe("ReviewPage", () => {
     await user.click(screen.getByRole("button", { name: /^5$/i }));
 
     await waitFor(() => {
-      expect(mockApiClient.post).toHaveBeenCalledWith("/reviews/sessions/session-123/complete");
+      expect(mockApiClient.post).toHaveBeenCalledWith(
+        "/reviews/queue/queue-item-1/submit",
+        expect.objectContaining({ quality: 5 })
+      );
       expect(screen.getByText(/session complete/i)).toBeInTheDocument();
+    });
+  });
+
+  it("shows no cards due state when queue is empty", async () => {
+    const user = userEvent.setup();
+    mockApiClient.get.mockResolvedValue([]);
+
+    render(<ReviewPage />);
+
+    await user.click(screen.getByRole("button", { name: /start review/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/no cards due/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/you have no cards to review right now/i)
+      ).toBeInTheDocument();
     });
   });
 });

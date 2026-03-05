@@ -10,6 +10,7 @@ from app.core.redis import get_redis
 from app.core.security import create_access_token
 from app.main import app
 from app.models.user import User
+from app.models.meaning import Meaning
 from app.models.review import ReviewSession, ReviewCard
 
 
@@ -164,6 +165,186 @@ class TestSubmitReview:
             f"/api/reviews/cards/{card_id}/submit",
             json={"quality": 4, "time_spent_ms": 5000},
         )
+        assert response.status_code == 401
+
+
+class TestQueueAdd:
+    @pytest.mark.asyncio
+    async def test_add_to_queue_success(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        meaning = Meaning(id=uuid.uuid4(), word_id=uuid.uuid4(), definition="Queue def")
+        session = ReviewSession(id=uuid.uuid4(), user_id=user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        existing_item_result = MagicMock()
+        existing_item_result.scalar_one_or_none.return_value = None
+        meaning_result = MagicMock()
+        meaning_result.scalar_one_or_none.return_value = meaning
+        session_result = MagicMock()
+        session_result.scalar_one_or_none.return_value = session
+        mock_db.execute.side_effect = [
+            user_result,
+            existing_item_result,
+            meaning_result,
+            session_result,
+        ]
+
+        response = await client.post(
+            "/api/reviews/queue",
+            json={"meaning_id": str(meaning.id)},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["meaning_id"] == str(meaning.id)
+        assert data["word_id"] in (None, str(meaning.word_id))
+        assert data["card_type"] == "flashcard"
+
+    @pytest.mark.asyncio
+    async def test_add_to_queue_requires_auth(self, client):
+        response = await client.post(
+            "/api/reviews/queue",
+            json={"meaning_id": str(uuid.uuid4())},
+        )
+        assert response.status_code == 401
+
+
+class TestQueueDue:
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_success(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        due_item = ReviewCard(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            word_id=uuid.uuid4(),
+            meaning_id=uuid.uuid4(),
+            card_type="flashcard",
+            next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        due_result = MagicMock()
+        due_result.all.return_value = [(due_item, "ephemeral", "lasting a short time")]
+        mock_db.execute.side_effect = [user_result, due_result]
+
+        response = await client.get(
+            "/api/reviews/queue/due?limit=5",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["id"] == str(due_item.id)
+        assert data[0]["word"] == "ephemeral"
+        assert data[0]["definition"] == "lasting a short time"
+
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_requires_auth(self, client):
+        response = await client.get("/api/reviews/queue/due")
+        assert response.status_code == 401
+
+
+class TestQueueSubmit:
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_success(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        item = ReviewCard(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            word_id=uuid.uuid4(),
+            meaning_id=uuid.uuid4(),
+            card_type="flashcard",
+            ease_factor=2.5,
+            interval_days=1,
+            repetitions=1,
+        )
+        item.review_count = 0
+        item.correct_count = 0
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        item_result = MagicMock()
+        item_result.scalar_one_or_none.return_value = item
+        latest_history_result = MagicMock()
+        latest_history_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [user_result, item_result, latest_history_result]
+
+        response = await client.post(
+            f"/api/reviews/queue/{item.id}/submit",
+            json={"quality": 4, "time_spent_ms": 1234, "card_type": "listening"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(item.id)
+        assert data["quality_rating"] == 4
+        assert data["time_spent_ms"] == 1234
+        assert data["card_type"] == "listening"
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_returns_404_when_item_not_found(
+        self, client, mock_db, auth_token
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        item_id = uuid.uuid4()
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        item_result = MagicMock()
+        item_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [user_result, item_result]
+
+        response = await client.post(
+            f"/api/reviews/queue/{item_id}/submit",
+            json={"quality": 4, "time_spent_ms": 1234},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+
+class TestQueueStats:
+    @pytest.mark.asyncio
+    async def test_get_queue_stats_success(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 3
+        due_result = MagicMock()
+        due_result.scalar_one.return_value = 1
+        aggregate_result = MagicMock()
+        aggregate_result.one.return_value = (8, 6)
+        mock_db.execute.side_effect = [user_result, total_result, due_result, aggregate_result]
+
+        response = await client.get(
+            "/api/reviews/queue/stats",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_items"] == 3
+        assert data["due_items"] == 1
+        assert data["review_count"] == 8
+        assert data["correct_count"] == 6
+        assert data["accuracy"] == 0.75
+
+    @pytest.mark.asyncio
+    async def test_get_queue_stats_requires_auth(self, client):
+        response = await client.get("/api/reviews/queue/stats")
         assert response.status_code == 401
 
 

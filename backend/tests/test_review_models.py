@@ -1,9 +1,13 @@
 import uuid
-from datetime import datetime, timedelta, timezone
 
-import pytest
+from sqlalchemy import UniqueConstraint
 
-from app.models.review import ReviewSession, ReviewCard
+from app.models.review import (
+    LearningQueueItem,
+    ReviewCard,
+    ReviewHistory,
+    ReviewSession,
+)
 
 
 class TestReviewSessionModel:
@@ -65,3 +69,46 @@ class TestReviewCardModel:
                 card_type=card_type,
             )
             assert card.card_type == card_type
+
+
+class TestLearningQueueItemModel:
+    def test_queue_item_has_required_fields(self):
+        user_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        item = LearningQueueItem(user_id=user_id, meaning_id=meaning_id)
+        assert item.user_id == user_id
+        assert item.meaning_id == meaning_id
+        assert item.priority == 0
+        assert item.review_count == 0
+        assert item.last_reviewed_at is None
+        assert item.created_at is not None
+
+    def test_queue_item_has_user_meaning_unique_constraint(self):
+        constraints = [
+            constraint
+            for constraint in LearningQueueItem.__table__.constraints
+            if isinstance(constraint, UniqueConstraint)
+        ]
+        assert any(
+            constraint.name == "uq_learning_queue_user_meaning"
+            and {column.name for column in constraint.columns} == {"user_id", "meaning_id"}
+            for constraint in constraints
+        )
+
+
+class TestReviewHistoryModel:
+    def test_review_history_has_required_fields(self):
+        user_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        history = ReviewHistory(
+            user_id=user_id,
+            meaning_id=meaning_id,
+            card_type="flashcard",
+            quality_rating=4,
+        )
+        assert history.user_id == user_id
+        assert history.meaning_id == meaning_id
+        assert history.card_type == "flashcard"
+        assert history.quality_rating == 4
+        assert history.time_spent_ms is None
+        assert history.created_at is not None

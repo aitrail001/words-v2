@@ -1,7 +1,7 @@
-import hashlib
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 
 import ebooklib
 from ebooklib import epub
@@ -14,13 +14,24 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models.epub_import import EpubImport
 from app.models.word import Word
-from app.models.meaning import Meaning
 
 logger = get_logger(__name__)
 settings = get_settings()
 
 # Sync engine for Celery tasks (can't use async in Celery)
 sync_engine = create_engine(settings.database_url_sync)
+
+
+def _cleanup_uploaded_file(file_path: str, import_id: str) -> None:
+    try:
+        Path(file_path).unlink(missing_ok=True)
+    except OSError as cleanup_error:
+        logger.warning(
+            "Failed to clean up uploaded file",
+            import_id=import_id,
+            path=file_path,
+            error=str(cleanup_error),
+        )
 
 
 @celery_app.task(bind=True, name="extract_epub_vocabulary")
@@ -37,13 +48,14 @@ def extract_epub_vocabulary(self, import_id: str, user_id: str, file_path: str) 
         dict with status, total_words, words_created, or error
     """
     import_uuid = uuid.UUID(import_id)
-    user_uuid = uuid.UUID(user_id)
+    uuid.UUID(user_id)
 
     with Session(sync_engine) as db:
         # Update status to processing
         result = db.execute(select(EpubImport).where(EpubImport.id == import_uuid))
         epub_import = result.scalar_one_or_none()
         if not epub_import:
+            _cleanup_uploaded_file(file_path, import_id)
             return {"status": "failed", "error": "Import record not found"}
 
         epub_import.status = "processing"
@@ -148,3 +160,5 @@ def extract_epub_vocabulary(self, import_id: str, user_id: str, file_path: str) 
             db.commit()
 
             return {"status": "failed", "error": str(e)}
+        finally:
+            _cleanup_uploaded_file(file_path, import_id)

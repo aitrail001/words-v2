@@ -1,7 +1,5 @@
 import uuid
-from datetime import datetime, timezone
 
-import pytest
 
 from app.models.user import User
 from app.models.word import Word

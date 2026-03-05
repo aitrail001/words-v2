@@ -47,7 +47,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=development
       - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
-      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./backend:/app
@@ -62,13 +62,37 @@ services:
     networks:
       - words-network
 
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: words-worker
+    command: celery -A app.celery_app:celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=development
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./backend:/app
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - words-network
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: words-frontend
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -79,6 +103,25 @@ services:
       - backend
     networks:
       - words-network
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.52.0-noble
+    container_name: words-playwright
+    working_dir: /workspace/e2e
+    command: sh -lc "tail -f /dev/null"
+    environment:
+      - CI=true
+      - E2E_BASE_URL=${E2E_BASE_URL:-http://frontend:3000}
+      - E2E_API_URL=${E2E_API_URL:-http://backend:8000/api}
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - words-network
+    profiles:
+      - tests
 
   # Optional dev tools
   pgadmin:

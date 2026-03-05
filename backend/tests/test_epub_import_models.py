@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 
-import pytest
 
 from app.models.epub_import import EpubImport
 
