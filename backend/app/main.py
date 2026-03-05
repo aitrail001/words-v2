@@ -8,6 +8,7 @@ from slowapi.util import get_remote_address
 
 from app.api.auth import router as auth_router
 from app.api.health import router as health_router
+from app.api.imports import router as imports_router
 from app.api.reviews import router as reviews_router
 from app.api.words import router as words_router
 from app.core.config import get_settings
@@ -48,3 +49,4 @@ app.include_router(health_router, prefix="/api")
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(words_router, prefix="/api/words", tags=["words"])
 app.include_router(reviews_router, prefix="/api/reviews", tags=["reviews"])
+app.include_router(imports_router, prefix="/api/imports", tags=["imports"])
