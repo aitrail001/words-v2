@@ -61,4 +61,14 @@ describe("Auth middleware for /", () => {
   it("allows authenticated requests", () => {
     expect(getAuthRedirectPath("/", true)).toBeNull();
   });
+
+  it("redirects unauthenticated /imports requests", () => {
+    expect(getAuthRedirectPath("/imports", false)).toBe(
+      "/login?next=%2Fimports",
+    );
+  });
+
+  it("allows authenticated /imports requests", () => {
+    expect(getAuthRedirectPath("/imports", true)).toBeNull();
+  });
 });

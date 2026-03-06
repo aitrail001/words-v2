@@ -36,7 +36,7 @@ This board consolidates progress from:
 |---|---|---|---|---|---|
 | Foundation platform | DONE | Docker stack, health checks, CI baseline | In place and stable | `docker-compose.yml`, `.github/workflows/ci.yml`, `backend/app/api/health.py` | Maintain |
 | Auth + core vocabulary | PARTIAL | Register/login/refresh/me/logout, protected routes, lookup fallback | Register/login/me/refresh/logout implemented with refresh rotation + access-token revocation; frontend protected routes + logout UX + 401 lifecycle handling are in place; dictionary lookup fallback still pending | `backend/app/api/auth.py`, `backend/app/services/auth_tokens.py`, `frontend/src/lib/api-client.ts`, `frontend/src/middleware.ts`, `e2e/tests/smoke/auth-contract.smoke.spec.ts`, `e2e/tests/smoke/auth-guard.smoke.spec.ts` | Implement dictionary API fallback for `/api/words/lookup` misses and add coverage |
-| Word list + ePub import | PARTIAL | Word-list domain + import jobs + progress channel | Import skeleton and worker exist; full word-list domain and realtime progress path pending | `backend/app/api/imports.py`, `backend/app/tasks/epub_processing.py`, `backend/alembic/versions/003_add_epub_import.py` | Implement books/word_lists/word_list_items/import-jobs (+ progress stream) |
+| Word list + ePub import | DONE | Word-list domain + import jobs + progress channel | Full word-list import domain implemented (`books`, `word_lists`, `word_list_items`, `import_jobs`) with new backend APIs, worker persistence path, and SSE progress endpoint; frontend `/imports` upload/progress wiring and smoke/full E2E coverage are in place | `backend/app/models/book.py`, `backend/app/models/word_list.py`, `backend/app/models/word_list_item.py`, `backend/app/models/import_job.py`, `backend/app/api/word_lists.py`, `backend/app/api/import_jobs.py`, `backend/app/tasks/epub_processing.py`, `frontend/src/app/imports/page.tsx`, `e2e/tests/smoke/import-domain.smoke.spec.ts` | Maintain stability and harden edge-case import UX |
 | Review + SM-2 queue | PARTIAL | Queue add/due/submit/stats + full integration | Queue API/service/frontend implemented; broader roadmap depth still pending | `backend/app/api/reviews.py`, `backend/app/services/review.py`, `frontend/src/app/review/page.tsx` | Close remaining roadmap gaps and harden flows |
 | E2E + CI quality gates | DONE (baseline) | Required smoke gate on PR + broader suite | Smoke required on PR; auth contract + protected-route smoke coverage added; full suite runs on main/dispatch | `.github/workflows/ci.yml`, `e2e/tests/smoke/*`, `e2e/tests/full/*` | Keep smoke minimal and non-flaky |
 | Pre-prod readiness gate | DONE | Rollback drill + smoke + observability validation | Implemented and previously validated green | `.github/workflows/preprod-readiness.yml`, `docs/runbooks/preprod-readiness-checklist.md` | Keep green on release tags |
@@ -48,9 +48,9 @@ This board consolidates progress from:
 
 ## Current Top Gaps (Priority Order)
 
-1. Build full word-list import domain (books/lists/items/jobs + realtime progress path).
-2. Implement dictionary API fallback for `/api/words/lookup` misses + tests.
-3. Beta-release activation: wire real deploy/promote variables and pass full tagged promotion drill.
+1. Implement dictionary API fallback for `/api/words/lookup` misses + tests.
+2. Beta-release activation: wire real deploy/promote variables and pass full tagged promotion drill.
+3. Concept learning (synsets, R/U/L) phase design and first implementation slice.
 
 ---
 
@@ -96,3 +96,4 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "ci.ym
 |---|---|---|---|
 | 2026-03-06 | Initialized canonical project status board and consolidated tracking sources. | Codex | `docs/plans/2026-02-26-full-rebuild.md`, `docs/plans/2026-03-05-current-state-phase-plan.md` |
 | 2026-03-06 | Auth lifecycle hardening implemented (backend refresh/logout with token lifecycle controls, frontend protected routes/logout/401-refresh behavior, auth smoke coverage). | Codex | `docker compose -f docker-compose.test.yml run --rm --build test sh -lc "pip install -q -r requirements-test.txt && pytest -q"` (113 passed), `npm --prefix frontend run lint` (pass), `npm --prefix frontend test -- --runInBand` (7 suites/26 tests passed), `docker compose -f docker-compose.yml --profile tests exec -T playwright ... npm run test:smoke:ci` (6 passed), `docker compose -f docker-compose.yml --profile tests exec -T playwright ... npm run test:full` (7 passed) |
+| 2026-03-06 | Word-list import domain delivered: new domain tables/models/APIs/tasks + `/imports` frontend + import-domain smoke/full verification. | Codex | `docker compose -f docker-compose.test.yml run --rm --build test sh -lc "pip install -q -r requirements-test.txt && pytest -q"` (127 passed), `npm --prefix frontend run lint` (pass), `npm --prefix frontend test -- --runInBand` (9 suites/35 tests passed), `docker compose -f docker-compose.yml --profile tests exec -T backend alembic upgrade head` (to 005), `docker compose -f docker-compose.yml --profile tests exec -T playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"` (7 passed), `docker compose -f docker-compose.yml --profile tests exec -T playwright sh -lc "cd /workspace/e2e && npm run test:full"` (8 passed) |

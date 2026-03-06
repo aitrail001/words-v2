@@ -36,6 +36,13 @@ export function AuthNavigation() {
       >
         Review
       </Link>
+      <Link
+        href="/imports"
+        className="hover:text-gray-900"
+        data-testid="nav-imports-link"
+      >
+        Imports
+      </Link>
       {isAuthenticated ? (
         <button
           type="button"

@@ -1,5 +1,7 @@
 export const isProtectedPath = (pathname: string): boolean =>
-  pathname === "/" || pathname.startsWith("/review");
+  pathname === "/" ||
+  pathname.startsWith("/review") ||
+  pathname.startsWith("/imports");
 
 export const getAuthRedirectPath = (
   pathname: string,
