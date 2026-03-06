@@ -4,6 +4,7 @@
 
 ```
 docs/
+├── status/       # Canonical live status board + status archives
 ├── plans/        # Implementation plans (YYYY-MM-DD-<topic>.md)
 ├── decisions/    # Architecture Decision Records (ADR-NNN-<topic>.md)
 ├── lessons/      # Lessons learned during rebuild (YYYY-MM-DD-<topic>.md)
@@ -19,6 +20,12 @@ docs/
 - Include: requirements, phases, risks, dependencies, acceptance criteria
 - Status header: `DRAFT`, `APPROVED`, `IN_PROGRESS`, `COMPLETED`, `SUPERSEDED`
 - Link to related ADRs and lessons learned
+- Do not use plan files as live status boards; update `docs/status/project-status.md` for current state
+
+### Status (`docs/status/`)
+- Source-of-truth status board: `docs/status/project-status.md`
+- Consolidates delivery status across plans, workflows, and runbooks
+- Must be updated whenever feature or release-readiness status changes
 
 ### Architecture Decision Records (`docs/decisions/`)
 - One file per significant technical decision

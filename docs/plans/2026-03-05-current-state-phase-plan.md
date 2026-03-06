@@ -3,6 +3,7 @@
 **Status:** IN_PROGRESS  
 **Date:** 2026-03-05  
 **Scope:** Derived from current commits plus code/test files in `backend/` and `frontend/` (not from roadmap intent alone).
+**Live Status Board:** `docs/status/project-status.md` (canonical, keep updated alongside implementation changes)
 
 ---
 
