@@ -10,6 +10,20 @@ This file defines how coding agents should operate in this repository.
    - system/developer instructions override repository files
    - `AGENTS.md` overrides process sections duplicated elsewhere in repo docs
 
+## Session Kickoff Checklist (Reusable)
+
+Use this checklist at the start of every new task/session.
+
+1. Confirm runtime context (repo path, branch, target slice).
+2. Perform skill applicability check and invoke all relevant skills before implementation.
+3. Use a git worktree for non-trivial work.
+4. Require verification evidence before any completion claim.
+5. Update `docs/status/project-status.md` when feature/gate/release state changes.
+
+Shortcut prompt users can paste:
+
+`Follow AGENTS kickoff checklist: skill-check first, use relevant skills, worktree for non-trivial changes, verify before done, and update docs/status/project-status.md with evidence.`
+
 ## Canonical Project Status
 
 1. Live status source of truth: `docs/status/project-status.md`.
@@ -24,6 +38,10 @@ This file defines how coding agents should operate in this repository.
 4. Use an isolated git worktree by default for non-trivial slices.
 5. Write/adjust tests first where practical; run verification before claiming success.
 6. Update docs/status as part of the same change set.
+
+Hard gate:
+
+- No implementation starts until a skill check is completed and relevant skills are invoked.
 
 ## Skill Invocation Policy
 
