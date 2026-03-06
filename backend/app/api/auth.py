@@ -1,20 +1,22 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, field_validator
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.redis import get_redis
 from app.core.security import (
-    create_access_token,
     decode_token,
     hash_password,
     verify_password,
 )
 from app.models.user import User
+from app.services.auth_tokens import AuthTokenService
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -41,12 +43,14 @@ class LoginRequest(BaseModel):
 
 class RegisterResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     email: str
 
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
 
 
@@ -58,27 +62,45 @@ class UserResponse(BaseModel):
     is_active: bool
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 # Dependency: get current user from JWT
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> User:
     token = credentials.credentials
     payload = decode_token(token)
-    if payload is None:
+    token_service = AuthTokenService(redis)
+    if payload is None or payload.get("token_type") != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
         )
 
     user_id = payload.get("sub")
-    if not user_id:
+    if not isinstance(user_id, str):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        ) from None
+    if await token_service.is_access_payload_revoked(payload):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
         )
 
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
 
     if user is None or not user.is_active:
@@ -94,6 +116,7 @@ async def get_current_user(
 async def register(
     request: RegisterRequest,
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> RegisterResponse:
     # Check if user exists
     result = await db.execute(select(User).where(User.email == request.email))
@@ -115,19 +138,19 @@ async def register(
 
     logger.info("User registered", user_id=str(user.id), email=user.email)
 
-    # Create access token
-    access_token = create_access_token(
-        subject=str(user.id),
-        extra={"email": user.email, "role": user.role},
+    token_service = AuthTokenService(redis)
+    tokens = await token_service.issue_token_pair(
+        subject=str(user.id), extra={"email": user.email, "role": user.role}
     )
 
-    return RegisterResponse(access_token=access_token, email=user.email)
+    return RegisterResponse(email=user.email, **tokens)
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: LoginRequest,
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> TokenResponse:
     # Find user
     result = await db.execute(select(User).where(User.email == request.email))
@@ -148,13 +171,59 @@ async def login(
 
     logger.info("User logged in", user_id=str(user.id), email=user.email)
 
-    # Create access token
-    access_token = create_access_token(
-        subject=str(user.id),
-        extra={"email": user.email, "role": user.role},
+    token_service = AuthTokenService(redis)
+    tokens = await token_service.issue_token_pair(
+        subject=str(user.id), extra={"email": user.email, "role": user.role}
     )
 
-    return TokenResponse(access_token=access_token)
+    return TokenResponse(**tokens)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_tokens(
+    request: RefreshRequest,
+    redis: Redis = Depends(get_redis),
+) -> TokenResponse:
+    token_service = AuthTokenService(redis)
+    tokens = await token_service.rotate_refresh_token(request.refresh_token)
+    if tokens is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+    return TokenResponse(**tokens)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    redis: Redis = Depends(get_redis),
+) -> Response:
+    payload = decode_token(credentials.credentials)
+    if payload is None or payload.get("token_type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+
+    user_id = payload.get("sub")
+    if not isinstance(user_id, str):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    try:
+        uuid.UUID(user_id)
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        ) from None
+
+    token_service = AuthTokenService(redis)
+    await token_service.revoke_access_payload(payload)
+    await token_service.revoke_refresh_tokens_for_subject(user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=UserResponse)

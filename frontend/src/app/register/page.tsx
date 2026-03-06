@@ -17,11 +17,12 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const response = await apiClient.post<{ access_token: string; email: string }>(
-        "/auth/register",
-        { email, password }
-      );
-      apiClient.setToken(response.access_token);
+      const response = await apiClient.post<{
+        access_token: string;
+        refresh_token: string;
+        email: string;
+      }>("/auth/register", { email, password });
+      apiClient.setTokens(response.access_token, response.refresh_token);
       router.push("/");
     } catch (err: any) {
       setError(err.message || "Registration failed");

@@ -1,6 +1,7 @@
 import { expect, APIRequestContext, Page } from "@playwright/test";
 
 const API_URL = process.env.E2E_API_URL ?? "http://localhost:8000/api";
+const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const TOKEN_STORAGE_KEY = "words_access_token";
 const DEFAULT_PASSWORD = "password123";
 
@@ -36,6 +37,15 @@ export const registerViaApi = async (
 };
 
 export const injectToken = async (page: Page, token: string): Promise<void> => {
+  await page.context().addCookies([
+    {
+      name: TOKEN_STORAGE_KEY,
+      value: token,
+      url: BASE_URL,
+      sameSite: "Lax",
+    },
+  ]);
+
   await page.addInitScript(
     ({ key, value }) => {
       window.localStorage.setItem(key, value);

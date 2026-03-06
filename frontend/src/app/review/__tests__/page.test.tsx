@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRouter } from "next/navigation";
 import ReviewPage from "@/app/review/page";
+import { getAuthRedirectPath } from "@/lib/auth-route-guard";
 
 jest.mock("next/navigation", () => ({
   useRouter: jest.fn(),
@@ -146,5 +147,17 @@ describe("ReviewPage", () => {
         screen.getByText(/you have no cards to review right now/i)
       ).toBeInTheDocument();
     });
+  });
+});
+
+describe("Auth middleware for /review", () => {
+  it("redirects unauthenticated review route requests to /login", () => {
+    expect(getAuthRedirectPath("/review", false)).toBe(
+      "/login?next=%2Freview",
+    );
+  });
+
+  it("allows authenticated review route requests", () => {
+    expect(getAuthRedirectPath("/review", true)).toBeNull();
   });
 });

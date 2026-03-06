@@ -10,7 +10,7 @@ jest.mock("next/navigation", () => ({
 jest.mock("@/lib/api-client", () => ({
   apiClient: {
     post: jest.fn(),
-    setToken: jest.fn(),
+    setTokens: jest.fn(),
   },
 }));
 
@@ -34,6 +34,7 @@ describe("RegisterPage", () => {
     const user = userEvent.setup();
     mockApiClient.post.mockResolvedValue({
       access_token: "test-token",
+      refresh_token: "refresh-token",
       email: "new@example.com",
     });
 
@@ -48,7 +49,10 @@ describe("RegisterPage", () => {
         email: "new@example.com",
         password: "password123",
       });
-      expect(mockApiClient.setToken).toHaveBeenCalledWith("test-token");
+      expect(mockApiClient.setTokens).toHaveBeenCalledWith(
+        "test-token",
+        "refresh-token",
+      );
       expect(mockPush).toHaveBeenCalledWith("/");
     });
   });

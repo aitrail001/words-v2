@@ -1,5 +1,12 @@
+import uuid
 
-from app.core.security import hash_password, verify_password, create_access_token, decode_token
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    hash_password,
+    verify_password,
+)
 
 
 class TestPasswordHashing:
@@ -43,6 +50,9 @@ class TestJWT:
         token = create_access_token(subject="user-123")
         payload = decode_token(token)
         assert "exp" in payload
+        assert payload["token_type"] == "access"
+        assert "jti" in payload
+        uuid.UUID(payload["jti"])
 
     def test_decode_token_invalid_token_returns_none(self):
         payload = decode_token("invalid.token.here")
@@ -57,3 +67,12 @@ class TestJWT:
         assert payload["sub"] == "user-123"
         assert payload["role"] == "admin"
         assert payload["email"] == "test@example.com"
+
+    def test_create_refresh_token_contains_refresh_claims(self):
+        token = create_refresh_token(subject="user-123")
+        payload = decode_token(token)
+        assert payload["sub"] == "user-123"
+        assert payload["token_type"] == "refresh"
+        assert "jti" in payload
+        uuid.UUID(payload["jti"])
+        assert "exp" in payload
