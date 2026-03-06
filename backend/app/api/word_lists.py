@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.uploads import resolve_upload_dir
 from app.models.import_job import ImportJob
 from app.models.user import User
 from app.models.word_list import WordList
@@ -20,8 +21,7 @@ from app.tasks.epub_processing import process_word_list_import
 logger = get_logger(__name__)
 router = APIRouter()
 
-UPLOAD_DIR = Path("/tmp/words_uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR = resolve_upload_dir()
 
 
 class ImportJobResponse(BaseModel):
