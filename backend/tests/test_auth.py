@@ -6,9 +6,34 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.database import get_db
 from app.core.redis import get_redis
-from app.core.security import hash_password
+from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.main import app
 from app.models.user import User
+
+
+class InMemoryRedis:
+    def __init__(self):
+        self._store: dict[str, str] = {}
+
+    async def ping(self):
+        return True
+
+    async def set(self, name: str, value: str, ex: int | None = None, nx: bool = False):
+        if nx and name in self._store:
+            return False
+        self._store[name] = value
+        return True
+
+    async def get(self, name: str):
+        return self._store.get(name)
+
+    async def delete(self, *names: str):
+        deleted = 0
+        for name in names:
+            if name in self._store:
+                deleted += 1
+                del self._store[name]
+        return deleted
 
 
 @pytest.fixture
@@ -22,12 +47,7 @@ def mock_db():
 
 @pytest.fixture
 def mock_redis():
-    r = AsyncMock()
-    r.ping = AsyncMock(return_value=True)
-    r.set = AsyncMock()
-    r.get = AsyncMock(return_value=None)
-    r.delete = AsyncMock()
-    return r
+    return InMemoryRedis()
 
 
 @pytest.fixture
@@ -78,6 +98,8 @@ class TestRegister:
         assert response.status_code == 201
         data = response.json()
         assert "access_token" in data
+        assert "refresh_token" in data
+        assert data["token_type"] == "bearer"
         assert data["email"] == "new@example.com"
 
     @pytest.mark.asyncio
@@ -125,6 +147,8 @@ class TestLogin:
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
+        assert "refresh_token" in data
+        assert data["token_type"] == "bearer"
 
     @pytest.mark.asyncio
     async def test_login_wrong_password(self, client, mock_db):
@@ -173,7 +197,6 @@ class TestMe:
         result.scalar_one_or_none.return_value = user
         mock_db.execute.return_value = result
 
-        from app.core.security import create_access_token
         token = create_access_token(subject=str(user.id))
 
         response = await client.get(
@@ -196,3 +219,82 @@ class TestMe:
             headers={"Authorization": "Bearer invalid.token.here"},
         )
         assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_me_rejects_refresh_token(self, client):
+        token = create_refresh_token(subject=str(uuid.uuid4()))
+        response = await client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_me_malformed_subject_returns_401(self, client):
+        token = create_access_token(subject="not-a-uuid")
+        response = await client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 401
+
+
+class TestRefreshAndLogout:
+    @pytest.mark.asyncio
+    async def test_refresh_rotates_refresh_token(self, client, mock_db):
+        user = make_user(email="rotate@example.com", password="correct_password")
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = user
+        mock_db.execute.return_value = result
+
+        login_response = await client.post("/api/auth/login", json={
+            "email": "rotate@example.com",
+            "password": "correct_password",
+        })
+        assert login_response.status_code == 200
+        tokens = login_response.json()
+
+        refresh_response = await client.post("/api/auth/refresh", json={
+            "refresh_token": tokens["refresh_token"],
+        })
+        assert refresh_response.status_code == 200
+        refreshed_tokens = refresh_response.json()
+        assert refreshed_tokens["refresh_token"] != tokens["refresh_token"]
+        assert refreshed_tokens["access_token"] != tokens["access_token"]
+
+        old_refresh_response = await client.post("/api/auth/refresh", json={
+            "refresh_token": tokens["refresh_token"],
+        })
+        assert old_refresh_response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_logout_revokes_access_token_by_jti(self, client, mock_db):
+        user = make_user(email="logout@example.com", password="correct_password")
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = user
+        mock_db.execute.return_value = result
+
+        login_response = await client.post("/api/auth/login", json={
+            "email": "logout@example.com",
+            "password": "correct_password",
+        })
+        assert login_response.status_code == 200
+        access_token = login_response.json()["access_token"]
+
+        me_before_logout = await client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        assert me_before_logout.status_code == 200
+
+        logout_response = await client.post(
+            "/api/auth/logout",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        assert logout_response.status_code == 204
+
+        me_after_logout = await client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        assert me_after_logout.status_code == 401

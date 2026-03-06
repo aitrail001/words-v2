@@ -20,6 +20,9 @@ def mock_db():
 def mock_redis():
     r = AsyncMock()
     r.ping = AsyncMock(return_value=True)
+    r.get = AsyncMock(return_value=None)
+    r.set = AsyncMock(return_value=True)
+    r.delete = AsyncMock(return_value=1)
     return r
 
 

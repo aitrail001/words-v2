@@ -17,11 +17,14 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await apiClient.post<{ access_token: string }>(
+      const response = await apiClient.post<{
+        access_token: string;
+        refresh_token: string;
+      }>(
         "/auth/login",
         { email, password }
       );
-      apiClient.setToken(response.access_token);
+      apiClient.setTokens(response.access_token, response.refresh_token);
       router.push("/");
     } catch (err: any) {
       setError(err.message || "Login failed");

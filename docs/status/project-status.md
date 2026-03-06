@@ -35,10 +35,10 @@ This board consolidates progress from:
 | Workstream | Status | Target Scope | Current Reality | Evidence | Next Milestone |
 |---|---|---|---|---|---|
 | Foundation platform | DONE | Docker stack, health checks, CI baseline | In place and stable | `docker-compose.yml`, `.github/workflows/ci.yml`, `backend/app/api/health.py` | Maintain |
-| Auth + core vocabulary | PARTIAL | Register/login/refresh/me/logout, protected routes, lookup fallback | Register/login/me + search/detail done; refresh/logout/protected routes/dictionary fallback pending | `backend/app/api/auth.py`, `backend/app/api/words.py`, `frontend/src/app/login/page.tsx`, `frontend/src/app/register/page.tsx` | Complete auth lifecycle + protected-route enforcement |
+| Auth + core vocabulary | PARTIAL | Register/login/refresh/me/logout, protected routes, lookup fallback | Register/login/me/refresh/logout implemented with refresh rotation + access-token revocation; frontend protected routes + logout UX + 401 lifecycle handling are in place; dictionary lookup fallback still pending | `backend/app/api/auth.py`, `backend/app/services/auth_tokens.py`, `frontend/src/lib/api-client.ts`, `frontend/src/middleware.ts`, `e2e/tests/smoke/auth-contract.smoke.spec.ts`, `e2e/tests/smoke/auth-guard.smoke.spec.ts` | Implement dictionary API fallback for `/api/words/lookup` misses and add coverage |
 | Word list + ePub import | PARTIAL | Word-list domain + import jobs + progress channel | Import skeleton and worker exist; full word-list domain and realtime progress path pending | `backend/app/api/imports.py`, `backend/app/tasks/epub_processing.py`, `backend/alembic/versions/003_add_epub_import.py` | Implement books/word_lists/word_list_items/import-jobs (+ progress stream) |
 | Review + SM-2 queue | PARTIAL | Queue add/due/submit/stats + full integration | Queue API/service/frontend implemented; broader roadmap depth still pending | `backend/app/api/reviews.py`, `backend/app/services/review.py`, `frontend/src/app/review/page.tsx` | Close remaining roadmap gaps and harden flows |
-| E2E + CI quality gates | DONE (baseline) | Required smoke gate on PR + broader suite | Smoke required on PR; full suite runs on main/dispatch | `.github/workflows/ci.yml`, `e2e/tests/smoke/*`, `e2e/tests/full/*` | Keep smoke minimal and non-flaky |
+| E2E + CI quality gates | DONE (baseline) | Required smoke gate on PR + broader suite | Smoke required on PR; auth contract + protected-route smoke coverage added; full suite runs on main/dispatch | `.github/workflows/ci.yml`, `e2e/tests/smoke/*`, `e2e/tests/full/*` | Keep smoke minimal and non-flaky |
 | Pre-prod readiness gate | DONE | Rollback drill + smoke + observability validation | Implemented and previously validated green | `.github/workflows/preprod-readiness.yml`, `docs/runbooks/preprod-readiness-checklist.md` | Keep green on release tags |
 | Promotion automation wiring | DEFERRED | Real preprod deploy + prod promote via workflows | Workflows implemented; real infra command/URL wiring deferred to beta release | `.github/workflows/deploy-preprod.yml`, `.github/workflows/promote-prod.yml` | Wire real commands/URLs and run tagged dry-run |
 | Concept learning (synsets, R/U/L) | PENDING | Phase 4 concepts/mastery system | Not started | `docs/plans/2026-02-26-full-rebuild.md` | Design + implement phase slice |
@@ -48,8 +48,8 @@ This board consolidates progress from:
 
 ## Current Top Gaps (Priority Order)
 
-1. Complete auth lifecycle and protected routes (`refresh`, `logout`, guard behavior, token lifecycle tests).
-2. Build full word-list import domain (books/lists/items/jobs + realtime progress path).
+1. Build full word-list import domain (books/lists/items/jobs + realtime progress path).
+2. Implement dictionary API fallback for `/api/words/lookup` misses + tests.
 3. Beta-release activation: wire real deploy/promote variables and pass full tagged promotion drill.
 
 ---
@@ -95,3 +95,4 @@ ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "ci.ym
 | Date (UTC) | Change | Editor | Evidence |
 |---|---|---|---|
 | 2026-03-06 | Initialized canonical project status board and consolidated tracking sources. | Codex | `docs/plans/2026-02-26-full-rebuild.md`, `docs/plans/2026-03-05-current-state-phase-plan.md` |
+| 2026-03-06 | Auth lifecycle hardening implemented (backend refresh/logout with token lifecycle controls, frontend protected routes/logout/401-refresh behavior, auth smoke coverage). | Codex | `docker compose -f docker-compose.test.yml run --rm --build test sh -lc "pip install -q -r requirements-test.txt && pytest -q"` (113 passed), `npm --prefix frontend run lint` (pass), `npm --prefix frontend test -- --runInBand` (7 suites/26 tests passed), `docker compose -f docker-compose.yml --profile tests exec -T playwright ... npm run test:smoke:ci` (6 passed), `docker compose -f docker-compose.yml --profile tests exec -T playwright ... npm run test:full` (7 passed) |

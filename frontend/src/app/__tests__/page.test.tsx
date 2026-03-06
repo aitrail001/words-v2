@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import HomePage from "@/app/page";
+import { getAuthRedirectPath } from "@/lib/auth-route-guard";
 
 jest.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -49,5 +50,15 @@ describe("HomePage (Word Search)", () => {
     await waitFor(() => {
       expect(screen.getByText(/no words found/i)).toBeInTheDocument();
     });
+  });
+});
+
+describe("Auth middleware for /", () => {
+  it("redirects unauthenticated requests to /login", () => {
+    expect(getAuthRedirectPath("/", false)).toBe("/login?next=%2F");
+  });
+
+  it("allows authenticated requests", () => {
+    expect(getAuthRedirectPath("/", true)).toBeNull();
   });
 });

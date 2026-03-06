@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import bcrypt
 from jose import JWTError, jwt
@@ -24,15 +25,54 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-def create_access_token(subject: str, extra: dict | None = None) -> str:
-    """Create a JWT access token."""
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.jwt_expiration_minutes
-    )
-    payload = {"sub": subject, "exp": expire}
+def _create_token(
+    *,
+    subject: str,
+    token_type: str,
+    expires_delta: timedelta,
+    extra: dict | None = None,
+    jti: str | None = None,
+) -> str:
+    expire = datetime.now(timezone.utc) + expires_delta
+    payload = {
+        "sub": subject,
+        "exp": expire,
+        "token_type": token_type,
+        "jti": jti or str(uuid4()),
+    }
     if extra:
         payload.update(extra)
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def create_access_token(
+    subject: str,
+    extra: dict | None = None,
+    jti: str | None = None,
+) -> str:
+    """Create a JWT access token."""
+    return _create_token(
+        subject=subject,
+        token_type="access",
+        expires_delta=timedelta(minutes=settings.jwt_expiration_minutes),
+        extra=extra,
+        jti=jti,
+    )
+
+
+def create_refresh_token(
+    subject: str,
+    extra: dict | None = None,
+    jti: str | None = None,
+) -> str:
+    """Create a JWT refresh token."""
+    return _create_token(
+        subject=subject,
+        token_type="refresh",
+        expires_delta=timedelta(days=settings.refresh_token_expiration_days),
+        extra=extra,
+        jti=jti,
+    )
 
 
 def decode_token(token: str) -> dict | None:
