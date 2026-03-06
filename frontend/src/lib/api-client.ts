@@ -94,9 +94,19 @@ class ApiClient {
     allowRefresh = true,
   ): Promise<T> {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
+    const hasContentTypeHeader = Object.keys(headers).some(
+      (headerName) => headerName.toLowerCase() === "content-type",
+    );
+    if (
+      options.body !== undefined &&
+      options.body !== null &&
+      !(options.body instanceof FormData) &&
+      !hasContentTypeHeader
+    ) {
+      headers["Content-Type"] = "application/json";
+    }
 
     if (this.accessToken) {
       headers["Authorization"] = `Bearer ${this.accessToken}`;
@@ -141,14 +151,14 @@ class ApiClient {
   post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>(path, {
       method: "POST",
-      body: body ? JSON.stringify(body) : undefined,
+      body: this.normalizeBody(body),
     });
   }
 
   put<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>(path, {
       method: "PUT",
-      body: body ? JSON.stringify(body) : undefined,
+      body: this.normalizeBody(body),
     });
   }
 
@@ -164,6 +174,19 @@ class ApiClient {
     }
 
     this.clearSessionAndRedirect();
+  }
+
+  private normalizeBody(body: unknown): BodyInit | undefined {
+    if (body === undefined || body === null) {
+      return undefined;
+    }
+    if (body instanceof FormData) {
+      return body;
+    }
+    if (typeof body === "string") {
+      return body;
+    }
+    return JSON.stringify(body);
   }
 }
 

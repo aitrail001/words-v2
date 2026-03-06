@@ -31,6 +31,7 @@ describe("RootLayout auth navigation", () => {
 
     expect(screen.getByTestId("nav-login-link")).toBeInTheDocument();
     expect(screen.getByTestId("nav-register-link")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-imports-link")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /logout/i }),
     ).not.toBeInTheDocument();

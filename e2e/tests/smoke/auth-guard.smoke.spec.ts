@@ -9,6 +9,10 @@ test("@smoke auth guard redirects unauthenticated users to login with next", asy
   await page.goto("/review");
   await expect(page).toHaveURL(/\/login\?next=%2Freview$/);
   await expect(page.getByTestId("login-form")).toBeVisible();
+
+  await page.goto("/imports");
+  await expect(page).toHaveURL(/\/login\?next=%2Fimports$/);
+  await expect(page.getByTestId("login-form")).toBeVisible();
 });
 
 test("@smoke auth guard allows authenticated users on protected routes", async ({ page, request }) => {
@@ -23,4 +27,8 @@ test("@smoke auth guard allows authenticated users on protected routes", async (
   await page.goto("/review");
   await expect(page).toHaveURL(/\/review$/);
   await expect(page.getByTestId("review-start-button")).toBeVisible();
+
+  await page.goto("/imports");
+  await expect(page).toHaveURL(/\/imports$/);
+  await expect(page.getByTestId("imports-page-title")).toBeVisible();
 });

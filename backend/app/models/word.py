@@ -10,6 +10,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.meaning import Meaning
+    from app.models.word_list_item import WordListItem
 
 
 class Word(Base):
@@ -29,6 +30,9 @@ class Word(Base):
 
     meanings: Mapped[list["Meaning"]] = relationship(
         "Meaning", back_populates="word", cascade="all, delete-orphan"
+    )
+    word_list_items: Mapped[list["WordListItem"]] = relationship(
+        "WordListItem", back_populates="word", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
