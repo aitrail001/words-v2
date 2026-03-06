@@ -1,4 +1,5 @@
 import uuid
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,42 @@ def _cleanup_uploaded_file(file_path: str, import_id: str) -> None:
             path=file_path,
             error=str(cleanup_error),
         )
+
+
+def _build_word_frequency(full_text: str) -> tuple[Counter[str], str]:
+    """Build normalized word frequencies with resilient NLP fallbacks."""
+    text = full_text[:1000000]
+
+    try:
+        import spacy
+
+        nlp_mode = "en_core_web_sm"
+        try:
+            nlp = spacy.load("en_core_web_sm")
+        except OSError as model_error:
+            logger.warning(
+                "spaCy model unavailable, using blank English pipeline",
+                error=str(model_error),
+                model="en_core_web_sm",
+            )
+            nlp = spacy.blank("en")
+            nlp_mode = "blank_en"
+
+        doc = nlp(text)
+        word_freq: Counter[str] = Counter()
+        for token in doc:
+            if token.is_alpha and not token.is_stop and len(token.text) > 2:
+                lemma = (getattr(token, "lemma_", "") or token.text).strip().lower()
+                if lemma:
+                    word_freq[lemma] += 1
+
+        return word_freq, nlp_mode
+    except Exception as nlp_error:  # pragma: no cover - defensive fallback
+        logger.warning(
+            "spaCy pipeline unavailable, using regex tokenizer fallback",
+            error=str(nlp_error),
+        )
+        return Counter(re.findall(r"[A-Za-z]{3,}", text.lower())), "regex"
 
 
 @celery_app.task(bind=True, name="extract_epub_vocabulary")
@@ -81,29 +118,13 @@ def extract_epub_vocabulary(self, import_id: str, user_id: str, file_path: str) 
 
             full_text = " ".join(text_content)
 
-            # Load spaCy model (English)
-            try:
-                import spacy
-                nlp = spacy.load("en_core_web_sm")
-            except OSError:
-                # Model not installed
-                logger.error("spaCy model not installed. Run: python -m spacy download en_core_web_sm")
-                raise Exception("spaCy model 'en_core_web_sm' not installed")
-
-            # Process text with spaCy
-            logger.info("Processing text with spaCy", text_length=len(full_text))
-            doc = nlp(full_text[:1000000])  # Limit to 1M chars to avoid memory issues
-
-            # Extract words: lemmatize, filter stop words, count frequency
-            word_freq = Counter()
-            for token in doc:
-                if (
-                    token.is_alpha  # Only alphabetic
-                    and not token.is_stop  # Not a stop word
-                    and len(token.text) > 2  # At least 3 characters
-                ):
-                    lemma = token.lemma_.lower()
-                    word_freq[lemma] += 1
+            word_freq, nlp_mode = _build_word_frequency(full_text)
+            logger.info(
+                "Processed text for vocabulary extraction",
+                text_length=len(full_text),
+                nlp_mode=nlp_mode,
+                unique_words=len(word_freq),
+            )
 
             # Update total words
             epub_import.total_words = len(word_freq)
@@ -207,19 +228,14 @@ def process_word_list_import(self, job_id: str, user_id: str, file_path: str) ->
 
             full_text = " ".join(text_content)
 
-            try:
-                import spacy
-                nlp = spacy.load("en_core_web_sm")
-            except OSError:
-                logger.error("spaCy model not installed. Run: python -m spacy download en_core_web_sm")
-                raise Exception("spaCy model 'en_core_web_sm' not installed")
-
-            doc = nlp(full_text[:1000000])
-            word_freq = Counter()
-            for token in doc:
-                if token.is_alpha and not token.is_stop and len(token.text) > 2:
-                    lemma = token.lemma_.lower()
-                    word_freq[lemma] += 1
+            word_freq, nlp_mode = _build_word_frequency(full_text)
+            logger.info(
+                "Processed text for word-list import",
+                import_job_id=job_id,
+                text_length=len(full_text),
+                nlp_mode=nlp_mode,
+                unique_words=len(word_freq),
+            )
 
             top_words = word_freq.most_common(500)
             import_job.total_items = len(top_words)
