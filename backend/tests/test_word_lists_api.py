@@ -11,7 +11,6 @@ from app.core.security import create_access_token, hash_password
 from app.main import app
 from app.models.user import User
 from app.models.word_list import WordList
-from app.models.word_list_item import WordListItem
 
 
 @pytest.fixture
