@@ -1,5 +1,8 @@
 # Words-Codex — Vocabulary Learning Platform
 
+> Operational note: Agent execution/governance rules live in `AGENTS.md`.  
+> This file (`CLAUDE.md`) is the product/domain context reference.
+
 ## What This App Is
 
 A context-aware English vocabulary learning app. Users import ePub books, extract vocabulary, and learn word meanings through spaced repetition. The key differentiator: learning happens at the **meaning level**, not the word level — because "bank" (river) and "bank" (financial) are different things to learn.
