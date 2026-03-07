@@ -7,14 +7,14 @@ Quick operator references:
 - `tools/lexicon/.env.example` — tool-local example env file for offline lexicon runs
 
 Current scope:
-- `python -m tools.lexicon.cli build-base ...` builds a bounded normalized base summary from seed words
-- `python -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files
-- `python -m tools.lexicon.cli enrich --snapshot-dir ...` generates learner-facing `enrichments.jsonl` for an existing snapshot
-- `python -m tools.lexicon.cli validate --snapshot-dir ...` validates normalized snapshot JSONL files
-- `python -m tools.lexicon.cli validate --compiled-input ...` validates compiled learner-facing JSONL rows (`--compiled-path` remains an alias)
-- `python -m tools.lexicon.cli compile-export --snapshot-dir ... --output ...` compiles normalized snapshot files into `words.enriched.jsonl`
-- `python -m tools.lexicon.cli import-db --input ... --dry-run` loads compiled rows and prints a local-admin import summary
-- `python -m tools.lexicon.cli import-db --input ... --source-type ... --source-reference ... --language ...` runs the local import path against the configured DB
+- `python3 -m tools.lexicon.cli build-base ...` builds a bounded normalized base summary from seed words
+- `python3 -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files
+- `python3 -m tools.lexicon.cli enrich --snapshot-dir ...` generates learner-facing `enrichments.jsonl` for an existing snapshot
+- `python3 -m tools.lexicon.cli validate --snapshot-dir ...` validates normalized snapshot JSONL files
+- `python3 -m tools.lexicon.cli validate --compiled-input ...` validates compiled learner-facing JSONL rows (`--compiled-path` remains an alias)
+- `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --output ...` compiles normalized snapshot files into `words.enriched.jsonl`
+- `python3 -m tools.lexicon.cli import-db --input ... --dry-run` loads compiled rows and prints a local-admin import summary
+- `python3 -m tools.lexicon.cli import-db --input ... --source-type ... --source-reference ... --language ...` runs the local import path against the configured DB
 
 ## Dependencies
 
@@ -35,11 +35,11 @@ This is intentional. The operator path should not silently fall back to fake lex
 Recommended offline flow:
 
 ```bash
-python -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
-python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
-python -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
-python -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
-python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
+python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
+python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
+python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
+python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
 ```
 
 This separation keeps lexical base generation, learner-facing enrichment, validation, compilation, and DB import independently rerunnable.
@@ -89,19 +89,19 @@ npm --prefix tools/lexicon ci
 ### Build base summary
 
 ```bash
-python -m tools.lexicon.cli build-base run set lead
+python3 -m tools.lexicon.cli build-base run set lead
 ```
 
 ### Build and write normalized snapshot files
 
 ```bash
-python -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
+python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 ```
 
 ### Generate learner-facing enrichments
 
 ```bash
-python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
 ```
 
 
@@ -110,14 +110,14 @@ python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --
 Use the helper command:
 
 ```bash
-python -m tools.lexicon.cli smoke-openai-compatible --output-dir /tmp/lexicon-openai-smoke run set
+python3 -m tools.lexicon.cli smoke-openai-compatible --output-dir /tmp/lexicon-openai-smoke run set
 ```
 
 For Cloudflare-fronted custom gateways like `https://api.nwai.cc`, use the Node-backed mode:
 
 ```bash
 LEXICON_LLM_TRANSPORT=node \
-python -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compatible_node --output-dir /tmp/lexicon-openai-smoke run set
+python3 -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compatible_node --output-dir /tmp/lexicon-openai-smoke run set
 ```
 
 This is the fastest local check for a real endpoint. It should:
@@ -129,31 +129,31 @@ This is the fastest local check for a real endpoint. It should:
 ### Validate a normalized snapshot
 
 ```bash
-python -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
+python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
 ```
 
 ### Validate a compiled export
 
 ```bash
-python -m tools.lexicon.cli validate --compiled-input data/lexicon/snapshots/demo/words.enriched.jsonl
+python3 -m tools.lexicon.cli validate --compiled-input data/lexicon/snapshots/demo/words.enriched.jsonl
 ```
 
 ### Compile export
 
 ```bash
-python -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
+python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
 ```
 
 ### Import dry run
 
 ```bash
-python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
+python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
 ```
 
 ### Import into local DB
 
 ```bash
-python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --source-type lexicon_snapshot --source-reference demo-snapshot-20260307 --language en
+python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --source-type lexicon_snapshot --source-reference demo-snapshot-20260307 --language en
 ```
 
 ### Real local DB import smoke
@@ -169,7 +169,7 @@ DATABASE_URL_SYNC=postgresql://vocabapp:devpassword@localhost:5432/vocabapp_dev 
 cd ..
 DATABASE_URL=postgresql+asyncpg://vocabapp:devpassword@localhost:5432/vocabapp_dev \
 DATABASE_URL_SYNC=postgresql://vocabapp:devpassword@localhost:5432/vocabapp_dev \
-python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --source-type lexicon_snapshot --source-reference demo-snapshot-20260307 --language en
+python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --source-type lexicon_snapshot --source-reference demo-snapshot-20260307 --language en
 ```
 
 If your usual local dev DB has unrelated schema drift, use an isolated temporary Postgres instance for the smoke instead of reusing that DB blindly.

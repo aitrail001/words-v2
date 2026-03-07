@@ -46,31 +46,31 @@ Important notes:
 Build a normalized snapshot first:
 
 ```bash
-python -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
+python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 ```
 
 Enrich the learner-facing layer:
 
 ```bash
-python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
 ```
 
 Validate the normalized snapshot plus enrichments:
 
 ```bash
-python -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
+python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
 ```
 
 Compile the final export:
 
 ```bash
-python -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
+python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
 ```
 
 Run an import dry-run summary:
 
 ```bash
-python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
+python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
 ```
 
 ## 5. Provider modes
@@ -83,19 +83,18 @@ python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.
 
 ## 6. Custom OpenAI-compatible gateways
 
-If your gateway works with the official Node OpenAI SDK but rejects the Python transport, set:
+If your gateway works with the official Node OpenAI SDK but rejects the Python transport, store the values in `tools/lexicon/.env.local`, source that file into your shell, and set:
 
 ```bash
-export LEXICON_LLM_BASE_URL='https://api.nwai.cc'
-export LEXICON_LLM_MODEL='gpt-5.1'
-export LEXICON_LLM_API_KEY='your-local-key'
-export LEXICON_LLM_TRANSPORT='node'
+LEXICON_LLM_BASE_URL='https://api.nwai.cc'
+LEXICON_LLM_MODEL='gpt-5.1'
+LEXICON_LLM_TRANSPORT='node'
 ```
 
-Then use either the normal `enrich` flow with `--provider-mode auto` or the bounded smoke command:
+Keep `LEXICON_LLM_API_KEY` in your local `tools/lexicon/.env.local` instead of pasting it directly into shell history. Then use either the normal `enrich` flow with `--provider-mode auto` or the bounded smoke command:
 
 ```bash
-python -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compatible_node --output-dir /tmp/lexicon-openai-smoke run set
+python3 -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compatible_node --output-dir /tmp/lexicon-openai-smoke run set
 ```
 
 ## 7. Import into the local DB
@@ -103,7 +102,7 @@ python -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compa
 For a real non-dry-run import, your backend DB settings must be available in the shell:
 
 ```bash
-python -m tools.lexicon.cli import-db \
+python3 -m tools.lexicon.cli import-db \
   --input data/lexicon/snapshots/demo/words.enriched.jsonl \
   --source-type lexicon_snapshot \
   --source-reference demo-snapshot-20260307 \
