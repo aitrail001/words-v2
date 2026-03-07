@@ -12,6 +12,7 @@ class LexiconSettings:
     llm_base_url: str | None
     llm_model: str | None
     llm_api_key: str | None
+    llm_transport: str | None
 
     @property
     def llm_provider(self) -> str | None:
@@ -27,4 +28,5 @@ class LexiconSettings:
             llm_base_url=llm_base_url,
             llm_model=source.get("LEXICON_LLM_MODEL"),
             llm_api_key=source.get("LEXICON_LLM_API_KEY"),
+            llm_transport=source.get("LEXICON_LLM_TRANSPORT"),
         )

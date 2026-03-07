@@ -1,0 +1,8 @@
+{
+  "name": "@words-v2/lexicon-tool",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "openai": "^6.10.0"
+  }
+}

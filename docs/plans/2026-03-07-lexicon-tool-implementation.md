@@ -163,6 +163,16 @@ Add operator-friendly pytest support for the lexicon tool without changing the u
 4. keep the existing offline smoke flow after tests
 5. verify workflow YAML plus local repo-venv pytest execution
 
+## Approved Follow-up Slice: Cloudflare-Friendly Node Gateway Transport
+
+Add a separate Node-backed OpenAI-compatible provider path for gateways that work with the official OpenAI SDK but reject the Python transport:
+
+1. add failing tests first for the new provider mode and CLI wiring
+2. keep the existing Python `openai_compatible` provider unchanged
+3. add a tool-local Node helper that uses the OpenAI SDK with `x-api-key` and Responses `input_text` array payloads
+4. document `LEXICON_LLM_TRANSPORT=node` and `openai_compatible_node` for custom gateways like `api.nwai.cc`
+5. verify with the lexicon test suite, workflow YAML checks, and a real gateway smoke run
+
 ## Notes for Implementation
 
 - Keep LLM credentials environment-driven only.

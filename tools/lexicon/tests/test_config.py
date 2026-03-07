@@ -35,6 +35,18 @@ class LexiconSettingsTests(unittest.TestCase):
         self.assertEqual(settings.llm_base_url, "https://legacy.example.test/v1")
         self.assertEqual(settings.llm_provider, "https://legacy.example.test/v1")
 
+    def test_settings_reads_optional_llm_transport(self) -> None:
+        settings = LexiconSettings.from_env(
+            {
+                "LEXICON_LLM_BASE_URL": "https://api.example.test",
+                "LEXICON_LLM_MODEL": "gpt-5.1",
+                "LEXICON_LLM_API_KEY": "secret-key",
+                "LEXICON_LLM_TRANSPORT": "node",
+            }
+        )
+
+        self.assertEqual(settings.llm_transport, "node")
+
 
 if __name__ == "__main__":
     unittest.main()

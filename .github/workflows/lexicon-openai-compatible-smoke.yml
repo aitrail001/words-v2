@@ -29,6 +29,7 @@ jobs:
       LEXICON_LLM_BASE_URL: ${{ vars.LEXICON_LLM_BASE_URL }}
       LEXICON_LLM_MODEL: ${{ vars.LEXICON_LLM_MODEL }}
       LEXICON_LLM_API_KEY: ${{ secrets.LEXICON_LLM_API_KEY }}
+      LEXICON_LLM_TRANSPORT: ${{ vars.LEXICON_LLM_TRANSPORT }}
       LEXICON_SEED_WORDS: ${{ github.event.inputs.seed_words || 'run set lead' }}
 
     steps:
@@ -55,8 +56,17 @@ jobs:
           : "${LEXICON_LLM_MODEL:?Repository variable LEXICON_LLM_MODEL is required}"
           : "${LEXICON_LLM_API_KEY:?Repository secret LEXICON_LLM_API_KEY is required}"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/lexicon/package-lock.json
+
       - name: Install lexicon dependencies
         run: pip install -r tools/lexicon/requirements-dev.txt
+
+      - name: Install lexicon Node dependencies
+        run: npm --prefix tools/lexicon ci
 
       - name: Download WordNet corpora
         run: python -m nltk.downloader -d "$NLTK_DATA" wordnet omw-1.4
@@ -68,10 +78,15 @@ jobs:
         run: |
           set -euo pipefail
           smoke_dir="${RUNNER_TEMP}/lexicon-openai-compatible-smoke"
+          provider_mode='openai_compatible'
+          if [ "${LEXICON_LLM_TRANSPORT:-}" = 'node' ]; then
+            provider_mode='openai_compatible_node'
+          fi
           rm -rf "$smoke_dir"
           mkdir -p "$smoke_dir"
-          python -m tools.lexicon.cli build-base ${LEXICON_SEED_WORDS} --output-dir "$smoke_dir"
-          python -m tools.lexicon.cli enrich --snapshot-dir "$smoke_dir" --provider-mode openai_compatible
+          read -r -a seed_words <<< "${LEXICON_SEED_WORDS}"
+          python -m tools.lexicon.cli build-base "${seed_words[@]}" --output-dir "$smoke_dir"
+          python -m tools.lexicon.cli enrich --snapshot-dir "$smoke_dir" --provider-mode "$provider_mode"
           python -m tools.lexicon.cli validate --snapshot-dir "$smoke_dir"
           python -m tools.lexicon.cli compile-export --snapshot-dir "$smoke_dir" --output "$smoke_dir/words.enriched.jsonl"
           test -f "$smoke_dir/enrichments.jsonl"

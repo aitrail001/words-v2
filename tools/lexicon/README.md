@@ -72,8 +72,15 @@ For real endpoint-backed enrichment, set:
 - `LEXICON_LLM_BASE_URL` — base URL for an OpenAI-compatible Responses API
 - `LEXICON_LLM_MODEL` — model identifier for that endpoint
 - `LEXICON_LLM_API_KEY` — API key or token for that endpoint
+- `LEXICON_LLM_TRANSPORT` — optional transport hint; set `node` for Cloudflare-fronted gateways that reject the Python client
 
 `LEXICON_LLM_PROVIDER` is still accepted as a backward-compatible alias for `LEXICON_LLM_BASE_URL`.
+
+If you need the Node-backed gateway path, install the tool-local Node dependency too:
+
+```bash
+npm --prefix tools/lexicon ci
+```
 
 ### Build base summary
 
@@ -100,6 +107,13 @@ Use the helper command:
 
 ```bash
 python -m tools.lexicon.cli smoke-openai-compatible --output-dir /tmp/lexicon-openai-smoke run set
+```
+
+For Cloudflare-fronted custom gateways like `https://api.nwai.cc`, use the Node-backed mode:
+
+```bash
+LEXICON_LLM_TRANSPORT=node \
+python -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compatible_node --output-dir /tmp/lexicon-openai-smoke run set
 ```
 
 This is the fastest local check for a real endpoint. It should:
@@ -158,6 +172,7 @@ If your usual local dev DB has unrelated schema drift, use an isolated temporary
 
 Notes:
 - `build-base` should use real WordNet and `wordfreq` providers on the operator path
-- `enrich` remains an offline admin step and supports `--provider-mode auto|placeholder|openai_compatible`
-- `.github/workflows/lexicon-openai-compatible-smoke.yml` is a manual/nightly secret-backed OpenAI-compatible smoke workflow that calls the configured endpoint using `LEXICON_LLM_BASE_URL`, `LEXICON_LLM_MODEL`, and `LEXICON_LLM_API_KEY`
+- `enrich` remains an offline admin step and supports `--provider-mode auto|placeholder|openai_compatible|openai_compatible_node`
+- use `openai_compatible_node` when a custom gateway works with the official Node OpenAI SDK but rejects the Python transport
+- `.github/workflows/lexicon-openai-compatible-smoke.yml` is a manual/nightly secret-backed OpenAI-compatible smoke workflow that calls the configured endpoint using `LEXICON_LLM_BASE_URL`, `LEXICON_LLM_MODEL`, `LEXICON_LLM_API_KEY`, and optional `LEXICON_LLM_TRANSPORT=node`
 - non-dry-run import expects backend DB dependencies and settings to be available in the local environment
