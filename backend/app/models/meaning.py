@@ -27,6 +27,7 @@ class Meaning(Base):
     example_sentence: Mapped[str | None] = mapped_column(Text, nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

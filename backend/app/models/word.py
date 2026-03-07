@@ -24,6 +24,8 @@ class Word(Base):
     phonetic: Mapped[str | None] = mapped_column(String(255), nullable=True)
     frequency_rank: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     word_forms: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )

@@ -52,6 +52,11 @@ class TestWordModel:
         word = Word(word="bank")
         assert "bank" in repr(word)
 
+    def test_word_provenance_fields(self):
+        word = Word(word="run", source_type="lexicon_snapshot", source_reference="snapshot-20260307")
+        assert word.source_type == "lexicon_snapshot"
+        assert word.source_reference == "snapshot-20260307"
+
 
 class TestMeaningModel:
     def test_meaning_has_required_fields(self):
@@ -78,6 +83,16 @@ class TestMeaningModel:
             definition="A financial institution",
         )
         assert "A financial institution" in repr(meaning)
+
+    def test_meaning_source_reference_optional(self):
+        meaning = Meaning(
+            word_id=uuid.uuid4(),
+            definition="test",
+            source="lexicon_snapshot",
+            source_reference="snapshot-20260307:sn_1",
+        )
+        assert meaning.source == "lexicon_snapshot"
+        assert meaning.source_reference == "snapshot-20260307:sn_1"
 
 
 class TestTranslationModel:
