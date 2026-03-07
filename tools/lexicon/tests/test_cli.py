@@ -99,6 +99,17 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertIn("LEXICON_LLM_BASE_URL is required", stderr)
 
+
+    def test_enrich_command_passes_node_provider_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[])) as mocked_enrich:
+                code, stdout, _ = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir), "--provider-mode", "openai_compatible_node"])
+
+            self.assertEqual(code, 0)
+            self.assertIn('"command": "enrich"', stdout)
+            self.assertEqual(mocked_enrich.call_args.kwargs["provider_mode"], "openai_compatible_node")
+
     def test_openai_compatible_smoke_command_runs_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "smoke"
@@ -123,6 +134,26 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["enrichment_count"], 2)
             self.assertEqual(mocked_build.call_args.kwargs["words"], ["run", "set"])
             mocked_compile.assert_called_once()
+
+
+    def test_openai_compatible_smoke_command_passes_provider_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "smoke"
+            fake_result = type("FakeBaseResult", (), {
+                "lexemes": [type("Lexeme", (), {"lemma": "run"})()],
+                "senses": [object()],
+                "concepts": [object()],
+            })()
+            with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
+                 patch("tools.lexicon.cli.build_base_records", return_value=fake_result), \
+                 patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object()] )) as mocked_enrich, \
+                 patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
+                 patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]):
+                code, _, _ = self.run_cli(["smoke-openai-compatible", "--provider-mode", "openai_compatible_node", "--output-dir", str(output_dir), "run"])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(mocked_enrich.call_args.kwargs["provider_mode"], "openai_compatible_node")
 
     def test_openai_compatible_smoke_command_reports_validation_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

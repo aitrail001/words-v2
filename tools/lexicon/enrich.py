@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, Callable
 import json
 import math
+import shutil
+import subprocess
 from urllib import error, request
 
 from tools.lexicon.config import LexiconSettings
@@ -16,10 +18,12 @@ from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, S
 
 EnrichmentProvider = Callable[..., EnrichmentRecord]
 Transport = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
-_PROVIDER_MODES = {"auto", "placeholder", "openai_compatible"}
+NodeRunner = Callable[[dict[str, Any]], dict[str, Any]]
+_PROVIDER_MODES = {"auto", "placeholder", "openai_compatible", "openai_compatible_node"}
 _ALLOWED_CEFR_LEVELS = {'A1', 'A2', 'B1', 'B2', 'C1', 'C2'}
 _ALLOWED_REGISTERS = {'neutral', 'formal', 'informal'}
 _STRING_LIST_FIELDS = ('secondary_domains', 'synonyms', 'antonyms', 'collocations', 'grammar_patterns')
+_NODE_RUN_TIMEOUT_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,68 @@ def _default_transport(url: str, payload: dict[str, Any], headers: dict[str, str
         raise RuntimeError(f"OpenAI-compatible endpoint request failed with status {exc.code}: {body}") from exc
     except error.URLError as exc:
         raise RuntimeError(f"OpenAI-compatible endpoint request failed: {exc.reason}") from exc
+
+
+def _default_node_runner(payload: dict[str, Any]) -> dict[str, Any]:
+    node_bin = shutil.which('node')
+    if not node_bin:
+        raise LexiconDependencyError('Node.js is required for openai_compatible_node enrichment mode')
+
+    script_path = Path(__file__).resolve().parent / 'node' / 'openai_compatible_responses.mjs'
+    if not script_path.exists():
+        raise LexiconDependencyError(f'Node enrichment script is missing: {script_path}')
+
+    try:
+        completed = subprocess.run(
+            [node_bin, str(script_path)],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=_NODE_RUN_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f'Node OpenAI-compatible transport timed out after {_NODE_RUN_TIMEOUT_SECONDS} seconds'
+        ) from exc
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or completed.stdout.strip() or 'Node OpenAI-compatible transport failed'
+        raise RuntimeError(message)
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError('Node OpenAI-compatible transport returned non-JSON output') from exc
+
+
+class NodeOpenAICompatibleResponsesClient:
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        api_key: str,
+        model: str,
+        runner: NodeRunner | None = None,
+    ) -> None:
+        self.endpoint = endpoint.rstrip('/')
+        self.api_key = api_key
+        self.model = model
+        self.runner = runner or _default_node_runner
+
+    def generate_json(self, prompt: str) -> dict[str, Any]:
+        response = self.runner(
+            {
+                'base_url': self.endpoint,
+                'api_key': self.api_key,
+                'model': self.model,
+                'prompt': prompt,
+                'system_prompt': _SYSTEM_PROMPT,
+            }
+        )
+        text = _extract_output_text(response)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError('OpenAI-compatible node endpoint returned non-JSON enrichment output') from exc
 
 
 _SYSTEM_PROMPT = (
@@ -386,6 +452,58 @@ def build_placeholder_enrichment_provider(
     return provider
 
 
+def build_openai_compatible_node_enrichment_provider(
+    *,
+    settings: LexiconSettings,
+    model_name: str | None = None,
+    review_status: str = 'draft',
+    runner: NodeRunner | None = None,
+) -> EnrichmentProvider:
+    if not settings.llm_base_url:
+        raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible_node enrichment mode')
+    if not (model_name or settings.llm_model):
+        raise LexiconDependencyError('LEXICON_LLM_MODEL is required for openai_compatible_node enrichment mode')
+    if not settings.llm_api_key:
+        raise LexiconDependencyError('LEXICON_LLM_API_KEY is required for openai_compatible_node enrichment mode')
+
+    effective_model_name = model_name or settings.llm_model
+    client = NodeOpenAICompatibleResponsesClient(
+        endpoint=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=str(effective_model_name),
+        runner=runner,
+    )
+
+    def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
+        response = _validate_openai_compatible_payload(client.generate_json(build_enrichment_prompt(lexeme=lexeme, sense=sense)))
+        return EnrichmentRecord(
+            snapshot_id=sense.snapshot_id,
+            enrichment_id=make_enrichment_id(sense.sense_id, prompt_version),
+            sense_id=sense.sense_id,
+            definition=response['definition'],
+            examples=response['examples'],
+            cefr_level=response.get('cefr_level') or 'B1',
+            primary_domain=str(response.get('primary_domain') or 'general'),
+            secondary_domains=response.get('secondary_domains') or [],
+            register=response.get('register') or 'neutral',
+            synonyms=response.get('synonyms') or [],
+            antonyms=response.get('antonyms') or [],
+            collocations=response.get('collocations') or [],
+            grammar_patterns=response.get('grammar_patterns') or [],
+            usage_note=str(response.get('usage_note') or f'Auto-generated learner note for {lexeme.lemma}.'),
+            forms=response.get('forms') or _default_forms(lexeme.lemma, sense.part_of_speech),
+            confusable_words=response.get('confusable_words') or [],
+            model_name=str(effective_model_name),
+            prompt_version=prompt_version,
+            generation_run_id=generation_run_id,
+            confidence=response['confidence'],
+            review_status=review_status,
+            generated_at=generated_at,
+        )
+
+    return provider
+
+
 def build_openai_compatible_enrichment_provider(
     *,
     settings: LexiconSettings,
@@ -445,6 +563,7 @@ def build_enrichment_provider(
     model_name: str | None = None,
     review_status: str = 'draft',
     transport: Transport | None = None,
+    runner: NodeRunner | None = None,
 ) -> EnrichmentProvider:
     if provider_mode not in _PROVIDER_MODES:
         raise ValueError(f'Unsupported provider mode: {provider_mode}')
@@ -457,7 +576,21 @@ def build_enrichment_provider(
             review_status=review_status,
             transport=transport,
         )
+    if provider_mode == 'openai_compatible_node':
+        return build_openai_compatible_node_enrichment_provider(
+            settings=settings,
+            model_name=model_name,
+            review_status=review_status,
+            runner=runner,
+        )
     if settings.llm_base_url and settings.llm_model and settings.llm_api_key:
+        if settings.llm_transport == 'node':
+            return build_openai_compatible_node_enrichment_provider(
+                settings=settings,
+                model_name=model_name,
+                review_status=review_status,
+                runner=runner,
+            )
         return build_openai_compatible_enrichment_provider(
             settings=settings,
             model_name=model_name,

@@ -1,13 +1,18 @@
 import json
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from tools.lexicon.config import LexiconSettings
 from tools.lexicon.enrich import (
     OpenAICompatibleResponsesClient,
     build_enrichment_prompt,
+    build_enrichment_provider,
     build_openai_compatible_enrichment_provider,
+    _default_node_runner,
+    build_openai_compatible_node_enrichment_provider,
     enrich_snapshot,
     read_snapshot_inputs,
 )
@@ -472,6 +477,85 @@ class EnrichSnapshotTests(unittest.TestCase):
                     generation_run_id="run-123",
                     prompt_version="v1",
                 )
+
+    def test_node_provider_maps_openai_sdk_style_response_to_enrichment_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexeme, sense = read_snapshot_inputs(snapshot_dir)[0][0], read_snapshot_inputs(snapshot_dir)[1][0]
+            settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://api.nwai.cc",
+                    "LEXICON_LLM_MODEL": "gpt-5.1",
+                    "LEXICON_LLM_API_KEY": "secret-key",
+                }
+            )
+            captured = {}
+
+            def runner(payload):
+                captured.update(payload)
+                return {
+                    "output_text": json.dumps(
+                        {
+                            "definition": "to move quickly on foot",
+                            "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                            "cefr_level": "A1",
+                            "primary_domain": "general",
+                            "secondary_domains": [],
+                            "register": "neutral",
+                            "synonyms": ["jog"],
+                            "antonyms": ["walk"],
+                            "collocations": ["run fast"],
+                            "grammar_patterns": ["run + adverb"],
+                            "usage_note": "Common everyday verb.",
+                            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                            "confusable_words": [{"word": "ran", "note": "Past tense form."}],
+                            "confidence": 0.91,
+                        }
+                    )
+                }
+
+            provider = build_openai_compatible_node_enrichment_provider(settings=settings, runner=runner)
+            record = provider(
+                lexeme=lexeme,
+                sense=sense,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(captured["base_url"], "https://api.nwai.cc")
+            self.assertEqual(captured["api_key"], "secret-key")
+            self.assertEqual(captured["model"], "gpt-5.1")
+            self.assertIn("run", captured["prompt"])
+            self.assertIn("learners", captured["system_prompt"].lower())
+            self.assertEqual(record.definition, "to move quickly on foot")
+            self.assertEqual(record.confidence, 0.91)
+
+    def test_auto_provider_uses_node_transport_when_configured(self) -> None:
+        settings = LexiconSettings.from_env(
+            {
+                "LEXICON_LLM_BASE_URL": "https://api.nwai.cc",
+                "LEXICON_LLM_MODEL": "gpt-5.1",
+                "LEXICON_LLM_API_KEY": "secret-key",
+                "LEXICON_LLM_TRANSPORT": "node",
+            }
+        )
+
+        sentinel_provider = object()
+        with patch('tools.lexicon.enrich.build_openai_compatible_node_enrichment_provider', return_value=sentinel_provider) as mocked_builder:
+            provider = build_enrichment_provider(settings=settings, provider_mode="auto", transport=lambda *_: {})
+
+        self.assertIs(provider, sentinel_provider)
+        mocked_builder.assert_called_once()
+
+    def test_default_node_runner_times_out_cleanly(self) -> None:
+        with patch('tools.lexicon.enrich.shutil.which', return_value='node'), \
+             patch('tools.lexicon.enrich.Path.exists', return_value=True), \
+             patch('tools.lexicon.enrich.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd=['node'], timeout=60)):
+            with self.assertRaisesRegex(RuntimeError, 'timed out after 60 seconds'):
+                _default_node_runner({'prompt': 'hello'})
 
 
 if __name__ == "__main__":

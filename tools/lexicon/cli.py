@@ -140,7 +140,7 @@ def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
         enrichment_result = run_enrichment(
             output_dir,
             prompt_version=args.prompt_version,
-            provider_mode='openai_compatible',
+            provider_mode=args.provider_mode,
         )
         errors = validate_snapshot_files(output_dir)
         if errors:
@@ -217,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')
     enrich.add_argument('--output', help='optional output path for enrichments.jsonl')
     enrich.add_argument('--prompt-version', default='v1', help='prompt version tag for generated enrichment rows')
-    enrich.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible'], default='auto', help='enrichment provider mode')
+    enrich.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='enrichment provider mode')
     enrich.set_defaults(handler=_enrich_command)
 
     smoke_openai = subparsers.add_parser('smoke-openai-compatible', help='run a tiny real OpenAI-compatible smoke flow locally')
@@ -225,6 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_openai.add_argument('--snapshot-id', help='optional snapshot identifier override')
     smoke_openai.add_argument('--max-senses', type=int, default=4, help='maximum learner-visible senses per word')
     smoke_openai.add_argument('--prompt-version', default='v1', help='prompt version tag for generated enrichment rows')
+    smoke_openai.add_argument('--provider-mode', choices=['openai_compatible', 'openai_compatible_node'], default='openai_compatible', help='real endpoint provider mode for the smoke run')
     smoke_openai.add_argument('words', nargs='*', default=['run', 'set'], help='tiny seed words for the smoke run')
     smoke_openai.set_defaults(handler=_smoke_openai_compatible_command)
 
