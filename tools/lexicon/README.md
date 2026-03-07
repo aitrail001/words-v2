@@ -2,6 +2,10 @@
 
 Offline/admin lexicon pipeline for Words-Codex.
 
+Quick operator references:
+- `tools/lexicon/OPERATOR_GUIDE.md` — step-by-step setup and runbook for admins/operators
+- `tools/lexicon/.env.example` — tool-local example env file for offline lexicon runs
+
 Current scope:
 - `python -m tools.lexicon.cli build-base ...` builds a bounded normalized base summary from seed words
 - `python -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files
