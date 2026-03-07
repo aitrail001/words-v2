@@ -95,6 +95,50 @@ jobs:
       - name: Test
         run: npm test
 
+  lexicon:
+    name: Lexicon Tool (test + smoke)
+    runs-on: ubuntu-latest
+    env:
+      NLTK_DATA: ~/.cache/nltk_data
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            tools/lexicon/requirements.txt
+            tools/lexicon/requirements-dev.txt
+
+      - name: Cache WordNet corpora
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/nltk_data
+          key: ${{ runner.os }}-nltk-wordnet-v1
+
+      - name: Install lexicon dependencies
+        run: pip install -r tools/lexicon/requirements-dev.txt
+
+      - name: Download WordNet corpora
+        run: python -m nltk.downloader -d "$NLTK_DATA" wordnet omw-1.4
+
+      - name: Run lexicon pytest suite
+        run: python -m pytest tools/lexicon/tests -q
+
+      - name: Run lexicon smoke flow
+        run: |
+          set -euo pipefail
+          smoke_dir="${RUNNER_TEMP}/lexicon-smoke"
+          rm -rf "$smoke_dir"
+          mkdir -p "$smoke_dir"
+          python -m tools.lexicon.cli build-base run set lead --output-dir "$smoke_dir"
+          python -m tools.lexicon.cli enrich --snapshot-dir "$smoke_dir" --provider-mode placeholder
+          python -m tools.lexicon.cli validate --snapshot-dir "$smoke_dir"
+          python -m tools.lexicon.cli compile-export --snapshot-dir "$smoke_dir" --output "$smoke_dir/words.enriched.jsonl"
+          test -f "$smoke_dir/words.enriched.jsonl"
+
   e2e-smoke:
     name: E2E Smoke (required)
     runs-on: ubuntu-latest

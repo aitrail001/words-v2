@@ -11,6 +11,7 @@ build/
 .eggs/
 *.egg
 .venv/
+.venv-lexicon/
 venv/
 
 # Node
@@ -56,3 +57,5 @@ secrets/
 # Playwright
 e2e/test-results/
 e2e/playwright-report/
+# Lexicon tool local outputs
+data/lexicon/
