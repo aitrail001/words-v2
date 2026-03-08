@@ -2,7 +2,7 @@ import uuid
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,7 @@ class WordDetailResponse(WordResponse):
 class MeaningExampleResponse(BaseModel):
     id: str
     sentence: str
+    difficulty: str | None
     order_index: int
     source: str | None
     confidence: float | None
@@ -78,6 +79,15 @@ class LexiconEnrichmentRunResponse(BaseModel):
 
 
 class EnrichedMeaningResponse(MeaningResponse):
+    model_config = ConfigDict(populate_by_name=True)
+
+    wn_synset_id: str | None
+    primary_domain: str | None
+    secondary_domains: list[str] | None
+    register_label: str | None = Field(default=None, serialization_alias="register", validation_alias="register")
+    grammar_patterns: list[str] | None
+    usage_note: str | None
+    learner_generated_at: str | None
     examples: list[MeaningExampleResponse]
     relations: list[WordRelationResponse]
 
@@ -86,6 +96,10 @@ class WordEnrichmentDetailResponse(WordResponse):
     phonetic_source: str | None
     phonetic_confidence: float | None
     phonetic_enrichment_run_id: str | None
+    cefr_level: str | None
+    part_of_speech: list[str] | None
+    confusable_words: list[dict[str, str]] | None
+    learner_generated_at: str | None
     meanings: list[EnrichedMeaningResponse]
     enrichment_runs: list[LexiconEnrichmentRunResponse]
 
@@ -209,13 +223,25 @@ async def get_word_enrichment(
         phonetic_source=word.phonetic_source,
         phonetic_confidence=word.phonetic_confidence,
         phonetic_enrichment_run_id=str(word.phonetic_enrichment_run_id) if word.phonetic_enrichment_run_id else None,
+        cefr_level=word.cefr_level,
+        part_of_speech=word.learner_part_of_speech,
+        confusable_words=word.confusable_words,
+        learner_generated_at=word.learner_generated_at.isoformat() if word.learner_generated_at else None,
         meanings=[
             EnrichedMeaningResponse(
                 **_meaning_response(meaning).model_dump(),
+                wn_synset_id=meaning.wn_synset_id,
+                primary_domain=meaning.primary_domain,
+                secondary_domains=meaning.secondary_domains,
+                register_label=meaning.register_label,
+                grammar_patterns=meaning.grammar_patterns,
+                usage_note=meaning.usage_note,
+                learner_generated_at=meaning.learner_generated_at.isoformat() if meaning.learner_generated_at else None,
                 examples=[
                     MeaningExampleResponse(
                         id=str(example.id),
                         sentence=example.sentence,
+                        difficulty=example.difficulty,
                         order_index=example.order_index,
                         source=example.source,
                         confidence=example.confidence,

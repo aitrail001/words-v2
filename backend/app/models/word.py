@@ -33,6 +33,10 @@ class Word(Base):
         nullable=True,
         index=True,
     )
+    cefr_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    learner_part_of_speech: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    confusable_words: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    learner_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     frequency_rank: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     word_forms: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_type: Mapped[str | None] = mapped_column(String(50), nullable=True)

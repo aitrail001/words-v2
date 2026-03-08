@@ -257,7 +257,19 @@ class TestWordEnrichmentDetail:
         word.phonetic_source = "lexicon_snapshot"
         word.phonetic_confidence = 0.95
         word.phonetic_enrichment_run_id = run.id
+        word.cefr_level = "B1"
+        word.learner_part_of_speech = ["noun"]
+        word.confusable_words = [{"word": "bench", "note": "Different object."}]
+        word.learner_generated_at = run.created_at
+        meaning.wn_synset_id = "bank.n.09"
+        meaning.primary_domain = "business"
+        meaning.secondary_domains = ["finance"]
+        meaning.register_label = "neutral"
+        meaning.grammar_patterns = ["bank + on"]
+        meaning.usage_note = "Common everyday noun."
+        meaning.learner_generated_at = run.created_at
         example = make_meaning_example(meaning.id, "I deposited cash at the bank.")
+        example.difficulty = "A2"
         example.enrichment_run_id = run.id
         relation = make_word_relation(word.id, meaning.id, relation_type="synonym", related_word="lender")
         relation.enrichment_run_id = run.id
@@ -287,10 +299,22 @@ class TestWordEnrichmentDetail:
         assert data["phonetic_source"] == "lexicon_snapshot"
         assert data["phonetic_confidence"] == 0.95
         assert data["phonetic_enrichment_run_id"] == str(run.id)
+        assert data["cefr_level"] == "B1"
+        assert data["part_of_speech"] == ["noun"]
+        assert data["confusable_words"] == [{"word": "bench", "note": "Different object."}]
+        assert data["learner_generated_at"] == run.created_at.isoformat()
         assert len(data["meanings"]) == 1
         assert data["meanings"][0]["definition"] == "A financial institution"
+        assert data["meanings"][0]["wn_synset_id"] == "bank.n.09"
+        assert data["meanings"][0]["primary_domain"] == "business"
+        assert data["meanings"][0]["secondary_domains"] == ["finance"]
+        assert data["meanings"][0]["register"] == "neutral"
+        assert data["meanings"][0]["grammar_patterns"] == ["bank + on"]
+        assert data["meanings"][0]["usage_note"] == "Common everyday noun."
+        assert data["meanings"][0]["learner_generated_at"] == run.created_at.isoformat()
         assert len(data["meanings"][0]["examples"]) == 1
         assert data["meanings"][0]["examples"][0]["sentence"] == "I deposited cash at the bank."
+        assert data["meanings"][0]["examples"][0]["difficulty"] == "A2"
         assert len(data["meanings"][0]["relations"]) == 1
         assert data["meanings"][0]["relations"][0]["relation_type"] == "synonym"
         assert data["meanings"][0]["relations"][0]["related_word"] == "lender"
