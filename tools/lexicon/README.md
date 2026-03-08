@@ -80,24 +80,26 @@ This separation keeps lexical base generation, learner-facing enrichment, valida
 Runtime/admin dependencies only:
 
 ```bash
-python3 -m pip install -r tools/lexicon/requirements.txt
-python3 -m nltk.downloader wordnet omw-1.4
+python3.13 -m venv .venv-lexicon
+./.venv-lexicon/bin/python -m pip install -r tools/lexicon/requirements.txt
+./.venv-lexicon/bin/python -m nltk.downloader wordnet omw-1.4
 ```
 
 Local development and test runner dependencies:
 
 ```bash
-python3 -m pip install -r tools/lexicon/requirements-dev.txt
-python3 -m nltk.downloader wordnet omw-1.4
-python3 -m pytest tools/lexicon/tests -q
-```
-
-If you use the repo-local lexicon virtualenv, the same flow is:
-
-```bash
+python3.13 -m venv .venv-lexicon
 ./.venv-lexicon/bin/python -m pip install -r tools/lexicon/requirements-dev.txt
+./.venv-lexicon/bin/python -m nltk.downloader wordnet omw-1.4
 ./.venv-lexicon/bin/python -m pytest tools/lexicon/tests -q
 ```
+
+Repo-local env policy:
+
+- keep the durable lexicon env at repo root as `./.venv-lexicon`
+- keep the durable backend env at repo root as `./.venv-backend`
+- recreate those stable envs when dependencies/runtime change
+- avoid keeping durable virtualenvs inside disposable git worktrees
 
 `build-base` now fails loudly if `nltk`/WordNet or `wordfreq` are unavailable.
 
