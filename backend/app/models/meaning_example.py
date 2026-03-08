@@ -23,6 +23,7 @@ class MeaningExample(Base):
         UUID(as_uuid=True), ForeignKey("meanings.id", ondelete="CASCADE"), nullable=False, index=True
     )
     sentence: Mapped[str] = mapped_column(Text, nullable=False)
+    difficulty: Mapped[str | None] = mapped_column(String(10), nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)

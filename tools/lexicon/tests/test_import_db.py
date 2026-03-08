@@ -12,6 +12,10 @@ class FakeWord:
     word: str
     language: str = "en"
     frequency_rank: object = None
+    cefr_level: object = None
+    learner_part_of_speech: object = None
+    confusable_words: object = None
+    learner_generated_at: object = None
     word_forms: object = None
     source_type: object = None
     source_reference: object = None
@@ -27,6 +31,13 @@ class FakeMeaning:
     definition: str
     part_of_speech: object = None
     example_sentence: object = None
+    wn_synset_id: object = None
+    primary_domain: object = None
+    secondary_domains: object = None
+    register_label: object = None
+    grammar_patterns: object = None
+    usage_note: object = None
+    learner_generated_at: object = None
     order_index: int = 0
     source: object = None
     source_reference: object = None
@@ -37,6 +48,7 @@ class FakeMeaning:
 class FakeMeaningExample:
     meaning_id: uuid.UUID
     sentence: str
+    difficulty: object = None
     order_index: int = 0
     source: object = None
     confidence: object = None
@@ -113,6 +125,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
         session.execute.side_effect = [
             _ScalarResult(None),
             _ListResult([]),
+            _ScalarResult(None),
         ]
         added = []
         session.add.side_effect = added.append
@@ -188,12 +201,74 @@ class ImportCompiledRowsTests(unittest.TestCase):
         imported_word = next(item for item in added if isinstance(item, FakeWord))
         imported_meanings = [item for item in added if isinstance(item, FakeMeaning)]
         self.assertEqual(imported_word.word, "run")
+        self.assertEqual(imported_word.cefr_level, "A1")
+        self.assertEqual(imported_word.learner_part_of_speech, ["verb", "noun"])
+        self.assertEqual(imported_word.confusable_words, [{"word": "ran", "note": "Past tense form."}])
         self.assertEqual(imported_word.source_type, "lexicon_snapshot")
         self.assertEqual(imported_word.source_reference, "snapshot-20260307")
         self.assertEqual(imported_word.word_forms["verb_forms"]["past"], "ran")
+        self.assertIsNotNone(imported_word.learner_generated_at)
         self.assertEqual(imported_meanings[0].source, "lexicon_snapshot")
+        self.assertEqual(imported_meanings[0].primary_domain, "general")
+        self.assertEqual(imported_meanings[0].register_label, "neutral")
+        self.assertEqual(imported_meanings[0].grammar_patterns, ["run + adverb"])
+        self.assertEqual(imported_meanings[0].usage_note, "Common everyday verb.")
         self.assertEqual(imported_meanings[0].source_reference, "snapshot-20260307:sn_lx_run_run_v_01_abcd1234")
         self.assertEqual(imported_meanings[1].order_index, 1)
+
+
+    def test_import_applies_word_level_fields_even_without_senses(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [
+            _ScalarResult(None),
+            _ListResult([]),
+            _ScalarResult(None),
+        ]
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.0.0",
+                "word": "solo",
+                "part_of_speech": ["adjective"],
+                "cefr_level": "A2",
+                "frequency_rank": 1234,
+                "forms": {
+                    "plural_forms": [],
+                    "verb_forms": {},
+                    "comparative": None,
+                    "superlative": None,
+                    "derivations": [],
+                },
+                "senses": [],
+                "confusable_words": [{"word": "single", "note": "Related but not identical."}],
+                "generated_at": "2026-03-07T00:00:00Z",
+            }
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260307",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            meaning_example_model=FakeMeaningExample,
+            word_relation_model=FakeWordRelation,
+            lexicon_enrichment_job_model=FakeLexiconEnrichmentJob,
+            lexicon_enrichment_run_model=FakeLexiconEnrichmentRun,
+        )
+
+        self.assertEqual(summary.created_words, 1)
+        self.assertEqual(summary.created_meanings, 0)
+        imported_word = next(item for item in added if isinstance(item, FakeWord))
+        self.assertEqual(imported_word.cefr_level, "A2")
+        self.assertEqual(imported_word.learner_part_of_speech, ["adjective"])
+        self.assertEqual(imported_word.confusable_words, [{"word": "single", "note": "Related but not identical."}])
+        self.assertIsNotNone(imported_word.learner_generated_at)
 
     def test_import_updates_existing_word_and_meanings_without_duplication(self) -> None:
         existing_word = FakeWord(
@@ -277,9 +352,18 @@ class ImportCompiledRowsTests(unittest.TestCase):
 
         self.assertEqual(summary, ImportSummary(created_words=0, updated_words=1, created_meanings=0, updated_meanings=1))
         self.assertEqual(existing_word.frequency_rank, 5)
+        self.assertEqual(existing_word.cefr_level, "A1")
+        self.assertEqual(existing_word.learner_part_of_speech, ["verb"])
+        self.assertEqual(existing_word.confusable_words, [])
+        self.assertIsNotNone(existing_word.learner_generated_at)
         self.assertEqual(existing_word.source_reference, "snapshot-20260307")
         self.assertEqual(existing_meaning.definition, "to move quickly on foot")
         self.assertEqual(existing_meaning.example_sentence, "I run every morning.")
+        self.assertEqual(existing_meaning.primary_domain, "general")
+        self.assertEqual(existing_meaning.register_label, "neutral")
+        self.assertEqual(existing_meaning.grammar_patterns, ["run + adverb"])
+        self.assertEqual(existing_meaning.usage_note, "Common everyday verb.")
+        self.assertIsNotNone(existing_meaning.learner_generated_at)
         self.assertEqual(existing_meaning.source_reference, "snapshot-20260307:sn_lx_run_run_v_01_abcd1234")
         self.assertEqual(added, [])
         self.assertEqual(deleted, [])
@@ -374,10 +458,24 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_run.generator_model, "gpt-5.1")
         self.assertEqual(imported_run.prompt_version, "v1")
         self.assertEqual(imported_run.confidence, 0.91)
+        imported_word = next(item for item in added if isinstance(item, FakeWord))
+        imported_meaning = next(item for item in added if isinstance(item, FakeMeaning))
+        self.assertEqual(imported_word.cefr_level, "A1")
+        self.assertEqual(imported_word.learner_part_of_speech, ["verb"])
+        self.assertEqual(imported_word.confusable_words, [])
+        self.assertIsNotNone(imported_word.learner_generated_at)
+        self.assertEqual(imported_meaning.wn_synset_id, "run.v.01")
+        self.assertEqual(imported_meaning.primary_domain, "general")
+        self.assertEqual(imported_meaning.secondary_domains, [])
+        self.assertEqual(imported_meaning.register_label, "neutral")
+        self.assertEqual(imported_meaning.grammar_patterns, ["run + adverb"])
+        self.assertEqual(imported_meaning.usage_note, "Common everyday verb.")
+        self.assertIsNotNone(imported_meaning.learner_generated_at)
         self.assertEqual([item.sentence for item in imported_examples], [
             "I run every morning.",
             "They run together on Sundays.",
         ])
+        self.assertEqual([item.difficulty for item in imported_examples], ["A1", "A2"])
         self.assertEqual(
             [(item.relation_type, item.related_word) for item in imported_relations],
             [("synonym", "jog"), ("antonym", "walk"), ("collocation", "run fast")],
@@ -504,11 +602,19 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(summary.deleted_relations, 1)
         self.assertEqual(summary.created_examples, 1)
         self.assertEqual(summary.created_relations, 2)
+        self.assertEqual(existing_word.cefr_level, "A1")
+        self.assertEqual(existing_word.learner_part_of_speech, ["verb"])
+        self.assertEqual(existing_meaning.wn_synset_id, "run.v.01")
+        self.assertEqual(existing_meaning.primary_domain, "general")
+        self.assertEqual(existing_meaning.register_label, "neutral")
+        self.assertEqual(existing_meaning.grammar_patterns, ["run + adverb"])
+        self.assertEqual(existing_meaning.usage_note, "Common everyday verb.")
         self.assertEqual(deleted, [old_example, old_relation])
         self.assertEqual(
             [(item.relation_type, item.related_word) for item in added if isinstance(item, FakeWordRelation)],
             [("synonym", "jog"), ("antonym", "walk")],
         )
+        self.assertEqual([item.difficulty for item in added if isinstance(item, FakeMeaningExample)], ["A1"])
 
 
 if __name__ == "__main__":

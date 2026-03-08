@@ -33,6 +33,7 @@ words-codex/
 
 ### Tech Stack
 - **Backend**: Python 3.13, FastAPI, SQLAlchemy 2.0, PostgreSQL 15, Redis 7, Alembic
+- **Local Python env policy**: Keep durable repo-local envs at `./.venv-backend` and `./.venv-lexicon`, create them with Python 3.13, and do not keep durable virtualenvs inside disposable git worktrees.
 - **Frontend**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4
 - **NLP**: spaCy (backend only — see lessons learned)
 - **AI**: Multi-provider LLM (Anthropic/OpenAI/Gemini), TTS (MiniMax/ElevenLabs/Google/Azure), Image (Leonardo/DALL-E/Replicate)
@@ -93,6 +94,9 @@ docker-compose exec frontend sh -lc "npm test -- --runInBand"
 # E2E tests
 docker-compose --profile tests run --rm playwright npx playwright test
 ```
+
+### Local Python Envs
+Use durable repo-root virtualenvs for local Python work: `./.venv-backend` for backend tasks and `./.venv-lexicon` for lexicon tasks. Create or recreate both with Python 3.13, and avoid keeping durable virtualenvs inside disposable git worktrees.
 
 ### Environment Config
 Copy `.env.example` (265 lines) → `.env`. Key sections: database, Redis, JWT, LLM API keys, TTS providers, image providers, storage backend.

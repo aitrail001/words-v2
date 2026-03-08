@@ -113,6 +113,13 @@ python3 -m tools.lexicon.cli prepare-review --snapshot-dir data/lexicon/snapshot
 
 If your gateway works with the official Node OpenAI SDK but rejects the Python transport, store the values in `tools/lexicon/.env.local`, source that file into your shell, and set:
 
+For GitHub Actions, do **not** rely on local `.env` files. Configure the same values in the protected GitHub environment `lexicon-llm` instead:
+
+- environment variable `LEXICON_LLM_BASE_URL`
+- environment variable `LEXICON_LLM_MODEL`
+- optional environment variable `LEXICON_LLM_TRANSPORT=node`
+- environment secret `LEXICON_LLM_API_KEY`
+
 ```bash
 LEXICON_LLM_BASE_URL='https://api.nwai.cc'
 LEXICON_LLM_MODEL='gpt-5.1'
@@ -187,6 +194,7 @@ Re-run any stage independently as long as the required upstream files already ex
 - Missing WordNet or `wordfreq` dependencies: re-run `python3 -m pip install -r tools/lexicon/requirements.txt` and `python3 -m nltk.downloader wordnet omw-1.4`
 - Missing LLM env for real enrichment or risky-word review prep: confirm `LEXICON_LLM_BASE_URL`, `LEXICON_LLM_MODEL`, and `LEXICON_LLM_API_KEY` are exported in the current shell
 - Cloudflare/custom gateway rejects Python transport: install Node deps with `npm --prefix tools/lexicon ci`, then set `LEXICON_LLM_TRANSPORT=node`
+- If the GitHub workflow still returns Cloudflare challenge HTML or HTTP 403 after switching to `LEXICON_LLM_TRANSPORT=node`, the GitHub-hosted runner is being blocked upstream. In that case, use a self-hosted runner or add gateway allow/bypass rules for the CI client/API path.
 - Import path fails against a drifted local DB: use a clean local DB or isolated temporary Postgres instance instead of forcing the import into a broken dev database
 - Import wrote only core words/meanings when you expected learner-facing extras: confirm the compiled file came from the current `compile-export` step and not an older minimal `words.enriched.jsonl`
 
