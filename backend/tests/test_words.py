@@ -11,6 +11,9 @@ from app.main import app
 from app.models.user import User
 from app.models.word import Word
 from app.models.meaning import Meaning
+from app.models.meaning_example import MeaningExample
+from app.models.word_relation import WordRelation
+from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 
 
 @pytest.fixture
@@ -74,6 +77,46 @@ def make_meaning(word_id: uuid.UUID, definition: str = "A financial institution"
         definition=definition,
         part_of_speech="noun",
         order_index=0,
+    )
+
+
+
+def make_meaning_example(meaning_id: uuid.UUID, sentence: str = "I go to the bank.") -> MeaningExample:
+    return MeaningExample(
+        id=uuid.uuid4(),
+        meaning_id=meaning_id,
+        sentence=sentence,
+        order_index=0,
+        source="lexicon_snapshot",
+        confidence=0.9,
+    )
+
+
+def make_word_relation(word_id: uuid.UUID, meaning_id: uuid.UUID, relation_type: str = "synonym", related_word: str = "shore") -> WordRelation:
+    return WordRelation(
+        id=uuid.uuid4(),
+        word_id=word_id,
+        meaning_id=meaning_id,
+        relation_type=relation_type,
+        related_word=related_word,
+        source="lexicon_snapshot",
+        confidence=0.8,
+    )
+
+
+def make_enrichment_run() -> LexiconEnrichmentRun:
+    return LexiconEnrichmentRun(
+        id=uuid.uuid4(),
+        enrichment_job_id=uuid.uuid4(),
+        generator_provider="lexicon_snapshot",
+        generator_model="gpt-5.1",
+        prompt_version="v1",
+        prompt_hash="hash-123",
+        verdict="imported",
+        confidence=0.9,
+        token_input=123,
+        token_output=45,
+        estimated_cost=0.01,
     )
 
 
@@ -199,4 +242,82 @@ class TestWordLookup:
             "/api/words/lookup",
             json={"word": "hello"},
         )
+        assert response.status_code == 401
+
+
+class TestWordEnrichmentDetail:
+    @pytest.mark.asyncio
+    async def test_get_word_enrichment_by_id(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = make_word("bank")
+        meaning = make_meaning(word.id, "A financial institution")
+        run = make_enrichment_run()
+        word.phonetic = "/bæŋk/"
+        word.phonetic_source = "lexicon_snapshot"
+        word.phonetic_confidence = 0.95
+        word.phonetic_enrichment_run_id = run.id
+        example = make_meaning_example(meaning.id, "I deposited cash at the bank.")
+        example.enrichment_run_id = run.id
+        relation = make_word_relation(word.id, meaning.id, relation_type="synonym", related_word="lender")
+        relation.enrichment_run_id = run.id
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = word
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [meaning]
+        examples_result = MagicMock()
+        examples_result.scalars.return_value.all.return_value = [example]
+        relations_result = MagicMock()
+        relations_result.scalars.return_value.all.return_value = [relation]
+        runs_result = MagicMock()
+        runs_result.scalars.return_value.all.return_value = [run]
+        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result, runs_result]
+
+        response = await client.get(
+            f"/api/words/{word.id}/enrichment",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["word"] == "bank"
+        assert data["phonetic"] == "/bæŋk/"
+        assert data["phonetic_source"] == "lexicon_snapshot"
+        assert data["phonetic_confidence"] == 0.95
+        assert data["phonetic_enrichment_run_id"] == str(run.id)
+        assert len(data["meanings"]) == 1
+        assert data["meanings"][0]["definition"] == "A financial institution"
+        assert len(data["meanings"][0]["examples"]) == 1
+        assert data["meanings"][0]["examples"][0]["sentence"] == "I deposited cash at the bank."
+        assert len(data["meanings"][0]["relations"]) == 1
+        assert data["meanings"][0]["relations"][0]["relation_type"] == "synonym"
+        assert data["meanings"][0]["relations"][0]["related_word"] == "lender"
+        assert len(data["enrichment_runs"]) == 1
+        assert data["enrichment_runs"][0]["generator_model"] == "gpt-5.1"
+        assert data["enrichment_runs"][0]["verdict"] == "imported"
+
+    @pytest.mark.asyncio
+    async def test_get_word_enrichment_not_found(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [user_result, word_result]
+
+        fake_id = uuid.uuid4()
+        response = await client.get(
+            f"/api/words/{fake_id}/enrichment",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Word not found"
+
+    @pytest.mark.asyncio
+    async def test_get_word_enrichment_requires_auth(self, client):
+        response = await client.get(f"/api/words/{uuid.uuid4()}/enrichment")
         assert response.status_code == 401

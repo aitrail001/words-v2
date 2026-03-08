@@ -180,6 +180,56 @@ class EnrichSnapshotTests(unittest.TestCase):
         self.assertEqual(captured["payload"]["model"], "gpt-test")
         self.assertEqual(payload["definition"], "to move quickly on foot")
 
+    def test_openai_compatible_client_includes_reasoning_effort_when_configured(self) -> None:
+        captured = {}
+
+        def transport(url, payload, headers):
+            captured["url"] = url
+            captured["payload"] = payload
+            captured["headers"] = headers
+            return {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "definition": "to move quickly on foot",
+                                        "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                        "cefr_level": "A1",
+                                        "primary_domain": "general",
+                                        "secondary_domains": [],
+                                        "register": "neutral",
+                                        "synonyms": ["jog"],
+                                        "antonyms": ["walk"],
+                                        "collocations": ["run fast"],
+                                        "grammar_patterns": ["run + adverb"],
+                                        "usage_note": "Common everyday verb.",
+                                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                                        "confusable_words": [{"word": "ran", "note": "Past tense form."}],
+                                        "confidence": 0.93,
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        client = OpenAICompatibleResponsesClient(
+            endpoint="https://example.test/v1",
+            api_key="secret-key",
+            model="gpt-test",
+            reasoning_effort="low",
+            transport=transport,
+        )
+
+        client.generate_json("hello")
+
+        self.assertEqual(captured["payload"]["reasoning"], {"effort": "low"})
+
     def test_real_provider_requires_endpoint_model_and_api_key(self) -> None:
         settings = LexiconSettings.from_env({"LEXICON_LLM_MODEL": "gpt-test"})
 

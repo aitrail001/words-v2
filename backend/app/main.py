@@ -12,6 +12,7 @@ from slowapi.util import get_remote_address
 from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.api.import_jobs import router as import_jobs_router
+from app.api.lexicon_reviews import router as lexicon_reviews_router
 from app.api.imports import router as imports_router
 from app.api.reviews import router as reviews_router
 from app.api.word_lists import router as word_lists_router
@@ -85,3 +86,4 @@ app.include_router(reviews_router, prefix="/api/reviews", tags=["reviews"])
 app.include_router(imports_router, prefix="/api/imports", tags=["imports"])
 app.include_router(word_lists_router, prefix="/api/word-lists", tags=["word-lists"])
 app.include_router(import_jobs_router, prefix="/api/import-jobs", tags=["import-jobs"])
+app.include_router(lexicon_reviews_router, prefix="/api/lexicon-reviews", tags=["lexicon-reviews"])

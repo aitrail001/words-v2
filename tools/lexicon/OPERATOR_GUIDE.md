@@ -7,6 +7,8 @@ This guide is for the offline/admin lexicon pipeline that builds snapshot files,
 Use `tools/lexicon` when you want to:
 - build a WordNet + `wordfreq` based lexical snapshot
 - enrich learner-facing fields with an LLM in a separate admin step
+- optionally rerank grounded WordNet candidates with an LLM before deciding whether the selector needs further tuning
+- run built-in tuning/holdout benchmarks to compare deterministic selection against multiple grounded rerank modes
 - validate and compile the snapshot into `words.enriched.jsonl`
 - import the compiled output into the local DB
 
@@ -40,6 +42,26 @@ Important notes:
 - `tools/lexicon/.env.local` is not auto-loaded by the CLI; you must source it yourself.
 - Keep real LLM keys only in your local `.env.local` or another secret store.
 - Prefer `LEXICON_LLM_BASE_URL` over the legacy alias `LEXICON_LLM_PROVIDER`.
+- `LEXICON_LLM_REASONING_EFFORT` is optional and supports `low`, `medium`, or `high` for compatible Responses APIs.
+
+## 3.5 Canonical final DB write path
+
+Use this as the canonical final DB write path for generated learner-facing lexicon data:
+
+1. `build-base`
+2. optional review-prep flow
+3. `enrich`
+4. `validate --snapshot-dir`
+5. `compile-export`
+6. `validate --compiled-input`
+7. `import-db`
+
+Important:
+- staged review is the review/decision layer
+- `compile-export -> import-db` is the canonical final learner-enrichment write path
+- the narrower staged-review publish path is transitional and should not be treated as the main learner-enrichment publisher
+
+For the minimum pass/fail closure gate, use `docs/runbooks/lexicon-working-gate.md`.
 
 ## 4. Recommended operator flow
 
@@ -53,6 +75,7 @@ Enrich the learner-facing layer:
 
 ```bash
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --model gpt-5.4 --reasoning-effort low
 ```
 
 Validate the normalized snapshot plus enrichments:
@@ -71,6 +94,11 @@ Run an import dry-run summary:
 
 ```bash
 python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
+python3 -m tools.lexicon.cli rerank-senses --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --candidate-source candidates --candidate-limit 8
+python3 -m tools.lexicon.cli compare-selection --snapshot-dir data/lexicon/snapshots/demo --rerank-file data/lexicon/snapshots/demo/sense_reranks.jsonl
+python3 -m tools.lexicon.cli benchmark-selection --output-dir /tmp/lexicon-benchmark --dataset tuning --dataset holdout --with-rerank --provider-mode auto --candidate-source selected_only --candidate-source candidates --candidate-source full_wordnet
+python3 -m tools.lexicon.cli score-selection-risk --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/selection_decisions.jsonl
+python3 -m tools.lexicon.cli prepare-review --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --review-queue-output data/lexicon/snapshots/demo/review_queue.jsonl --provider-mode auto --candidate-source candidates --candidate-limit 8
 ```
 
 ## 5. Provider modes
@@ -94,8 +122,39 @@ LEXICON_LLM_TRANSPORT='node'
 Keep `LEXICON_LLM_API_KEY` in your local `tools/lexicon/.env.local` instead of pasting it directly into shell history. Then use either the normal `enrich` flow with `--provider-mode auto` or the bounded smoke command:
 
 ```bash
-python3 -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compatible_node --output-dir /tmp/lexicon-openai-smoke run set
+python3 -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compatible_node --output-dir /tmp/lexicon-openai-smoke run
+python3 -m tools.lexicon.cli smoke-openai-compatible --provider-mode openai_compatible_node --output-dir /tmp/lexicon-openai-smoke --max-words 2 --max-senses 2 --model gpt-5.4 --reasoning-effort low run set
 ```
+
+## 6.5 Learner-priority rubric
+
+Use `tools/lexicon/SELECTION_RUBRIC.md` when judging whether deterministic selection or `rerank-senses` produced a better learner-facing candidate set. The rerank step is grounded: it may only choose from provided `wn_synset_id` candidates and cannot invent new senses.
+
+Mode guidance:
+- `selected_only` is safest when you want an LLM review of ordering without allowing any new grounded senses into the set.
+- `candidates` is the recommended benchmark and premium-quality mode because it can fix deterministic misses while staying within a bounded shortlist.
+- `full_wordnet` is useful for evaluation and exploration, but it is slower and more likely to surface debatable tail substitutions.
+
+## 6.6 Risk scoring and review preparation
+
+Use this offline three-step flow when you want staged review instead of publishing deterministic selection directly:
+
+```bash
+python3 -m tools.lexicon.cli score-selection-risk --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/selection_decisions.jsonl
+python3 -m tools.lexicon.cli prepare-review --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --review-queue-output data/lexicon/snapshots/demo/review_queue.jsonl --provider-mode auto --candidate-source candidates --candidate-limit 8
+```
+
+Interpretation:
+- `risk_band=deterministic_only` means no rerank is needed for that lexeme in the staged flow
+- `risk_band=rerank_recommended` means rerank is useful but may still auto-accept if the change is small and stable
+- `risk_band=rerank_and_review_candidate` means the lexeme is a stronger human-review candidate even after rerank
+- `auto_accepted=true` means rerank was applied and accepted without human review
+- `review_required=true` means the row should stay staged and also appear in `review_queue.jsonl`
+
+This stage is intentionally review-oriented:
+- `selection_decisions.jsonl` keeps the deterministic decision, risk score, candidate metadata, and rerank outcome together
+- `review_queue.jsonl` is the bounded list humans should actually inspect
+- future admin UI work should use staged review storage rather than raw JSONL inspection
 
 ## 7. Import into the local DB
 
@@ -117,27 +176,33 @@ A single snapshot directory links together the pipeline stages:
 - `lexemes.jsonl` holds lemma-level records
 - `senses.jsonl` links back to lexemes by `lexeme_id`
 - `enrichments.jsonl` links to senses by `sense_id`
-- `words.enriched.jsonl` is the compiled learner-facing export used by `import-db`
+- `selection_decisions.jsonl` stores deterministic selection, risk scoring, and rerank/review state for each lexeme
+- `review_queue.jsonl` stores only the lexemes still marked `review_required=true` after bounded rerank
+- `words.enriched.jsonl` is the compiled learner-facing export used by `import-db`, including sense-level enrichment provenance needed for local DB writeback
 
 Re-run any stage independently as long as the required upstream files already exist in that snapshot directory.
 
 ## 9. Common failure modes
 
 - Missing WordNet or `wordfreq` dependencies: re-run `python3 -m pip install -r tools/lexicon/requirements.txt` and `python3 -m nltk.downloader wordnet omw-1.4`
-- Missing LLM env for real enrichment: confirm `LEXICON_LLM_BASE_URL`, `LEXICON_LLM_MODEL`, and `LEXICON_LLM_API_KEY` are exported in the current shell
+- Missing LLM env for real enrichment or risky-word review prep: confirm `LEXICON_LLM_BASE_URL`, `LEXICON_LLM_MODEL`, and `LEXICON_LLM_API_KEY` are exported in the current shell
 - Cloudflare/custom gateway rejects Python transport: install Node deps with `npm --prefix tools/lexicon ci`, then set `LEXICON_LLM_TRANSPORT=node`
 - Import path fails against a drifted local DB: use a clean local DB or isolated temporary Postgres instance instead of forcing the import into a broken dev database
+- Import wrote only core words/meanings when you expected learner-facing extras: confirm the compiled file came from the current `compile-export` step and not an older minimal `words.enriched.jsonl`
 
 ## 10. Operator evidence checklist
 
 After a successful run, keep or inspect these artifacts:
-- the snapshot directory containing `lexemes.jsonl`, `senses.jsonl`, and `enrichments.jsonl`
+- the snapshot directory containing `lexemes.jsonl`, `senses.jsonl`, `enrichments.jsonl`, and any staged review outputs
+- the staged review artifacts `selection_decisions.jsonl` and optional `review_queue.jsonl` when you run the review-prep flow
 - the compiled export `words.enriched.jsonl`
-- the exact command lines used for `build-base`, `enrich`, `validate`, `compile-export`, and optional `import-db`
-- the summary counts printed by the CLI so you can compare later reruns and imports
+- the exact command lines used for `build-base`, `enrich`, `score-selection-risk`, `prepare-review`, `validate`, `compile-export`, and optional `import-db`
+- the summary counts printed by the CLI so you can compare later reruns, rerank decisions, and imports, including examples/relations and enrichment job/run reuse
 
 ## 11. See also
 
 - `tools/lexicon/README.md`
 - `tools/lexicon/.env.example`
 - `.github/workflows/lexicon-openai-compatible-smoke.yml`
+- `docs/runbooks/lexicon-working-gate.md`
+- `docs/plans/2026-03-08-lexicon-future-improvements-todo.md`

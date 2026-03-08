@@ -40,7 +40,7 @@ def build_base_records(
     created_at: str,
     rank_provider: RankProvider,
     sense_provider: CanonicalSenseProvider,
-    max_senses: int = 4,
+    max_senses: int = 8,
 ) -> BaseBuildResult:
     lexeme_records: list[LexemeRecord] = []
     sense_records: list[SenseRecord] = []
@@ -67,7 +67,7 @@ def build_base_records(
             )
         )
 
-        is_high_polysemy = len(available_senses) > max_senses
+        is_high_polysemy = len(available_senses) > len(canonical_senses)
         for index, canonical_sense in enumerate(canonical_senses, start=1):
             wn_synset_id = canonical_sense.get('wn_synset_id')
             part_of_speech = str(canonical_sense.get('part_of_speech') or 'noun')

@@ -123,6 +123,13 @@ class CompileWordsTests(unittest.TestCase):
         self.assertEqual([sense["sense_id"] for sense in row["senses"]], ["sn_lx_run_1", "sn_lx_run_2"])
         self.assertEqual(row["confusable_words"], [{"word": "ran", "note": "Past tense form."}])
         self.assertEqual(row["frequency_rank"], 5)
+        self.assertEqual(row["senses"][0]["wn_synset_id"], "run.v.01")
+        self.assertEqual(row["senses"][0]["enrichment_id"], "en_sn_lx_run_1_v1")
+        self.assertEqual(row["senses"][0]["generation_run_id"], "run-1")
+        self.assertEqual(row["senses"][0]["model_name"], "gpt-5.4")
+        self.assertEqual(row["senses"][0]["prompt_version"], "v1")
+        self.assertEqual(row["senses"][0]["confidence"], 0.9)
+        self.assertEqual(row["senses"][0]["generated_at"], "2026-03-07T00:00:00Z")
 
     def test_compile_words_skips_lexemes_without_enrichments(self) -> None:
         lexeme = LexemeRecord(
