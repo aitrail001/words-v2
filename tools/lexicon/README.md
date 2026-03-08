@@ -258,5 +258,7 @@ Notes:
 - `enrich` remains an offline admin step and supports `--provider-mode auto|placeholder|openai_compatible|openai_compatible_node`
 - use `openai_compatible_node` when a custom gateway works with the official Node OpenAI SDK but rejects the Python transport
 - `.github/workflows/lexicon-openai-compatible-smoke.yml` is a manual/nightly secret-backed OpenAI-compatible smoke workflow that calls the configured endpoint using `LEXICON_LLM_BASE_URL`, `LEXICON_LLM_MODEL`, `LEXICON_LLM_API_KEY`, and optional `LEXICON_LLM_TRANSPORT=node`
+- Configure those values in the GitHub environment `lexicon-llm` (environment vars for base URL/model/transport, environment secret for API key); local `.env` files are not read by GitHub Actions.
+- If the workflow returns Cloudflare challenge HTML/403, the runner reached the gateway but was blocked upstream; first try `LEXICON_LLM_TRANSPORT=node`, then move to a self-hosted runner or gateway allow/bypass rules if GitHub-hosted runners are still challenged.
 - model benchmark conclusions and artifact notes for `gpt-5.1`/`gpt-5.2`/`gpt-5.3`/`gpt-5.4` live in `tools/lexicon/MODEL_BENCHMARKS.md`
 - non-dry-run import expects backend DB dependencies and settings to be available in the local environment

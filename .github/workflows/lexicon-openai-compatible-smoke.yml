@@ -52,9 +52,13 @@ jobs:
       - name: Validate lexicon enrichment configuration
         run: |
           set -euo pipefail
-          : "${LEXICON_LLM_BASE_URL:?Repository variable LEXICON_LLM_BASE_URL is required}"
-          : "${LEXICON_LLM_MODEL:?Repository variable LEXICON_LLM_MODEL is required}"
-          : "${LEXICON_LLM_API_KEY:?Repository secret LEXICON_LLM_API_KEY is required}"
+          : "${LEXICON_LLM_BASE_URL:?GitHub environment/repository variable LEXICON_LLM_BASE_URL is required}"
+          : "${LEXICON_LLM_MODEL:?GitHub environment/repository variable LEXICON_LLM_MODEL is required}"
+          : "${LEXICON_LLM_API_KEY:?GitHub environment/repository secret LEXICON_LLM_API_KEY is required}"
+          echo "Using protected environment: lexicon-llm"
+          echo "LLM base URL configured: ${LEXICON_LLM_BASE_URL}"
+          echo "LLM model configured: ${LEXICON_LLM_MODEL}"
+          echo "LLM transport configured: ${LEXICON_LLM_TRANSPORT:-python-default}"
 
       - uses: actions/setup-node@v4
         with:
@@ -78,6 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           smoke_dir="${RUNNER_TEMP}/lexicon-openai-compatible-smoke"
+          smoke_log="$smoke_dir/smoke.log"
           provider_mode='openai_compatible'
           if [ "${LEXICON_LLM_TRANSPORT:-}" = 'node' ]; then
             provider_mode='openai_compatible_node'
@@ -85,7 +90,24 @@ jobs:
           rm -rf "$smoke_dir"
           mkdir -p "$smoke_dir"
           read -r -a seed_words <<< "${LEXICON_SEED_WORDS}"
-          python -m tools.lexicon.cli smoke-openai-compatible --provider-mode "$provider_mode" --output-dir "$smoke_dir" --max-words 1 --max-senses 2 "${seed_words[@]}"
+          echo "Provider mode: $provider_mode" | tee "$smoke_log"
+          echo "Seed words: ${LEXICON_SEED_WORDS}" | tee -a "$smoke_log"
+          set +e
+          python -m tools.lexicon.cli smoke-openai-compatible --provider-mode "$provider_mode" --output-dir "$smoke_dir" --max-words 1 --max-senses 2 "${seed_words[@]}" 2>&1 | tee -a "$smoke_log"
+          smoke_exit=${PIPESTATUS[0]}
+          set -e
+          if [ "$smoke_exit" -ne 0 ]; then
+            if grep -Eqi 'Just a moment|__cf_chl|Enable JavaScript and cookies to continue|<title>Just a moment' "$smoke_log"; then
+              echo
+              echo 'Detected Cloudflare challenge HTML instead of an API response.'
+              echo 'This usually means the endpoint is blocking the GitHub-hosted runner, not that the API key/model/base URL is missing.'
+              echo 'Recommended actions:'
+              echo '  1. Set LEXICON_LLM_TRANSPORT=node for Cloudflare-fronted OpenAI-compatible gateways.'
+              echo '  2. If node transport still fails, use a self-hosted runner or allowlist/bypass the GitHub runner for the API path.'
+              echo '  3. Confirm the values are configured in the lexicon-llm GitHub environment, not only in a local .env file.'
+            fi
+            exit "$smoke_exit"
+          fi
           test -f "$smoke_dir/enrichments.jsonl"
           test -f "$smoke_dir/words.enriched.jsonl"
 
@@ -95,9 +117,10 @@ jobs:
           {
             echo "## Lexicon OpenAI-compatible smoke"
             echo
-            echo "- Validates secret-backed OpenAI-compatible endpoint enrichment in a protected environment."
+            echo "- Validates secret-backed OpenAI-compatible endpoint enrichment in the protected GitHub environment `lexicon-llm`."
             echo "- Downloads WordNet corpora and runs a bounded offline lexicon smoke flow."
             echo "- Calls the configured OpenAI-compatible endpoint through the real lexicon enrichment client."
+            echo "- For Cloudflare-fronted gateways, prefer `LEXICON_LLM_TRANSPORT=node`; if GitHub-hosted runners are still challenged, use a self-hosted runner or gateway allow/bypass rules."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload lexicon smoke artifacts
