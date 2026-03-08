@@ -7,6 +7,9 @@ from tools.lexicon.jsonl_io import read_jsonl, write_jsonl
 from tools.lexicon.models import CompiledWordRecord, EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 
 
+COMPILED_SCHEMA_VERSION = "1.1.0"
+
+
 def compile_words(
     lexemes: list[LexemeRecord],
     senses: list[SenseRecord],
@@ -48,6 +51,7 @@ def compile_words(
             compiled_senses.append(
                 {
                     "sense_id": sense.sense_id,
+                    "wn_synset_id": sense.wn_synset_id,
                     "pos": sense.part_of_speech,
                     "primary_domain": enrichment.primary_domain,
                     "secondary_domains": enrichment.secondary_domains,
@@ -59,6 +63,12 @@ def compile_words(
                     "collocations": enrichment.collocations,
                     "grammar_patterns": enrichment.grammar_patterns,
                     "usage_note": enrichment.usage_note,
+                    "enrichment_id": enrichment.enrichment_id,
+                    "generation_run_id": enrichment.generation_run_id,
+                    "model_name": enrichment.model_name,
+                    "prompt_version": enrichment.prompt_version,
+                    "confidence": enrichment.confidence,
+                    "generated_at": enrichment.generated_at,
                 }
             )
 
@@ -67,7 +77,7 @@ def compile_words(
 
         compiled.append(
             CompiledWordRecord(
-                schema_version="1.0.0",
+                schema_version=COMPILED_SCHEMA_VERSION,
                 word=lexeme.lemma,
                 part_of_speech=top_level_pos,
                 cefr_level=top_level_cefr or "B1",

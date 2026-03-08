@@ -25,7 +25,7 @@ try {
   fail('Node OpenAI-compatible transport received invalid JSON payload');
 }
 
-const { base_url: baseURL, api_key: apiKey, model, prompt, system_prompt: systemPrompt } = payload;
+const { base_url: baseURL, api_key: apiKey, model, prompt, system_prompt: systemPrompt, reasoning_effort: reasoningEffort } = payload;
 if (!baseURL || !apiKey || !model || !prompt) {
   fail('Node OpenAI-compatible transport requires base_url, api_key, model, and prompt');
 }
@@ -39,7 +39,7 @@ const client = new OpenAI({
 const combinedPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
 
 try {
-  const resp = await client.responses.create({
+  const request = {
     model,
     input: [
       {
@@ -47,7 +47,11 @@ try {
         content: [{ type: 'input_text', text: combinedPrompt }],
       },
     ],
-  });
+  };
+  if (reasoningEffort) {
+    request.reasoning = { effort: reasoningEffort };
+  }
+  const resp = await client.responses.create(request);
   process.stdout.write(JSON.stringify(resp));
 } catch (error) {
   const message = error?.message || String(error);

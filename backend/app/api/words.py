@@ -1,4 +1,5 @@
 import uuid
+from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
@@ -8,9 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 from app.models.meaning import Meaning
+from app.models.meaning_example import MeaningExample
 from app.models.user import User
 from app.models.word import Word
+from app.models.word_relation import WordRelation
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -37,6 +41,55 @@ class WordDetailResponse(WordResponse):
     meanings: list[MeaningResponse]
 
 
+class MeaningExampleResponse(BaseModel):
+    id: str
+    sentence: str
+    order_index: int
+    source: str | None
+    confidence: float | None
+    enrichment_run_id: str | None
+
+
+class WordRelationResponse(BaseModel):
+    id: str
+    relation_type: str
+    related_word: str
+    related_word_id: str | None
+    source: str | None
+    confidence: float | None
+    enrichment_run_id: str | None
+
+
+class LexiconEnrichmentRunResponse(BaseModel):
+    id: str
+    enrichment_job_id: str
+    generator_provider: str | None
+    generator_model: str | None
+    validator_provider: str | None
+    validator_model: str | None
+    prompt_version: str | None
+    prompt_hash: str | None
+    verdict: str | None
+    confidence: float | None
+    token_input: int | None
+    token_output: int | None
+    estimated_cost: float | None
+    created_at: str
+
+
+class EnrichedMeaningResponse(MeaningResponse):
+    examples: list[MeaningExampleResponse]
+    relations: list[WordRelationResponse]
+
+
+class WordEnrichmentDetailResponse(WordResponse):
+    phonetic_source: str | None
+    phonetic_confidence: float | None
+    phonetic_enrichment_run_id: str | None
+    meanings: list[EnrichedMeaningResponse]
+    enrichment_runs: list[LexiconEnrichmentRunResponse]
+
+
 class LookupRequest(BaseModel):
     word: str
 
@@ -47,6 +100,26 @@ class LookupRequest(BaseModel):
         if not v:
             raise ValueError("Word must not be empty")
         return v
+
+
+def _word_response(word: Word) -> WordResponse:
+    return WordResponse(
+        id=str(word.id),
+        word=word.word,
+        language=word.language,
+        phonetic=word.phonetic,
+        frequency_rank=word.frequency_rank,
+    )
+
+
+def _meaning_response(meaning: Meaning) -> MeaningResponse:
+    return MeaningResponse(
+        id=str(meaning.id),
+        definition=meaning.definition,
+        part_of_speech=meaning.part_of_speech,
+        example_sentence=meaning.example_sentence,
+        order_index=meaning.order_index,
+    )
 
 
 @router.get("/search", response_model=list[WordResponse])
@@ -63,16 +136,128 @@ async def search_words(
     )
     words = result.scalars().all()
 
-    return [
-        WordResponse(
-            id=str(w.id),
-            word=w.word,
-            language=w.language,
-            phonetic=w.phonetic,
-            frequency_rank=w.frequency_rank,
+    return [_word_response(w) for w in words]
+
+
+@router.get("/{word_id}/enrichment", response_model=WordEnrichmentDetailResponse)
+async def get_word_enrichment(
+    word_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WordEnrichmentDetailResponse:
+    result = await db.execute(select(Word).where(Word.id == word_id))
+    word = result.scalar_one_or_none()
+
+    if word is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Word not found",
         )
-        for w in words
-    ]
+
+    meanings_result = await db.execute(
+        select(Meaning)
+        .where(Meaning.word_id == word_id)
+        .order_by(Meaning.order_index)
+    )
+    meanings = meanings_result.scalars().all()
+    meaning_ids = [meaning.id for meaning in meanings]
+
+    examples_by_meaning: dict[uuid.UUID, list[MeaningExample]] = defaultdict(list)
+    if meaning_ids:
+        examples_result = await db.execute(
+            select(MeaningExample)
+            .where(MeaningExample.meaning_id.in_(meaning_ids))
+            .order_by(MeaningExample.meaning_id.asc(), MeaningExample.order_index.asc())
+        )
+        examples = examples_result.scalars().all()
+        for example in examples:
+            examples_by_meaning[example.meaning_id].append(example)
+    else:
+        examples = []
+
+    relations_result = await db.execute(
+        select(WordRelation)
+        .where(WordRelation.word_id == word_id)
+        .order_by(WordRelation.meaning_id.asc().nullslast(), WordRelation.relation_type.asc(), WordRelation.related_word.asc())
+    )
+    relations = relations_result.scalars().all()
+    relations_by_meaning: dict[uuid.UUID, list[WordRelation]] = defaultdict(list)
+    for relation in relations:
+        if relation.meaning_id is not None:
+            relations_by_meaning[relation.meaning_id].append(relation)
+
+    referenced_run_ids = {
+        run_id
+        for run_id in [word.phonetic_enrichment_run_id] + [example.enrichment_run_id for example in examples] + [relation.enrichment_run_id for relation in relations]
+        if run_id is not None
+    }
+    enrichment_runs: list[LexiconEnrichmentRun] = []
+    if referenced_run_ids:
+        runs_result = await db.execute(
+            select(LexiconEnrichmentRun)
+            .where(LexiconEnrichmentRun.id.in_(referenced_run_ids))
+            .order_by(LexiconEnrichmentRun.created_at.desc())
+        )
+        enrichment_runs = runs_result.scalars().all()
+
+    return WordEnrichmentDetailResponse(
+        id=str(word.id),
+        word=word.word,
+        language=word.language,
+        phonetic=word.phonetic,
+        frequency_rank=word.frequency_rank,
+        phonetic_source=word.phonetic_source,
+        phonetic_confidence=word.phonetic_confidence,
+        phonetic_enrichment_run_id=str(word.phonetic_enrichment_run_id) if word.phonetic_enrichment_run_id else None,
+        meanings=[
+            EnrichedMeaningResponse(
+                **_meaning_response(meaning).model_dump(),
+                examples=[
+                    MeaningExampleResponse(
+                        id=str(example.id),
+                        sentence=example.sentence,
+                        order_index=example.order_index,
+                        source=example.source,
+                        confidence=example.confidence,
+                        enrichment_run_id=str(example.enrichment_run_id) if example.enrichment_run_id else None,
+                    )
+                    for example in examples_by_meaning.get(meaning.id, [])
+                ],
+                relations=[
+                    WordRelationResponse(
+                        id=str(relation.id),
+                        relation_type=relation.relation_type,
+                        related_word=relation.related_word,
+                        related_word_id=str(relation.related_word_id) if relation.related_word_id else None,
+                        source=relation.source,
+                        confidence=relation.confidence,
+                        enrichment_run_id=str(relation.enrichment_run_id) if relation.enrichment_run_id else None,
+                    )
+                    for relation in relations_by_meaning.get(meaning.id, [])
+                ],
+            )
+            for meaning in meanings
+        ],
+        enrichment_runs=[
+            LexiconEnrichmentRunResponse(
+                id=str(run.id),
+                enrichment_job_id=str(run.enrichment_job_id),
+                generator_provider=run.generator_provider,
+                generator_model=run.generator_model,
+                validator_provider=run.validator_provider,
+                validator_model=run.validator_model,
+                prompt_version=run.prompt_version,
+                prompt_hash=run.prompt_hash,
+                verdict=run.verdict,
+                confidence=run.confidence,
+                token_input=run.token_input,
+                token_output=run.token_output,
+                estimated_cost=run.estimated_cost,
+                created_at=run.created_at.isoformat(),
+            )
+            for run in enrichment_runs
+        ],
+    )
 
 
 @router.get("/{word_id}", response_model=WordDetailResponse)
@@ -98,21 +283,8 @@ async def get_word(
     meanings = meanings_result.scalars().all()
 
     return WordDetailResponse(
-        id=str(word.id),
-        word=word.word,
-        language=word.language,
-        phonetic=word.phonetic,
-        frequency_rank=word.frequency_rank,
-        meanings=[
-            MeaningResponse(
-                id=str(m.id),
-                definition=m.definition,
-                part_of_speech=m.part_of_speech,
-                example_sentence=m.example_sentence,
-                order_index=m.order_index,
-            )
-            for m in meanings
-        ],
+        **_word_response(word).model_dump(),
+        meanings=[_meaning_response(m) for m in meanings],
     )
 
 
@@ -137,21 +309,8 @@ async def lookup_word(
         meanings = meanings_result.scalars().all()
 
         return WordDetailResponse(
-            id=str(word.id),
-            word=word.word,
-            language=word.language,
-            phonetic=word.phonetic,
-            frequency_rank=word.frequency_rank,
-            meanings=[
-                MeaningResponse(
-                    id=str(m.id),
-                    definition=m.definition,
-                    part_of_speech=m.part_of_speech,
-                    example_sentence=m.example_sentence,
-                    order_index=m.order_index,
-                )
-                for m in meanings
-            ],
+            **_word_response(word).model_dump(),
+            meanings=[_meaning_response(m) for m in meanings],
         )
 
     # Not found locally — return 404 for now

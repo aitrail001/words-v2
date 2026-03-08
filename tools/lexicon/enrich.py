@@ -41,12 +41,14 @@ class OpenAICompatibleResponsesClient:
         model: str,
         transport: Transport | None = None,
         timeout_seconds: int = 60,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.endpoint = endpoint.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.transport = transport or _default_transport
         self.timeout_seconds = timeout_seconds
+        self.reasoning_effort = reasoning_effort
 
     def responses_url(self) -> str:
         if self.endpoint.endswith("/responses"):
@@ -60,6 +62,8 @@ class OpenAICompatibleResponsesClient:
             "input": prompt,
             "text": {"format": {"type": "json_object"}},
         }
+        if self.reasoning_effort:
+            payload["reasoning"] = {"effort": self.reasoning_effort}
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -124,22 +128,25 @@ class NodeOpenAICompatibleResponsesClient:
         api_key: str,
         model: str,
         runner: NodeRunner | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.endpoint = endpoint.rstrip('/')
         self.api_key = api_key
         self.model = model
         self.runner = runner or _default_node_runner
+        self.reasoning_effort = reasoning_effort
 
     def generate_json(self, prompt: str) -> dict[str, Any]:
-        response = self.runner(
-            {
-                'base_url': self.endpoint,
-                'api_key': self.api_key,
-                'model': self.model,
-                'prompt': prompt,
-                'system_prompt': _SYSTEM_PROMPT,
-            }
-        )
+        payload = {
+            'base_url': self.endpoint,
+            'api_key': self.api_key,
+            'model': self.model,
+            'prompt': prompt,
+            'system_prompt': _SYSTEM_PROMPT,
+        }
+        if self.reasoning_effort:
+            payload['reasoning_effort'] = self.reasoning_effort
+        response = self.runner(payload)
         text = _extract_output_text(response)
         try:
             return json.loads(text)
@@ -456,6 +463,7 @@ def build_openai_compatible_node_enrichment_provider(
     *,
     settings: LexiconSettings,
     model_name: str | None = None,
+    reasoning_effort: str | None = None,
     review_status: str = 'draft',
     runner: NodeRunner | None = None,
 ) -> EnrichmentProvider:
@@ -467,11 +475,13 @@ def build_openai_compatible_node_enrichment_provider(
         raise LexiconDependencyError('LEXICON_LLM_API_KEY is required for openai_compatible_node enrichment mode')
 
     effective_model_name = model_name or settings.llm_model
+    effective_reasoning_effort = reasoning_effort or settings.llm_reasoning_effort
     client = NodeOpenAICompatibleResponsesClient(
         endpoint=settings.llm_base_url,
         api_key=settings.llm_api_key,
         model=str(effective_model_name),
         runner=runner,
+        reasoning_effort=effective_reasoning_effort,
     )
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
@@ -508,6 +518,7 @@ def build_openai_compatible_enrichment_provider(
     *,
     settings: LexiconSettings,
     model_name: str | None = None,
+    reasoning_effort: str | None = None,
     review_status: str = 'draft',
     transport: Transport | None = None,
 ) -> EnrichmentProvider:
@@ -519,11 +530,13 @@ def build_openai_compatible_enrichment_provider(
         raise LexiconDependencyError('LEXICON_LLM_API_KEY is required for openai_compatible enrichment mode')
 
     effective_model_name = model_name or settings.llm_model
+    effective_reasoning_effort = reasoning_effort or settings.llm_reasoning_effort
     client = OpenAICompatibleResponsesClient(
         endpoint=settings.llm_base_url,
         api_key=settings.llm_api_key,
         model=str(effective_model_name),
         transport=transport,
+        reasoning_effort=effective_reasoning_effort,
     )
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
@@ -561,6 +574,7 @@ def build_enrichment_provider(
     settings: LexiconSettings,
     provider_mode: str = 'auto',
     model_name: str | None = None,
+    reasoning_effort: str | None = None,
     review_status: str = 'draft',
     transport: Transport | None = None,
     runner: NodeRunner | None = None,
@@ -573,6 +587,7 @@ def build_enrichment_provider(
         return build_openai_compatible_enrichment_provider(
             settings=settings,
             model_name=model_name,
+            reasoning_effort=reasoning_effort,
             review_status=review_status,
             transport=transport,
         )
@@ -580,6 +595,7 @@ def build_enrichment_provider(
         return build_openai_compatible_node_enrichment_provider(
             settings=settings,
             model_name=model_name,
+            reasoning_effort=reasoning_effort,
             review_status=review_status,
             runner=runner,
         )
@@ -588,12 +604,14 @@ def build_enrichment_provider(
             return build_openai_compatible_node_enrichment_provider(
                 settings=settings,
                 model_name=model_name,
+                reasoning_effort=reasoning_effort,
                 review_status=review_status,
                 runner=runner,
             )
         return build_openai_compatible_enrichment_provider(
             settings=settings,
             model_name=model_name,
+            reasoning_effort=reasoning_effort,
             review_status=review_status,
             transport=transport,
         )
@@ -619,6 +637,7 @@ def enrich_snapshot(
     review_status: str = 'draft',
     provider_mode: str = 'auto',
     transport: Transport | None = None,
+    reasoning_effort: str | None = None,
 ) -> list[EnrichmentRecord]:
     effective_settings = settings or LexiconSettings.from_env()
     effective_generated_at = generated_at or _utc_now()
@@ -629,6 +648,7 @@ def enrich_snapshot(
         settings=effective_settings,
         provider_mode=provider_mode,
         model_name=model_name,
+        reasoning_effort=reasoning_effort,
         review_status=review_status,
         transport=transport,
     )
@@ -667,6 +687,7 @@ def run_enrichment(
     review_status: str = 'draft',
     provider_mode: str = 'auto',
     transport: Transport | None = None,
+    reasoning_effort: str | None = None,
 ) -> EnrichmentRunResult:
     destination = output_path or snapshot_dir / 'enrichments.jsonl'
     enrichments = enrich_snapshot(
@@ -681,5 +702,6 @@ def run_enrichment(
         review_status=review_status,
         provider_mode=provider_mode,
         transport=transport,
+        reasoning_effort=reasoning_effort,
     )
     return EnrichmentRunResult(output_path=destination, enrichments=enrichments)

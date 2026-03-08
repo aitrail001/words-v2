@@ -29,6 +29,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("build-base", stdout)
         self.assertIn("smoke-openai-compatible", stdout)
         self.assertIn("enrich", stdout)
+        self.assertIn("rerank-senses", stdout)
+        self.assertIn("compare-selection", stdout)
+        self.assertIn("benchmark-selection", stdout)
         self.assertIn("validate", stdout)
         self.assertIn("compile-export", stdout)
         self.assertIn("import-db", stdout)
@@ -124,7 +127,7 @@ class CliTests(unittest.TestCase):
                  patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object(), object()])), \
                  patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
                  patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]) as mocked_compile:
-                code, stdout, _ = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "run", "set"])
+                code, stdout, _ = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "--max-words", "2", "--max-senses", "1", "run", "set"])
 
             self.assertEqual(code, 0)
             payload = json.loads(stdout)
@@ -132,8 +135,34 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["output_dir"], str(output_dir))
             self.assertEqual(payload["compiled_count"], 1)
             self.assertEqual(payload["enrichment_count"], 2)
+            self.assertEqual(payload["requested_words"], ["run", "set"])
+            self.assertEqual(payload["max_words"], 2)
+            self.assertEqual(payload["max_senses"], 1)
             self.assertEqual(mocked_build.call_args.kwargs["words"], ["run", "set"])
+            self.assertEqual(mocked_build.call_args.kwargs["max_senses"], 1)
             mocked_compile.assert_called_once()
+
+    def test_openai_compatible_smoke_command_bounds_words_before_building(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "smoke"
+            fake_result = type("FakeBaseResult", (), {
+                "lexemes": [type("Lexeme", (), {"lemma": "run"})()],
+                "senses": [object()],
+                "concepts": [object()],
+            })()
+            with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
+                 patch("tools.lexicon.cli.build_base_records", return_value=fake_result) as mocked_build, \
+                 patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object()])), \
+                 patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
+                 patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]):
+                code, stdout, _ = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "--max-words", "1", "run", "set", "lead"])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["requested_words"], ["run", "set", "lead"])
+            self.assertEqual(payload["words"], ["run"])
+            self.assertEqual(mocked_build.call_args.kwargs["words"], ["run"])
 
 
     def test_openai_compatible_smoke_command_passes_provider_mode(self) -> None:
@@ -154,6 +183,26 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(mocked_enrich.call_args.kwargs["provider_mode"], "openai_compatible_node")
+
+    def test_openai_compatible_smoke_command_passes_model_and_reasoning_effort_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "smoke"
+            fake_result = type("FakeBaseResult", (), {
+                "lexemes": [type("Lexeme", (), {"lemma": "run"})()],
+                "senses": [object()],
+                "concepts": [object()],
+            })()
+            with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
+                 patch("tools.lexicon.cli.build_base_records", return_value=fake_result), \
+                 patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object()] )) as mocked_enrich, \
+                 patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
+                 patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]):
+                code, _, _ = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "--model", "gpt-5.4", "--reasoning-effort", "low", "run"])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(mocked_enrich.call_args.kwargs["model_name"], "gpt-5.4")
+            self.assertEqual(mocked_enrich.call_args.kwargs["reasoning_effort"], "low")
 
     def test_openai_compatible_smoke_command_reports_validation_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -176,6 +225,305 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["command"], "smoke-openai-compatible")
             self.assertEqual(payload["error_count"], 1)
             self.assertEqual(payload["errors"], ["bad enrichment"])
+
+    def test_build_base_command_defaults_max_senses_to_eight(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["build-base", "run"])
+
+        self.assertEqual(args.max_senses, 8)
+
+    def test_smoke_openai_compatible_command_defaults_to_bounded_values(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["smoke-openai-compatible", "--output-dir", "/tmp/lexicon-smoke", "run"])
+
+        self.assertEqual(args.max_senses, 2)
+        self.assertEqual(args.max_words, 1)
+
+    def test_rerank_senses_command_defaults_candidate_source_to_candidates(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["rerank-senses", "--snapshot-dir", "/tmp/lexicon-snapshot"])
+
+        self.assertEqual(args.candidate_source, "candidates")
+
+    def test_rerank_senses_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            output_path = snapshot_dir / "sense_reranks.jsonl"
+            fake_result = type("FakeRerankRunResult", (), {"output_path": output_path, "rows": [{"lexeme_id": "lx_run"}]})()
+            with patch("tools.lexicon.cli.run_rerank", return_value=fake_result) as mocked_rerank:
+                code, stdout, _ = self.run_cli(["rerank-senses", "--snapshot-dir", str(snapshot_dir)])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "rerank-senses")
+            self.assertEqual(payload["rerank_count"], 1)
+            self.assertEqual(payload["output"], str(output_path))
+            mocked_rerank.assert_called_once()
+
+    def test_rerank_senses_command_passes_provider_model_reasoning_and_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            output_path = snapshot_dir / "sense_reranks.jsonl"
+            fake_result = type("FakeRerankRunResult", (), {"output_path": output_path, "rows": [{"lexeme_id": "lx_run"}]})()
+            with patch("tools.lexicon.cli.run_rerank", return_value=fake_result) as mocked_rerank:
+                code, _, _ = self.run_cli([
+                    "rerank-senses",
+                    "--snapshot-dir", str(snapshot_dir),
+                    "--provider-mode", "openai_compatible_node",
+                    "--model", "gpt-5.4",
+                    "--reasoning-effort", "low",
+                    "--candidate-source", "candidates",
+                    "--candidate-limit", "10",
+                    "run",
+                ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(mocked_rerank.call_args.kwargs["provider_mode"], "openai_compatible_node")
+            self.assertEqual(mocked_rerank.call_args.kwargs["model_name"], "gpt-5.4")
+            self.assertEqual(mocked_rerank.call_args.kwargs["reasoning_effort"], "low")
+            self.assertEqual(mocked_rerank.call_args.kwargs["candidate_source"], "candidates")
+            self.assertEqual(mocked_rerank.call_args.kwargs["candidate_limit"], 10)
+            self.assertEqual(mocked_rerank.call_args.kwargs["words"], ["run"])
+
+    def test_rerank_senses_command_passes_each_candidate_source_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            output_path = snapshot_dir / "sense_reranks.jsonl"
+            fake_result = type("FakeRerankRunResult", (), {"output_path": output_path, "rows": [{"lexeme_id": "lx_run"}]})()
+            for candidate_source in ("selected_only", "candidates", "full_wordnet"):
+                with self.subTest(candidate_source=candidate_source):
+                    with patch("tools.lexicon.cli.run_rerank", return_value=fake_result) as mocked_rerank:
+                        code, _, _ = self.run_cli([
+                            "rerank-senses",
+                            "--snapshot-dir", str(snapshot_dir),
+                            "--candidate-source", candidate_source,
+                            "run",
+                        ])
+
+                    self.assertEqual(code, 0)
+                    self.assertEqual(mocked_rerank.call_args.kwargs["candidate_source"], candidate_source)
+
+    def test_compare_selection_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            rerank_file = snapshot_dir / "sense_reranks.jsonl"
+            rerank_file.write_text("", encoding="utf-8")
+            output_path = snapshot_dir / "comparison.json"
+            with patch("tools.lexicon.cli.compare_selection_artifacts", return_value={
+                "compared_lexeme_count": 1,
+                "changed_lexeme_count": 1,
+                "changes": [{"lemma": "run"}],
+            }) as mocked_compare:
+                code, stdout, _ = self.run_cli([
+                    "compare-selection",
+                    "--snapshot-dir", str(snapshot_dir),
+                    "--rerank-file", str(rerank_file),
+                    "--output", str(output_path),
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "compare-selection")
+            self.assertEqual(payload["changed_lexeme_count"], 1)
+            self.assertEqual(payload["output"], str(output_path))
+            mocked_compare.assert_called_once()
+
+    def test_benchmark_selection_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "benchmarks"
+            fake_result = type(
+                "FakeBenchmarkSelectionRunResult",
+                (),
+                {
+                    "summary_path": output_dir / "summary.json",
+                    "payload": {
+                        "output_dir": str(output_dir),
+                        "datasets": [{"dataset": "tuning", "rerank_runs": []}],
+                    },
+                },
+            )()
+            with patch("tools.lexicon.cli.run_selection_benchmark", return_value=fake_result) as mocked_benchmark:
+                code, stdout, _ = self.run_cli(["benchmark-selection", "--output-dir", str(output_dir)])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "benchmark-selection")
+            self.assertEqual(payload["summary"], str(output_dir / "summary.json"))
+            self.assertEqual(payload["datasets"][0]["dataset"], "tuning")
+            mocked_benchmark.assert_called_once()
+
+    def test_score_selection_risk_command_reports_risk_band_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            output_path = snapshot_dir / "selection_decisions.jsonl"
+            fake_result = type("FakeSelectionRiskRunResult", (), {"output_path": output_path, "rows": [{"risk_band": "deterministic_only"}, {"risk_band": "rerank_recommended"}]})()
+            with patch("tools.lexicon.cli.score_selection_risk", return_value=fake_result) as mocked_score:
+                code, stdout, _ = self.run_cli(["score-selection-risk", "--snapshot-dir", str(snapshot_dir)])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "score-selection-risk")
+            self.assertEqual(payload["decision_count"], 2)
+            self.assertEqual(payload["output"], str(output_path))
+            self.assertEqual(payload["risk_band_counts"], {"deterministic_only": 1, "rerank_recommended": 1})
+            mocked_score.assert_called_once()
+
+    def test_prepare_review_command_reports_review_queue_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            decisions_path = snapshot_dir / "selection_decisions.jsonl"
+            decisions_path.write_text("", encoding="utf-8")
+            output_path = snapshot_dir / "selection_decisions.reviewed.jsonl"
+            review_queue_path = snapshot_dir / "review_queue.jsonl"
+            fake_result = type("FakePrepareReviewRunResult", (), {"output_path": output_path, "rows": [{"lemma": "run"}], "review_queue_output": review_queue_path, "review_rows": [{"lemma": "run", "review_required": True}]})()
+            with patch("tools.lexicon.cli.prepare_review", return_value=fake_result) as mocked_prepare:
+                code, stdout, _ = self.run_cli(["prepare-review", "--snapshot-dir", str(snapshot_dir), "--decisions", str(decisions_path)])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "prepare-review")
+            self.assertEqual(payload["decision_count"], 1)
+            self.assertEqual(payload["review_count"], 1)
+            self.assertEqual(payload["output"], str(output_path))
+            self.assertEqual(payload["review_queue_output"], str(review_queue_path))
+            mocked_prepare.assert_called_once()
+
+    def test_score_selection_risk_command_reports_rerank_recommended_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            output_path = snapshot_dir / "selection_decisions.jsonl"
+            fake_result = type("FakeSelectionRiskRunResult", (), {"output_path": output_path, "rows": [{"lemma": "bank", "risk_band": "rerank_recommended"}, {"lemma": "run", "risk_band": "deterministic_only"}]})()
+            with patch("tools.lexicon.cli.score_selection_risk", return_value=fake_result) as mocked_score:
+                code, stdout, _ = self.run_cli(["score-selection-risk", "--snapshot-dir", str(snapshot_dir)])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "score-selection-risk")
+            self.assertEqual(payload["decision_count"], 2)
+            self.assertEqual(payload["rerank_recommended_count"], 1)
+            self.assertEqual(payload["output"], str(output_path))
+            mocked_score.assert_called_once()
+
+    def test_prepare_review_command_reports_rerank_and_review_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            decisions_path = snapshot_dir / "selection_decisions.jsonl"
+            decisions_path.write_text("", encoding="utf-8")
+            output_path = snapshot_dir / "selection_decisions.reviewed.jsonl"
+            queue_path = snapshot_dir / "review_queue.jsonl"
+            fake_result = type(
+                "FakePrepareReviewRunResult",
+                (),
+                {
+                    "output_path": output_path,
+                    "rows": [{"lemma": "bank", "auto_accepted": True}, {"lemma": "case", "review_required": True}],
+                    "review_queue_output": queue_path,
+                    "review_rows": [{"lemma": "case"}],
+                    "reranked_lexeme_count": 1,
+                },
+            )()
+            with patch("tools.lexicon.cli.prepare_review", return_value=fake_result) as mocked_prepare:
+                code, stdout, _ = self.run_cli([
+                    "prepare-review",
+                    "--snapshot-dir", str(snapshot_dir),
+                    "--decisions", str(decisions_path),
+                    "--review-queue-output", str(queue_path),
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "prepare-review")
+            self.assertEqual(payload["decision_count"], 2)
+            self.assertEqual(payload["reranked_lexeme_count"], 1)
+            self.assertEqual(payload["review_required_count"], 1)
+            self.assertEqual(payload["review_queue_output"], str(queue_path))
+            mocked_prepare.assert_called_once()
+
+    def test_prepare_review_command_passes_provider_and_candidate_args(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            decisions_path = snapshot_dir / "selection_decisions.jsonl"
+            decisions_path.write_text("", encoding="utf-8")
+            output_path = snapshot_dir / "selection_decisions.reviewed.jsonl"
+            fake_result = type(
+                "FakePrepareReviewRunResult",
+                (),
+                {
+                    "output_path": output_path,
+                    "rows": [],
+                    "review_queue_output": None,
+                    "review_rows": [],
+                    "reranked_lexeme_count": 0,
+                },
+            )()
+            with patch("tools.lexicon.cli.prepare_review", return_value=fake_result) as mocked_prepare:
+                code, _, _ = self.run_cli([
+                    "prepare-review",
+                    "--snapshot-dir", str(snapshot_dir),
+                    "--decisions", str(decisions_path),
+                    "--output", str(output_path),
+                    "--provider-mode", "openai_compatible_node",
+                    "--model", "gpt-5.4",
+                    "--reasoning-effort", "low",
+                    "--candidate-limit", "12",
+                    "--candidate-source", "candidates",
+                ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(mocked_prepare.call_args.kwargs["provider_mode"], "openai_compatible_node")
+            self.assertEqual(mocked_prepare.call_args.kwargs["model_name"], "gpt-5.4")
+            self.assertEqual(mocked_prepare.call_args.kwargs["reasoning_effort"], "low")
+            self.assertEqual(mocked_prepare.call_args.kwargs["candidate_limit"], 12)
+            self.assertEqual(mocked_prepare.call_args.kwargs["candidate_source"], "candidates")
+
+    def test_benchmark_selection_command_passes_rerank_modes_and_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "benchmarks"
+            fake_result = type(
+                "FakeBenchmarkSelectionRunResult",
+                (),
+                {
+                    "summary_path": output_dir / "summary.json",
+                    "payload": {"output_dir": str(output_dir), "datasets": []},
+                },
+            )()
+            with patch("tools.lexicon.cli.run_selection_benchmark", return_value=fake_result) as mocked_benchmark:
+                code, _, _ = self.run_cli([
+                    "benchmark-selection",
+                    "--output-dir", str(output_dir),
+                    "--dataset", "tuning",
+                    "--dataset", "holdout",
+                    "--max-senses", "8",
+                    "--with-rerank",
+                    "--provider-mode", "openai_compatible_node",
+                    "--model", "gpt-5.4",
+                    "--reasoning-effort", "low",
+                    "--candidate-limit", "12",
+                    "--candidate-source", "selected_only",
+                    "--candidate-source", "full_wordnet",
+                ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(mocked_benchmark.call_args.kwargs["datasets"], ["tuning", "holdout"])
+            self.assertEqual(mocked_benchmark.call_args.kwargs["max_senses"], 8)
+            self.assertTrue(mocked_benchmark.call_args.kwargs["with_rerank"])
+            self.assertEqual(mocked_benchmark.call_args.kwargs["provider_mode"], "openai_compatible_node")
+            self.assertEqual(mocked_benchmark.call_args.kwargs["model_name"], "gpt-5.4")
+            self.assertEqual(mocked_benchmark.call_args.kwargs["reasoning_effort"], "low")
+            self.assertEqual(mocked_benchmark.call_args.kwargs["candidate_limit"], 12)
+            self.assertEqual(mocked_benchmark.call_args.kwargs["candidate_sources"], ["selected_only", "full_wordnet"])
 
     def test_validate_command_validates_snapshot_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -568,6 +916,8 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["dry_run"])
             self.assertEqual(payload["row_count"], 1)
             self.assertEqual(payload["sense_count"], 1)
+            self.assertEqual(payload["example_count"], 1)
+            self.assertEqual(payload["relation_count"], 3)
 
 
 if __name__ == "__main__":
