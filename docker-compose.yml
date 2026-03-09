@@ -47,7 +47,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=development
       - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./backend:/app
@@ -104,6 +104,24 @@ services:
     networks:
       - words-network
 
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+      dockerfile: Dockerfile
+    container_name: words-admin-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+    volumes:
+      - ./admin-frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3001:3001"
+    depends_on:
+      - backend
+    networks:
+      - words-network
+
   playwright:
     image: mcr.microsoft.com/playwright:v1.52.0-noble
     container_name: words-playwright
@@ -113,11 +131,13 @@ services:
       - CI=true
       - E2E_BASE_URL=${E2E_BASE_URL:-http://frontend:3000}
       - E2E_API_URL=${E2E_API_URL:-http://backend:8000/api}
+      - E2E_ADMIN_URL=${E2E_ADMIN_URL:-http://admin-frontend:3001}
     volumes:
       - ./:/workspace
     depends_on:
       - backend
       - frontend
+      - admin-frontend
     networks:
       - words-network
     profiles:

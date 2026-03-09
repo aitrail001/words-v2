@@ -17,9 +17,10 @@ jobs:
       POSTGRES_PASSWORD: devpassword
       POSTGRES_DB: vocabapp_dev
       NEXT_PUBLIC_API_URL: http://backend:8000/api
-      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
       E2E_BASE_URL: http://frontend:3000
       E2E_API_URL: http://backend:8000/api
+      E2E_ADMIN_URL: http://admin-frontend:3001
 
     steps:
       - name: Checkout
@@ -40,9 +41,9 @@ jobs:
       - name: Start app stack (docker compose)
         id: start_stack
         run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend
+          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend admin-frontend
 
-      - name: Wait for backend and frontend readiness
+      - name: Wait for backend, learner frontend, and admin frontend readiness
         id: readiness
         run: |
           set -euo pipefail
@@ -75,6 +76,20 @@ jobs:
             exit 1
           fi
 
+          admin_frontend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
+              admin_frontend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${admin_frontend_ready}" -ne 1 ]; then
+            echo "Admin frontend did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 admin-frontend
+            exit 1
+          fi
+
       - name: Rollback drill (upgrade/downgrade/upgrade)
         id: rollback_drill
         run: |
@@ -89,6 +104,7 @@ jobs:
           docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
             -e E2E_BASE_URL="${E2E_BASE_URL}" \
             -e E2E_API_URL="${E2E_API_URL}" \
+            -e E2E_ADMIN_URL="${E2E_ADMIN_URL}" \
             -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}" \
             playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"
 
@@ -169,10 +185,10 @@ jobs:
           {
             echo "## Pre-prod Readiness Rehearsal Checklist"
             echo
-            echo "- $(checkbox "${START_OUTCOME}") Start disposable docker compose rehearsal stack (postgres/redis/backend/worker/frontend)"
-            echo "- $(checkbox "${READY_OUTCOME}") Backend/frontend readiness checks"
+            echo "- $(checkbox "${START_OUTCOME}") Start disposable docker compose rehearsal stack (postgres/redis/backend/worker/frontend/admin-frontend)"
+            echo "- $(checkbox "${READY_OUTCOME}") Backend/frontend/admin-frontend readiness checks"
             echo "- $(checkbox "${ROLLBACK_OUTCOME}") Rollback drill (alembic upgrade -> downgrade -1 -> upgrade)"
-            echo "- $(checkbox "${SMOKE_OUTCOME}") Playwright smoke run in container"
+            echo "- $(checkbox "${SMOKE_OUTCOME}") Playwright smoke run in container (learner + admin)"
             echo "- $(checkbox "${OBS_OUTCOME}") Observability signal check (X-Request-ID + access log)"
             echo "- $(checkbox "${ARTIFACT_OUTCOME}") Smoke artifacts uploaded"
             echo "- $(checkbox "${TEARDOWN_OUTCOME}") Stack teardown (always)"

@@ -16,7 +16,7 @@ Related distinction:
 - Local/Docker runner prerequisites for the rehearsal are available.
 - Branch protection/ruleset is active on `main`.
 
-For deployed pre-prod URLs, migration access, and persistent DB checks, use [`real-preprod-verification.md`](./real-preprod-verification.md) after `Deploy Preprod` succeeds.
+For deployed pre-prod URLs, learner/admin frontend reachability, migration access, and persistent DB checks, use [`real-preprod-verification.md`](./real-preprod-verification.md) after `Deploy Preprod` succeeds.
 
 ## 2. Required Checks (Must Be Green)
 

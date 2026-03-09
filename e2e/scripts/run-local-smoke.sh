@@ -12,12 +12,13 @@ fi
 
 export E2E_BASE_URL="${E2E_BASE_URL:-http://frontend:3000}"
 export E2E_API_URL="${E2E_API_URL:-http://backend:8000/api}"
+export E2E_ADMIN_URL="${E2E_ADMIN_URL:-http://admin-frontend:3001}"
 export POSTGRES_USER="${POSTGRES_USER:-${env_postgres_user:-vocabapp}}"
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-${env_postgres_password:-devpassword}}"
 export POSTGRES_DB="${POSTGRES_DB:-${env_postgres_db:-vocabapp_dev}}"
 export E2E_DB_URL="${E2E_DB_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}"
 export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://backend:8000/api}"
-export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000}"
+export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001}"
 
 E2E_SMOKE_CLEANUP="${E2E_SMOKE_CLEANUP:-0}"
 
@@ -56,10 +57,11 @@ wait_http_ready() {
 trap cleanup EXIT
 
 echo "[local-smoke] starting compose services for tests"
-compose up -d postgres redis backend frontend worker playwright
+compose up -d postgres redis backend frontend admin-frontend worker playwright
 
 wait_http_ready "backend" "http://localhost:8000/api/health"
 wait_http_ready "frontend" "http://localhost:3000"
+wait_http_ready "admin frontend" "http://localhost:3001/login"
 
 echo "[local-smoke] running backend migrations"
 compose exec -T backend alembic upgrade head
@@ -69,5 +71,5 @@ compose exec -T playwright sh -lc "
   if [ ! -d node_modules ]; then
     npm ci --prefer-offline --no-audit --no-fund
   fi
-  E2E_BASE_URL='${E2E_BASE_URL}' E2E_API_URL='${E2E_API_URL}' E2E_DB_URL='${E2E_DB_URL}' npm run test:smoke:ci
+  E2E_BASE_URL='${E2E_BASE_URL}' E2E_API_URL='${E2E_API_URL}' E2E_ADMIN_URL='${E2E_ADMIN_URL}' E2E_DB_URL='${E2E_DB_URL}' npm run test:smoke:ci
 "

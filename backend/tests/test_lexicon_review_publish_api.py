@@ -12,8 +12,8 @@ from app.models.user import User
 from app.models.word import Word
 
 
-def make_user(user_id: uuid.UUID) -> User:
-    return User(id=user_id, email="publisher@example.com", password_hash="hashed")
+def make_user(user_id: uuid.UUID, role: str = "admin") -> User:
+    return User(id=user_id, email="publisher@example.com", password_hash="hashed", role=role)
 
 
 def make_batch(user_id: uuid.UUID, **overrides) -> LexiconReviewBatch:

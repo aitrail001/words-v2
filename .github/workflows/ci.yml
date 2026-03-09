@@ -25,7 +25,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U vocabapp"
+          --health-cmd "pg_isready -U vocabapp -d vocabapp_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -70,7 +70,7 @@ jobs:
         run: pytest -q
 
   frontend:
-    name: Frontend (lint + test)
+    name: Frontend (lint + test + build)
     runs-on: ubuntu-latest
 
     defaults:
@@ -94,6 +94,42 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_API_URL: http://backend:8000/api
+        run: npm run build
+
+  admin-frontend:
+    name: Admin Frontend (lint + test + build)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: admin-frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: admin-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test -- --runInBand
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_API_URL: http://backend:8000/api
+        run: npm run build
 
   lexicon:
     name: Lexicon Tool (test + smoke)
@@ -164,11 +200,11 @@ jobs:
           POSTGRES_PASSWORD: devpassword
           POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
-          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000
+          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend
+          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend admin-frontend
 
-      - name: Wait for backend and frontend
+      - name: Wait for backend and frontends
         run: |
           set -euo pipefail
 
@@ -200,6 +236,20 @@ jobs:
             exit 1
           fi
 
+          admin_frontend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
+              admin_frontend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${admin_frontend_ready}" -ne 1 ]; then
+            echo "Admin frontend did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 admin-frontend
+            exit 1
+          fi
+
       - name: Apply migrations
         run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
 
@@ -210,6 +260,7 @@ jobs:
           docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
             -e E2E_API_URL=http://backend:8000/api \
+            -e E2E_ADMIN_URL=http://admin-frontend:3001 \
             -e E2E_DB_URL=${E2E_DB_URL} \
             playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"
 
@@ -254,11 +305,11 @@ jobs:
           POSTGRES_PASSWORD: devpassword
           POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
-          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000
+          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend
+          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend admin-frontend
 
-      - name: Wait for backend and frontend
+      - name: Wait for backend and frontends
         run: |
           set -euo pipefail
 
@@ -290,6 +341,20 @@ jobs:
             exit 1
           fi
 
+          admin_frontend_ready=0
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
+              admin_frontend_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${admin_frontend_ready}" -ne 1 ]; then
+            echo "Admin frontend did not become ready in time."
+            docker compose -f docker-compose.yml --profile tests logs --tail=200 admin-frontend
+            exit 1
+          fi
+
       - name: Apply migrations
         run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
 
@@ -300,6 +365,7 @@ jobs:
           docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
             -e E2E_API_URL=http://backend:8000/api \
+            -e E2E_ADMIN_URL=http://admin-frontend:3001 \
             -e E2E_DB_URL=${E2E_DB_URL} \
             playwright sh -lc "cd /workspace/e2e && npm run test:full"
 
