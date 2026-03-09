@@ -216,6 +216,18 @@ def _make_prompt_hash(source_type: str, source_reference: str, word: str, sense:
 
 
 def _sync_word_level_enrichment_fields(word: Any, row: dict[str, Any], run: Any | None, source_type: str) -> None:
+    if row.get("cefr_level") is not None and hasattr(word, "cefr_level"):
+        word.cefr_level = row.get("cefr_level")
+    if row.get("part_of_speech") is not None and hasattr(word, "learner_part_of_speech"):
+        word.learner_part_of_speech = list(row.get("part_of_speech") or [])
+    if row.get("part_of_speech") is not None and hasattr(word, "part_of_speech"):
+        word.part_of_speech = list(row.get("part_of_speech") or [])
+    if row.get("confusable_words") is not None and hasattr(word, "confusable_words"):
+        word.confusable_words = list(row.get("confusable_words") or [])
+    if row.get("generated_at") is not None and hasattr(word, "learner_generated_at"):
+        word.learner_generated_at = _parse_timestamp(row.get("generated_at"))
+    if row.get("generated_at") is not None and hasattr(word, "generated_at"):
+        word.generated_at = _parse_timestamp(row.get("generated_at"))
     if row.get("phonetic") is not None and hasattr(word, "phonetic"):
         word.phonetic = row.get("phonetic")
     if row.get("phonetic") is not None and hasattr(word, "phonetic_source"):
@@ -224,6 +236,28 @@ def _sync_word_level_enrichment_fields(word: Any, row: dict[str, Any], run: Any 
         word.phonetic_confidence = _normalize_confidence(row.get("phonetic_confidence"))
     if run is not None and row.get("phonetic") is not None and hasattr(word, "phonetic_enrichment_run_id"):
         word.phonetic_enrichment_run_id = run.id
+
+
+def _sync_meaning_level_learner_fields(meaning: Any, sense: dict[str, Any], row: dict[str, Any]) -> None:
+    if sense.get("wn_synset_id") is not None and hasattr(meaning, "wn_synset_id"):
+        meaning.wn_synset_id = sense.get("wn_synset_id")
+    if sense.get("primary_domain") is not None and hasattr(meaning, "primary_domain"):
+        meaning.primary_domain = sense.get("primary_domain")
+    if sense.get("secondary_domains") is not None and hasattr(meaning, "secondary_domains"):
+        meaning.secondary_domains = list(sense.get("secondary_domains") or [])
+    if sense.get("register") is not None and hasattr(meaning, "register_label"):
+        meaning.register_label = sense.get("register")
+    if sense.get("register") is not None and hasattr(meaning, "register"):
+        meaning.register = sense.get("register")
+    if sense.get("grammar_patterns") is not None and hasattr(meaning, "grammar_patterns"):
+        meaning.grammar_patterns = list(sense.get("grammar_patterns") or [])
+    if sense.get("usage_note") is not None and hasattr(meaning, "usage_note"):
+        meaning.usage_note = sense.get("usage_note")
+    meaning_generated_at = sense.get("generated_at") or row.get("generated_at")
+    if meaning_generated_at is not None and hasattr(meaning, "learner_generated_at"):
+        meaning.learner_generated_at = _parse_timestamp(meaning_generated_at)
+    if meaning_generated_at is not None and hasattr(meaning, "generated_at"):
+        meaning.generated_at = _parse_timestamp(meaning_generated_at)
 
 
 def import_compiled_rows(
@@ -283,6 +317,8 @@ def import_compiled_rows(
                 word.source_reference = source_reference
             summary = _increment(summary, updated_words=1)
 
+        _sync_word_level_enrichment_fields(word, row, None, source_type)
+
         existing_meanings = _load_existing_meanings(session, meaning_model, word.id)
         matched_meaning_ids: set[Any] = set()
         enrichment_job = None
@@ -334,6 +370,7 @@ def import_compiled_rows(
                     source=source_type,
                     source_reference=sense_source_reference,
                 )
+                _sync_meaning_level_learner_fields(meaning, sense, row)
                 session.add(meaning)
                 session.flush()
                 summary = _increment(summary, created_meanings=1)
@@ -347,6 +384,7 @@ def import_compiled_rows(
                     meaning.source = source_type
                 if hasattr(meaning, "source_reference"):
                     meaning.source_reference = sense_source_reference
+                _sync_meaning_level_learner_fields(meaning, sense, row)
                 summary = _increment(summary, updated_meanings=1)
             matched_meaning_ids.add(meaning.id)
 
@@ -400,6 +438,7 @@ def import_compiled_rows(
                     meaning_example = meaning_example_model(
                         meaning_id=meaning.id,
                         sentence=sentence,
+                        difficulty=(example or {}).get("difficulty"),
                         order_index=example_index,
                         source=source_type,
                         confidence=_normalize_confidence(sense.get("confidence")),
