@@ -13,8 +13,8 @@ from app.models.word import Word
 from app.models.meaning import Meaning
 
 
-def make_user(user_id: uuid.UUID) -> User:
-    return User(id=user_id, email="reviewer@example.com", password_hash="hashed")
+def make_user(user_id: uuid.UUID, role: str = "admin") -> User:
+    return User(id=user_id, email="reviewer@example.com", password_hash="hashed", role=role)
 
 
 def make_batch(user_id: uuid.UUID, **overrides) -> LexiconReviewBatch:
@@ -80,6 +80,116 @@ def make_item(batch_id: uuid.UUID, reviewer_id: uuid.UUID | None = None, **overr
 
 def build_jsonl_bytes(*rows: dict) -> bytes:
     return "".join(json.dumps(row) + "\n" for row in rows).encode("utf-8")
+
+
+class TestLexiconReviewBatchAdminAccess:
+    @pytest.mark.asyncio
+    async def test_import_requires_admin_role(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id, role="user")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        row = {
+            "schema_version": "lexicon_selection_decision.v1",
+            "snapshot_id": "snapshot-001",
+            "lexeme_id": "lx_bank",
+            "lemma": "bank",
+            "language": "en",
+            "risk_band": "rerank_and_review_candidate",
+            "selection_risk_score": 6,
+            "deterministic_selected_wn_synset_ids": ["bank.n.01"],
+            "candidate_metadata": [{"wn_synset_id": "bank.n.01"}],
+            "review_required": True,
+            "auto_accepted": False,
+            "generated_at": "2026-03-08T00:00:00Z",
+            "generation_run_id": "selection-review-2026-03-08T00:00:00Z",
+        }
+
+        response = await client.post(
+            "/api/lexicon-reviews/batches/import",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("selection_decisions.jsonl", build_jsonl_bytes(row), "application/x-ndjson")},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Admin access required"
+
+    @pytest.mark.asyncio
+    async def test_list_batches_requires_admin_role(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id, role="user")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        response = await client.get(
+            "/api/lexicon-reviews/batches",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Admin access required"
+
+    @pytest.mark.asyncio
+    async def test_patch_item_requires_admin_role(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id, role="user")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        response = await client.patch(
+            f"/api/lexicon-reviews/items/{uuid.uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"review_status": "approved"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Admin access required"
+
+    @pytest.mark.asyncio
+    async def test_publish_preview_requires_admin_role(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id, role="user")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        response = await client.get(
+            f"/api/lexicon-reviews/batches/{uuid.uuid4()}/publish-preview",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Admin access required"
+
+    @pytest.mark.asyncio
+    async def test_publish_requires_admin_role(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id, role="user")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        response = await client.post(
+            f"/api/lexicon-reviews/batches/{uuid.uuid4()}/publish",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Admin access required"
 
 
 class TestImportLexiconReviewBatch:

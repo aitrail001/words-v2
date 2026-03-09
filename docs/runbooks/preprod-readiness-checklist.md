@@ -7,7 +7,7 @@ For end-to-end promotion order (merge -> tag -> deploy -> verify -> promote), se
 ## 1. Prerequisites
 
 - Release candidate commit SHA is frozen and shared.
-- Pre-prod environment is reachable (API, frontend, DB, Redis).
+- Pre-prod environment is reachable (API, learner frontend, admin frontend, DB, Redis).
 - Operator access confirmed:
   - GitHub Actions read/dispatch permission.
   - Deployment credentials for pre-prod.
@@ -19,6 +19,7 @@ Quick health probe:
 ```bash
 curl -fsS "${API_BASE_URL}/api/health"
 curl -fsS -o /dev/null -w "%{http_code}\n" "${WEB_BASE_URL}/register"
+curl -fsS -o /dev/null -w "%{http_code}\n" "${ADMIN_WEB_BASE_URL}/login"
 ```
 
 ## 2. Required Checks (Must Be Green)

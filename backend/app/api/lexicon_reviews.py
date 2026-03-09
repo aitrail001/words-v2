@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_admin_user
 from app.core.database import get_db
 from app.models.lexicon_review_batch import LexiconReviewBatch
 from app.models.lexicon_review_item import LexiconReviewItem
@@ -347,7 +347,7 @@ async def import_lexicon_review_batch(
     file: UploadFile = File(...),
     source_type: str | None = Form(default='lexicon_selection_decisions'),
     source_reference: str | None = Form(default=None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> LexiconReviewBatchResponse:
     payload, rows = await _parse_upload(file)
@@ -415,7 +415,7 @@ async def import_lexicon_review_batch(
 
 @router.get('/batches', response_model=list[LexiconReviewBatchResponse])
 async def list_lexicon_review_batches(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[LexiconReviewBatchResponse]:
     result = await db.execute(
@@ -431,7 +431,7 @@ async def list_lexicon_review_batches(
 @router.get('/batches/{batch_id}', response_model=LexiconReviewBatchResponse)
 async def get_lexicon_review_batch(
     batch_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> LexiconReviewBatchResponse:
     batch = await _get_batch_for_user(batch_id, current_user.id, db)
@@ -444,7 +444,7 @@ async def list_lexicon_review_items(
     review_status: str | None = Query(default=None),
     risk_band: str | None = Query(default=None),
     review_required: bool | None = Query(default=None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[LexiconReviewItemResponse]:
     await _get_batch_for_user(batch_id, current_user.id, db)
@@ -468,7 +468,7 @@ async def list_lexicon_review_items(
 @router.get('/batches/{batch_id}/publish-preview', response_model=LexiconReviewBatchPublishPreviewResponse)
 async def preview_lexicon_review_batch_publish(
     batch_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> LexiconReviewBatchPublishPreviewResponse:
     batch = await _get_batch_for_user(batch_id, current_user.id, db)
@@ -500,7 +500,7 @@ async def preview_lexicon_review_batch_publish(
 @router.post('/batches/{batch_id}/publish', response_model=LexiconReviewBatchPublishResponse)
 async def publish_lexicon_review_batch(
     batch_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> LexiconReviewBatchPublishResponse:
     batch = await _get_batch_for_user(batch_id, current_user.id, db)
@@ -569,7 +569,7 @@ async def publish_lexicon_review_batch(
 async def update_lexicon_review_item(
     item_id: uuid.UUID,
     request: LexiconReviewItemUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> LexiconReviewItemResponse:
     if request.review_status not in ALLOWED_REVIEW_STATUSES:
