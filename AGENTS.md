@@ -74,6 +74,9 @@ Use the smallest required set, but do not skip relevant skills.
 2. Keep commits focused and reversible.
 3. Do not include unrelated local changes in commits.
 4. Never use destructive git operations unless explicitly requested.
+5. After a PR merges, do not keep using that merged branch/worktree as a scratchpad for follow-up work.
+6. For follow-up work after merge, either clean up the old worktree immediately or create a fresh branch/worktree before continuing.
+7. If local changes must be preserved before cleanup, export them intentionally (commit, stash, or patch backup) instead of leaving silent dirty worktrees behind.
 
 ## Verification Standard
 
