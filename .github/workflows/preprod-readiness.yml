@@ -1,4 +1,4 @@
-name: Preprod Readiness
+name: Preprod Readiness Rehearsal
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ concurrency:
 
 jobs:
   preprod-readiness:
-    name: Rollback + Smoke Health
+    name: "Rehearsal: Rollback + Smoke Health"
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -167,9 +167,9 @@ jobs:
           }
 
           {
-            echo "## Pre-prod Readiness Checklist"
+            echo "## Pre-prod Readiness Rehearsal Checklist"
             echo
-            echo "- $(checkbox "${START_OUTCOME}") Start docker compose stack (postgres/redis/backend/worker/frontend)"
+            echo "- $(checkbox "${START_OUTCOME}") Start disposable docker compose rehearsal stack (postgres/redis/backend/worker/frontend)"
             echo "- $(checkbox "${READY_OUTCOME}") Backend/frontend readiness checks"
             echo "- $(checkbox "${ROLLBACK_OUTCOME}") Rollback drill (alembic upgrade -> downgrade -1 -> upgrade)"
             echo "- $(checkbox "${SMOKE_OUTCOME}") Playwright smoke run in container"
