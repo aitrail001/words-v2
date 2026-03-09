@@ -1,26 +1,22 @@
 # Pre-Prod Readiness Checklist
 
-Use this checklist before promoting a release candidate to pre-prod test window.
+Use this checklist before promoting a release candidate to a pre-prod test window. This checklist covers release readiness expectations and the disposable rehearsal workflow in `.github/workflows/preprod-readiness.yml`; it is not, by itself, a substitute for verifying a real persistent pre-prod environment.
 
 For end-to-end promotion order (merge -> tag -> deploy -> verify -> promote), see [`release-promotion.md`](./release-promotion.md).
+
+Related distinction:
+
+- **Preprod readiness rehearsal** = disposable Docker-based rollback/smoke drill against an ephemeral stack; today this is what `.github/workflows/preprod-readiness.yml` runs.
+- **Real preprod verification** = verification against the actual deployed pre-prod environment and its persistent populated DB; use [`real-preprod-verification.md`](./real-preprod-verification.md).
 
 ## 1. Prerequisites
 
 - Release candidate commit SHA is frozen and shared.
-- Pre-prod environment is reachable (API, learner frontend, admin frontend, DB, Redis).
-- Operator access confirmed:
-  - GitHub Actions read/dispatch permission.
-  - Deployment credentials for pre-prod.
-  - DB migration tooling access (`alembic`).
+- GitHub Actions read/dispatch permission is confirmed.
+- Local/Docker runner prerequisites for the rehearsal are available.
 - Branch protection/ruleset is active on `main`.
 
-Quick health probe:
-
-```bash
-curl -fsS "${API_BASE_URL}/api/health"
-curl -fsS -o /dev/null -w "%{http_code}\n" "${WEB_BASE_URL}/register"
-curl -fsS -o /dev/null -w "%{http_code}\n" "${ADMIN_WEB_BASE_URL}/login"
-```
+For deployed pre-prod URLs, learner/admin frontend reachability, migration access, and persistent DB checks, use [`real-preprod-verification.md`](./real-preprod-verification.md) after `Deploy Preprod` succeeds.
 
 ## 2. Required Checks (Must Be Green)
 

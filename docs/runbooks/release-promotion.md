@@ -24,21 +24,23 @@ Command vars must execute the deploy/promote action for the exact release artifa
   - `Backend (lint + test)`
   - `Frontend (lint + test)`
   - `E2E Smoke (required)`
-- Post-merge gate must be green:
-  - `Preprod Readiness` on the same `release_ref` (tag or SHA) that will be deployed and promoted
+- Post-merge rehearsal gate must be green:
+  - `Preprod Readiness Rehearsal` on the same `release_ref` (tag or SHA) that will be deployed and promoted
+- Real pre-prod verification against the deployed environment and persistent DB must be completed per [`real-preprod-verification.md`](./real-preprod-verification.md).
 
 ## 3. Strict Promotion Sequence (UI)
 
 1. Merge release PR to `main`.
 2. Create and push release tag from `origin/main` (for example `release-YYYYMMDD-HHMM-<sha7>`).
-3. Run workflow `Preprod Readiness` using **Use workflow from** = `<release_tag_or_sha>`; require green and record run URL.
+3. Run workflow `Preprod Readiness Rehearsal` using **Use workflow from** = `<release_tag_or_sha>`; require green and record run URL.
 4. Run workflow `Deploy Preprod` with `release_ref=<release_tag_or_sha>`.
-5. Record the successful `Deploy Preprod` run id (numeric id in the run URL: `/actions/runs/<id>`).
-6. Run workflow `Production Promote` with:
+5. Run the real environment verification in [`real-preprod-verification.md`](./real-preprod-verification.md) against the deployed pre-prod environment; record migration, smoke, and rollback evidence as applicable.
+6. Record the successful `Deploy Preprod` run id (numeric id in the run URL: `/actions/runs/<id>`).
+7. Run workflow `Production Promote` with:
    - `release_ref=<same_release_tag_or_sha>`
    - `preprod_run_id=<run_id_from_step_5>`
-7. Approve required environment prompts (always production; preprod only if required reviewers are configured).
-8. Verify production health and close release.
+8. Approve required environment prompts (always production; preprod only if required reviewers are configured).
+9. Verify production health and close release.
 
 ## 4. Detailed `gh` Command Sequence
 
@@ -69,9 +71,9 @@ latest_run_id() {
     | head -n 1
 }
 
-# 3) Run Preprod Readiness on the same release tag, then wait
-gh workflow run "Preprod Readiness" --repo "${OWNER}/${REPO}" --ref "${TAG}"
-PREPROD_READINESS_RUN_ID="$(latest_run_id "Preprod Readiness" "${SHA}")"
+# 3) Run Preprod Readiness Rehearsal on the same release tag, then wait
+gh workflow run "Preprod Readiness Rehearsal" --repo "${OWNER}/${REPO}" --ref "${TAG}"
+PREPROD_READINESS_RUN_ID="$(latest_run_id "Preprod Readiness Rehearsal" "${SHA}")"
 gh run watch "${PREPROD_READINESS_RUN_ID}" --repo "${OWNER}/${REPO}" --exit-status
 
 # 4) Run Deploy Preprod on the same release tag, then wait
@@ -79,7 +81,10 @@ gh workflow run "Deploy Preprod" --repo "${OWNER}/${REPO}" --ref "${TAG}" -f rel
 DEPLOY_PREPROD_RUN_ID="$(latest_run_id "Deploy Preprod" "${SHA}")"
 gh run watch "${DEPLOY_PREPROD_RUN_ID}" --repo "${OWNER}/${REPO}" --exit-status
 
-# 5) Run Production Promote with same release_ref + deploy-preprod run id
+# 5) Execute the real pre-prod verification runbook against the deployed environment
+#    (manual/operator step documented in docs/runbooks/real-preprod-verification.md)
+
+# 6) Run Production Promote with same release_ref + deploy-preprod run id
 gh workflow run "Production Promote" \
   --repo "${OWNER}/${REPO}" \
   --ref "${TAG}" \
@@ -88,7 +93,7 @@ gh workflow run "Production Promote" \
 PROMOTE_PROD_RUN_ID="$(latest_run_id "Production Promote" "${SHA}")"
 gh run watch "${PROMOTE_PROD_RUN_ID}" --repo "${OWNER}/${REPO}" --exit-status
 
-# 6) Operator verification
+# 7) Operator verification
 echo "Release tag: ${TAG}"
 echo "Release SHA: ${SHA}"
 echo "Deploy-preprod run id: ${DEPLOY_PREPROD_RUN_ID}"
@@ -113,13 +118,14 @@ echo "Release SHA: ${SHA}"
 
 Then dispatch workflows in GitHub UI (same repository):
 
-1. `Actions` -> `Preprod Readiness` -> `Run workflow`
+1. `Actions` -> `Preprod Readiness Rehearsal` -> `Run workflow`
    Set `Use workflow from` to `${TAG}`.
 2. `Actions` -> `Deploy Preprod` -> `Run workflow`
    Set `Use workflow from` to `${TAG}` and `release_ref=${TAG}`.
-3. Open the successful `Deploy Preprod` run and copy numeric run id from URL:
+3. Execute [`real-preprod-verification.md`](./real-preprod-verification.md) against the deployed pre-prod environment and record evidence.
+4. Open the successful `Deploy Preprod` run and copy numeric run id from URL:
    `.../actions/runs/<id>`.
-4. `Actions` -> `Production Promote` -> `Run workflow`
+5. `Actions` -> `Production Promote` -> `Run workflow`
    Set `Use workflow from` to `${TAG}`, `release_ref=${TAG}`, and `preprod_run_id=<id>`.
 
 ## 6. Manual Workflow Inputs
