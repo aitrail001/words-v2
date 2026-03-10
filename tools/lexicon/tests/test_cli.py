@@ -960,3 +960,21 @@ if __name__ == "__main__":
             self.assertEqual(payload["decisions"], str(decisions_path))
             self.assertEqual(mocked_compile.call_args.kwargs["decision_filter"], "mode_c_safe")
             self.assertEqual(mocked_compile.call_args.kwargs["decisions_path"], decisions_path)
+
+    def test_compile_export_command_rejects_decisions_without_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            decisions_path = Path(tmpdir) / "selection_decisions.jsonl"
+            decisions_path.write_text("", encoding="utf-8")
+            output_path = Path(tmpdir) / "words.enriched.jsonl"
+
+            code, _, stderr = self.run_cli([
+                "compile-export",
+                "--snapshot-dir", str(snapshot_dir),
+                "--output", str(output_path),
+                "--decisions", str(decisions_path),
+            ])
+
+            self.assertEqual(code, 2)
+            self.assertIn("requires --decision-filter", stderr)

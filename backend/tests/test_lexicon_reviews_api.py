@@ -399,6 +399,48 @@ class TestLexiconReviewBatchReadApi:
         assert data[0]["candidate_entries"][0]["definition"] == "a financial institution"
         assert data[0]["candidate_entries"][0]["deterministic_selected"] is True
 
+    @pytest.mark.asyncio
+    async def test_list_batch_items_supports_legacy_candidate_metadata_fields(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(user_id)
+        item = make_item(
+            batch.id,
+            review_status="pending",
+            review_required=True,
+            candidate_metadata=[
+                {
+                    "wn_synset_id": "bank.n.01",
+                    "label": "bank",
+                    "gloss": "a place that keeps money",
+                    "part_of_speech": "noun",
+                }
+            ],
+            deterministic_selected_wn_synset_ids=["bank.n.01"],
+            reranked_selected_wn_synset_ids=None,
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        items_result = MagicMock()
+        items_result.scalars.return_value.all.return_value = [item]
+        mock_db.execute.side_effect = [user_result, batch_result, items_result]
+
+        response = await client.get(
+            f"/api/lexicon-reviews/batches/{batch.id}/items",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["selected_source"] == "deterministic"
+        assert data[0]["candidate_entries"][0]["canonical_label"] == "bank"
+        assert data[0]["candidate_entries"][0]["gloss"] == "a place that keeps money"
+        assert data[0]["candidate_entries"][0]["definition"] == "a place that keeps money"
+
 
 class TestLexiconReviewItemUpdateApi:
     @pytest.mark.asyncio
@@ -662,6 +704,43 @@ class TestLexiconReviewBatchPublishPreviewApi:
         mock_db.add.assert_not_called()
         mock_db.delete.assert_not_called()
         mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_publish_preview_supports_legacy_gloss_metadata(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(user_id, status="reviewing")
+        approved_item = make_item(
+            batch.id,
+            review_status="approved",
+            candidate_metadata=[
+                {"wn_synset_id": "bank.n.01", "gloss": "a place that keeps money", "part_of_speech": "noun"},
+            ],
+            deterministic_selected_wn_synset_ids=["bank.n.01"],
+            reranked_selected_wn_synset_ids=None,
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        items_result = MagicMock()
+        items_result.scalars.return_value.all.return_value = [approved_item]
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [user_result, batch_result, items_result, word_result]
+
+        response = await client.get(
+            f"/api/lexicon-reviews/batches/{batch.id}/publish-preview",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["publishable_item_count"] == 1
+        assert data["created_meaning_count"] == 1
+        assert data["items"][0]["selected_synset_ids"] == ["bank.n.01"]
 
     @pytest.mark.asyncio
     async def test_publish_preview_returns_400_when_no_items_are_publishable(self, client, mock_db):

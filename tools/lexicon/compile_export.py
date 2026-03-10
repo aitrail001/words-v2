@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-import json
 
 from tools.lexicon.jsonl_io import read_jsonl, write_jsonl
 from tools.lexicon.models import CompiledWordRecord, EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
@@ -126,6 +125,22 @@ def _load_decisions(path: Path) -> list[dict[str, object]]:
     return [dict(row) for row in read_jsonl(path)]
 
 
+def _coerce_decision_bool(value: object, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "0", "false", "no", "n", "off"}:
+            return False
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+    raise ValueError(f"Selection decision field '{field_name}' must be a boolean-like value")
+
+
 
 def _allowed_lexeme_ids_from_decisions(
     decisions: list[dict[str, object]],
@@ -148,8 +163,8 @@ def _allowed_lexeme_ids_from_decisions(
             if not lexeme_id:
                 continue
             risk_band = str(row.get("risk_band") or "")
-            auto_accepted = bool(row.get("auto_accepted"))
-            review_required = bool(row.get("review_required"))
+            auto_accepted = _coerce_decision_bool(row.get("auto_accepted"), field_name="auto_accepted")
+            review_required = _coerce_decision_bool(row.get("review_required"), field_name="review_required")
             if review_required:
                 continue
             if risk_band == "deterministic_only" or auto_accepted:
@@ -170,6 +185,9 @@ def compile_snapshot(
     lexemes = _load_lexemes(snapshot_dir / "lexemes.jsonl")
     senses = _load_senses(snapshot_dir / "senses.jsonl")
     enrichments = _load_enrichments(snapshot_dir / "enrichments.jsonl")
+
+    if decisions_path is not None and decision_filter is None:
+        raise ValueError("--decisions requires --decision-filter")
 
     if decision_filter is not None:
         if decisions_path is None:

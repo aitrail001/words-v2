@@ -245,12 +245,16 @@ def _validate_command(args: argparse.Namespace) -> int:
 
 
 def _compile_export_command(args: argparse.Namespace) -> int:
-    compiled = compile_snapshot(
-        Path(args.snapshot_dir),
-        Path(args.output),
-        decisions_path=Path(args.decisions) if args.decisions else None,
-        decision_filter=args.decision_filter,
-    )
+    try:
+        compiled = compile_snapshot(
+            Path(args.snapshot_dir),
+            Path(args.output),
+            decisions_path=Path(args.decisions) if args.decisions else None,
+            decision_filter=args.decision_filter,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     payload = {
         'command': 'compile-export',
         'compiled_count': len(compiled),

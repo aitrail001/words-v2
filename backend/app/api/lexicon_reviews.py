@@ -156,6 +156,20 @@ def _candidate_metadata_by_id(item: LexiconReviewItem) -> dict[str, dict[str, An
     return {str(entry.get("wn_synset_id") or ""): entry for entry in item.candidate_metadata or []}
 
 
+
+
+def _candidate_label(metadata: dict[str, Any]) -> str | None:
+    return str(metadata.get("canonical_label") or metadata.get("label") or "").strip() or None
+
+
+def _candidate_gloss(metadata: dict[str, Any]) -> str | None:
+    return str(metadata.get("canonical_gloss") or metadata.get("gloss") or metadata.get("definition") or "").strip() or None
+
+
+def _candidate_definition(metadata: dict[str, Any]) -> str | None:
+    return str(metadata.get("definition") or metadata.get("canonical_gloss") or metadata.get("gloss") or "").strip() or None
+
+
 def _selected_item_ids(item: LexiconReviewItem) -> tuple[list[str], str]:
     if item.review_override_wn_synset_ids:
         return [str(value) for value in item.review_override_wn_synset_ids], 'review_override'
@@ -191,9 +205,9 @@ def _candidate_entries(item: LexiconReviewItem) -> list[LexiconReviewCandidateEn
             reason_hint = raw.get('reason_hint')
         entries.append(LexiconReviewCandidateEntryResponse(
             wn_synset_id=wn_synset_id,
-            canonical_label=str(raw.get('canonical_label') or '').strip() or None,
-            gloss=str(raw.get('canonical_gloss') or '').strip() or None,
-            definition=str(raw.get('definition') or raw.get('canonical_gloss') or '').strip() or None,
+            canonical_label=_candidate_label(raw),
+            gloss=_candidate_gloss(raw),
+            definition=_candidate_definition(raw),
             part_of_speech=str(raw.get('part_of_speech') or '').strip() or None,
             rank_hint=rank_value,
             reason_hint=str(reason_hint or '').strip() or None,
@@ -212,7 +226,7 @@ def _resolve_publish_meanings(item: LexiconReviewItem) -> list[dict[str, Any]]:
         metadata = metadata_by_id.get(synset_id)
         if metadata is None:
             raise HTTPException(status_code=400, detail=f"Publish metadata missing for selected synset {synset_id} on lexeme {item.lexeme_id}")
-        definition = str(metadata.get("canonical_gloss") or "").strip()
+        definition = _candidate_definition(metadata) or ""
         if not definition:
             raise HTTPException(status_code=400, detail=f"Publish definition missing for selected synset {synset_id} on lexeme {item.lexeme_id}")
         meanings.append({

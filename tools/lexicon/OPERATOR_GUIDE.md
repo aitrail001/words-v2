@@ -164,6 +164,7 @@ This stage is intentionally review-oriented:
 - `review_queue.jsonl` is the bounded list humans should actually inspect
 - the admin lexicon portal can now import staged decisions and show current selected senses, selection source, candidate gloss/definition, POS, and rank/reason hints for review
 - `compile-export --decisions ... --decision-filter mode_c_safe` is the first-class safe-export path for direct DB import of lexemes that are deterministic-only or auto-accepted and not still marked `review_required=true`
+- filtered compile runs now fail loudly if `--decisions` and `--decision-filter` are not provided together, which prevents accidental unfiltered exports
 
 ## 7. Import into the local DB
 
