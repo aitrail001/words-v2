@@ -21,6 +21,7 @@ Current scope:
 - `python3 -m tools.lexicon.cli validate --compiled-input ...` validates compiled learner-facing JSONL rows (`--compiled-path` remains an alias)
 - `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --output ...` compiles normalized snapshot files into `words.enriched.jsonl`, preserving sense-level enrichment provenance needed for DB writeback
 - `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --decisions ... --decision-filter mode_c_safe --output ...` compiles only deterministic-safe or auto-accepted lexemes from `selection_decisions.jsonl`
+- filtered compile runs require both `--decisions` and `--decision-filter`; passing one without the other now fails loudly
 - `python3 -m tools.lexicon.cli import-db --input ... --dry-run` loads compiled rows and prints a local-admin import summary, including learner-facing example/relation and enrichment provenance counts
 - `python3 -m tools.lexicon.cli import-db --input ... --source-type ... --source-reference ... --language ...` runs the local import path against the configured DB, writing `words`, `meanings`, `meaning_examples`, `word_relations`, and enrichment job/run metadata
 
