@@ -23,13 +23,30 @@ export type LexiconReviewBatch = {
 export type LexiconCandidateMetadata = Record<string, unknown> & {
   wn_synset_id?: string;
   canonical_gloss?: string;
+  gloss?: string;
+  definition?: string;
   canonical_label?: string;
   label?: string;
   part_of_speech?: string;
+  pos?: string;
   score?: number;
   selection_score?: number;
   lemma_count?: number;
+  rank?: number;
+  candidate_rank?: number;
+  selection_rank?: number;
+  rerank_rank?: number;
+  reason_hint?: string;
+  selection_reason?: string;
+  rerank_reason?: string;
+  note?: string;
   flags?: string[];
+  candidate_flags?: string[];
+  deterministic_selected?: boolean;
+  rerank_selected?: boolean;
+  rerank_exposed?: boolean;
+  review_override_selected?: boolean;
+  selected?: boolean;
 };
 
 export type LexiconReviewCandidateEntry = {

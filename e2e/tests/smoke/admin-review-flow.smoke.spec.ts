@@ -33,13 +33,6 @@ type PublishPreview = {
   }>;
 };
 
-type PublishResult = {
-  batch_id: string;
-  status: string;
-  published_item_count: number;
-  published_word_count: number;
-};
-
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
 const buildSelectionDecisionRow = (runId: string, lemma: string) => ({
@@ -59,6 +52,7 @@ const buildSelectionDecisionRow = (runId: string, lemma: string) => ({
       part_of_speech: "noun",
       selection_reason: "common concrete noun",
       selection_score: 9.7,
+      candidate_flags: ["core_sense"],
     },
   ],
   review_required: true,
@@ -113,24 +107,38 @@ test("@smoke admin can import, approve, preview, and publish a staged review ite
   expect(items[0].review_status).toBe("pending");
 
   await page.goto(`${adminUrl}/lexicon`);
-  await expect(page.getByTestId("lexicon-item-detail-panel")).toContainText(lemma);
+  await expect(page.getByTestId("lexicon-batches-list")).toContainText("selection_decisions.jsonl");
+  await expect(page.getByTestId("lexicon-item-detail-panel")).toContainText(`Review item: ${lemma}`);
+  await expect(page.getByTestId("lexicon-item-current-selection")).toContainText("Current selected senses");
   await expect(page.getByTestId("lexicon-item-current-selection")).toContainText("bank.n.01");
   await expect(page.getByTestId("lexicon-item-candidates")).toContainText("a financial institution that accepts deposits");
   await expect(page.getByTestId("lexicon-item-candidates")).toContainText("common concrete noun");
+  await expect(page.getByTestId("lexicon-item-candidates")).toContainText("core_sense");
 
-  const approveResponse = await request.patch(`${apiUrl}/lexicon-reviews/items/${items[0].id}`, {
-    headers: authHeaders(user.token),
-    data: {
-      review_status: "approved",
-      review_comment: "Approved in admin smoke",
-      review_override_wn_synset_ids: ["bank.n.01"],
-    },
-  });
-  expect(approveResponse.status()).toBe(200);
-  const approvedItem = (await approveResponse.json()) as ReviewItem;
+  await page.getByTestId("lexicon-item-review-status").selectOption("approved");
+  await page.getByTestId("lexicon-item-override-ids").fill("bank.n.01");
+  await page.getByTestId("lexicon-item-review-comment").fill("Approved in admin smoke");
+  await page.getByTestId("lexicon-item-save-button").click();
+  await expect(page.getByTestId("lexicon-item-current-selection")).toContainText("Review override");
+  await expect(page.getByTestId("lexicon-item-current-selection")).toContainText("bank.n.01");
+
+  const approvedItemsResponse = await request.get(
+    `${apiUrl}/lexicon-reviews/batches/${batch!.id}/items`,
+    { headers: authHeaders(user.token) },
+  );
+  expect(approvedItemsResponse.status()).toBe(200);
+  const approvedItems = (await approvedItemsResponse.json()) as ReviewItem[];
+  expect(approvedItems).toHaveLength(1);
+  const approvedItem = approvedItems[0];
   expect(approvedItem.review_status).toBe("approved");
   expect(approvedItem.review_comment).toBe("Approved in admin smoke");
   expect(approvedItem.review_override_wn_synset_ids).toEqual(["bank.n.01"]);
+
+  await page.getByTestId("lexicon-publish-preview-button").click();
+  await expect(page.getByTestId("lexicon-publish-preview-panel")).toBeVisible();
+  await expect(page.getByTestId("lexicon-publish-preview-panel")).toContainText("Publishable: 1");
+  await expect(page.getByTestId("lexicon-publish-preview-panel")).toContainText(lemma);
+  await expect(page.getByTestId("lexicon-publish-preview-panel")).toContainText("bank.n.01");
 
   const previewResponse = await request.get(
     `${apiUrl}/lexicon-reviews/batches/${batch!.id}/publish-preview`,
@@ -151,32 +159,22 @@ test("@smoke admin can import, approve, preview, and publish a staged review ite
     ]),
   );
 
-  if (preview.publishable_item_count > 0) {
-    const publishResponse = await request.post(
-      `${apiUrl}/lexicon-reviews/batches/${batch!.id}/publish`,
-      { headers: authHeaders(user.token) },
-    );
-    expect(publishResponse.status()).toBe(200);
-    const publishResult = (await publishResponse.json()) as PublishResult;
-    expect(publishResult.batch_id).toBe(batch!.id);
-    expect(publishResult.status).toBe("published");
-    expect(publishResult.published_item_count).toBe(1);
-    expect(publishResult.published_word_count).toBe(1);
+  await page.getByTestId("lexicon-publish-button").click();
+  await expect(page.getByText(/Published 1 items to 1 words\./i)).toBeVisible();
 
-    const publishedBatchResponse = await request.get(`${apiUrl}/lexicon-reviews/batches`, {
-      headers: authHeaders(user.token),
-    });
-    expect(publishedBatchResponse.status()).toBe(200);
-    const publishedBatches = (await publishedBatchResponse.json()) as ReviewBatch[];
-    const publishedBatch = publishedBatches.find((entry) => entry.id === batch!.id);
-    expect(publishedBatch?.status).toBe("published");
+  const publishedBatchResponse = await request.get(`${apiUrl}/lexicon-reviews/batches`, {
+    headers: authHeaders(user.token),
+  });
+  expect(publishedBatchResponse.status()).toBe(200);
+  const publishedBatches = (await publishedBatchResponse.json()) as ReviewBatch[];
+  const publishedBatch = publishedBatches.find((entry) => entry.id === batch!.id);
+  expect(publishedBatch?.status).toBe("published");
 
-    const wordsResponse = await request.get(
-      `${apiUrl}/words/search?q=${encodeURIComponent(lemma)}`,
-      { headers: authHeaders(user.token) },
-    );
-    expect(wordsResponse.status()).toBe(200);
-    const words = (await wordsResponse.json()) as Array<{ word: string }>;
-    expect(words.some((entry) => entry.word === lemma)).toBe(true);
-  }
+  const wordsResponse = await request.get(
+    `${apiUrl}/words/search?q=${encodeURIComponent(lemma)}`,
+    { headers: authHeaders(user.token) },
+  );
+  expect(wordsResponse.status()).toBe(200);
+  const words = (await wordsResponse.json()) as Array<{ word: string }>;
+  expect(words.some((entry) => entry.word === lemma)).toBe(true);
 });
