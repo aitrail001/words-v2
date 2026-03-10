@@ -49,7 +49,7 @@ def make_item(batch_id: uuid.UUID, reviewer_id: uuid.UUID | None = None, **overr
         selection_risk_score=overrides.pop("selection_risk_score", 6),
         deterministic_selected_wn_synset_ids=overrides.pop("deterministic_selected_wn_synset_ids", ["bank.n.01"]),
         reranked_selected_wn_synset_ids=overrides.pop("reranked_selected_wn_synset_ids", ["bank.n.01"]),
-        candidate_metadata=overrides.pop("candidate_metadata", [{"wn_synset_id": "bank.n.01"}]),
+        candidate_metadata=overrides.pop("candidate_metadata", [{"wn_synset_id": "bank.n.01", "canonical_label": "bank", "canonical_gloss": "a financial institution", "part_of_speech": "noun", "selection_score": 9.7, "selection_reason": "common concrete noun"}]),
         auto_accepted=overrides.pop("auto_accepted", False),
         review_required=overrides.pop("review_required", True),
         review_status=overrides.pop("review_status", "pending"),
@@ -68,7 +68,7 @@ def make_item(batch_id: uuid.UUID, reviewer_id: uuid.UUID | None = None, **overr
                 "risk_band": "rerank_and_review_candidate",
                 "selection_risk_score": 6,
                 "deterministic_selected_wn_synset_ids": ["bank.n.01"],
-                "candidate_metadata": [{"wn_synset_id": "bank.n.01"}],
+                "candidate_metadata": [{"wn_synset_id": "bank.n.01", "canonical_label": "bank", "canonical_gloss": "a financial institution", "part_of_speech": "noun", "selection_score": 9.7, "selection_reason": "common concrete noun"}],
                 "generated_at": "2026-03-08T00:00:00Z",
                 "generation_run_id": "selection-review-2026-03-08T00:00:00Z",
             },
@@ -394,6 +394,10 @@ class TestLexiconReviewBatchReadApi:
         assert len(data) == 1
         assert data[0]["lemma"] == "bank"
         assert data[0]["review_status"] == "pending"
+        assert data[0]["selected_source"] == "reranked"
+        assert data[0]["selected_wn_synset_ids"] == ["bank.n.01"]
+        assert data[0]["candidate_entries"][0]["definition"] == "a financial institution"
+        assert data[0]["candidate_entries"][0]["deterministic_selected"] is True
 
 
 class TestLexiconReviewItemUpdateApi:
@@ -426,6 +430,9 @@ class TestLexiconReviewItemUpdateApi:
         assert data["review_status"] == "approved"
         assert data["review_comment"] == "Looks good"
         assert data["review_override_wn_synset_ids"] == ["bank.n.01", "bank.v.01"]
+        assert data["selected_source"] == "review_override"
+        assert data["selected_wn_synset_ids"] == ["bank.n.01", "bank.v.01"]
+        assert data["candidate_entries"][0]["definition"] == "a financial institution"
         assert data["reviewed_by"] == str(user_id)
         assert data["reviewed_at"] is not None
 

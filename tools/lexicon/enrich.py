@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,9 +18,11 @@ from tools.lexicon.jsonl_io import read_jsonl, write_jsonl
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 
 EnrichmentProvider = Callable[..., EnrichmentRecord]
+WordEnrichmentProvider = Callable[..., list[EnrichmentRecord]]
 Transport = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
 NodeRunner = Callable[[dict[str, Any]], dict[str, Any]]
 _PROVIDER_MODES = {"auto", "placeholder", "openai_compatible", "openai_compatible_node"}
+_ENRICHMENT_MODES = {"per_sense", "per_word"}
 _ALLOWED_CEFR_LEVELS = {'A1', 'A2', 'B1', 'B2', 'C1', 'C2'}
 _ALLOWED_REGISTERS = {'neutral', 'formal', 'informal'}
 _STRING_LIST_FIELDS = ('secondary_domains', 'synonyms', 'antonyms', 'collocations', 'grammar_patterns')
@@ -30,6 +33,8 @@ _NODE_RUN_TIMEOUT_SECONDS = 60
 class EnrichmentRunResult:
     output_path: Path
     enrichments: list[EnrichmentRecord]
+    lexeme_count: int = 0
+    mode: str = "per_sense"
 
 
 class OpenAICompatibleResponsesClient:
@@ -421,6 +426,112 @@ def _normalize_confusable_words(value: Any) -> list[dict[str, str]]:
     return normalized
 
 
+def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord]) -> str:
+    sense_rows = [
+        {
+            'sense_id': sense.sense_id,
+            'wn_synset_id': sense.wn_synset_id,
+            'part_of_speech': sense.part_of_speech,
+            'canonical_gloss': sense.canonical_gloss,
+            'sense_order': sense.sense_order,
+            'selection_reason': sense.selection_reason,
+        }
+        for sense in sorted(senses, key=lambda item: item.sense_order)
+    ]
+    schema_hint = {
+        'senses': [
+            {
+                'sense_id': 'string',
+                'definition': 'string',
+                'examples': [{'sentence': 'string', 'difficulty': 'A1|A2|B1|B2|C1|C2'}],
+                'cefr_level': 'A1|A2|B1|B2|C1|C2',
+                'primary_domain': 'string',
+                'secondary_domains': ['string'],
+                'register': 'neutral|formal|informal',
+                'synonyms': ['string'],
+                'antonyms': ['string'],
+                'collocations': ['string'],
+                'grammar_patterns': ['string'],
+                'usage_note': 'string',
+                'forms': {
+                    'plural_forms': ['string'],
+                    'verb_forms': {'base': 'string', 'third_person_singular': 'string', 'past': 'string', 'past_participle': 'string', 'gerund': 'string'},
+                    'comparative': 'string|null',
+                    'superlative': 'string|null',
+                    'derivations': ['string'],
+                },
+                'confusable_words': [{'word': 'string', 'note': 'string'}],
+                'confidence': 'number',
+            }
+        ]
+    }
+    return (
+        f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
+        f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
+        f"Enrich exactly these selected senses and do not invent or omit any sense IDs: {json.dumps(sense_rows)}\n"
+        f"Return JSON only with this schema: {json.dumps(schema_hint)}"
+    )
+
+
+def _build_enrichment_record(*, lexeme: LexemeRecord, sense: SenseRecord, response: dict[str, Any], model_name: str, prompt_version: str, generation_run_id: str, review_status: str, generated_at: str) -> EnrichmentRecord:
+    return EnrichmentRecord(
+        snapshot_id=sense.snapshot_id,
+        enrichment_id=make_enrichment_id(sense.sense_id, prompt_version),
+        sense_id=sense.sense_id,
+        definition=response['definition'],
+        examples=response['examples'],
+        cefr_level=response.get('cefr_level') or 'B1',
+        primary_domain=str(response.get('primary_domain') or 'general'),
+        secondary_domains=response.get('secondary_domains') or [],
+        register=response.get('register') or 'neutral',
+        synonyms=response.get('synonyms') or [],
+        antonyms=response.get('antonyms') or [],
+        collocations=response.get('collocations') or [],
+        grammar_patterns=response.get('grammar_patterns') or [],
+        usage_note=str(response.get('usage_note') or f'Auto-generated learner note for {lexeme.lemma}.'),
+        forms=response.get('forms') or _default_forms(lexeme.lemma, sense.part_of_speech),
+        confusable_words=response.get('confusable_words') or [],
+        model_name=str(model_name),
+        prompt_version=prompt_version,
+        generation_run_id=generation_run_id,
+        confidence=response['confidence'],
+        review_status=review_status,
+        generated_at=generated_at,
+    )
+
+
+def _validate_openai_compatible_word_payload(response: dict[str, Any], *, senses: list[SenseRecord]) -> list[dict[str, Any]]:
+    if not isinstance(response, dict):
+        raise RuntimeError('OpenAI-compatible endpoint returned a non-object word enrichment payload')
+    value = response.get('senses')
+    if not isinstance(value, list) or not value:
+        raise RuntimeError("OpenAI-compatible word enrichment payload field 'senses' must be a non-empty list")
+
+    expected_ids = [sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)]
+    expected_set = set(expected_ids)
+    normalized_rows: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"OpenAI-compatible word enrichment payload field 'senses[{index}]' must be an object")
+        sense_id = _require_non_empty_string(item.get('sense_id'), field=f'senses[{index}].sense_id')
+        if sense_id not in expected_set:
+            raise RuntimeError(f"OpenAI-compatible word enrichment payload returned unknown sense_id '{sense_id}'")
+        if sense_id in seen_ids:
+            raise RuntimeError(f"OpenAI-compatible word enrichment payload returned duplicate sense_id '{sense_id}'")
+        seen_ids.add(sense_id)
+        normalized = _validate_openai_compatible_payload(item)
+        normalized['sense_id'] = sense_id
+        normalized_rows.append(normalized)
+
+    missing = [sense_id for sense_id in expected_ids if sense_id not in seen_ids]
+    if missing:
+        raise RuntimeError(f'OpenAI-compatible word enrichment payload omitted expected sense_ids: {missing}')
+
+    normalized_by_id = {row['sense_id']: row for row in normalized_rows}
+    return [normalized_by_id[sense_id] for sense_id in expected_ids]
+
+
 def build_placeholder_enrichment_provider(
     *,
     settings: LexiconSettings | None = None,
@@ -459,6 +570,30 @@ def build_placeholder_enrichment_provider(
     return provider
 
 
+def build_placeholder_word_enrichment_provider(
+    *,
+    settings: LexiconSettings | None = None,
+    model_name: str | None = None,
+    review_status: str = 'draft',
+) -> WordEnrichmentProvider:
+    sense_provider = build_placeholder_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+
+    def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
+        return [
+            sense_provider(
+                lexeme=lexeme,
+                sense=sense,
+                settings=settings,
+                generated_at=generated_at,
+                generation_run_id=generation_run_id,
+                prompt_version=prompt_version,
+            )
+            for sense in sorted(senses, key=lambda item: item.sense_order)
+        ]
+
+    return provider
+
+
 def build_openai_compatible_node_enrichment_provider(
     *,
     settings: LexiconSettings,
@@ -486,30 +621,62 @@ def build_openai_compatible_node_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
         response = _validate_openai_compatible_payload(client.generate_json(build_enrichment_prompt(lexeme=lexeme, sense=sense)))
-        return EnrichmentRecord(
-            snapshot_id=sense.snapshot_id,
-            enrichment_id=make_enrichment_id(sense.sense_id, prompt_version),
-            sense_id=sense.sense_id,
-            definition=response['definition'],
-            examples=response['examples'],
-            cefr_level=response.get('cefr_level') or 'B1',
-            primary_domain=str(response.get('primary_domain') or 'general'),
-            secondary_domains=response.get('secondary_domains') or [],
-            register=response.get('register') or 'neutral',
-            synonyms=response.get('synonyms') or [],
-            antonyms=response.get('antonyms') or [],
-            collocations=response.get('collocations') or [],
-            grammar_patterns=response.get('grammar_patterns') or [],
-            usage_note=str(response.get('usage_note') or f'Auto-generated learner note for {lexeme.lemma}.'),
-            forms=response.get('forms') or _default_forms(lexeme.lemma, sense.part_of_speech),
-            confusable_words=response.get('confusable_words') or [],
+        return _build_enrichment_record(
+            lexeme=lexeme,
+            sense=sense,
+            response=response,
             model_name=str(effective_model_name),
             prompt_version=prompt_version,
             generation_run_id=generation_run_id,
-            confidence=response['confidence'],
             review_status=review_status,
             generated_at=generated_at,
         )
+
+    return provider
+
+
+def build_openai_compatible_node_word_enrichment_provider(
+    *,
+    settings: LexiconSettings,
+    model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    review_status: str = 'draft',
+    runner: NodeRunner | None = None,
+) -> WordEnrichmentProvider:
+    if not settings.llm_base_url:
+        raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible_node enrichment mode')
+    if not (model_name or settings.llm_model):
+        raise LexiconDependencyError('LEXICON_LLM_MODEL is required for openai_compatible_node enrichment mode')
+    if not settings.llm_api_key:
+        raise LexiconDependencyError('LEXICON_LLM_API_KEY is required for openai_compatible_node enrichment mode')
+
+    effective_model_name = model_name or settings.llm_model
+    effective_reasoning_effort = reasoning_effort or settings.llm_reasoning_effort
+    client = NodeOpenAICompatibleResponsesClient(
+        endpoint=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=str(effective_model_name),
+        runner=runner,
+        reasoning_effort=effective_reasoning_effort,
+    )
+
+    def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
+        ordered_senses = sorted(senses, key=lambda item: item.sense_order)
+        response = _validate_openai_compatible_word_payload(client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=ordered_senses)), senses=ordered_senses)
+        sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
+        return [
+            _build_enrichment_record(
+                lexeme=lexeme,
+                sense=sense_by_id[row['sense_id']],
+                response=row,
+                model_name=str(effective_model_name),
+                prompt_version=prompt_version,
+                generation_run_id=generation_run_id,
+                review_status=review_status,
+                generated_at=generated_at,
+            )
+            for row in response
+        ]
 
     return provider
 
@@ -541,30 +708,62 @@ def build_openai_compatible_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
         response = _validate_openai_compatible_payload(client.generate_json(build_enrichment_prompt(lexeme=lexeme, sense=sense)))
-        return EnrichmentRecord(
-            snapshot_id=sense.snapshot_id,
-            enrichment_id=make_enrichment_id(sense.sense_id, prompt_version),
-            sense_id=sense.sense_id,
-            definition=response['definition'],
-            examples=response['examples'],
-            cefr_level=response.get('cefr_level') or 'B1',
-            primary_domain=str(response.get('primary_domain') or 'general'),
-            secondary_domains=response.get('secondary_domains') or [],
-            register=response.get('register') or 'neutral',
-            synonyms=response.get('synonyms') or [],
-            antonyms=response.get('antonyms') or [],
-            collocations=response.get('collocations') or [],
-            grammar_patterns=response.get('grammar_patterns') or [],
-            usage_note=str(response.get('usage_note') or f'Auto-generated learner note for {lexeme.lemma}.'),
-            forms=response.get('forms') or _default_forms(lexeme.lemma, sense.part_of_speech),
-            confusable_words=response.get('confusable_words') or [],
+        return _build_enrichment_record(
+            lexeme=lexeme,
+            sense=sense,
+            response=response,
             model_name=str(effective_model_name),
             prompt_version=prompt_version,
             generation_run_id=generation_run_id,
-            confidence=response['confidence'],
             review_status=review_status,
             generated_at=generated_at,
         )
+
+    return provider
+
+
+def build_openai_compatible_word_enrichment_provider(
+    *,
+    settings: LexiconSettings,
+    model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    review_status: str = 'draft',
+    transport: Transport | None = None,
+) -> WordEnrichmentProvider:
+    if not settings.llm_base_url:
+        raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
+    if not (model_name or settings.llm_model):
+        raise LexiconDependencyError('LEXICON_LLM_MODEL is required for openai_compatible enrichment mode')
+    if not settings.llm_api_key:
+        raise LexiconDependencyError('LEXICON_LLM_API_KEY is required for openai_compatible enrichment mode')
+
+    effective_model_name = model_name or settings.llm_model
+    effective_reasoning_effort = reasoning_effort or settings.llm_reasoning_effort
+    client = OpenAICompatibleResponsesClient(
+        endpoint=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=str(effective_model_name),
+        transport=transport,
+        reasoning_effort=effective_reasoning_effort,
+    )
+
+    def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
+        ordered_senses = sorted(senses, key=lambda item: item.sense_order)
+        response = _validate_openai_compatible_word_payload(client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=ordered_senses)), senses=ordered_senses)
+        sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
+        return [
+            _build_enrichment_record(
+                lexeme=lexeme,
+                sense=sense_by_id[row['sense_id']],
+                response=row,
+                model_name=str(effective_model_name),
+                prompt_version=prompt_version,
+                generation_run_id=generation_run_id,
+                review_status=review_status,
+                generated_at=generated_at,
+            )
+            for row in response
+        ]
 
     return provider
 
@@ -618,6 +817,55 @@ def build_enrichment_provider(
     return build_placeholder_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
 
 
+def build_word_enrichment_provider(
+    *,
+    settings: LexiconSettings,
+    provider_mode: str = 'auto',
+    model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    review_status: str = 'draft',
+    transport: Transport | None = None,
+    runner: NodeRunner | None = None,
+) -> WordEnrichmentProvider:
+    if provider_mode not in _PROVIDER_MODES:
+        raise ValueError(f'Unsupported provider mode: {provider_mode}')
+    if provider_mode == 'placeholder':
+        return build_placeholder_word_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+    if provider_mode == 'openai_compatible':
+        return build_openai_compatible_word_enrichment_provider(
+            settings=settings,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            review_status=review_status,
+            transport=transport,
+        )
+    if provider_mode == 'openai_compatible_node':
+        return build_openai_compatible_node_word_enrichment_provider(
+            settings=settings,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            review_status=review_status,
+            runner=runner,
+        )
+    if settings.llm_base_url and settings.llm_model and settings.llm_api_key:
+        if settings.llm_transport == 'node':
+            return build_openai_compatible_node_word_enrichment_provider(
+                settings=settings,
+                model_name=model_name,
+                reasoning_effort=reasoning_effort,
+                review_status=review_status,
+                runner=runner,
+            )
+        return build_openai_compatible_word_enrichment_provider(
+            settings=settings,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            review_status=review_status,
+            transport=transport,
+        )
+    return build_placeholder_word_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+
+
 def read_snapshot_inputs(snapshot_dir: Path) -> tuple[list[LexemeRecord], list[SenseRecord]]:
     lexemes = [LexemeRecord(**row) for row in read_jsonl(snapshot_dir / 'lexemes.jsonl')]
     senses = [SenseRecord(**row) for row in read_jsonl(snapshot_dir / 'senses.jsonl')]
@@ -629,6 +877,7 @@ def enrich_snapshot(
     *,
     output_path: Path | None = None,
     provider: EnrichmentProvider | None = None,
+    word_provider: WordEnrichmentProvider | None = None,
     settings: LexiconSettings | None = None,
     model_name: str | None = None,
     generated_at: str | None = None,
@@ -638,36 +887,97 @@ def enrich_snapshot(
     provider_mode: str = 'auto',
     transport: Transport | None = None,
     reasoning_effort: str | None = None,
+    mode: str = 'per_sense',
+    max_concurrency: int = 1,
 ) -> list[EnrichmentRecord]:
+    if mode not in _ENRICHMENT_MODES:
+        raise ValueError(f'Unsupported enrichment mode: {mode}')
     effective_settings = settings or LexiconSettings.from_env()
     effective_generated_at = generated_at or _utc_now()
     effective_generation_run_id = generation_run_id or f'enrich-{effective_generated_at}'
     lexemes, senses = read_snapshot_inputs(snapshot_dir)
     lexemes_by_id = {lexeme.lexeme_id: lexeme for lexeme in lexemes}
-    enrichment_provider = provider or build_enrichment_provider(
-        settings=effective_settings,
-        provider_mode=provider_mode,
-        model_name=model_name,
-        reasoning_effort=reasoning_effort,
-        review_status=review_status,
-        transport=transport,
-    )
+    senses_by_lexeme: dict[str, list[SenseRecord]] = {}
+    for sense in senses:
+        senses_by_lexeme.setdefault(sense.lexeme_id, []).append(sense)
 
-    enrichments: list[EnrichmentRecord] = []
-    for sense in sorted(senses, key=lambda item: (item.lexeme_id, item.sense_order)):
-        lexeme = lexemes_by_id.get(sense.lexeme_id)
-        if lexeme is None:
-            continue
-        enrichments.append(
-            enrichment_provider(
+    if mode == 'per_sense':
+        enrichment_provider = provider or build_enrichment_provider(
+            settings=effective_settings,
+            provider_mode=provider_mode,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            review_status=review_status,
+            transport=transport,
+        )
+        enrichments: list[EnrichmentRecord] = []
+        for sense in sorted(senses, key=lambda item: (item.lexeme_id, item.sense_order)):
+            lexeme = lexemes_by_id.get(sense.lexeme_id)
+            if lexeme is None:
+                continue
+            enrichments.append(
+                enrichment_provider(
+                    lexeme=lexeme,
+                    sense=sense,
+                    settings=effective_settings,
+                    generated_at=effective_generated_at,
+                    generation_run_id=effective_generation_run_id,
+                    prompt_version=prompt_version,
+                )
+            )
+    else:
+        effective_max_concurrency = max(1, int(max_concurrency or 1))
+        word_enrichment_provider = word_provider or build_word_enrichment_provider(
+            settings=effective_settings,
+            provider_mode=provider_mode,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            review_status=review_status,
+            transport=transport,
+        )
+        ordered_lexemes = sorted(lexemes, key=lambda item: item.lemma)
+        ordered_sense_lists = {
+            lexeme.lexeme_id: sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
+            for lexeme in ordered_lexemes
+        }
+        failures: list[str] = []
+        per_lexeme_results: dict[str, list[EnrichmentRecord]] = {}
+
+        def run_word_job(lexeme: LexemeRecord) -> list[EnrichmentRecord]:
+            word_senses = ordered_sense_lists.get(lexeme.lexeme_id, [])
+            if not word_senses:
+                return []
+            return word_enrichment_provider(
                 lexeme=lexeme,
-                sense=sense,
+                senses=word_senses,
                 settings=effective_settings,
                 generated_at=effective_generated_at,
                 generation_run_id=effective_generation_run_id,
                 prompt_version=prompt_version,
             )
-        )
+
+        if effective_max_concurrency == 1:
+            for lexeme in ordered_lexemes:
+                try:
+                    per_lexeme_results[lexeme.lexeme_id] = run_word_job(lexeme)
+                except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
+                    failures.append(f'{lexeme.lemma}: {exc}')
+        else:
+            with ThreadPoolExecutor(max_workers=effective_max_concurrency) as executor:
+                future_map = {executor.submit(run_word_job, lexeme): lexeme for lexeme in ordered_lexemes}
+                for future in as_completed(future_map):
+                    lexeme = future_map[future]
+                    try:
+                        per_lexeme_results[lexeme.lexeme_id] = future.result()
+                    except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
+                        failures.append(f'{lexeme.lemma}: {exc}')
+
+        if failures:
+            raise RuntimeError('Per-word enrichment failed for ' + '; '.join(sorted(failures)))
+
+        enrichments = []
+        for lexeme in ordered_lexemes:
+            enrichments.extend(per_lexeme_results.get(lexeme.lexeme_id, []))
 
     destination = output_path or snapshot_dir / 'enrichments.jsonl'
     write_jsonl(destination, [record.to_dict() for record in enrichments])
@@ -679,6 +989,7 @@ def run_enrichment(
     *,
     output_path: Path | None = None,
     provider: EnrichmentProvider | None = None,
+    word_provider: WordEnrichmentProvider | None = None,
     settings: LexiconSettings | None = None,
     model_name: str | None = None,
     generated_at: str | None = None,
@@ -688,12 +999,16 @@ def run_enrichment(
     provider_mode: str = 'auto',
     transport: Transport | None = None,
     reasoning_effort: str | None = None,
+    mode: str = 'per_sense',
+    max_concurrency: int = 1,
 ) -> EnrichmentRunResult:
     destination = output_path or snapshot_dir / 'enrichments.jsonl'
+    lexemes, _ = read_snapshot_inputs(snapshot_dir)
     enrichments = enrich_snapshot(
         snapshot_dir,
         output_path=destination,
         provider=provider,
+        word_provider=word_provider,
         settings=settings,
         model_name=model_name,
         generated_at=generated_at,
@@ -703,5 +1018,7 @@ def run_enrichment(
         provider_mode=provider_mode,
         transport=transport,
         reasoning_effort=reasoning_effort,
+        mode=mode,
+        max_concurrency=max_concurrency,
     )
-    return EnrichmentRunResult(output_path=destination, enrichments=enrichments)
+    return EnrichmentRunResult(output_path=destination, enrichments=enrichments, lexeme_count=len(lexemes), mode=mode)

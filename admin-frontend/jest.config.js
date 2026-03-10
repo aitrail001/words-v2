@@ -11,7 +11,9 @@ const config = {
       },
     }],
   },
+  modulePathIgnorePatterns: ["<rootDir>/.next/"],
   testPathIgnorePatterns: ["<rootDir>/node_modules/", "<rootDir>/.next/"],
+  watchPathIgnorePatterns: ["<rootDir>/.next/"],
 };
 
 module.exports = config;

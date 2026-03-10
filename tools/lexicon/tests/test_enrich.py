@@ -1,6 +1,7 @@
 import json
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -9,6 +10,7 @@ from tools.lexicon.config import LexiconSettings
 from tools.lexicon.enrich import (
     OpenAICompatibleResponsesClient,
     build_enrichment_prompt,
+    build_word_enrichment_prompt,
     build_enrichment_provider,
     build_openai_compatible_enrichment_provider,
     _default_node_runner,
@@ -610,3 +612,225 @@ class EnrichSnapshotTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnrichPerWordModeTests(unittest.TestCase):
+    def _write_snapshot(self, snapshot_dir: Path) -> None:
+        (snapshot_dir / "lexemes.jsonl").write_text(
+            "\n".join([
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "language": "en",
+                    "wordfreq_rank": 5,
+                    "is_wordnet_backed": True,
+                    "source_refs": ["wordnet", "wordfreq"],
+                    "created_at": "2026-03-07T00:00:00Z",
+                }),
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "lexeme_id": "lx_play",
+                    "lemma": "play",
+                    "language": "en",
+                    "wordfreq_rank": 8,
+                    "is_wordnet_backed": True,
+                    "source_refs": ["wordnet", "wordfreq"],
+                    "created_at": "2026-03-07T00:00:00Z",
+                }),
+            ]) + "\n",
+            encoding="utf-8",
+        )
+        (snapshot_dir / "senses.jsonl").write_text(
+            "\n".join([
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "sense_id": "sn_lx_run_1",
+                    "lexeme_id": "lx_run",
+                    "wn_synset_id": "run.v.01",
+                    "part_of_speech": "verb",
+                    "canonical_gloss": "move fast by using your legs",
+                    "selection_reason": "common learner sense",
+                    "sense_order": 1,
+                    "is_high_polysemy": False,
+                    "created_at": "2026-03-07T00:00:00Z",
+                }),
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "sense_id": "sn_lx_run_2",
+                    "lexeme_id": "lx_run",
+                    "wn_synset_id": "run.n.01",
+                    "part_of_speech": "noun",
+                    "canonical_gloss": "a period of running",
+                    "selection_reason": "common learner sense",
+                    "sense_order": 2,
+                    "is_high_polysemy": False,
+                    "created_at": "2026-03-07T00:00:00Z",
+                }),
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "sense_id": "sn_lx_play_1",
+                    "lexeme_id": "lx_play",
+                    "wn_synset_id": "play.v.01",
+                    "part_of_speech": "verb",
+                    "canonical_gloss": "engage in activity for enjoyment",
+                    "selection_reason": "common learner sense",
+                    "sense_order": 1,
+                    "is_high_polysemy": False,
+                    "created_at": "2026-03-07T00:00:00Z",
+                }),
+            ]) + "\n",
+            encoding="utf-8",
+        )
+
+    def _response(self, sense_id: str, definition: str) -> dict:
+        return {
+            "sense_id": sense_id,
+            "definition": definition,
+            "examples": [{"sentence": f"Example for {sense_id}", "difficulty": "A1"}],
+            "cefr_level": "A1",
+            "primary_domain": "general",
+            "secondary_domains": [],
+            "register": "neutral",
+            "synonyms": [],
+            "antonyms": [],
+            "collocations": [],
+            "grammar_patterns": [],
+            "usage_note": "Helpful note.",
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "confusable_words": [],
+            "confidence": 0.9,
+        }
+
+    def test_build_word_enrichment_prompt_includes_all_selected_senses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=run_lexeme, senses=run_senses)
+
+            self.assertIn("sn_lx_run_1", prompt)
+            self.assertIn("sn_lx_run_2", prompt)
+            self.assertIn("do not invent or omit", prompt.lower())
+
+    def test_enrich_snapshot_per_word_mode_writes_existing_enrichments_jsonl_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                return [
+                    EnrichmentRecord(
+                        snapshot_id=sense.snapshot_id,
+                        enrichment_id=f"en_{sense.sense_id}_v1",
+                        sense_id=sense.sense_id,
+                        definition=f"def:{sense.sense_id}",
+                        examples=[{"sentence": f"{lexeme.lemma}:{sense.sense_id}", "difficulty": "A1"}],
+                        cefr_level="A1",
+                        primary_domain="general",
+                        secondary_domains=[],
+                        register="neutral",
+                        synonyms=[],
+                        antonyms=[],
+                        collocations=[],
+                        grammar_patterns=[],
+                        usage_note="note",
+                        forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        confusable_words=[],
+                        model_name="test-provider",
+                        prompt_version=prompt_version,
+                        generation_run_id=generation_run_id,
+                        confidence=0.9,
+                        review_status="draft",
+                        generated_at=generated_at,
+                    )
+                    for sense in senses
+                ]
+
+            records = enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2, generated_at="2026-03-07T00:00:00Z", generation_run_id="run-123")
+
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_play_1", "sn_lx_run_1", "sn_lx_run_2"])
+            payload = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(payload[0]["sense_id"], "sn_lx_play_1")
+            self.assertEqual(payload[-1]["sense_id"], "sn_lx_run_2")
+
+    def test_enrich_snapshot_per_word_mode_preserves_output_order_under_parallelism(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                if lexeme.lemma == "run":
+                    time.sleep(0.05)
+                return [
+                    EnrichmentRecord(
+                        snapshot_id=sense.snapshot_id,
+                        enrichment_id=f"en_{sense.sense_id}_v1",
+                        sense_id=sense.sense_id,
+                        definition=f"def:{sense.sense_id}",
+                        examples=[{"sentence": f"{lexeme.lemma}:{sense.sense_id}", "difficulty": "A1"}],
+                        cefr_level="A1",
+                        primary_domain="general",
+                        secondary_domains=[],
+                        register="neutral",
+                        synonyms=[],
+                        antonyms=[],
+                        collocations=[],
+                        grammar_patterns=[],
+                        usage_note="note",
+                        forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        confusable_words=[],
+                        model_name="test-provider",
+                        prompt_version=prompt_version,
+                        generation_run_id=generation_run_id,
+                        confidence=0.9,
+                        review_status="draft",
+                        generated_at=generated_at,
+                    )
+                    for sense in senses
+                ]
+
+            records = enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2)
+
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_play_1", "sn_lx_run_1", "sn_lx_run_2"])
+
+    def test_enrich_snapshot_per_word_mode_reports_failed_lexeme(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                if lexeme.lemma == "run":
+                    raise RuntimeError("gateway timeout")
+                return [
+                    EnrichmentRecord(
+                        snapshot_id=senses[0].snapshot_id,
+                        enrichment_id="en_ok",
+                        sense_id=senses[0].sense_id,
+                        definition="ok",
+                        examples=[{"sentence": "ok", "difficulty": "A1"}],
+                        cefr_level="A1",
+                        primary_domain="general",
+                        secondary_domains=[],
+                        register="neutral",
+                        synonyms=[],
+                        antonyms=[],
+                        collocations=[],
+                        grammar_patterns=[],
+                        usage_note="ok",
+                        forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        confusable_words=[],
+                        model_name="test-provider",
+                        prompt_version=prompt_version,
+                        generation_run_id=generation_run_id,
+                        confidence=0.9,
+                        review_status="draft",
+                        generated_at=generated_at,
+                    )
+                ]
+
+            with self.assertRaisesRegex(RuntimeError, "run: gateway timeout"):
+                enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2)

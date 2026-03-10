@@ -74,8 +74,8 @@ python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/s
 Enrich the learner-facing layer:
 
 ```bash
-python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
-python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --model gpt-5.4 --reasoning-effort low
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
 ```
 
 Validate the normalized snapshot plus enrichments:
@@ -88,6 +88,7 @@ Compile the final export:
 
 ```bash
 python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
+python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --decision-filter mode_c_safe --output data/lexicon/snapshots/demo/words.mode-c-safe.enriched.jsonl
 ```
 
 Run an import dry-run summary:
@@ -161,7 +162,8 @@ Interpretation:
 This stage is intentionally review-oriented:
 - `selection_decisions.jsonl` keeps the deterministic decision, risk score, candidate metadata, and rerank outcome together
 - `review_queue.jsonl` is the bounded list humans should actually inspect
-- future admin UI work should use staged review storage rather than raw JSONL inspection
+- the admin lexicon portal can now import staged decisions and show current selected senses, selection source, candidate gloss/definition, POS, and rank/reason hints for review
+- `compile-export --decisions ... --decision-filter mode_c_safe` is the first-class safe-export path for direct DB import of lexemes that are deterministic-only or auto-accepted and not still marked `review_required=true`
 
 ## 7. Import into the local DB
 
@@ -183,7 +185,7 @@ A single snapshot directory links together the pipeline stages:
 - `lexemes.jsonl` holds lemma-level records
 - `senses.jsonl` links back to lexemes by `lexeme_id`
 - `enrichments.jsonl` links to senses by `sense_id`
-- `selection_decisions.jsonl` stores deterministic selection, risk scoring, and rerank/review state for each lexeme
+- `selection_decisions.jsonl` stores deterministic selection, risk scoring, and rerank/review state for each lexeme, and can drive both admin review import and `compile-export --decision-filter mode_c_safe`
 - `review_queue.jsonl` stores only the lexemes still marked `review_required=true` after bounded rerank
 - `words.enriched.jsonl` is the compiled learner-facing export used by `import-db`, including sense-level enrichment provenance needed for local DB writeback
 

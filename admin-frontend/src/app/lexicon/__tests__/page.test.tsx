@@ -65,6 +65,8 @@ const reviewItem = {
   selection_risk_score: 9,
   deterministic_selected_wn_synset_ids: ["bank.n.01", "bank.v.01"],
   reranked_selected_wn_synset_ids: ["bank.n.01", "bank.n.02"],
+  selected_wn_synset_ids: ["bank.n.01", "bank.n.02"],
+  selected_source: "reranked",
   candidate_metadata: [
     {
       wn_synset_id: "bank.n.01",
@@ -72,6 +74,22 @@ const reviewItem = {
       canonical_label: "bank",
       canonical_gloss: "a financial institution",
       selection_score: 9.7,
+      selection_reason: "common concrete noun",
+    },
+  ],
+  candidate_entries: [
+    {
+      wn_synset_id: "bank.n.01",
+      canonical_label: "bank",
+      gloss: "a financial institution",
+      definition: "a financial institution",
+      part_of_speech: "noun",
+      rank_hint: 9.7,
+      reason_hint: "common concrete noun",
+      deterministic_selected: true,
+      reranked_selected: true,
+      review_override_selected: false,
+      selected: true,
     },
   ],
   auto_accepted: false,
@@ -90,6 +108,15 @@ const savedItem = {
   review_status: "approved",
   review_comment: "Looks good",
   review_override_wn_synset_ids: ["bank.n.01"],
+  selected_wn_synset_ids: ["bank.n.01"],
+  selected_source: "review_override",
+  candidate_entries: [
+    {
+      ...reviewItem.candidate_entries[0],
+      review_override_selected: true,
+      selected: true,
+    },
+  ],
 };
 
 const preview = {
@@ -194,6 +221,9 @@ describe("LexiconPage", () => {
 
     expect(screen.getByTestId("lexicon-batches-list")).toHaveTextContent("selection.jsonl");
     expect(screen.getByTestId("lexicon-item-detail-panel")).toHaveTextContent("bank");
+    expect(screen.getByTestId("lexicon-item-current-selection")).toHaveTextContent("bank.n.01");
+    expect(screen.getByTestId("lexicon-item-candidates")).toHaveTextContent("a financial institution");
+    expect(screen.getByTestId("lexicon-item-candidates")).toHaveTextContent("common concrete noun");
   });
 
   it("imports a staged review batch", async () => {

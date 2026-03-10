@@ -42,6 +42,7 @@ const parseOverrideIds = (value: string): string[] | null => {
 
 const selectedIdsForItem = (item: LexiconReviewItem | null): string[] => {
   if (!item) return [];
+  if (item.selected_wn_synset_ids?.length) return item.selected_wn_synset_ids;
   return item.review_override_wn_synset_ids ?? item.reranked_selected_wn_synset_ids ?? item.deterministic_selected_wn_synset_ids;
 };
 
@@ -444,11 +445,66 @@ export default function LexiconPage() {
                         <div className="text-sm text-gray-500">generated {formatDateTime(selectedItem.created_at)}</div>
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
-                        <div className="rounded border border-gray-200 p-3 text-sm"><p className="font-medium text-gray-900">Current selected synset ids</p><ul className="mt-2 space-y-1 text-gray-700">{selectedSynsetIds.map((id) => <li key={id}>{id}</li>)}{selectedSynsetIds.length === 0 ? <li>None</li> : null}</ul></div>
-                        <div className="rounded border border-gray-200 p-3 text-sm"><p className="font-medium text-gray-900">Deterministic vs reranked</p><p className="mt-2 text-gray-700">Deterministic: {selectedItem.deterministic_selected_wn_synset_ids.join(", ") || "—"}</p><p className="mt-1 text-gray-700">Reranked: {selectedItem.reranked_selected_wn_synset_ids?.join(", ") || "—"}</p></div>
+                        <div className="rounded border border-gray-200 p-3 text-sm" data-testid="lexicon-item-current-selection">
+                          <p className="font-medium text-gray-900">Current selected senses</p>
+                          <p className="mt-1 text-xs text-gray-500">source: {selectedItem.selected_source ?? "—"}</p>
+                          <ul className="mt-2 space-y-1 text-gray-700">
+                            {selectedSynsetIds.map((id) => <li key={id}>{id}</li>)}
+                            {selectedSynsetIds.length === 0 ? <li>None</li> : null}
+                          </ul>
+                        </div>
+                        <div className="rounded border border-gray-200 p-3 text-sm" data-testid="lexicon-item-selection-sources">
+                          <p className="font-medium text-gray-900">Selection sources</p>
+                          <p className="mt-2 text-gray-700">Deterministic: {selectedItem.deterministic_selected_wn_synset_ids.join(", ") || "—"}</p>
+                          <p className="mt-1 text-gray-700">Reranked: {selectedItem.reranked_selected_wn_synset_ids?.join(", ") || "—"}</p>
+                          <p className="mt-1 text-gray-700">Override: {selectedItem.review_override_wn_synset_ids?.join(", ") || "—"}</p>
+                        </div>
                       </div>
-                      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                        <div className="space-y-3"><p className="text-sm font-medium text-gray-900">Candidate metadata</p><div className="max-h-[420px] space-y-2 overflow-y-auto pr-1" data-testid="lexicon-item-candidates">{selectedItem.candidate_metadata.map((candidate, index) => { const synsetId = String(candidate.wn_synset_id ?? `candidate-${index}`); const score = candidate.selection_score ?? candidate.score; const isSelected = selectedSynsetIds.includes(synsetId); return <div key={`${synsetId}-${index}`} className={`rounded border p-3 text-sm ${isSelected ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white"}`}><div className="flex items-center justify-between gap-2"><p className="font-medium">{candidate.canonical_label ?? candidate.label ?? synsetId}</p><span className="text-xs text-gray-500">{candidate.part_of_speech ?? "—"}</span></div><p className="mt-1 break-all text-xs text-gray-500">{synsetId}</p><p className="mt-1 text-gray-700">{candidate.canonical_gloss ?? "No gloss available."}</p><p className="mt-1 text-xs text-gray-500">lemma_count: {candidate.lemma_count ?? "—"} · score: {score ?? "—"}</p></div>; })}</div></div>
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                        <div className="space-y-4">
+                          <section className="rounded border border-gray-200 p-4" data-testid="lexicon-item-candidates">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-gray-900">Candidate senses</p>
+                              <span className="text-xs text-gray-500">{selectedItem.candidate_entries?.length || selectedItem.candidate_metadata.length} candidates</span>
+                            </div>
+                            <div className="mt-3 max-h-[520px] space-y-3 overflow-y-auto pr-1">
+                              {(selectedItem.candidate_entries?.length ? selectedItem.candidate_entries : selectedItem.candidate_metadata.map((candidate, index) => ({
+                                wn_synset_id: String(candidate.wn_synset_id ?? `candidate-${index}`),
+                                canonical_label: String(candidate.canonical_label ?? candidate.label ?? "").trim() || null,
+                                gloss: String(candidate.canonical_gloss ?? "").trim() || null,
+                                definition: String(candidate.canonical_gloss ?? "").trim() || null,
+                                part_of_speech: String(candidate.part_of_speech ?? "").trim() || null,
+                                rank_hint: typeof candidate.selection_score === "number" ? candidate.selection_score : (typeof candidate.score === "number" ? candidate.score : null),
+                                reason_hint: null,
+                                deterministic_selected: selectedItem.deterministic_selected_wn_synset_ids.includes(String(candidate.wn_synset_id ?? "")),
+                                reranked_selected: selectedItem.reranked_selected_wn_synset_ids?.includes(String(candidate.wn_synset_id ?? "")) ?? false,
+                                review_override_selected: selectedItem.review_override_wn_synset_ids?.includes(String(candidate.wn_synset_id ?? "")) ?? false,
+                                selected: selectedSynsetIds.includes(String(candidate.wn_synset_id ?? "")),
+                              }))).map((candidate) => (
+                                <article key={candidate.wn_synset_id} className={`rounded border p-4 text-sm ${candidate.selected ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white"}`}>
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <div>
+                                      <p className="font-medium text-gray-900">{candidate.canonical_label ?? candidate.wn_synset_id}</p>
+                                      <p className="mt-1 break-all text-xs text-gray-500">{candidate.wn_synset_id}</p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {candidate.part_of_speech ? <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{candidate.part_of_speech}</span> : null}
+                                      {candidate.selected ? <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">selected</span> : null}
+                                      {candidate.deterministic_selected ? <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">deterministic</span> : null}
+                                      {candidate.reranked_selected ? <span className="rounded bg-violet-100 px-2 py-0.5 text-xs text-violet-700">reranked</span> : null}
+                                      {candidate.review_override_selected ? <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">override</span> : null}
+                                    </div>
+                                  </div>
+                                  <p className="mt-2 text-gray-700">{candidate.definition ?? candidate.gloss ?? "No gloss available."}</p>
+                                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                                    <span>rank: {candidate.rank_hint ?? "—"}</span>
+                                    <span>reason: {candidate.reason_hint ?? "—"}</span>
+                                  </div>
+                                </article>
+                              ))}
+                            </div>
+                          </section>
+                        </div>
                         <div className="space-y-3 rounded border border-gray-200 bg-gray-50 p-4">
                           <p className="text-sm font-medium text-gray-900">Review decision</p>
                           <label className="text-sm font-medium text-gray-700">Review status<select value={editorStatus} onChange={(event) => setEditorStatus(event.target.value as LexiconReviewStatus)} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2" data-testid="lexicon-item-review-status">{REVIEW_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>

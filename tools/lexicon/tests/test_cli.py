@@ -93,6 +93,20 @@ class CliTests(unittest.TestCase):
             mocked_enrich.assert_called_once()
             self.assertEqual(mocked_enrich.call_args.kwargs["provider_mode"], "openai_compatible")
 
+
+    def test_enrich_command_passes_mode_and_concurrency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()], lexeme_count=2, mode="per_word")) as mocked_enrich:
+                code, stdout, _ = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir), "--mode", "per_word", "--max-concurrency", "8"] )
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["mode"], "per_word")
+            self.assertEqual(payload["lexeme_count"], 2)
+            self.assertEqual(mocked_enrich.call_args.kwargs["mode"], "per_word")
+            self.assertEqual(mocked_enrich.call_args.kwargs["max_concurrency"], 8)
+
     def test_enrich_command_reports_provider_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -922,3 +936,27 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_compile_export_command_passes_decision_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir()
+            decisions_path = Path(tmpdir) / "selection_decisions.jsonl"
+            decisions_path.write_text("", encoding="utf-8")
+            output_path = Path(tmpdir) / "words.enriched.jsonl"
+
+            with patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]) as mocked_compile:
+                code, stdout, _ = self.run_cli([
+                    "compile-export",
+                    "--snapshot-dir", str(snapshot_dir),
+                    "--output", str(output_path),
+                    "--decisions", str(decisions_path),
+                    "--decision-filter", "mode_c_safe",
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["decision_filter"], "mode_c_safe")
+            self.assertEqual(payload["decisions"], str(decisions_path))
+            self.assertEqual(mocked_compile.call_args.kwargs["decision_filter"], "mode_c_safe")
+            self.assertEqual(mocked_compile.call_args.kwargs["decisions_path"], decisions_path)

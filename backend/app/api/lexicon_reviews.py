@@ -55,6 +55,20 @@ class LexiconReviewBatchResponse(BaseModel):
     completed_at: datetime | None
 
 
+class LexiconReviewCandidateEntryResponse(BaseModel):
+    wn_synset_id: str
+    canonical_label: str | None
+    gloss: str | None
+    definition: str | None
+    part_of_speech: str | None
+    rank_hint: float | None
+    reason_hint: str | None
+    deterministic_selected: bool
+    reranked_selected: bool
+    review_override_selected: bool
+    selected: bool
+
+
 class LexiconReviewItemResponse(BaseModel):
     id: str
     batch_id: str
@@ -66,7 +80,10 @@ class LexiconReviewItemResponse(BaseModel):
     selection_risk_score: int
     deterministic_selected_wn_synset_ids: list[str]
     reranked_selected_wn_synset_ids: list[str] | None
+    selected_wn_synset_ids: list[str]
+    selected_source: str
     candidate_metadata: list[dict[str, Any]]
+    candidate_entries: list[LexiconReviewCandidateEntryResponse]
     auto_accepted: bool
     review_required: bool
     review_status: str
@@ -137,6 +154,55 @@ def _selected_publish_ids(item: LexiconReviewItem) -> list[str]:
 
 def _candidate_metadata_by_id(item: LexiconReviewItem) -> dict[str, dict[str, Any]]:
     return {str(entry.get("wn_synset_id") or ""): entry for entry in item.candidate_metadata or []}
+
+
+def _selected_item_ids(item: LexiconReviewItem) -> tuple[list[str], str]:
+    if item.review_override_wn_synset_ids:
+        return [str(value) for value in item.review_override_wn_synset_ids], 'review_override'
+    if item.reranked_selected_wn_synset_ids:
+        return [str(value) for value in item.reranked_selected_wn_synset_ids], 'reranked'
+    if item.deterministic_selected_wn_synset_ids:
+        return [str(value) for value in item.deterministic_selected_wn_synset_ids], 'deterministic'
+    return [], 'none'
+
+
+def _candidate_entries(item: LexiconReviewItem) -> list[LexiconReviewCandidateEntryResponse]:
+    deterministic_ids = {str(value) for value in item.deterministic_selected_wn_synset_ids or []}
+    reranked_ids = {str(value) for value in item.reranked_selected_wn_synset_ids or []}
+    review_override_ids = {str(value) for value in item.review_override_wn_synset_ids or []}
+    selected_ids, _ = _selected_item_ids(item)
+    selected_set = set(selected_ids)
+    entries: list[LexiconReviewCandidateEntryResponse] = []
+    for raw in item.candidate_metadata or []:
+        if not isinstance(raw, dict):
+            continue
+        wn_synset_id = str(raw.get('wn_synset_id') or '').strip()
+        if not wn_synset_id:
+            continue
+        rank_hint = raw.get('selection_score')
+        if rank_hint is None:
+            rank_hint = raw.get('rank_hint')
+        try:
+            rank_value = float(rank_hint) if rank_hint is not None else None
+        except (TypeError, ValueError):
+            rank_value = None
+        reason_hint = raw.get('selection_reason')
+        if reason_hint is None:
+            reason_hint = raw.get('reason_hint')
+        entries.append(LexiconReviewCandidateEntryResponse(
+            wn_synset_id=wn_synset_id,
+            canonical_label=str(raw.get('canonical_label') or '').strip() or None,
+            gloss=str(raw.get('canonical_gloss') or '').strip() or None,
+            definition=str(raw.get('definition') or raw.get('canonical_gloss') or '').strip() or None,
+            part_of_speech=str(raw.get('part_of_speech') or '').strip() or None,
+            rank_hint=rank_value,
+            reason_hint=str(reason_hint or '').strip() or None,
+            deterministic_selected=wn_synset_id in deterministic_ids,
+            reranked_selected=wn_synset_id in reranked_ids,
+            review_override_selected=wn_synset_id in review_override_ids,
+            selected=wn_synset_id in selected_set,
+        ))
+    return entries
 
 
 def _resolve_publish_meanings(item: LexiconReviewItem) -> list[dict[str, Any]]:
@@ -239,6 +305,7 @@ def _to_batch_response(batch: LexiconReviewBatch) -> LexiconReviewBatchResponse:
 
 
 def _to_item_response(item: LexiconReviewItem) -> LexiconReviewItemResponse:
+    selected_ids, selected_source = _selected_item_ids(item)
     return LexiconReviewItemResponse(
         id=str(item.id),
         batch_id=str(item.batch_id),
@@ -250,7 +317,10 @@ def _to_item_response(item: LexiconReviewItem) -> LexiconReviewItemResponse:
         selection_risk_score=item.selection_risk_score,
         deterministic_selected_wn_synset_ids=item.deterministic_selected_wn_synset_ids,
         reranked_selected_wn_synset_ids=item.reranked_selected_wn_synset_ids,
+        selected_wn_synset_ids=selected_ids,
+        selected_source=selected_source,
         candidate_metadata=item.candidate_metadata,
+        candidate_entries=_candidate_entries(item),
         auto_accepted=item.auto_accepted,
         review_required=item.review_required,
         review_status=item.review_status,
