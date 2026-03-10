@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Security
     bcrypt_rounds: int = 12
 
+    # Local dev bootstrap
+    dev_test_users_enabled: bool = False
+
     # Rate limiting
     rate_limit_per_minute: int = 60
 

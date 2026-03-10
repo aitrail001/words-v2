@@ -3,6 +3,7 @@ from time import perf_counter
 from uuid import uuid4
 
 import structlog
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -20,6 +21,8 @@ from app.api.words import router as words_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
 from app.core.redis import close_redis, init_redis
+from app.core.database import async_session
+from app.services.dev_test_users import ensure_dev_test_users
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -29,6 +32,7 @@ logger = get_logger(__name__)
 async def lifespan(application: FastAPI):
     setup_logging()
     init_redis(settings.redis_url)
+    application.state.dev_test_users_seeded = False
     yield
     await close_redis()
 
@@ -47,6 +51,17 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.middleware("http")
 async def request_observability_middleware(request: Request, call_next):
+    if (
+        settings.environment == "development"
+        and settings.dev_test_users_enabled
+        and not getattr(app.state, "dev_test_users_seeded", False)
+    ):
+        try:
+            await ensure_dev_test_users(async_session)
+            app.state.dev_test_users_seeded = True
+        except SQLAlchemyError:
+            logger.warning("dev_test_users_seed_skipped", reason="database_not_ready")
+
     request_id = request.headers.get("x-request-id") or str(uuid4())
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(request_id=request_id)
