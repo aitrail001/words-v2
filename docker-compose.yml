@@ -49,6 +49,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED:-true}
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads

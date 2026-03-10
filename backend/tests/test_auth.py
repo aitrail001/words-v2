@@ -298,3 +298,69 @@ class TestRefreshAndLogout:
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert me_after_logout.status_code == 401
+
+
+class TestDevTestUserBootstrap:
+    @pytest.mark.asyncio
+    async def test_middleware_seeds_dev_test_users_when_enabled(self, client, mock_db, mock_redis, monkeypatch):
+        from app import main as app_main
+
+        seeded = AsyncMock()
+        monkeypatch.setattr(app_main, "ensure_dev_test_users", seeded)
+        monkeypatch.setattr(app_main.settings, "environment", "development")
+        monkeypatch.setattr(app_main.settings, "dev_test_users_enabled", True)
+        app.state.dev_test_users_seeded = False
+
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = make_user(email="me@example.com")
+        mock_db.execute.return_value = result
+        token = create_access_token(subject=str(result.scalar_one_or_none.return_value.id))
+
+        response = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 200
+        seeded.assert_awaited_once_with(app_main.async_session)
+        assert app.state.dev_test_users_seeded is True
+
+    @pytest.mark.asyncio
+    async def test_middleware_skips_dev_test_users_when_disabled(self, client, mock_db, monkeypatch):
+        from app import main as app_main
+
+        seeded = AsyncMock()
+        monkeypatch.setattr(app_main, "ensure_dev_test_users", seeded)
+        monkeypatch.setattr(app_main.settings, "environment", "development")
+        monkeypatch.setattr(app_main.settings, "dev_test_users_enabled", False)
+        app.state.dev_test_users_seeded = False
+
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = make_user(email="me@example.com")
+        mock_db.execute.return_value = result
+        token = create_access_token(subject=str(result.scalar_one_or_none.return_value.id))
+
+        response = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 200
+        seeded.assert_not_awaited()
+
+
+    @pytest.mark.asyncio
+    async def test_middleware_tolerates_database_not_ready_for_dev_test_users(self, client, mock_db, monkeypatch):
+        from app import main as app_main
+        from sqlalchemy.exc import ProgrammingError
+
+        seeded = AsyncMock(side_effect=ProgrammingError("stmt", {}, Exception("missing users table")))
+        monkeypatch.setattr(app_main, "ensure_dev_test_users", seeded)
+        monkeypatch.setattr(app_main.settings, "environment", "development")
+        monkeypatch.setattr(app_main.settings, "dev_test_users_enabled", True)
+        app.state.dev_test_users_seeded = False
+
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = make_user(email="me@example.com")
+        mock_db.execute.return_value = result
+        token = create_access_token(subject=str(result.scalar_one_or_none.return_value.id))
+
+        response = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+        assert response.status_code == 200
+        seeded.assert_awaited_once_with(app_main.async_session)
+        assert app.state.dev_test_users_seeded is False
