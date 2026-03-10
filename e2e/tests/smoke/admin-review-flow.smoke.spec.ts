@@ -57,6 +57,8 @@ const buildSelectionDecisionRow = (runId: string, lemma: string) => ({
       canonical_label: "financial institution",
       canonical_gloss: "a financial institution that accepts deposits",
       part_of_speech: "noun",
+      selection_reason: "common concrete noun",
+      selection_score: 9.7,
     },
   ],
   review_required: true,
@@ -109,6 +111,12 @@ test("@smoke admin can import, approve, preview, and publish a staged review ite
   expect(items).toHaveLength(1);
   expect(items[0].lemma).toBe(lemma);
   expect(items[0].review_status).toBe("pending");
+
+  await page.goto(`${adminUrl}/lexicon`);
+  await expect(page.getByTestId("lexicon-item-detail-panel")).toContainText(lemma);
+  await expect(page.getByTestId("lexicon-item-current-selection")).toContainText("bank.n.01");
+  await expect(page.getByTestId("lexicon-item-candidates")).toContainText("a financial institution that accepts deposits");
+  await expect(page.getByTestId("lexicon-item-candidates")).toContainText("common concrete noun");
 
   const approveResponse = await request.patch(`${apiUrl}/lexicon-reviews/items/${items[0].id}`, {
     headers: authHeaders(user.token),

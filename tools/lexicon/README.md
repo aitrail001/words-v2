@@ -11,6 +11,7 @@ Current scope:
 - `python3 -m tools.lexicon.cli build-base ...` builds a bounded normalized base summary from seed words
 - `python3 -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ...` generates learner-facing `enrichments.jsonl` for an existing snapshot
+- `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --max-concurrency ...` enriches one lexeme per LLM call while preserving the existing sense-level output artifact
 - `python3 -m tools.lexicon.cli rerank-senses --snapshot-dir ...` writes grounded LLM rerank decisions for existing snapshots
 - `python3 -m tools.lexicon.cli compare-selection --snapshot-dir ... --rerank-file ...` compares deterministic selection against reranked selection
 - `python3 -m tools.lexicon.cli benchmark-selection --output-dir ...` runs built-in tuning/holdout benchmark snapshots with optional rerank comparisons
@@ -19,6 +20,7 @@ Current scope:
 - `python3 -m tools.lexicon.cli validate --snapshot-dir ...` validates normalized snapshot JSONL files
 - `python3 -m tools.lexicon.cli validate --compiled-input ...` validates compiled learner-facing JSONL rows (`--compiled-path` remains an alias)
 - `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --output ...` compiles normalized snapshot files into `words.enriched.jsonl`, preserving sense-level enrichment provenance needed for DB writeback
+- `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --decisions ... --decision-filter mode_c_safe --output ...` compiles only deterministic-safe or auto-accepted lexemes from `selection_decisions.jsonl`
 - `python3 -m tools.lexicon.cli import-db --input ... --dry-run` loads compiled rows and prints a local-admin import summary, including learner-facing example/relation and enrichment provenance counts
 - `python3 -m tools.lexicon.cli import-db --input ... --source-type ... --source-reference ... --language ...` runs the local import path against the configured DB, writing `words`, `meanings`, `meaning_examples`, `word_relations`, and enrichment job/run metadata
 
@@ -59,10 +61,11 @@ Recommended offline flow:
 
 ```bash
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
-python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto
-python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --model gpt-5.4 --reasoning-effort low
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
 python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
 python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
+python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --decision-filter mode_c_safe --output data/lexicon/snapshots/demo/words.mode-c-safe.enriched.jsonl
 python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
 python3 -m tools.lexicon.cli rerank-senses --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --candidate-source candidates --candidate-limit 8
 python3 -m tools.lexicon.cli compare-selection --snapshot-dir data/lexicon/snapshots/demo --rerank-file data/lexicon/snapshots/demo/sense_reranks.jsonl
@@ -72,6 +75,10 @@ python3 -m tools.lexicon.cli prepare-review --snapshot-dir data/lexicon/snapshot
 ```
 
 This separation keeps lexical base generation, learner-facing enrichment, validation, compilation, and DB import independently rerunnable.
+
+For staged review runs, `selection_decisions.jsonl` can now feed two downstream paths:
+- import into the admin review portal for human review and overrides
+- filtered `compile-export --decision-filter mode_c_safe` runs for direct import of safe lexemes only
 
 ## Usage
 

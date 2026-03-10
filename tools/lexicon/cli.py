@@ -74,6 +74,8 @@ def _enrich_command(args: argparse.Namespace) -> int:
             provider_mode=args.provider_mode,
             model_name=args.model,
             reasoning_effort=args.reasoning_effort,
+            mode=args.mode,
+            max_concurrency=args.max_concurrency,
         )
     except (LexiconDependencyError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
@@ -82,6 +84,8 @@ def _enrich_command(args: argparse.Namespace) -> int:
         'command': 'enrich',
         'snapshot_dir': str(Path(args.snapshot_dir)),
         'output': str(result.output_path),
+        'mode': result.mode,
+        'lexeme_count': result.lexeme_count,
         'enrichment_count': len(result.enrichments),
     }
     print(json.dumps(payload))
@@ -241,12 +245,21 @@ def _validate_command(args: argparse.Namespace) -> int:
 
 
 def _compile_export_command(args: argparse.Namespace) -> int:
-    compiled = compile_snapshot(Path(args.snapshot_dir), Path(args.output))
+    compiled = compile_snapshot(
+        Path(args.snapshot_dir),
+        Path(args.output),
+        decisions_path=Path(args.decisions) if args.decisions else None,
+        decision_filter=args.decision_filter,
+    )
     payload = {
         'command': 'compile-export',
         'compiled_count': len(compiled),
         'output': str(Path(args.output)),
     }
+    if args.decision_filter:
+        payload['decision_filter'] = args.decision_filter
+    if args.decisions:
+        payload['decisions'] = str(Path(args.decisions))
     print(json.dumps(payload))
     return 0
 
@@ -371,6 +384,8 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='enrichment provider mode')
     enrich.add_argument('--model', help='optional model override for this enrichment run')
     enrich.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for real endpoint runs')
+    enrich.add_argument('--mode', choices=['per_sense', 'per_word'], default='per_sense', help='enrichment execution mode')
+    enrich.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel lexeme jobs for per_word enrichment mode')
     enrich.set_defaults(handler=_enrich_command)
 
     smoke_openai = subparsers.add_parser('smoke-openai-compatible', help='run a tiny real OpenAI-compatible smoke flow locally')
@@ -441,6 +456,8 @@ def build_parser() -> argparse.ArgumentParser:
     compile_export = subparsers.add_parser('compile-export', help='compile normalized snapshot records into learner JSONL')
     compile_export.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')
     compile_export.add_argument('--output', required=True, help='path to write compiled learner JSONL output')
+    compile_export.add_argument('--decisions', help='optional selection_decisions.jsonl input for filtered compile runs')
+    compile_export.add_argument('--decision-filter', choices=['mode_c_safe'], help='optional compile filter preset based on selection decisions')
     compile_export.set_defaults(handler=_compile_export_command)
 
     import_db = subparsers.add_parser('import-db', help='load compiled learner JSONL for local DB import workflows')

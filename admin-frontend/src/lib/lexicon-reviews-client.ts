@@ -32,6 +32,20 @@ export type LexiconCandidateMetadata = Record<string, unknown> & {
   flags?: string[];
 };
 
+export type LexiconReviewCandidateEntry = {
+  wn_synset_id: string;
+  canonical_label: string | null;
+  gloss: string | null;
+  definition: string | null;
+  part_of_speech: string | null;
+  rank_hint: number | null;
+  reason_hint: string | null;
+  deterministic_selected: boolean;
+  reranked_selected: boolean;
+  review_override_selected: boolean;
+  selected: boolean;
+};
+
 export type LexiconReviewItem = {
   id: string;
   batch_id: string;
@@ -43,7 +57,10 @@ export type LexiconReviewItem = {
   selection_risk_score: number;
   deterministic_selected_wn_synset_ids: string[];
   reranked_selected_wn_synset_ids: string[] | null;
+  selected_wn_synset_ids: string[];
+  selected_source: string;
   candidate_metadata: LexiconCandidateMetadata[];
+  candidate_entries: LexiconReviewCandidateEntry[];
   auto_accepted: boolean;
   review_required: boolean;
   review_status: LexiconReviewStatus;
