@@ -442,6 +442,93 @@ class TestLexiconReviewBatchReadApi:
         assert data[0]["candidate_entries"][0]["definition"] == "a place that keeps money"
 
 
+    @pytest.mark.asyncio
+    async def test_list_batch_items_surfaces_fallback_reason_rank_and_pos_fields(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(user_id)
+        item = make_item(
+            batch.id,
+            review_status="pending",
+            review_required=True,
+            candidate_metadata=[
+                {
+                    "wn_synset_id": "bank.n.01",
+                    "label": "bank",
+                    "gloss": "a place that keeps money",
+                    "pos": "noun",
+                    "candidate_rank": 4,
+                    "rerank_reason": "preferred for learner familiarity",
+                }
+            ],
+            deterministic_selected_wn_synset_ids=["bank.n.01"],
+            reranked_selected_wn_synset_ids=None,
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        items_result = MagicMock()
+        items_result.scalars.return_value.all.return_value = [item]
+        mock_db.execute.side_effect = [user_result, batch_result, items_result]
+
+        response = await client.get(
+            f"/api/lexicon-reviews/batches/{batch.id}/items",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["candidate_entries"][0]["part_of_speech"] == "noun"
+        assert data[0]["candidate_entries"][0]["rank_hint"] == 4
+        assert data[0]["candidate_entries"][0]["reason_hint"] == "preferred for learner familiarity"
+
+    @pytest.mark.asyncio
+    async def test_patch_item_review_decision_includes_override_entries_even_without_candidate_metadata(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(user_id)
+        item = make_item(
+            batch.id,
+            candidate_metadata=[
+                {
+                    "wn_synset_id": "bank.n.01",
+                    "canonical_label": "bank",
+                    "canonical_gloss": "a financial institution",
+                    "part_of_speech": "noun",
+                }
+            ],
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        item_result = MagicMock()
+        item_result.scalar_one_or_none.return_value = item
+        mock_db.execute.side_effect = [user_result, item_result]
+
+        response = await client.patch(
+            f"/api/lexicon-reviews/items/{item.id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "review_status": "approved",
+                "review_comment": "Keep missing selected synset visible",
+                "review_override_wn_synset_ids": ["bank.n.01", "bank.v.01"],
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        candidate_ids = [entry["wn_synset_id"] for entry in data["candidate_entries"]]
+        assert candidate_ids == ["bank.n.01", "bank.v.01"]
+        assert data["candidate_entries"][1]["selected"] is True
+        assert data["candidate_entries"][1]["review_override_selected"] is True
+        assert data["candidate_entries"][1]["canonical_label"] is None
+
+
+
 class TestLexiconReviewItemUpdateApi:
     @pytest.mark.asyncio
     async def test_patch_item_review_decision(self, client, mock_db):

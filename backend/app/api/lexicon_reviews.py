@@ -145,6 +145,22 @@ def _meaning_source_reference(batch_id: uuid.UUID, lexeme_id: str, order_index: 
     return f"{_publish_source_reference(batch_id)}:{lexeme_id}:{order_index}"
 
 
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None or value == '' or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _selected_publish_ids(item: LexiconReviewItem) -> list[str]:
     for candidate in (item.review_override_wn_synset_ids, item.reranked_selected_wn_synset_ids, item.deterministic_selected_wn_synset_ids):
         if candidate:
@@ -153,21 +169,31 @@ def _selected_publish_ids(item: LexiconReviewItem) -> list[str]:
 
 
 def _candidate_metadata_by_id(item: LexiconReviewItem) -> dict[str, dict[str, Any]]:
-    return {str(entry.get("wn_synset_id") or ""): entry for entry in item.candidate_metadata or []}
-
-
+    metadata_by_id: dict[str, dict[str, Any]] = {}
+    for raw in item.candidate_metadata or []:
+        if not isinstance(raw, dict):
+            continue
+        synset_id = _string_or_none(raw.get("wn_synset_id"))
+        if synset_id is None or synset_id in metadata_by_id:
+            continue
+        metadata_by_id[synset_id] = raw
+    return metadata_by_id
 
 
 def _candidate_label(metadata: dict[str, Any]) -> str | None:
-    return str(metadata.get("canonical_label") or metadata.get("label") or "").strip() or None
+    return _string_or_none(metadata.get("canonical_label") or metadata.get("label"))
 
 
 def _candidate_gloss(metadata: dict[str, Any]) -> str | None:
-    return str(metadata.get("canonical_gloss") or metadata.get("gloss") or metadata.get("definition") or "").strip() or None
+    return _string_or_none(metadata.get("canonical_gloss") or metadata.get("gloss") or metadata.get("definition"))
 
 
 def _candidate_definition(metadata: dict[str, Any]) -> str | None:
-    return str(metadata.get("definition") or metadata.get("canonical_gloss") or metadata.get("gloss") or "").strip() or None
+    return _string_or_none(metadata.get("definition") or metadata.get("canonical_gloss") or metadata.get("gloss"))
+
+
+def _candidate_part_of_speech(metadata: dict[str, Any]) -> str | None:
+    return _string_or_none(metadata.get("part_of_speech") or metadata.get("pos"))
 
 
 def _selected_item_ids(item: LexiconReviewItem) -> tuple[list[str], str]:
@@ -180,41 +206,54 @@ def _selected_item_ids(item: LexiconReviewItem) -> tuple[list[str], str]:
     return [], 'none'
 
 
+def _candidate_rank_hint(metadata: dict[str, Any]) -> float | None:
+    for key in ('selection_score', 'rank_hint', 'rerank_rank', 'candidate_rank', 'selection_rank', 'rank', 'score'):
+        value = _float_or_none(metadata.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _candidate_reason_hint(metadata: dict[str, Any]) -> str | None:
+    for key in ('reason_hint', 'selection_reason', 'rerank_reason', 'reason', 'risk_hint', 'note'):
+        value = _string_or_none(metadata.get(key))
+        if value is not None:
+            return value
+    return None
+
+
 def _candidate_entries(item: LexiconReviewItem) -> list[LexiconReviewCandidateEntryResponse]:
-    deterministic_ids = {str(value) for value in item.deterministic_selected_wn_synset_ids or []}
-    reranked_ids = {str(value) for value in item.reranked_selected_wn_synset_ids or []}
-    review_override_ids = {str(value) for value in item.review_override_wn_synset_ids or []}
+    metadata_by_id = _candidate_metadata_by_id(item)
     selected_ids, _ = _selected_item_ids(item)
+    deterministic_ids = [str(value) for value in item.deterministic_selected_wn_synset_ids or []]
+    reranked_ids = [str(value) for value in item.reranked_selected_wn_synset_ids or []]
+    review_override_ids = [str(value) for value in item.review_override_wn_synset_ids or []]
+
+    ordered_ids: list[str] = []
+    for synset_id in [*metadata_by_id.keys(), *selected_ids, *deterministic_ids, *reranked_ids, *review_override_ids]:
+        if synset_id and synset_id not in ordered_ids:
+            ordered_ids.append(synset_id)
+
+    deterministic_set = set(deterministic_ids)
+    reranked_set = set(reranked_ids)
+    review_override_set = set(review_override_ids)
     selected_set = set(selected_ids)
+
     entries: list[LexiconReviewCandidateEntryResponse] = []
-    for raw in item.candidate_metadata or []:
-        if not isinstance(raw, dict):
-            continue
-        wn_synset_id = str(raw.get('wn_synset_id') or '').strip()
-        if not wn_synset_id:
-            continue
-        rank_hint = raw.get('selection_score')
-        if rank_hint is None:
-            rank_hint = raw.get('rank_hint')
-        try:
-            rank_value = float(rank_hint) if rank_hint is not None else None
-        except (TypeError, ValueError):
-            rank_value = None
-        reason_hint = raw.get('selection_reason')
-        if reason_hint is None:
-            reason_hint = raw.get('reason_hint')
+    for synset_id in ordered_ids:
+        raw = metadata_by_id.get(synset_id, {"wn_synset_id": synset_id})
         entries.append(LexiconReviewCandidateEntryResponse(
-            wn_synset_id=wn_synset_id,
+            wn_synset_id=synset_id,
             canonical_label=_candidate_label(raw),
             gloss=_candidate_gloss(raw),
             definition=_candidate_definition(raw),
-            part_of_speech=str(raw.get('part_of_speech') or '').strip() or None,
-            rank_hint=rank_value,
-            reason_hint=str(reason_hint or '').strip() or None,
-            deterministic_selected=wn_synset_id in deterministic_ids,
-            reranked_selected=wn_synset_id in reranked_ids,
-            review_override_selected=wn_synset_id in review_override_ids,
-            selected=wn_synset_id in selected_set,
+            part_of_speech=_candidate_part_of_speech(raw),
+            rank_hint=_candidate_rank_hint(raw),
+            reason_hint=_candidate_reason_hint(raw),
+            deterministic_selected=synset_id in deterministic_set,
+            reranked_selected=synset_id in reranked_set,
+            review_override_selected=synset_id in review_override_set,
+            selected=synset_id in selected_set,
         ))
     return entries
 
@@ -231,7 +270,7 @@ def _resolve_publish_meanings(item: LexiconReviewItem) -> list[dict[str, Any]]:
             raise HTTPException(status_code=400, detail=f"Publish definition missing for selected synset {synset_id} on lexeme {item.lexeme_id}")
         meanings.append({
             "definition": definition,
-            "part_of_speech": str(metadata.get("part_of_speech") or "") or None,
+            "part_of_speech": _candidate_part_of_speech(metadata),
             "order_index": order_index,
             "source_reference": _meaning_source_reference(item.batch_id, item.lexeme_id, order_index),
         })

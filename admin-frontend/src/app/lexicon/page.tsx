@@ -1,11 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
+  LexiconCandidateMetadata,
   LexiconReviewBatch,
   LexiconReviewBatchPublishPreview,
+  LexiconReviewCandidateEntry,
   LexiconReviewItem,
   LexiconReviewStatus,
   getLexiconReviewBatch,
@@ -43,8 +45,207 @@ const parseOverrideIds = (value: string): string[] | null => {
 const selectedIdsForItem = (item: LexiconReviewItem | null): string[] => {
   if (!item) return [];
   if (item.selected_wn_synset_ids?.length) return item.selected_wn_synset_ids;
-  return item.review_override_wn_synset_ids ?? item.reranked_selected_wn_synset_ids ?? item.deterministic_selected_wn_synset_ids;
+  return item.review_override_wn_synset_ids ?? item.reranked_selected_wn_synset_ids ?? item.deterministic_selected_wn_synset_ids ?? [];
 };
+
+const formatSourceLabel = (value: string | null | undefined): string => {
+  const labels: Record<string, string> = {
+    review_override: "Review override",
+    reranked: "Reranked",
+    deterministic: "Deterministic",
+    none: "None",
+  };
+  if (!value) return "Unknown";
+  return labels[value] ?? value.replaceAll("_", " ");
+};
+
+const normalizeFlags = (metadata?: LexiconCandidateMetadata): string[] => {
+  const values = metadata?.candidate_flags ?? metadata?.flags;
+  return Array.isArray(values)
+    ? values.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+};
+
+const formatNumericHint = (value: number | null | undefined): string | null => {
+  if (typeof value !== "number" || Number.isNaN(value)) return null;
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+};
+
+const deriveCandidateEntries = (item: LexiconReviewItem | null): LexiconReviewCandidateEntry[] => {
+  if (!item) return [];
+  if (item.candidate_entries?.length) return item.candidate_entries;
+
+  const metadataById = new Map<string, LexiconCandidateMetadata>();
+  for (const candidate of item.candidate_metadata ?? []) {
+    const synsetId = String(candidate.wn_synset_id ?? "").trim();
+    if (!synsetId || metadataById.has(synsetId)) continue;
+    metadataById.set(synsetId, candidate);
+  }
+
+  const orderedIds = [
+    ...metadataById.keys(),
+    ...selectedIdsForItem(item),
+    ...(item.deterministic_selected_wn_synset_ids ?? []),
+    ...(item.reranked_selected_wn_synset_ids ?? []),
+    ...(item.review_override_wn_synset_ids ?? []),
+  ].filter((value, index, values) => value && values.indexOf(value) === index);
+
+  const deterministicSet = new Set(item.deterministic_selected_wn_synset_ids ?? []);
+  const rerankedSet = new Set(item.reranked_selected_wn_synset_ids ?? []);
+  const overrideSet = new Set(item.review_override_wn_synset_ids ?? []);
+  const selectedSet = new Set(selectedIdsForItem(item));
+
+  return orderedIds.map((synsetId) => {
+    const metadata = metadataById.get(synsetId);
+    return {
+      wn_synset_id: synsetId,
+      canonical_label: String(metadata?.canonical_label ?? metadata?.label ?? "").trim() || null,
+      gloss: String(metadata?.canonical_gloss ?? metadata?.gloss ?? metadata?.definition ?? "").trim() || null,
+      definition: String(metadata?.definition ?? metadata?.canonical_gloss ?? metadata?.gloss ?? "").trim() || null,
+      part_of_speech: String(metadata?.part_of_speech ?? metadata?.pos ?? "").trim() || null,
+      rank_hint:
+        typeof metadata?.rerank_rank === "number"
+          ? metadata.rerank_rank
+          : typeof metadata?.candidate_rank === "number"
+            ? metadata.candidate_rank
+            : typeof metadata?.selection_rank === "number"
+              ? metadata.selection_rank
+              : typeof metadata?.rank === "number"
+                ? metadata.rank
+                : null,
+      reason_hint:
+        String(
+          metadata?.reason_hint
+            ?? metadata?.selection_reason
+            ?? metadata?.rerank_reason
+            ?? metadata?.note
+            ?? "",
+        ).trim() || null,
+      deterministic_selected: deterministicSet.has(synsetId),
+      reranked_selected: rerankedSet.has(synsetId),
+      review_override_selected: overrideSet.has(synsetId),
+      selected: selectedSet.has(synsetId),
+    };
+  });
+};
+
+type DetailBadgeTone = "blue" | "green" | "amber" | "slate" | "violet";
+
+const DETAIL_BADGE_TONES: Record<DetailBadgeTone, string> = {
+  blue: "border-blue-200 bg-blue-50 text-blue-700",
+  green: "border-green-200 bg-green-50 text-green-700",
+  amber: "border-amber-200 bg-amber-50 text-amber-700",
+  slate: "border-gray-200 bg-gray-100 text-gray-700",
+  violet: "border-violet-200 bg-violet-50 text-violet-700",
+};
+
+const DetailBadge = ({ children, tone = "slate" }: { children: ReactNode; tone?: DetailBadgeTone }) => (
+  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${DETAIL_BADGE_TONES[tone]}`}>
+    {children}
+  </span>
+);
+
+type SenseCardProps = {
+  entry: LexiconReviewCandidateEntry;
+  metadata?: LexiconCandidateMetadata;
+  fallbackLabel: string;
+};
+
+const SenseCard = ({ entry, metadata, fallbackLabel }: SenseCardProps) => {
+  const label = entry.canonical_label ?? fallbackLabel;
+  const flags = normalizeFlags(metadata);
+  const score = formatNumericHint(
+    typeof metadata?.selection_score === "number"
+      ? metadata.selection_score
+      : typeof metadata?.score === "number"
+        ? metadata.score
+        : undefined,
+  );
+  const lemmaCount = formatNumericHint(typeof metadata?.lemma_count === "number" ? metadata.lemma_count : undefined);
+  const borderClass = entry.selected
+    ? "border-blue-300 bg-blue-50"
+    : entry.review_override_selected
+      ? "border-green-200 bg-green-50"
+      : entry.reranked_selected
+        ? "border-violet-200 bg-violet-50"
+        : entry.deterministic_selected
+          ? "border-amber-200 bg-amber-50"
+          : "border-gray-200 bg-white";
+
+  return (
+    <article className={`rounded-lg border p-4 text-sm ${borderClass}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-base font-semibold text-gray-900">{label}</p>
+          <p className="mt-1 break-all font-mono text-xs text-gray-500">{entry.wn_synset_id}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {entry.part_of_speech ? <DetailBadge>{entry.part_of_speech}</DetailBadge> : null}
+          {entry.rank_hint !== null ? <DetailBadge tone="slate">rank {entry.rank_hint}</DetailBadge> : null}
+          {entry.selected ? <DetailBadge tone="blue">current</DetailBadge> : null}
+          {entry.review_override_selected ? <DetailBadge tone="green">override</DetailBadge> : null}
+          {entry.reranked_selected ? <DetailBadge tone="violet">reranked</DetailBadge> : null}
+          {entry.deterministic_selected ? <DetailBadge tone="amber">deterministic</DetailBadge> : null}
+        </div>
+      </div>
+      <div className="mt-3 space-y-2 text-gray-700">
+        <p><span className="font-medium text-gray-900">Gloss:</span> {entry.gloss ?? "—"}</p>
+        {entry.definition && entry.definition !== entry.gloss ? (
+          <p><span className="font-medium text-gray-900">Definition:</span> {entry.definition}</p>
+        ) : null}
+        {entry.reason_hint ? <p><span className="font-medium text-gray-900">Reason hint:</span> {entry.reason_hint}</p> : null}
+      </div>
+      {(flags.length > 0 || score || lemmaCount) ? (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-600">
+          {score ? <DetailBadge tone="slate">score {score}</DetailBadge> : null}
+          {lemmaCount ? <DetailBadge tone="slate">lemma count {lemmaCount}</DetailBadge> : null}
+          {flags.map((flag) => <DetailBadge key={flag} tone="slate">{flag}</DetailBadge>)}
+        </div>
+      ) : null}
+    </article>
+  );
+};
+
+type SenseSectionProps = {
+  title: string;
+  description: string;
+  entries: LexiconReviewCandidateEntry[];
+  metadataById: Map<string, LexiconCandidateMetadata | undefined>;
+  fallbackLabel: string;
+  emptyText: string;
+  testId: string;
+};
+
+const SenseSection = ({
+  title,
+  description,
+  entries,
+  metadataById,
+  fallbackLabel,
+  emptyText,
+  testId,
+}: SenseSectionProps) => (
+  <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4" data-testid={testId}>
+    <div>
+      <h4 className="text-base font-semibold text-gray-900">{title}</h4>
+      <p className="text-sm text-gray-500">{description}</p>
+    </div>
+    {entries.length > 0 ? (
+      <div className="space-y-3">
+        {entries.map((entry) => (
+          <SenseCard
+            key={`${testId}-${entry.wn_synset_id}`}
+            entry={entry}
+            metadata={metadataById.get(entry.wn_synset_id)}
+            fallbackLabel={fallbackLabel}
+          />
+        ))}
+      </div>
+    ) : (
+      <p className="text-sm text-gray-500">{emptyText}</p>
+    )}
+  </section>
+);
 
 export default function LexiconPage() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -305,6 +506,44 @@ export default function LexiconPage() {
   }, [selectedWordId]);
 
   const selectedSynsetIds = selectedIdsForItem(selectedItem);
+  const candidateEntries = useMemo(() => deriveCandidateEntries(selectedItem), [selectedItem]);
+  const candidateMetadataById = useMemo(
+    () => new Map(candidateEntries.map((entry) => [entry.wn_synset_id, selectedItem?.candidate_metadata.find((candidate) => String(candidate.wn_synset_id ?? "") === entry.wn_synset_id) ?? undefined])),
+    [candidateEntries, selectedItem],
+  );
+  const candidateEntryById = useMemo(
+    () => new Map(candidateEntries.map((entry) => [entry.wn_synset_id, entry])),
+    [candidateEntries],
+  );
+  const toEntries = useCallback(
+    (ids: string[] | null | undefined) => (ids ?? []).map((synsetId) => candidateEntryById.get(synsetId) ?? {
+      wn_synset_id: synsetId,
+      canonical_label: null,
+      gloss: null,
+      definition: null,
+      part_of_speech: null,
+      rank_hint: null,
+      reason_hint: null,
+      deterministic_selected: selectedItem?.deterministic_selected_wn_synset_ids.includes(synsetId) ?? false,
+      reranked_selected: selectedItem?.reranked_selected_wn_synset_ids?.includes(synsetId) ?? false,
+      review_override_selected: selectedItem?.review_override_wn_synset_ids?.includes(synsetId) ?? false,
+      selected: selectedSynsetIds.includes(synsetId),
+    }),
+    [candidateEntryById, selectedItem, selectedSynsetIds],
+  );
+  const currentSelectedEntries = useMemo(() => toEntries(selectedSynsetIds), [selectedSynsetIds, toEntries]);
+  const deterministicEntries = useMemo(
+    () => toEntries(selectedItem?.deterministic_selected_wn_synset_ids),
+    [selectedItem, toEntries],
+  );
+  const rerankedEntries = useMemo(
+    () => toEntries(selectedItem?.reranked_selected_wn_synset_ids),
+    [selectedItem, toEntries],
+  );
+  const overrideEntries = useMemo(
+    () => toEntries(selectedItem?.review_override_wn_synset_ids),
+    [selectedItem, toEntries],
+  );
 
   if (!isAuthenticated) {
     return <div data-testid="admin-auth-loading" className="text-sm text-gray-500">Checking authentication…</div>;
@@ -441,79 +680,98 @@ export default function LexiconPage() {
                   {selectedItem ? (
                     <>
                       <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div><h3 className="text-lg font-semibold">Review item: {selectedItem.lemma}</h3><p className="text-sm text-gray-500">review_required={String(selectedItem.review_required)} · wordfreq rank {selectedItem.wordfreq_rank ?? "—"}</p></div>
-                        <div className="text-sm text-gray-500">generated {formatDateTime(selectedItem.created_at)}</div>
-                      </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="rounded border border-gray-200 p-3 text-sm" data-testid="lexicon-item-current-selection">
-                          <p className="font-medium text-gray-900">Current selected senses</p>
-                          <p className="mt-1 text-xs text-gray-500">source: {selectedItem.selected_source ?? "—"}</p>
-                          <ul className="mt-2 space-y-1 text-gray-700">
-                            {selectedSynsetIds.map((id) => <li key={id}>{id}</li>)}
-                            {selectedSynsetIds.length === 0 ? <li>None</li> : null}
-                          </ul>
-                        </div>
-                        <div className="rounded border border-gray-200 p-3 text-sm" data-testid="lexicon-item-selection-sources">
-                          <p className="font-medium text-gray-900">Selection sources</p>
-                          <p className="mt-2 text-gray-700">Deterministic: {selectedItem.deterministic_selected_wn_synset_ids.join(", ") || "—"}</p>
-                          <p className="mt-1 text-gray-700">Reranked: {selectedItem.reranked_selected_wn_synset_ids?.join(", ") || "—"}</p>
-                          <p className="mt-1 text-gray-700">Override: {selectedItem.review_override_wn_synset_ids?.join(", ") || "—"}</p>
+                        <div className="space-y-2">
+                          <div>
+                            <h3 className="text-lg font-semibold">Review item: {selectedItem.lemma}</h3>
+                            <p className="text-sm text-gray-500">generated {formatDateTime(selectedItem.created_at)}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <DetailBadge tone="blue">selected source: {formatSourceLabel(selectedItem.selected_source)}</DetailBadge>
+                            <DetailBadge tone={selectedItem.review_required ? "amber" : "green"}>review required: {String(selectedItem.review_required)}</DetailBadge>
+                            <DetailBadge>{selectedItem.review_status}</DetailBadge>
+                            <DetailBadge>risk band: {selectedItem.risk_band}</DetailBadge>
+                            <DetailBadge>risk score: {selectedItem.selection_risk_score}</DetailBadge>
+                            <DetailBadge>wordfreq rank: {selectedItem.wordfreq_rank ?? "—"}</DetailBadge>
+                          </div>
                         </div>
                       </div>
-                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-                        <div className="space-y-4">
-                          <section className="rounded border border-gray-200 p-4" data-testid="lexicon-item-candidates">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm font-medium text-gray-900">Candidate senses</p>
-                              <span className="text-xs text-gray-500">{selectedItem.candidate_entries?.length || selectedItem.candidate_metadata.length} candidates</span>
-                            </div>
-                            <div className="mt-3 max-h-[520px] space-y-3 overflow-y-auto pr-1">
-                              {(selectedItem.candidate_entries?.length ? selectedItem.candidate_entries : selectedItem.candidate_metadata.map((candidate, index) => ({
-                                wn_synset_id: String(candidate.wn_synset_id ?? `candidate-${index}`),
-                                canonical_label: String(candidate.canonical_label ?? candidate.label ?? "").trim() || null,
-                                gloss: String(candidate.canonical_gloss ?? "").trim() || null,
-                                definition: String(candidate.canonical_gloss ?? "").trim() || null,
-                                part_of_speech: String(candidate.part_of_speech ?? "").trim() || null,
-                                rank_hint: typeof candidate.selection_score === "number" ? candidate.selection_score : (typeof candidate.score === "number" ? candidate.score : null),
-                                reason_hint: null,
-                                deterministic_selected: selectedItem.deterministic_selected_wn_synset_ids.includes(String(candidate.wn_synset_id ?? "")),
-                                reranked_selected: selectedItem.reranked_selected_wn_synset_ids?.includes(String(candidate.wn_synset_id ?? "")) ?? false,
-                                review_override_selected: selectedItem.review_override_wn_synset_ids?.includes(String(candidate.wn_synset_id ?? "")) ?? false,
-                                selected: selectedSynsetIds.includes(String(candidate.wn_synset_id ?? "")),
-                              }))).map((candidate) => (
-                                <article key={candidate.wn_synset_id} className={`rounded border p-4 text-sm ${candidate.selected ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white"}`}>
-                                  <div className="flex flex-wrap items-start justify-between gap-2">
-                                    <div>
-                                      <p className="font-medium text-gray-900">{candidate.canonical_label ?? candidate.wn_synset_id}</p>
-                                      <p className="mt-1 break-all text-xs text-gray-500">{candidate.wn_synset_id}</p>
-                                    </div>
-                                    <div className="flex flex-wrap gap-1">
-                                      {candidate.part_of_speech ? <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{candidate.part_of_speech}</span> : null}
-                                      {candidate.selected ? <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">selected</span> : null}
-                                      {candidate.deterministic_selected ? <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">deterministic</span> : null}
-                                      {candidate.reranked_selected ? <span className="rounded bg-violet-100 px-2 py-0.5 text-xs text-violet-700">reranked</span> : null}
-                                      {candidate.review_override_selected ? <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700">override</span> : null}
-                                    </div>
-                                  </div>
-                                  <p className="mt-2 text-gray-700">{candidate.definition ?? candidate.gloss ?? "No gloss available."}</p>
-                                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                                    <span>rank: {candidate.rank_hint ?? "—"}</span>
-                                    <span>reason: {candidate.reason_hint ?? "—"}</span>
-                                  </div>
-                                </article>
-                              ))}
-                            </div>
-                          </section>
+
+                      <section className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4" data-testid="lexicon-item-review-controls">
+                        <div>
+                          <h4 className="text-base font-semibold text-gray-900">Review decision</h4>
+                          <p className="text-sm text-gray-500">Override synset IDs if you want to replace the current selection before publish.</p>
                         </div>
-                        <div className="space-y-3 rounded border border-gray-200 bg-gray-50 p-4">
-                          <p className="text-sm font-medium text-gray-900">Review decision</p>
+                        <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
                           <label className="text-sm font-medium text-gray-700">Review status<select value={editorStatus} onChange={(event) => setEditorStatus(event.target.value as LexiconReviewStatus)} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2" data-testid="lexicon-item-review-status">{REVIEW_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
-                          <label className="text-sm font-medium text-gray-700">Override synset ids (newline or comma separated)<textarea value={editorOverrideIds} onChange={(event) => setEditorOverrideIds(event.target.value)} rows={6} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2" data-testid="lexicon-item-override-ids" /></label>
-                          <label className="text-sm font-medium text-gray-700">Review comment<textarea value={editorComment} onChange={(event) => setEditorComment(event.target.value)} rows={5} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2" data-testid="lexicon-item-review-comment" /></label>
-                          <button type="button" onClick={handleSaveItem} disabled={saveLoading} className="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50" data-testid="lexicon-item-save-button">{saveLoading ? "Saving..." : "Save Review Decision"}</button>
+                          <label className="text-sm font-medium text-gray-700">Override synset ids (newline or comma separated)<textarea value={editorOverrideIds} onChange={(event) => setEditorOverrideIds(event.target.value)} rows={4} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm" data-testid="lexicon-item-override-ids" /></label>
+                        </div>
+                        <label className="text-sm font-medium text-gray-700">Review comment<textarea value={editorComment} onChange={(event) => setEditorComment(event.target.value)} rows={4} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2" data-testid="lexicon-item-review-comment" /></label>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button type="button" onClick={handleSaveItem} disabled={saveLoading} className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50" data-testid="lexicon-item-save-button">{saveLoading ? "Saving..." : "Save Review Decision"}</button>
                           {saveMessage ? <p className="text-sm text-gray-700">{saveMessage}</p> : null}
                         </div>
-                      </div>
+                      </section>
+
+                      <SenseSection
+                        title="Current selected senses"
+                        description={`These are the senses that would publish right now (${formatSourceLabel(selectedItem.selected_source)}).`}
+                        entries={currentSelectedEntries}
+                        metadataById={candidateMetadataById}
+                        fallbackLabel={selectedItem.lemma}
+                        emptyText="No selected senses are available for this review item."
+                        testId="lexicon-item-current-selection"
+                      />
+
+                      <SenseSection
+                        title="Deterministic baseline"
+                        description="Baseline selection before any rerank or manual override."
+                        entries={deterministicEntries}
+                        metadataById={candidateMetadataById}
+                        fallbackLabel={selectedItem.lemma}
+                        emptyText="No deterministic baseline senses recorded."
+                        testId="lexicon-item-deterministic-selection"
+                      />
+
+                      {rerankedEntries.length > 0 ? (
+                        <SenseSection
+                          title="Reranked selected senses"
+                          description="LLM rerank proposal captured for this lexeme."
+                          entries={rerankedEntries}
+                          metadataById={candidateMetadataById}
+                          fallbackLabel={selectedItem.lemma}
+                          emptyText="No reranked senses recorded."
+                          testId="lexicon-item-reranked-selection"
+                        />
+                      ) : null}
+
+                      {overrideEntries.length > 0 ? (
+                        <SenseSection
+                          title="Manual override senses"
+                          description="Reviewer override that will take precedence at publish time."
+                          entries={overrideEntries}
+                          metadataById={candidateMetadataById}
+                          fallbackLabel={selectedItem.lemma}
+                          emptyText="No override senses recorded."
+                          testId="lexicon-item-override-selection"
+                        />
+                      ) : null}
+
+                      <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4" data-testid="lexicon-item-candidates-section">
+                        <div>
+                          <h4 className="text-base font-semibold text-gray-900">Candidate senses</h4>
+                          <p className="text-sm text-gray-500">Compare every candidate with glosses, definitions, WordNet IDs, POS tags, reason hints, and selection badges.</p>
+                        </div>
+                        <div className="max-h-[720px] space-y-3 overflow-y-auto pr-1" data-testid="lexicon-item-candidates">
+                          {candidateEntries.length > 0 ? candidateEntries.map((entry) => (
+                            <SenseCard
+                              key={`candidate-${entry.wn_synset_id}`}
+                              entry={entry}
+                              metadata={candidateMetadataById.get(entry.wn_synset_id)}
+                              fallbackLabel={selectedItem.lemma}
+                            />
+                          )) : <p className="text-sm text-gray-500">No candidate senses recorded for this item.</p>}
+                        </div>
+                      </section>
                     </>
                   ) : <p className="text-sm text-gray-500">Select a staged review item to inspect and edit.</p>}
                 </div>

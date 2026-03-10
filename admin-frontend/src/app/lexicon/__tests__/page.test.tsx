@@ -74,7 +74,31 @@ const reviewItem = {
       canonical_label: "bank",
       canonical_gloss: "a financial institution",
       selection_score: 9.7,
-      selection_reason: "common concrete noun",
+      lemma_count: 12,
+      candidate_flags: ["core_sense", "high_frequency"],
+      candidate_rank: 2,
+      selection_reason: "deterministic kept common money meaning",
+    },
+    {
+      wn_synset_id: "bank.n.02",
+      part_of_speech: "noun",
+      canonical_label: "bank",
+      definition: "sloping land beside a river",
+      score: 8.2,
+      lemma_count: 9,
+      rerank_rank: 1,
+      rerank_reason: "reranked higher for learner usefulness",
+    },
+    {
+      wn_synset_id: "bank.v.01",
+      part_of_speech: "verb",
+      canonical_label: "bank",
+      canonical_gloss: "to deposit money",
+      selection_score: 7.1,
+      lemma_count: 5,
+      candidate_flags: ["verb_sense"],
+      candidate_rank: 3,
+      selection_reason: "verb kept by deterministic selector",
     },
   ],
   candidate_entries: [
@@ -84,12 +108,38 @@ const reviewItem = {
       gloss: "a financial institution",
       definition: "a financial institution",
       part_of_speech: "noun",
-      rank_hint: 9.7,
-      reason_hint: "common concrete noun",
+      rank_hint: 2,
+      reason_hint: "deterministic kept common money meaning",
       deterministic_selected: true,
       reranked_selected: true,
       review_override_selected: false,
       selected: true,
+    },
+    {
+      wn_synset_id: "bank.n.02",
+      canonical_label: "bank",
+      gloss: "sloping land beside a river",
+      definition: "sloping land beside a river",
+      part_of_speech: "noun",
+      rank_hint: 1,
+      reason_hint: "reranked higher for learner usefulness",
+      deterministic_selected: false,
+      reranked_selected: true,
+      review_override_selected: false,
+      selected: true,
+    },
+    {
+      wn_synset_id: "bank.v.01",
+      canonical_label: "bank",
+      gloss: "to deposit money",
+      definition: "to deposit money",
+      part_of_speech: "verb",
+      rank_hint: 3,
+      reason_hint: "verb kept by deterministic selector",
+      deterministic_selected: true,
+      reranked_selected: false,
+      review_override_selected: false,
+      selected: false,
     },
   ],
   auto_accepted: false,
@@ -116,6 +166,11 @@ const savedItem = {
       review_override_selected: true,
       selected: true,
     },
+    {
+      ...reviewItem.candidate_entries[1],
+      selected: false,
+    },
+    reviewItem.candidate_entries[2],
   ],
 };
 
@@ -221,9 +276,12 @@ describe("LexiconPage", () => {
 
     expect(screen.getByTestId("lexicon-batches-list")).toHaveTextContent("selection.jsonl");
     expect(screen.getByTestId("lexicon-item-detail-panel")).toHaveTextContent("bank");
-    expect(screen.getByTestId("lexicon-item-current-selection")).toHaveTextContent("bank.n.01");
-    expect(screen.getByTestId("lexicon-item-candidates")).toHaveTextContent("a financial institution");
-    expect(screen.getByTestId("lexicon-item-candidates")).toHaveTextContent("common concrete noun");
+    expect(screen.getByTestId("lexicon-item-current-selection")).toHaveTextContent("Current selected senses");
+    expect(screen.getByTestId("lexicon-item-current-selection")).toHaveTextContent("Reranked");
+    expect(screen.getByTestId("lexicon-item-reranked-selection")).toHaveTextContent("reranked higher for learner usefulness");
+    expect(screen.getByTestId("lexicon-item-candidates")).toHaveTextContent("sloping land beside a river");
+    expect(screen.getByTestId("lexicon-item-candidates")).toHaveTextContent("Reason hint:");
+    expect(screen.getByTestId("lexicon-item-candidates")).toHaveTextContent("core_sense");
   });
 
   it("imports a staged review batch", async () => {
@@ -257,6 +315,9 @@ describe("LexiconPage", () => {
         review_comment: "Looks good",
         review_override_wn_synset_ids: ["bank.n.01"],
       });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("lexicon-item-current-selection")).toHaveTextContent("Review override");
     });
   });
 
