@@ -79,6 +79,10 @@ def compile_words(
         compiled.append(
             CompiledWordRecord(
                 schema_version=COMPILED_SCHEMA_VERSION,
+                entry_id=lexeme.entry_id,
+                entry_type=lexeme.entry_type,
+                normalized_form=lexeme.normalized_form,
+                source_provenance=lexeme.source_provenance,
                 word=lexeme.lemma,
                 part_of_speech=top_level_pos,
                 cefr_level=top_level_cefr or "B1",
@@ -99,15 +103,12 @@ def compile_words(
     return compiled
 
 
-
 def _load_lexemes(path: Path) -> list[LexemeRecord]:
     return [LexemeRecord(**row) for row in read_jsonl(path)]
 
 
-
 def _load_senses(path: Path) -> list[SenseRecord]:
     return [SenseRecord(**row) for row in read_jsonl(path)]
-
 
 
 def _load_enrichments(path: Path) -> list[EnrichmentRecord]:
@@ -118,7 +119,6 @@ def _load_enrichments(path: Path) -> list[EnrichmentRecord]:
         row["examples"] = examples
         records.append(EnrichmentRecord(**row))
     return records
-
 
 
 def _load_decisions(path: Path) -> list[dict[str, object]]:
@@ -139,7 +139,6 @@ def _coerce_decision_bool(value: object, *, field_name: str) -> bool:
         if normalized in {"1", "true", "yes", "y", "on"}:
             return True
     raise ValueError(f"Selection decision field '{field_name}' must be a boolean-like value")
-
 
 
 def _allowed_lexeme_ids_from_decisions(
@@ -172,7 +171,6 @@ def _allowed_lexeme_ids_from_decisions(
         return allowed
 
     raise ValueError(f"Unsupported decision filter: {decision_filter}")
-
 
 
 def compile_snapshot(

@@ -8,6 +8,10 @@ from tools.lexicon.models import CompiledWordRecord, EnrichmentRecord, LexemeRec
 
 REQUIRED_COMPILED_FIELDS = [
     "schema_version",
+    "entry_id",
+    "entry_type",
+    "normalized_form",
+    "source_provenance",
     "word",
     "part_of_speech",
     "cefr_level",
@@ -19,6 +23,21 @@ REQUIRED_COMPILED_FIELDS = [
 ]
 
 
+def compiled_meaning_limit(frequency_rank: Any) -> int:
+    try:
+        rank = int(frequency_rank)
+    except (TypeError, ValueError):
+        return 4
+    if rank <= 0:
+        return 4
+    if rank <= 5000:
+        return 8
+    if rank <= 10000:
+        return 6
+    return 4
+
+
+
 def validate_snapshot(
     lexemes: list[LexemeRecord],
     senses: list[SenseRecord],
@@ -28,6 +47,16 @@ def validate_snapshot(
     lexeme_ids = {lexeme.lexeme_id for lexeme in lexemes}
     sense_ids = {sense.sense_id for sense in senses}
     duplicate_keys: set[tuple[str, str, str]] = set()
+
+    for lexeme in lexemes:
+        if lexeme.entry_type != "word":
+            errors.append(f"lexeme {lexeme.lexeme_id} has unsupported entry_type {lexeme.entry_type}")
+        if not lexeme.entry_id:
+            errors.append(f"lexeme {lexeme.lexeme_id} is missing entry_id")
+        if not lexeme.normalized_form:
+            errors.append(f"lexeme {lexeme.lexeme_id} is missing normalized_form")
+        if not isinstance(lexeme.source_provenance, list) or not lexeme.source_provenance:
+            errors.append(f"lexeme {lexeme.lexeme_id} must include source_provenance")
 
     for sense in senses:
         if sense.lexeme_id not in lexeme_ids:
@@ -48,6 +77,7 @@ def validate_snapshot(
     return errors
 
 
+
 def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> list[str]:
     payload = record.to_dict() if isinstance(record, CompiledWordRecord) else record
     errors: list[str] = []
@@ -56,8 +86,18 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
         if field not in payload:
             errors.append(f"missing required field: {field}")
 
+    if payload.get("entry_type") not in {None, "word"}:
+        errors.append(f"unsupported entry_type: {payload.get('entry_type')}")
+
+    source_provenance = payload.get("source_provenance")
+    if source_provenance is not None and not isinstance(source_provenance, list):
+        errors.append("source_provenance must be a list")
+
     senses = payload.get("senses", [])
     if isinstance(senses, list):
+        max_senses = compiled_meaning_limit(payload.get("frequency_rank"))
+        if len(senses) > max_senses:
+            errors.append(f"senses exceeds allowed limit {max_senses} for frequency_rank {payload.get('frequency_rank')}")
         for index, sense in enumerate(senses, start=1):
             examples = sense.get("examples", []) if isinstance(sense, dict) else []
             if not examples:

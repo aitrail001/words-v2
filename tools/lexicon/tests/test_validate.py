@@ -180,12 +180,20 @@ class ValidateCompiledRecordTests(unittest.TestCase):
             }
         )
 
+        self.assertIn("missing required field: entry_id", errors)
+        self.assertIn("missing required field: entry_type", errors)
+        self.assertIn("missing required field: normalized_form", errors)
+        self.assertIn("missing required field: source_provenance", errors)
         self.assertIn("missing required field: cefr_level", errors)
         self.assertIn("missing required field: senses", errors)
 
     def test_validate_compiled_record_accepts_full_shape(self) -> None:
         record = CompiledWordRecord(
-            schema_version="1.0.0",
+            schema_version="1.1.0",
+            entry_id="lx_run",
+            entry_type="word",
+            normalized_form="run",
+            source_provenance=[{"source": "wordfreq"}],
             word="run",
             part_of_speech=["verb"],
             cefr_level="A1",
@@ -223,3 +231,28 @@ class ValidateCompiledRecordTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_validate_compiled_record_rejects_too_many_senses_for_frequency_band(self) -> None:
+        record = {
+            "schema_version": "1.1.0",
+            "entry_id": "lx_rare",
+            "entry_type": "word",
+            "normalized_form": "rareword",
+            "source_provenance": [{"source": "wordfreq"}],
+            "word": "rareword",
+            "part_of_speech": ["noun"],
+            "cefr_level": "B2",
+            "frequency_rank": 12000,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "senses": [
+                {"sense_id": f"sn_{idx}", "pos": "noun", "primary_domain": "general", "secondary_domains": [], "register": "neutral", "definition": "x", "examples": [{"sentence": "x", "difficulty": "A1"}], "synonyms": [], "antonyms": [], "collocations": [], "grammar_patterns": [], "usage_note": ""}
+                for idx in range(5)
+            ],
+            "confusable_words": [],
+            "generated_at": "2026-03-07T00:00:00Z",
+        }
+
+        errors = validate_compiled_record(record)
+
+        self.assertIn("senses exceeds allowed limit 4 for frequency_rank 12000", errors)

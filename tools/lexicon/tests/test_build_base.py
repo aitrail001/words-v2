@@ -12,6 +12,22 @@ class BuildBaseTests(unittest.TestCase):
 
         self.assertEqual(words, ["run", "set", "lead"])
 
+    def test_normalize_seed_words_filters_obvious_junk_tokens(self) -> None:
+        words = normalize_seed_words([" Run ", "can't", "co-op", "foo bar", "123", "a1", "___", "e-mail"])
+
+        self.assertEqual(words, ["run", "can't", "co-op", "e-mail"])
+
+    def test_build_word_inventory_normalizes_filters_and_bounds_top_words(self) -> None:
+        from tools.lexicon.build_base import build_word_inventory
+
+        def inventory_provider(limit: int):
+            self.assertEqual(limit, 5)
+            return ["The", "and", "foo bar", "co-op", "123", "can't", "THE"]
+
+        words = build_word_inventory(limit=5, inventory_provider=inventory_provider)
+
+        self.assertEqual(words, ["the", "and", "co-op", "can't"])
+
     def test_build_base_records_builds_linked_records_from_providers(self) -> None:
         def rank_provider(word: str) -> int:
             return {"run": 5}[word]
@@ -41,6 +57,10 @@ class BuildBaseTests(unittest.TestCase):
         )
 
         self.assertEqual([record.lemma for record in result.lexemes], ["run"])
+        self.assertEqual(result.lexemes[0].entry_type, "word")
+        self.assertEqual(result.lexemes[0].entry_id, "lx_run")
+        self.assertEqual(result.lexemes[0].normalized_form, "run")
+        self.assertEqual(result.lexemes[0].source_provenance, [{"source": "wordfreq", "role": "frequency_rank"}, {"source": "wordnet", "role": "sense_grounding"}])
         self.assertEqual(result.lexemes[0].wordfreq_rank, 5)
         self.assertEqual([record.sense_id for record in result.senses], ["sn_lx_run_1", "sn_lx_run_2"])
         self.assertEqual(result.senses[0].wn_synset_id, "run.v.01")

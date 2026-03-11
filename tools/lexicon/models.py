@@ -4,6 +4,10 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
+def _default_source_provenance(source_refs: list[str]) -> list[dict[str, Any]]:
+    return [{"source": source} for source in source_refs]
+
+
 @dataclass(frozen=True)
 class SerializableRecord:
     def to_dict(self) -> dict[str, Any]:
@@ -26,6 +30,18 @@ class LexemeRecord(SerializableRecord):
     is_wordnet_backed: bool
     source_refs: list[str]
     created_at: str
+    entry_id: str | None = None
+    entry_type: str = "word"
+    normalized_form: str | None = None
+    source_provenance: list[dict[str, Any]] | None = None
+
+    def __post_init__(self) -> None:
+        if self.entry_id is None:
+            object.__setattr__(self, "entry_id", self.lexeme_id)
+        if self.normalized_form is None:
+            object.__setattr__(self, "normalized_form", self.lemma.strip().lower())
+        if self.source_provenance is None:
+            object.__setattr__(self, "source_provenance", _default_source_provenance(self.source_refs))
 
 
 @dataclass(frozen=True)
@@ -105,3 +121,32 @@ class CompiledWordRecord(SerializableRecord):
     senses: list[dict[str, Any]]
     confusable_words: list[dict[str, str]]
     generated_at: str
+    entry_id: str | None = None
+    entry_type: str = "word"
+    normalized_form: str | None = None
+    source_provenance: list[dict[str, Any]] | None = None
+
+    def __post_init__(self) -> None:
+        if self.entry_id is None:
+            object.__setattr__(self, "entry_id", self.word)
+        if self.normalized_form is None:
+            object.__setattr__(self, "normalized_form", self.word.strip().lower())
+        if self.source_provenance is None:
+            object.__setattr__(self, "source_provenance", [])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "entry_id": self.entry_id,
+            "entry_type": self.entry_type,
+            "normalized_form": self.normalized_form,
+            "source_provenance": self.source_provenance,
+            "word": self.word,
+            "part_of_speech": self.part_of_speech,
+            "cefr_level": self.cefr_level,
+            "frequency_rank": self.frequency_rank,
+            "forms": self.forms,
+            "senses": self.senses,
+            "confusable_words": self.confusable_words,
+            "generated_at": self.generated_at,
+        }

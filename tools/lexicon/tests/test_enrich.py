@@ -13,6 +13,7 @@ from tools.lexicon.enrich import (
     build_word_enrichment_prompt,
     build_enrichment_provider,
     build_openai_compatible_enrichment_provider,
+    build_openai_compatible_word_enrichment_provider,
     _default_node_runner,
     build_openai_compatible_node_enrichment_provider,
     enrich_snapshot,
@@ -702,7 +703,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
             "confidence": 0.9,
         }
 
-    def test_build_word_enrichment_prompt_includes_all_selected_senses(self) -> None:
+    def test_build_word_enrichment_prompt_uses_grounding_and_adaptive_meaning_cap(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
             self._write_snapshot(snapshot_dir)
@@ -714,7 +715,10 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             self.assertIn("sn_lx_run_1", prompt)
             self.assertIn("sn_lx_run_2", prompt)
-            self.assertIn("do not invent or omit", prompt.lower())
+            self.assertIn("grounding context", prompt.lower())
+            self.assertIn("at most 8 learner-friendly meanings", prompt.lower())
+            self.assertIn("do not invent new sense ids", prompt.lower())
+            self.assertIn("you may omit weak tail senses", prompt.lower())
 
     def test_enrich_snapshot_per_word_mode_writes_existing_enrichments_jsonl_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -834,3 +838,107 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "run: gateway timeout"):
                 enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2)
+
+    def test_build_word_enrichment_prompt_tightens_meaning_cap_for_lower_frequency_words(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            low_priority = run_lexeme.__class__(**{**run_lexeme.to_dict(), "wordfreq_rank": 12000})
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=low_priority, senses=run_senses)
+
+            self.assertIn("at most 4 learner-friendly meanings", prompt.lower())
+
+    def test_real_word_provider_accepts_subset_of_grounded_senses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+            settings = LexiconSettings.from_env({
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-test",
+                "LEXICON_LLM_API_KEY": "secret-key",
+            })
+
+            def transport(url, payload, headers):
+                return {
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps({
+                                "senses": [{
+                                    "sense_id": "sn_lx_run_1",
+                                    "definition": "to move quickly on foot",
+                                    "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                    "cefr_level": "A1",
+                                    "primary_domain": "general",
+                                    "secondary_domains": [],
+                                    "register": "neutral",
+                                    "synonyms": ["jog"],
+                                    "antonyms": ["walk"],
+                                    "collocations": ["run fast"],
+                                    "grammar_patterns": ["run + adverb"],
+                                    "usage_note": "Common everyday verb.",
+                                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                                    "confusable_words": [],
+                                    "confidence": 0.91
+                                }]
+                            })
+                        }]
+                    }]
+                }
+
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            records = provider(
+                lexeme=run_lexeme,
+                senses=run_senses,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1"])
+
+    def test_real_word_provider_rejects_too_many_selected_senses_for_frequency_band(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            low_priority = run_lexeme.__class__(**{**run_lexeme.to_dict(), "wordfreq_rank": 12000})
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+            extra_senses = [run_senses[0].__class__(**{**run_senses[0].to_dict(), "sense_id": f"sn_lx_run_extra_{idx}", "sense_order": idx + 2}) for idx in range(4)]
+            settings = LexiconSettings.from_env({
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-test",
+                "LEXICON_LLM_API_KEY": "secret-key",
+            })
+
+            def transport(url, payload, headers):
+                rows = []
+                for sense in run_senses + extra_senses:
+                    rows.append({
+                        "sense_id": sense.sense_id,
+                        "definition": "x",
+                        "examples": [{"sentence": "x", "difficulty": "A1"}],
+                        "confidence": 0.9,
+                    })
+                return {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"senses": rows})}]}]}
+
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            with self.assertRaisesRegex(RuntimeError, "at most 4 learner-friendly meanings"):
+                provider(
+                    lexeme=low_priority,
+                    senses=run_senses + extra_senses,
+                    settings=settings,
+                    generated_at="2026-03-07T00:00:00Z",
+                    generation_run_id="run-123",
+                    prompt_version="v1",
+                )
