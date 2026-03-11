@@ -68,6 +68,8 @@ For the minimum pass/fail closure gate, use `docs/runbooks/lexicon-working-gate.
 Build a normalized snapshot first:
 
 ```bash
+python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/lexicon/snapshots/words-100
+python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 ```
 
@@ -75,6 +77,7 @@ Enrich the learner-facing layer:
 
 ```bash
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
+# per_word mode uses WordNet-grounded candidates as context only; the LLM may omit weak tail senses and keeps at most 8/6/4 meanings by frequency band
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
 ```
 
@@ -183,7 +186,7 @@ Use a clean local DB or isolated temporary Postgres instance if your main dev DB
 ## 8. Output files and linking
 
 A single snapshot directory links together the pipeline stages:
-- `lexemes.jsonl` holds lemma-level records
+- `lexemes.jsonl` holds lemma-level records plus shared entry metadata (`entry_id`, `entry_type`, `normalized_form`, `source_provenance`)
 - `senses.jsonl` links back to lexemes by `lexeme_id`
 - `enrichments.jsonl` links to senses by `sense_id`
 - `selection_decisions.jsonl` stores deterministic selection, risk scoring, and rerank/review state for each lexeme, and can drive both admin review import and `compile-export --decision-filter mode_c_safe`

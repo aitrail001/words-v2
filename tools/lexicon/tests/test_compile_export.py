@@ -119,6 +119,9 @@ class CompileWordsTests(unittest.TestCase):
         self.assertEqual(len(compiled), 1)
         row = compiled[0].to_dict()
         self.assertEqual(row["word"], "run")
+        self.assertEqual(row["entry_type"], "word")
+        self.assertEqual(row["entry_id"], "lx_run")
+        self.assertEqual(row["normalized_form"], "run")
         self.assertEqual(row["part_of_speech"], ["verb", "noun"])
         self.assertEqual([sense["sense_id"] for sense in row["senses"]], ["sn_lx_run_1", "sn_lx_run_2"])
         self.assertEqual(row["confusable_words"], [{"word": "ran", "note": "Past tense form."}])
@@ -549,3 +552,72 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
             compiled = compile_snapshot(root, output_path, decisions_path=decisions_path, decision_filter="mode_c_safe")
 
             self.assertEqual([row.word for row in compiled], ["run", "bank"])
+
+
+    def test_compile_words_keeps_subset_of_llm_selected_senses(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="lx_run",
+            lemma="run",
+            language="en",
+            wordfreq_rank=5,
+            is_wordnet_backed=True,
+            source_refs=["wordnet", "wordfreq"],
+            created_at="2026-03-07T00:00:00Z",
+        )
+        senses = [
+            SenseRecord(
+                snapshot_id="snap-1",
+                sense_id="sn_lx_run_1",
+                lexeme_id="lx_run",
+                wn_synset_id="run.v.01",
+                part_of_speech="verb",
+                canonical_gloss="move fast by using your legs",
+                selection_reason="core learner sense",
+                sense_order=1,
+                is_high_polysemy=False,
+                created_at="2026-03-07T00:00:00Z",
+            ),
+            SenseRecord(
+                snapshot_id="snap-1",
+                sense_id="sn_lx_run_2",
+                lexeme_id="lx_run",
+                wn_synset_id="run.n.01",
+                part_of_speech="noun",
+                canonical_gloss="an act of running",
+                selection_reason="secondary learner sense",
+                sense_order=2,
+                is_high_polysemy=False,
+                created_at="2026-03-07T00:00:00Z",
+            ),
+        ]
+        enrichments = [
+            EnrichmentRecord(
+                snapshot_id="snap-1",
+                enrichment_id="en_sn_lx_run_1_v1",
+                sense_id="sn_lx_run_1",
+                definition="to move quickly on foot",
+                examples=[SenseExample(sentence="I run every morning.", difficulty="A1")],
+                cefr_level="A1",
+                primary_domain="general",
+                secondary_domains=[],
+                register="neutral",
+                synonyms=[],
+                antonyms=[],
+                collocations=[],
+                grammar_patterns=[],
+                usage_note="",
+                forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                confusable_words=[],
+                model_name="gpt-test",
+                prompt_version="v1",
+                generation_run_id="run-1",
+                confidence=0.9,
+                review_status="approved",
+                generated_at="2026-03-07T00:00:00Z",
+            )
+        ]
+
+        compiled = compile_words(lexemes=[lexeme], senses=senses, enrichments=enrichments)
+
+        self.assertEqual([sense["sense_id"] for sense in compiled[0].senses], ["sn_lx_run_1"])

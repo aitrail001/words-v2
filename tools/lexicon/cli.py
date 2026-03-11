@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from tools.lexicon.benchmark_selection import run_selection_benchmark
-from tools.lexicon.build_base import build_base_records, normalize_seed_words, write_base_snapshot
+from tools.lexicon.build_base import build_base_records, build_word_inventory, normalize_seed_words, write_base_snapshot
 from tools.lexicon.compare_selection import compare_selection_artifacts
 from tools.lexicon.compile_export import compile_snapshot
 from tools.lexicon.enrich import run_enrichment
@@ -18,6 +18,7 @@ from tools.lexicon.rerank import RERANK_CANDIDATE_SOURCES, run_rerank
 from tools.lexicon.selection_review import prepare_review, score_selection_risk
 from tools.lexicon.validate import validate_compiled_record, validate_snapshot_files
 from tools.lexicon.wordfreq_provider import build_wordfreq_rank_provider
+from tools.lexicon.wordfreq_utils import build_wordfreq_inventory_provider
 from tools.lexicon.wordnet_provider import LexiconDependencyError, build_wordnet_sense_provider
 
 
@@ -29,6 +30,10 @@ def _load_build_base_providers():
     return build_wordfreq_rank_provider(), build_wordnet_sense_provider()
 
 
+def _load_word_inventory_provider():
+    return build_wordfreq_inventory_provider()
+
+
 def _build_base_command(args: argparse.Namespace) -> int:
     try:
         rank_provider, sense_provider = _load_build_base_providers()
@@ -36,12 +41,32 @@ def _build_base_command(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    if args.top_words and args.rollout_stage:
+        print('build-base accepts only one of --top-words or --rollout-stage', file=sys.stderr)
+        return 2
+
+    requested_top_words = args.top_words or args.rollout_stage
+    inventory_mode = 'seed_words'
+    words = list(args.words)
+    if requested_top_words is not None:
+        try:
+            inventory_provider = _load_word_inventory_provider()
+        except (LexiconDependencyError, RuntimeError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        words = build_word_inventory(limit=int(requested_top_words), inventory_provider=inventory_provider)
+        inventory_mode = 'top_words'
+
+    if not words:
+        print('build-base requires seed words or --top-words/--rollout-stage', file=sys.stderr)
+        return 2
+
     snapshot_id = args.snapshot_id or build_snapshot_id(
         date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
         source_label='wordnet-wordfreq',
     )
     result = build_base_records(
-        words=args.words,
+        words=words,
         snapshot_id=snapshot_id,
         created_at=_utc_now(),
         rank_provider=rank_provider,
@@ -51,11 +76,14 @@ def _build_base_command(args: argparse.Namespace) -> int:
     payload = {
         'command': 'build-base',
         'snapshot_id': snapshot_id,
+        'inventory_mode': inventory_mode,
         'words': [record.lemma for record in result.lexemes],
         'lexeme_count': len(result.lexemes),
         'sense_count': len(result.senses),
         'concept_count': len(result.concepts),
     }
+    if requested_top_words is not None:
+        payload['requested_top_words'] = int(requested_top_words)
     if args.output_dir:
         output_dir = Path(args.output_dir)
         written = write_base_snapshot(output_dir, result)
@@ -375,7 +403,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     build_base = subparsers.add_parser('build-base', help='build normalized base records for a bounded word list')
-    build_base.add_argument('words', nargs='+', help='seed words to normalize and process')
+    build_base.add_argument('words', nargs='*', help='seed words to normalize and process')
+    build_base.add_argument('--top-words', type=int, help='build a bounded top-N common-word inventory from wordfreq')
+    build_base.add_argument('--rollout-stage', type=int, choices=[100, 1000, 5000, 30000], help='named staged rollout size alias for top common words')
     build_base.add_argument('--snapshot-id', help='optional snapshot identifier override')
     build_base.add_argument('--max-senses', type=int, default=8, help='maximum learner-visible senses per word; adaptive selection typically keeps 4, 6, or 8')
     build_base.add_argument('--output-dir', help='optional output directory for normalized snapshot JSONL files')

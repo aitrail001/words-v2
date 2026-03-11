@@ -426,6 +426,18 @@ def _normalize_confusable_words(value: Any) -> list[dict[str, str]]:
     return normalized
 
 
+
+
+def learner_meaning_cap(wordfreq_rank: int) -> int:
+    rank = int(wordfreq_rank or 0)
+    if rank <= 0:
+        return 4
+    if rank <= 5000:
+        return 8
+    if rank <= 10000:
+        return 6
+    return 4
+
 def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord]) -> str:
     sense_rows = [
         {
@@ -438,6 +450,7 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
         }
         for sense in sorted(senses, key=lambda item: item.sense_order)
     ]
+    max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
     schema_hint = {
         'senses': [
             {
@@ -468,7 +481,9 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
     return (
         f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
         f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
-        f"Enrich exactly these selected senses and do not invent or omit any sense IDs: {json.dumps(sense_rows)}\n"
+        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
+        f"Select at most {max_meanings} learner-friendly meanings. You may omit weak tail senses.\n"
+        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
         f"Return JSON only with this schema: {json.dumps(schema_hint)}"
     )
 
@@ -500,15 +515,20 @@ def _build_enrichment_record(*, lexeme: LexemeRecord, sense: SenseRecord, respon
     )
 
 
-def _validate_openai_compatible_word_payload(response: dict[str, Any], *, senses: list[SenseRecord]) -> list[dict[str, Any]]:
+def _validate_openai_compatible_word_payload(response: dict[str, Any], *, lexeme: LexemeRecord, senses: list[SenseRecord]) -> list[dict[str, Any]]:
     if not isinstance(response, dict):
         raise RuntimeError('OpenAI-compatible endpoint returned a non-object word enrichment payload')
     value = response.get('senses')
     if not isinstance(value, list) or not value:
         raise RuntimeError("OpenAI-compatible word enrichment payload field 'senses' must be a non-empty list")
 
-    expected_ids = [sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)]
-    expected_set = set(expected_ids)
+    max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
+    if len(value) > max_meanings:
+        raise RuntimeError(
+            f"OpenAI-compatible word enrichment payload must select at most {max_meanings} learner-friendly meanings for frequency rank {lexeme.wordfreq_rank}"
+        )
+
+    expected_set = {sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)}
     normalized_rows: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for index, item in enumerate(value):
@@ -524,12 +544,7 @@ def _validate_openai_compatible_word_payload(response: dict[str, Any], *, senses
         normalized['sense_id'] = sense_id
         normalized_rows.append(normalized)
 
-    missing = [sense_id for sense_id in expected_ids if sense_id not in seen_ids]
-    if missing:
-        raise RuntimeError(f'OpenAI-compatible word enrichment payload omitted expected sense_ids: {missing}')
-
-    normalized_by_id = {row['sense_id']: row for row in normalized_rows}
-    return [normalized_by_id[sense_id] for sense_id in expected_ids]
+    return normalized_rows
 
 
 def build_placeholder_enrichment_provider(
@@ -662,7 +677,7 @@ def build_openai_compatible_node_word_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
         ordered_senses = sorted(senses, key=lambda item: item.sense_order)
-        response = _validate_openai_compatible_word_payload(client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=ordered_senses)), senses=ordered_senses)
+        response = _validate_openai_compatible_word_payload(client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=ordered_senses)), lexeme=lexeme, senses=ordered_senses)
         sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
         return [
             _build_enrichment_record(
@@ -749,7 +764,7 @@ def build_openai_compatible_word_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
         ordered_senses = sorted(senses, key=lambda item: item.sense_order)
-        response = _validate_openai_compatible_word_payload(client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=ordered_senses)), senses=ordered_senses)
+        response = _validate_openai_compatible_word_payload(client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=ordered_senses)), lexeme=lexeme, senses=ordered_senses)
         sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
         return [
             _build_enrichment_record(

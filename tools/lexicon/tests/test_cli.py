@@ -47,6 +47,33 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["lexeme_count"], 2)
         self.assertEqual(payload["sense_count"], 2)
 
+    def test_build_base_command_can_source_top_words_inventory(self) -> None:
+        with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: 10, lambda word: [])), \
+             patch("tools.lexicon.cli._load_word_inventory_provider", return_value=lambda limit: ["The", "and", "co-op", "123"]):
+            code, stdout, _ = self.run_cli(["build-base", "--top-words", "4"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["inventory_mode"], "top_words")
+        self.assertEqual(payload["requested_top_words"], 4)
+        self.assertEqual(payload["words"], ["the", "and", "co-op"])
+
+    def test_build_base_command_supports_rollout_stage_alias(self) -> None:
+        with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: 10, lambda word: [])), \
+             patch("tools.lexicon.cli._load_word_inventory_provider", return_value=lambda limit: ["one", "two", "three"]):
+            code, stdout, _ = self.run_cli(["build-base", "--rollout-stage", "100"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["requested_top_words"], 100)
+        self.assertEqual(payload["words"], ["one", "two", "three"])
+
+    def test_build_base_command_requires_words_or_top_words(self) -> None:
+        code, _, stderr = self.run_cli(["build-base"])
+
+        self.assertEqual(code, 2)
+        self.assertIn("requires seed words or --top-words", stderr)
+
     def test_build_base_command_reports_dependency_errors(self) -> None:
         with patch("tools.lexicon.cli._load_build_base_providers", side_effect=LexiconDependencyError("WordNet corpus is unavailable")):
             code, _, stderr = self.run_cli(["build-base", "run"])
@@ -633,7 +660,11 @@ class CliTests(unittest.TestCase):
             compiled_path.write_text(
                 json.dumps(
                     {
-                        "schema_version": "1.0.0",
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordfreq"}],
                         "word": "run",
                         "part_of_speech": ["verb"],
                         "cefr_level": "A1",
@@ -689,7 +720,11 @@ class CliTests(unittest.TestCase):
             compiled_path.write_text(
                 json.dumps(
                     {
-                        "schema_version": "1.0.0",
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordfreq"}],
                         "word": "run",
                         "part_of_speech": ["verb"],
                         "cefr_level": "A1",
@@ -880,7 +915,11 @@ class CliTests(unittest.TestCase):
             compiled_path.write_text(
                 json.dumps(
                     {
-                        "schema_version": "1.0.0",
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordfreq"}],
                         "word": "run",
                         "part_of_speech": ["verb"],
                         "cefr_level": "A1",

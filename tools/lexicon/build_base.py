@@ -7,7 +7,7 @@ from typing import Callable, Iterable, Optional
 from tools.lexicon.ids import make_concept_id, make_lexeme_id, make_sense_id
 from tools.lexicon.jsonl_io import write_jsonl
 from tools.lexicon.models import ConceptRecord, LexemeRecord, SenseRecord
-from tools.lexicon.wordfreq_utils import resolve_frequency_rank
+from tools.lexicon.wordfreq_utils import InventoryProvider, normalize_word_candidate, resolve_frequency_rank
 from tools.lexicon.wordnet_utils import fallback_sense, select_learner_senses
 
 CanonicalSenseProvider = Callable[[str], Iterable[dict[str, object]]]
@@ -25,12 +25,16 @@ def normalize_seed_words(words: Iterable[str]) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for raw_word in words:
-        word = raw_word.strip().lower()
+        word = normalize_word_candidate(raw_word)
         if not word or word in seen:
             continue
         seen.add(word)
         normalized.append(word)
     return normalized
+
+
+def build_word_inventory(*, limit: int, inventory_provider: InventoryProvider) -> list[str]:
+    return normalize_seed_words(inventory_provider(int(limit)))
 
 
 def build_base_records(
@@ -54,6 +58,10 @@ def build_base_records(
         if not canonical_senses:
             canonical_senses = [fallback_sense(word)]
 
+        source_provenance = [{"source": "wordfreq", "role": "frequency_rank"}]
+        if is_wordnet_backed:
+            source_provenance.append({"source": "wordnet", "role": "sense_grounding"})
+
         lexeme_records.append(
             LexemeRecord(
                 snapshot_id=snapshot_id,
@@ -64,6 +72,7 @@ def build_base_records(
                 is_wordnet_backed=is_wordnet_backed,
                 source_refs=['wordnet', 'wordfreq'] if is_wordnet_backed else ['wordfreq'],
                 created_at=created_at,
+                source_provenance=source_provenance,
             )
         )
 
