@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -81,7 +82,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("WordNet corpus is unavailable", stderr)
 
-    def test_build_base_command_skips_existing_db_words_by_default(self) -> None:
+    def test_build_base_command_skips_existing_db_words_when_db_is_configured(self) -> None:
         fake_result = type("FakeBaseResult", (), {
             "lexemes": [type("Lexeme", (), {"lemma": "run"})()],
             "senses": [object()],
@@ -92,16 +93,36 @@ class CliTests(unittest.TestCase):
         with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
              patch("tools.lexicon.cli._load_existing_db_words", return_value={"set"}) as mocked_existing, \
              patch("tools.lexicon.cli.build_base_records", return_value=fake_result) as mocked_build:
-            code, stdout, _ = self.run_cli(["build-base", "run", "set"])
+            code, stdout, _ = self.run_cli(["build-base", "--database-url", "postgresql://example/test", "run", "set"])
             callback = mocked_build.call_args.kwargs["existing_canonical_words_lookup"]
             self.assertIsNotNone(callback)
             self.assertEqual(callback(["run", "set"]), {"set"})
-            mocked_existing.assert_called_once_with(["run", "set"], language="en", database_url=None)
+            mocked_existing.assert_called_once_with(["run", "set"], language="en", database_url="postgresql://example/test")
 
         self.assertEqual(code, 0)
         payload = json.loads(stdout)
         self.assertTrue(payload["skip_existing_db"])
         self.assertEqual(payload["skipped_existing_db_count"], 1)
+
+    def test_build_base_command_without_db_config_skips_lookup(self) -> None:
+        fake_result = type("FakeBaseResult", (), {
+            "lexemes": [type("Lexeme", (), {"lemma": "run"})()],
+            "senses": [object()],
+            "concepts": [object()],
+            "ambiguous_forms": [],
+            "skipped_existing_canonical_words": [],
+        })()
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
+             patch("tools.lexicon.cli._load_existing_db_words") as mocked_existing, \
+             patch("tools.lexicon.cli.build_base_records", return_value=fake_result) as mocked_build:
+            code, stdout, _ = self.run_cli(["build-base", "run"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertFalse(payload["skip_existing_db"])
+        mocked_existing.assert_not_called()
+        self.assertIsNone(mocked_build.call_args.kwargs["existing_canonical_words_lookup"])
 
     def test_build_base_command_rerun_existing_disables_db_skip_lookup(self) -> None:
         fake_result = type("FakeBaseResult", (), {

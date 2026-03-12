@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,15 @@ from tools.lexicon.wordnet_provider import LexiconDependencyError, build_wordnet
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+
+
+def _resolve_existing_db_url(explicit_database_url: str | None) -> str | None:
+    if explicit_database_url:
+        return explicit_database_url
+    env_sync_url = os.getenv('DATABASE_URL_SYNC')
+    if env_sync_url:
+        return env_sync_url
+    return None
 
 
 def _load_existing_db_words(words: Sequence[str], language: str = 'en', database_url: str | None = None) -> set[str]:
@@ -99,13 +109,16 @@ def _build_base_command(args: argparse.Namespace) -> int:
     adjudications_path = getattr(args, 'adjudications', None)
     adjudications = load_adjudications(Path(adjudications_path)) if adjudications_path else None
     existing_canonical_words_lookup = None
+    existing_db_url = None
     if not args.rerun_existing:
-        def existing_canonical_words_lookup(canonical_words: list[str]) -> set[str]:
-            return _load_existing_db_words(
-                canonical_words,
-                language='en',
-                database_url=args.database_url,
-            )
+        existing_db_url = _resolve_existing_db_url(args.database_url)
+        if existing_db_url:
+            def existing_canonical_words_lookup(canonical_words: list[str]) -> set[str]:
+                return _load_existing_db_words(
+                    canonical_words,
+                    language='en',
+                    database_url=existing_db_url,
+                )
 
     try:
         result = build_base_records(
@@ -130,7 +143,7 @@ def _build_base_command(args: argparse.Namespace) -> int:
         'sense_count': len(result.senses),
         'concept_count': len(result.concepts),
         'ambiguous_form_count': len(result.ambiguous_forms),
-        'skip_existing_db': not args.rerun_existing,
+        'skip_existing_db': existing_canonical_words_lookup is not None,
         'skipped_existing_db_count': len(result.skipped_existing_canonical_words),
     }
     if requested_top_words is not None:

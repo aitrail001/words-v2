@@ -65,7 +65,7 @@ Important:
 - the narrower staged-review publish path is transitional and should not be treated as the main learner-enrichment publisher
 - ambiguous-form adjudication is optional and only operates on `unknown_needs_llm` canonicalization tails with bounded `candidate_forms`
 - unresolved ambiguous tails are deferred from `lexemes.jsonl` / `senses.jsonl` until adjudication; inspect them with `status-entry` instead of treating them as ready for enrichment
-- `build-base` now performs a bulk DB existence check on canonical headwords and skips already-published words by default; use `--rerun-existing` when you intentionally want to regenerate them
+- `build-base` now performs a bulk DB existence check on canonical headwords when `--database-url` or `DATABASE_URL_SYNC` is configured, and skips already-published words in that DB; use `--rerun-existing` when you intentionally want to regenerate them
 
 For the minimum pass/fail closure gate, use `docs/runbooks/lexicon-working-gate.md`.
 
