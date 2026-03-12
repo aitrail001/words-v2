@@ -81,7 +81,7 @@ Enrich the learner-facing layer:
 
 ```bash
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
-# per_word mode uses WordNet-grounded candidates as context only; the prompt repeats the hard 8/6/4 meaning cap, requires a JSON object only, and retries once with a repair prompt if the first payload is invalid
+# per_word mode uses WordNet-grounded candidates as context only; the prompt repeats the hard 8/6/4 meaning cap, requires a JSON object only, retries once with a repair prompt if the first payload is invalid, and now requires learner translations for zh-Hans/es/ar/pt-BR/ja
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
 ```
 
@@ -224,3 +224,11 @@ After a successful run, keep or inspect these artifacts:
 - `.github/workflows/lexicon-openai-compatible-smoke.yml`
 - `docs/runbooks/lexicon-working-gate.md`
 - `docs/plans/2026-03-08-lexicon-future-improvements-todo.md`
+
+
+## Translation scope in this slice
+
+- `enrich` now emits required learner translations for `zh-Hans`, `es`, `ar`, `pt-BR`, and `ja` on each sense.
+- `compile-export` preserves those translations in compiled sense rows.
+- `import-db` currently persists translated definitions into the DB `translations` table.
+- Translated usage notes and example translations stay in JSONL/compiled artifacts for now and are not yet surfaced in backend/admin APIs.

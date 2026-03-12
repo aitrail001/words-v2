@@ -23,16 +23,17 @@ def _ensure_backend_path() -> None:
         sys.path.insert(0, backend_str)
 
 
-def _default_models() -> tuple[type, type, type, type, type, type]:
+def _default_models() -> tuple[type, type, type, type, type, type, type]:
     _ensure_backend_path()
     from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
     from app.models.meaning import Meaning
     from app.models.meaning_example import MeaningExample
+    from app.models.translation import Translation
     from app.models.word import Word
     from app.models.word_relation import WordRelation
 
-    return Word, Meaning, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun
+    return Word, Meaning, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun, Translation
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,8 @@ class ImportSummary:
     deleted_examples: int = 0
     created_relations: int = 0
     deleted_relations: int = 0
+    created_translations: int = 0
+    updated_translations: int = 0
     created_enrichment_jobs: int = 0
     reused_enrichment_jobs: int = 0
     created_enrichment_runs: int = 0
@@ -180,6 +183,21 @@ def _load_existing_examples(session: Any, example_model: Type[Any], meaning_id: 
     return list(result.scalars().all())
 
 
+def _load_existing_translations(session: Any, translation_model: Type[Any], meaning_id: Any) -> list[Any]:
+    if _is_sqlalchemy_model(translation_model):
+        from sqlalchemy import select
+
+        result = session.execute(
+            select(translation_model)
+            .where(translation_model.meaning_id == meaning_id)
+            .order_by(translation_model.language.asc())
+        )
+        return list(result.scalars().all())
+
+    result = session.execute(object())
+    return list(result.scalars().all())
+
+
 def _load_existing_relations(session: Any, relation_model: Type[Any], meaning_id: Any, source: str) -> list[Any]:
     if _is_sqlalchemy_model(relation_model):
         from sqlalchemy import select
@@ -287,6 +305,7 @@ def import_compiled_rows(
     word_relation_model: Optional[Type[Any]] = None,
     lexicon_enrichment_job_model: Optional[Type[Any]] = None,
     lexicon_enrichment_run_model: Optional[Type[Any]] = None,
+    translation_model: Optional[Type[Any]] = None,
 ) -> ImportSummary:
     if word_model is None or meaning_model is None:
         (
@@ -296,6 +315,7 @@ def import_compiled_rows(
             default_word_relation_model,
             default_job_model,
             default_run_model,
+            default_translation_model,
         ) = _default_models()
         if meaning_example_model is None:
             meaning_example_model = default_meaning_example_model
@@ -305,6 +325,8 @@ def import_compiled_rows(
             lexicon_enrichment_job_model = default_job_model
         if lexicon_enrichment_run_model is None:
             lexicon_enrichment_run_model = default_run_model
+        if translation_model is None:
+            translation_model = default_translation_model
 
     summary = ImportSummary()
 
@@ -483,6 +505,28 @@ def import_compiled_rows(
                     session.add(meaning_example)
                     summary = _increment(summary, created_examples=1)
 
+            if translation_model is not None:
+                existing_translations = {
+                    getattr(item, 'language', None): item
+                    for item in _load_existing_translations(session, translation_model, meaning.id)
+                }
+                for locale, locale_payload in (sense.get('translations') or {}).items():
+                    translated_definition = str((locale_payload or {}).get('definition') or '').strip()
+                    if not translated_definition:
+                        continue
+                    translation = existing_translations.get(locale)
+                    if translation is None:
+                        translation = translation_model(
+                            meaning_id=meaning.id,
+                            language=locale,
+                            translation=translated_definition,
+                        )
+                        session.add(translation)
+                        summary = _increment(summary, created_translations=1)
+                    else:
+                        translation.translation = translated_definition
+                        summary = _increment(summary, updated_translations=1)
+
             if word_relation_model is not None:
                 existing_relations = _load_existing_relations(session, word_relation_model, meaning.id, source_type)
                 deleted_any_relations = False
@@ -574,6 +618,8 @@ def run_import_file(
         "deleted_examples": summary.deleted_examples,
         "created_relations": summary.created_relations,
         "deleted_relations": summary.deleted_relations,
+        "created_translations": summary.created_translations,
+        "updated_translations": summary.updated_translations,
         "created_enrichment_jobs": summary.created_enrichment_jobs,
         "reused_enrichment_jobs": summary.reused_enrichment_jobs,
         "created_enrichment_runs": summary.created_enrichment_runs,

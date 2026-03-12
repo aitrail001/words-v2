@@ -6,6 +6,8 @@ from typing import Any
 from tools.lexicon.jsonl_io import read_jsonl
 from tools.lexicon.models import CompiledWordRecord, EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 
+REQUIRED_TRANSLATION_LOCALES = ['zh-Hans', 'es', 'ar', 'pt-BR', 'ja']
+
 REQUIRED_COMPILED_FIELDS = [
     "schema_version",
     "entry_id",
@@ -21,6 +23,34 @@ REQUIRED_COMPILED_FIELDS = [
     "confusable_words",
     "generated_at",
 ]
+
+
+def _validate_compiled_sense_translations(value: Any, *, sense_index: int, example_count: int) -> list[str]:
+    errors: list[str] = []
+    if value in (None, {}):
+        return errors
+    if not isinstance(value, dict):
+        return [f"sense {sense_index} translations must be an object keyed by locale"]
+    for locale in REQUIRED_TRANSLATION_LOCALES:
+        locale_payload = value.get(locale)
+        if not isinstance(locale_payload, dict):
+            errors.append(f"sense {sense_index} translations must include locale {locale}")
+            continue
+        if not isinstance(locale_payload.get('definition'), str) or not locale_payload.get('definition', '').strip():
+            errors.append(f"sense {sense_index} translations.{locale}.definition must be a non-empty string")
+        if not isinstance(locale_payload.get('usage_note'), str) or not locale_payload.get('usage_note', '').strip():
+            errors.append(f"sense {sense_index} translations.{locale}.usage_note must be a non-empty string")
+        examples = locale_payload.get('examples')
+        if not isinstance(examples, list) or not examples:
+            errors.append(f"sense {sense_index} translations.{locale}.examples must be a non-empty list")
+            continue
+        if len(examples) != example_count:
+            errors.append(f"sense {sense_index} translations.{locale}.examples must align with English example count {example_count}")
+            continue
+        for example_index, example in enumerate(examples, start=1):
+            if not isinstance(example, str) or not example.strip():
+                errors.append(f"sense {sense_index} translations.{locale}.examples[{example_index}] must be a non-empty string")
+    return errors
 
 
 def compiled_meaning_limit(frequency_rank: Any) -> int:
@@ -102,6 +132,8 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
             examples = sense.get("examples", []) if isinstance(sense, dict) else []
             if not examples:
                 errors.append(f"sense {index} must include at least one example")
+            if isinstance(sense, dict):
+                errors.extend(_validate_compiled_sense_translations(sense.get('translations'), sense_index=index, example_count=len(examples)))
 
     return errors
 

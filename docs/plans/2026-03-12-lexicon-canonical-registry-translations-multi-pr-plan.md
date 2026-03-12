@@ -235,7 +235,12 @@ To preserve continuity after compaction or session reset:
 ## Current execution checkpoint
 
 - **PR 1 branch:** `feat_lexicon_canonical_registry_20260312`
-- **PR 1 status:** implementation + verification complete locally
+- **PR 1 status:** merged
 - **Fresh evidence:** `152` lexicon tests passed and a real smoke snapshot confirmed `gives/giving -> give`, `things -> thing`, and `left` as `keep_both_linked` to `leave`
 - **Next PR after merge:** PR 2 translations for `zh-Hans`, `es`, `ar`, `pt-BR`, and `ja`
 - **Carry-forward files:** `tools/lexicon/models.py`, `tools/lexicon/build_base.py`, `tools/lexicon/canonical_forms.py`, `tools/lexicon/canonical_registry.py`, `tools/lexicon/cli.py`, `tools/lexicon/README.md`, `tools/lexicon/OPERATOR_GUIDE.md`, `docs/status/project-status.md`
+
+- **PR 2 branch:** `feat_lexicon_translations_20260312`
+- **PR 2 status:** implementation + verification complete locally
+- **PR 2 evidence:** `156` lexicon tests passed and a real placeholder smoke confirmed compiled sense translations for all required locales
+- **Next PR after merge:** PR 3 optional ambiguous-form LLM adjudication

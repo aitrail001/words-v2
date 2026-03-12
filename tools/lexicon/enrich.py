@@ -26,6 +26,7 @@ _ENRICHMENT_MODES = {"per_sense", "per_word"}
 _ALLOWED_CEFR_LEVELS = {'A1', 'A2', 'B1', 'B2', 'C1', 'C2'}
 _ALLOWED_REGISTERS = {'neutral', 'formal', 'informal'}
 _STRING_LIST_FIELDS = ('secondary_domains', 'synonyms', 'antonyms', 'collocations', 'grammar_patterns')
+_REQUIRED_TRANSLATION_LOCALES = ('zh-Hans', 'es', 'ar', 'pt-BR', 'ja')
 _NODE_RUN_TIMEOUT_SECONDS = 60
 
 
@@ -220,6 +221,7 @@ def build_enrichment_prompt(*, lexeme: LexemeRecord, sense: SenseRecord) -> str:
         },
         'confusable_words': [{'word': 'string', 'note': 'string'}],
         'confidence': 'number',
+        'translations': {locale: {'definition': 'string', 'usage_note': 'string', 'examples': ['string']} for locale in _REQUIRED_TRANSLATION_LOCALES},
     }
     return (
         f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
@@ -372,6 +374,39 @@ def _validate_confidence(value: Any) -> float:
     return confidence
 
 
+def _validate_translations(value: Any, *, example_count: int) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        raise _payload_error('translations', 'must be an object keyed by locale')
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for locale in _REQUIRED_TRANSLATION_LOCALES:
+        locale_payload = value.get(locale)
+        if not isinstance(locale_payload, dict):
+            raise RuntimeError(f"OpenAI-compatible enrichment payload field 'translations' must include required locale '{locale}'")
+        definition = _require_non_empty_string(locale_payload.get('definition'), field=f'translations.{locale}.definition')
+        usage_note = _require_non_empty_string(locale_payload.get('usage_note'), field=f'translations.{locale}.usage_note')
+        examples = locale_payload.get('examples')
+        if not isinstance(examples, list) or not examples:
+            raise _payload_error(f'translations.{locale}.examples', 'must be a non-empty list of strings')
+        normalized_examples: list[str] = []
+        for index, item in enumerate(examples):
+            if not isinstance(item, str) or not item.strip():
+                raise _payload_error(f'translations.{locale}.examples[{index}]', 'must be a non-empty string')
+            normalized_examples.append(item.strip())
+        if len(normalized_examples) != example_count:
+            raise _payload_error(
+                f'translations.{locale}.examples',
+                f'must contain exactly {example_count} item(s) to align with the English examples'
+            )
+        normalized[locale] = {
+            'definition': definition,
+            'usage_note': usage_note,
+            'examples': normalized_examples,
+        }
+
+    return normalized
+
+
 def _validate_openai_compatible_payload(response: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(response, dict):
         raise RuntimeError('OpenAI-compatible endpoint returned a non-object enrichment payload')
@@ -386,6 +421,7 @@ def _validate_openai_compatible_payload(response: dict[str, Any]) -> dict[str, A
         normalized[field] = _validate_string_list_field(response.get(field), field=field)
     normalized['forms'] = _validate_forms(response.get('forms'))
     normalized['confusable_words'] = _validate_confusable_words(response.get('confusable_words'))
+    normalized['translations'] = _validate_translations(response.get('translations'), example_count=len(normalized['examples']))
     return normalized
 
 
@@ -474,6 +510,7 @@ def _word_enrichment_grounding_payload(*, senses: list[SenseRecord]) -> tuple[li
                 },
                 'confusable_words': [{'word': 'string', 'note': 'string'}],
                 'confidence': 'number',
+                'translations': {locale: {'definition': 'string', 'usage_note': 'string', 'examples': ['string']} for locale in _REQUIRED_TRANSLATION_LOCALES},
             }
         ]
     }
@@ -565,6 +602,7 @@ def _build_enrichment_record(*, lexeme: LexemeRecord, sense: SenseRecord, respon
         usage_note=str(response.get('usage_note') or f'Auto-generated learner note for {lexeme.lemma}.'),
         forms=response.get('forms') or _default_forms(lexeme.lemma, sense.part_of_speech),
         confusable_words=response.get('confusable_words') or [],
+        translations=response.get('translations') or {},
         model_name=str(model_name),
         prompt_version=prompt_version,
         generation_run_id=generation_run_id,
@@ -633,6 +671,14 @@ def build_placeholder_enrichment_provider(
             usage_note=f'Auto-generated learner note for {lexeme.lemma}.',
             forms=_default_forms(lexeme.lemma, sense.part_of_speech),
             confusable_words=[],
+            translations={
+                locale: {
+                    'definition': f'[{locale}] learner definition for {lexeme.lemma}',
+                    'usage_note': f'[{locale}] learner note for {lexeme.lemma}',
+                    'examples': [f'[{locale}] {_default_example(lexeme.lemma, sense.part_of_speech)}'],
+                }
+                for locale in _REQUIRED_TRANSLATION_LOCALES
+            },
             model_name=effective_model_name,
             prompt_version=prompt_version,
             generation_run_id=generation_run_id,
