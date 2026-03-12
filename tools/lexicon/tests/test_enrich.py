@@ -16,6 +16,7 @@ from tools.lexicon.enrich import (
     build_openai_compatible_word_enrichment_provider,
     _default_node_runner,
     build_openai_compatible_node_enrichment_provider,
+    _parse_json_payload_text,
     enrich_snapshot,
     read_snapshot_inputs,
 )
@@ -369,6 +370,41 @@ class EnrichSnapshotTests(unittest.TestCase):
                     prompt_version="v1",
                 )
 
+    def test_parse_json_payload_text_salvages_code_fenced_object(self) -> None:
+        payload = _parse_json_payload_text("```json\n{\"ok\": true}\n```")
+
+        self.assertEqual(payload, {"ok": True})
+
+    def test_real_provider_accepts_numeric_string_confidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexeme, sense = read_snapshot_inputs(snapshot_dir)[0][0], read_snapshot_inputs(snapshot_dir)[1][0]
+            settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-test",
+                    "LEXICON_LLM_API_KEY": "secret-key",
+                }
+            )
+
+            def transport(url, payload, headers):
+                return {
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "confidence": "0.9", "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."])})}]}]
+                }
+
+            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            record = provider(
+                lexeme=lexeme,
+                sense=sense,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(record.confidence, 0.9)
+
     def test_real_provider_rejects_non_numeric_confidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -622,6 +658,26 @@ class EnrichSnapshotTests(unittest.TestCase):
              patch('tools.lexicon.enrich.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd=['node'], timeout=60)):
             with self.assertRaisesRegex(RuntimeError, 'timed out after 60 seconds'):
                 _default_node_runner({'prompt': 'hello'})
+
+    def test_default_node_runner_uses_payload_timeout_seconds(self) -> None:
+        with patch('tools.lexicon.enrich.shutil.which', return_value='node'), \
+             patch('tools.lexicon.enrich.Path.exists', return_value=True), \
+             patch('tools.lexicon.enrich.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd=['node'], timeout=90)) as mocked_run:
+            with self.assertRaisesRegex(RuntimeError, 'timed out after 90 seconds'):
+                _default_node_runner({'prompt': 'hello'}, timeout_seconds=90)
+
+        self.assertEqual(mocked_run.call_args.kwargs['timeout'], 90)
+
+    def test_parse_json_payload_text_salvages_markdown_fenced_output(self) -> None:
+        payload = _parse_json_payload_text(
+            "Here is the JSON\n```json\n{\"ok\": true}\n```"
+        )
+
+        self.assertEqual(payload, {'ok': True})
+
+    def test_parse_json_payload_text_wraps_malformed_extracted_json(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, 'JSON object not found in model output'):
+            _parse_json_payload_text('prefix {"broken" 1} suffix')
 
     def test_enrich_snapshot_per_word_writes_partial_output_and_checkpoint_before_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1202,6 +1258,154 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     prompt_version="v1",
                 )
 
+    def test_real_word_provider_retries_transient_timeouts_before_failing_word(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+            settings = LexiconSettings.from_env({
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-test",
+                "LEXICON_LLM_API_KEY": "secret-key",
+            })
+
+            call_count = 0
+
+            def transport(url, payload, headers):
+                nonlocal call_count
+                call_count += 1
+                if call_count < 3:
+                    raise RuntimeError("Node OpenAI-compatible transport timed out after 60 seconds")
+                return {
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps({
+                                "senses": [{
+                                    "sense_id": "sn_lx_run_1",
+                                    "definition": "to move quickly on foot",
+                                    "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                    "confidence": 0.91,
+                                    "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."]),
+                                }]
+                            })
+                        }]
+                    }]
+                }
+
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            records = provider(
+                lexeme=run_lexeme,
+                senses=run_senses,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(call_count, 3)
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1"])
+
+    def test_real_word_provider_repairs_twice_for_schema_only_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+            settings = LexiconSettings.from_env({
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-test",
+                "LEXICON_LLM_API_KEY": "secret-key",
+            })
+
+            call_count = 0
+            prompts = []
+
+            def transport(url, payload, headers):
+                nonlocal call_count
+                call_count += 1
+                prompts.append(payload["input"])
+                if call_count == 1:
+                    return {
+                        "output": [{
+                            "type": "message",
+                            "content": [{
+                                "type": "output_text",
+                                "text": json.dumps({
+                                    "senses": [{
+                                        "sense_id": "sn_lx_run_1",
+                                        "definition": "to move quickly on foot",
+                                        "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                        "confidence": 0.91,
+                                        "translations": {
+                                            "zh-Hans": {"definition": "zh:def", "usage_note": "zh:note", "examples": ["zh:one"]},
+                                            "es": {"definition": "es:def", "usage_note": "es:note", "examples": ["es:one"]},
+                                            "ar": {"definition": "ar:def", "usage_note": "ar:note", "examples": ["ar:one"]},
+                                            "ja": {"definition": "ja:def", "usage_note": "ja:note", "examples": ["ja:one"]}
+                                        },
+                                    }]
+                                })
+                            }]
+                        }]
+                    }
+                if call_count == 2:
+                    return {
+                        "output": [{
+                            "type": "message",
+                            "content": [{
+                                "type": "output_text",
+                                "text": json.dumps({
+                                    "senses": [{
+                                        "sense_id": "sn_lx_run_1",
+                                        "definition": "to move quickly on foot",
+                                        "examples": [
+                                            {"sentence": "I run every morning.", "difficulty": "A1"},
+                                            {"sentence": "She runs every day.", "difficulty": "A1"}
+                                        ],
+                                        "confidence": 0.91,
+                                        "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["only one example"]),
+                                    }]
+                                })
+                            }]
+                        }]
+                    }
+                return {
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps({
+                                "senses": [{
+                                    "sense_id": "sn_lx_run_1",
+                                    "definition": "to move quickly on foot",
+                                    "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                    "confidence": 0.91,
+                                    "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."]),
+                                }]
+                            })
+                        }]
+                    }]
+                }
+
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            records = provider(
+                lexeme=run_lexeme,
+                senses=run_senses,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(call_count, 3)
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1"])
+            self.assertIn("repair the previous learner-facing enrichment response", prompts[1].lower())
+            self.assertIn("repair the previous learner-facing enrichment response", prompts[2].lower())
+
     def test_real_word_provider_repairs_once_when_model_returns_too_many_senses(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -1268,6 +1472,79 @@ class EnrichPerWordModeTests(unittest.TestCase):
             self.assertIn("repair the previous learner-facing enrichment response", prompts[1].lower())
             self.assertIn("at most 4 learner-friendly meanings", prompts[1].lower())
 
+    def test_real_word_provider_repairs_multiple_times_for_repairable_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+            settings = LexiconSettings.from_env({
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-test",
+                "LEXICON_LLM_API_KEY": "secret-key",
+            })
+
+            prompts = []
+            call_count = 0
+
+            def transport(url, payload, headers):
+                nonlocal call_count
+                call_count += 1
+                prompts.append(payload["input"])
+                if call_count == 1:
+                    return {"output": [{"type": "message", "content": [{"type": "output_text", "text": "```json\n{\"senses\": [{\"sense_id\": \"sn_lx_run_1\", \"definition\": \"to move quickly on foot\"}]}\n```"}]}]}
+                if call_count == 2:
+                    return {
+                        "output": [{
+                            "type": "message",
+                            "content": [{
+                                "type": "output_text",
+                                "text": json.dumps({
+                                    "senses": [{
+                                        "sense_id": "sn_lx_run_1",
+                                        "definition": "to move quickly on foot",
+                                        "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                        "confidence": 0.91,
+                                        "translations": {"zh-Hans": {"definition": "zh:def", "usage_note": "zh:note", "examples": ["zh:one", "zh:two"]}},
+                                    }]
+                                })
+                            }]
+                        }]
+                    }
+                return {
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps({
+                                "senses": [{
+                                    "sense_id": "sn_lx_run_1",
+                                    "definition": "to move quickly on foot",
+                                    "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                    "confidence": 0.91,
+                                    "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."]),
+                                }]
+                            })
+                        }]
+                    }]
+                }
+
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            records = provider(
+                lexeme=run_lexeme,
+                senses=run_senses,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1"])
+            self.assertEqual(call_count, 3)
+            self.assertIn("repair the previous learner-facing enrichment response", prompts[1].lower())
+            self.assertIn("repair the previous learner-facing enrichment response", prompts[2].lower())
+
     def test_real_word_provider_does_not_retry_transport_failures(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -1308,7 +1585,17 @@ class EnrichPerWordModeTests(unittest.TestCase):
             checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
             failures_path = snapshot_dir / "enrich.failures.jsonl"
             checkpoint_path.write_text("", encoding="utf-8")
-            failures_path.write_text("", encoding="utf-8")
+            failures_path.write_text(
+                json.dumps({
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "failed",
+                    "generation_run_id": "failed-run",
+                    "failed_at": "2026-03-07T00:00:00Z",
+                    "error": "gateway timeout",
+                }) + "\n",
+                encoding="utf-8",
+            )
             (snapshot_dir / "enrichments.jsonl").write_text(
                 json.dumps({
                     "snapshot_id": "snap-1",

@@ -9,6 +9,7 @@ class LexiconSettingsTests(unittest.TestCase):
         settings = LexiconSettings.from_env({})
 
         self.assertEqual(settings.output_root, Path("data/lexicon"))
+        self.assertEqual(settings.llm_timeout_seconds, 60)
 
     def test_settings_reads_llm_values_from_env(self) -> None:
         settings = LexiconSettings.from_env(
@@ -46,6 +47,35 @@ class LexiconSettingsTests(unittest.TestCase):
         )
 
         self.assertEqual(settings.llm_transport, "node")
+
+    def test_settings_reads_optional_timeout_seconds_minimal_env(self) -> None:
+        settings = LexiconSettings.from_env(
+            {
+                "LEXICON_LLM_TIMEOUT_SECONDS": "120",
+            }
+        )
+
+        self.assertEqual(settings.llm_timeout_seconds, 120)
+
+    def test_settings_reads_optional_timeout_seconds_with_llm_env(self) -> None:
+        settings = LexiconSettings.from_env(
+            {
+                "LEXICON_LLM_BASE_URL": "https://api.example.test",
+                "LEXICON_LLM_MODEL": "gpt-5.4",
+                "LEXICON_LLM_API_KEY": "secret-key",
+                "LEXICON_LLM_TIMEOUT_SECONDS": "120",
+            }
+        )
+
+        self.assertEqual(settings.llm_timeout_seconds, 120)
+
+    def test_settings_rejects_invalid_timeout_seconds_zero(self) -> None:
+        with self.assertRaises(ValueError):
+            LexiconSettings.from_env({"LEXICON_LLM_TIMEOUT_SECONDS": "0"})
+
+    def test_settings_rejects_invalid_timeout_seconds_non_numeric(self) -> None:
+        with self.assertRaises(ValueError):
+            LexiconSettings.from_env({"LEXICON_LLM_TIMEOUT_SECONDS": "fast"})
 
     def test_settings_reads_optional_reasoning_effort(self) -> None:
         settings = LexiconSettings.from_env(

@@ -29,7 +29,10 @@ _ALLOWED_CEFR_LEVELS = {'A1', 'A2', 'B1', 'B2', 'C1', 'C2'}
 _ALLOWED_REGISTERS = {'neutral', 'formal', 'informal'}
 _STRING_LIST_FIELDS = ('secondary_domains', 'synonyms', 'antonyms', 'collocations', 'grammar_patterns')
 _REQUIRED_TRANSLATION_LOCALES = ('zh-Hans', 'es', 'ar', 'pt-BR', 'ja')
-_NODE_RUN_TIMEOUT_SECONDS = 60
+_DEFAULT_LLM_TIMEOUT_SECONDS = 60
+_DEFAULT_WORD_TRANSIENT_RETRIES = 2
+_DEFAULT_WORD_REPAIR_ATTEMPTS = 2
+_NODE_RUN_TIMEOUT_SECONDS = _DEFAULT_LLM_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -54,8 +57,15 @@ class OpenAICompatibleResponsesClient:
         self.endpoint = endpoint.rstrip("/")
         self.api_key = api_key
         self.model = model
-        self.transport = transport or _default_transport
         self.timeout_seconds = timeout_seconds
+        self.transport = transport or (
+            lambda url, payload, headers: _default_transport(
+                url,
+                payload,
+                headers,
+                timeout_seconds=self.timeout_seconds,
+            )
+        )
         self.reasoning_effort = reasoning_effort
 
     def responses_url(self) -> str:
@@ -79,16 +89,22 @@ class OpenAICompatibleResponsesClient:
         response = self.transport(self.responses_url(), payload, headers)
         text = _extract_output_text(response)
         try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
+            return _parse_json_payload_text(text)
+        except RuntimeError as exc:
             raise RuntimeError("OpenAI-compatible endpoint returned non-JSON enrichment output") from exc
 
 
-def _default_transport(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+def _default_transport(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    *,
+    timeout_seconds: int = 60,
+) -> dict[str, Any]:
     encoded = json.dumps(payload).encode("utf-8")
     req = request.Request(url, data=encoded, headers=headers, method="POST")
     try:
-        with request.urlopen(req, timeout=60) as response:
+        with request.urlopen(req, timeout=timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
     except error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
@@ -97,7 +113,7 @@ def _default_transport(url: str, payload: dict[str, Any], headers: dict[str, str
         raise RuntimeError(f"OpenAI-compatible endpoint request failed: {exc.reason}") from exc
 
 
-def _default_node_runner(payload: dict[str, Any]) -> dict[str, Any]:
+def _default_node_runner(payload: dict[str, Any], *, timeout_seconds: int = _NODE_RUN_TIMEOUT_SECONDS) -> dict[str, Any]:
     node_bin = shutil.which('node')
     if not node_bin:
         raise LexiconDependencyError('Node.js is required for openai_compatible_node enrichment mode')
@@ -113,11 +129,11 @@ def _default_node_runner(payload: dict[str, Any]) -> dict[str, Any]:
             text=True,
             capture_output=True,
             check=False,
-            timeout=_NODE_RUN_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
-            f'Node OpenAI-compatible transport timed out after {_NODE_RUN_TIMEOUT_SECONDS} seconds'
+            f'Node OpenAI-compatible transport timed out after {timeout_seconds} seconds'
         ) from exc
     if completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip() or 'Node OpenAI-compatible transport failed'
@@ -136,12 +152,14 @@ class NodeOpenAICompatibleResponsesClient:
         api_key: str,
         model: str,
         runner: NodeRunner | None = None,
+        timeout_seconds: int = _NODE_RUN_TIMEOUT_SECONDS,
         reasoning_effort: str | None = None,
     ) -> None:
         self.endpoint = endpoint.rstrip('/')
         self.api_key = api_key
         self.model = model
-        self.runner = runner or _default_node_runner
+        self.timeout_seconds = timeout_seconds
+        self.runner = runner or (lambda payload: _default_node_runner(payload, timeout_seconds=self.timeout_seconds))
         self.reasoning_effort = reasoning_effort
 
     def generate_json(self, prompt: str) -> dict[str, Any]:
@@ -157,8 +175,8 @@ class NodeOpenAICompatibleResponsesClient:
         response = self.runner(payload)
         text = _extract_output_text(response)
         try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
+            return _parse_json_payload_text(text)
+        except RuntimeError as exc:
             raise RuntimeError('OpenAI-compatible node endpoint returned non-JSON enrichment output') from exc
 
 
@@ -242,6 +260,33 @@ def _extract_output_text(response_payload: dict[str, Any]) -> str:
             if content.get('type') in {'output_text', 'text'} and isinstance(content.get('text'), str):
                 return content['text']
     raise RuntimeError('OpenAI-compatible endpoint response did not contain output text')
+
+
+def _parse_json_payload_text(text: str) -> dict[str, Any]:
+    normalized = text.strip()
+    if normalized.startswith("```"):
+        lines = normalized.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        normalized = "\n".join(lines).strip()
+
+    try:
+        payload = json.loads(normalized)
+    except json.JSONDecodeError:
+        start = normalized.find('{')
+        end = normalized.rfind('}')
+        if start == -1 or end == -1 or end <= start:
+            raise RuntimeError('JSON object not found in model output')
+        try:
+            payload = json.loads(normalized[start:end + 1])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError('JSON object not found in model output') from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError('OpenAI-compatible endpoint returned a non-object enrichment payload')
+    return payload
 
 
 def _payload_error(field: str, message: str) -> RuntimeError:
@@ -366,6 +411,13 @@ def _validate_confusable_words(value: Any) -> list[dict[str, str]] | None:
 
 
 def _validate_confidence(value: Any) -> float:
+    if isinstance(value, str):
+        stripped = value.strip()
+        try:
+            value = float(stripped)
+        except ValueError as exc:
+            raise _payload_error('confidence', 'must be a numeric value between 0 and 1') from exc
+
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise _payload_error('confidence', 'must be a numeric value between 0 and 1')
 
@@ -530,6 +582,8 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
         f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
         f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
         "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
+        f"For every selected sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
         "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
         f"Return JSON only with this schema: {json.dumps(schema_hint)}"
     )
@@ -546,6 +600,8 @@ def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[Se
         f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
         f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
         "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
+        f"Every selected sense must include these translation locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
         "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
         f"Return JSON only with this schema: {json.dumps(schema_hint)}"
     )
@@ -564,26 +620,47 @@ def _is_repairable_word_payload_error(error: RuntimeError) -> bool:
     return not any(marker in message for marker in non_repairable_markers)
 
 
+def _is_retryable_word_generation_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    retryable_markers = (
+        'timed out',
+        'non-json',
+        'temporarily unavailable',
+        'connection reset',
+        'connection aborted',
+    )
+    return any(marker in message for marker in retryable_markers)
+
+
 def _generate_validated_word_payload(
     *,
     client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
     lexeme: LexemeRecord,
     senses: list[SenseRecord],
 ) -> list[dict[str, Any]]:
-    try:
-        first_response = client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=senses))
-        return _validate_openai_compatible_word_payload(first_response, lexeme=lexeme, senses=senses)
-    except RuntimeError as exc:
-        if not _is_repairable_word_payload_error(exc):
-            raise
-        repair_response = client.generate_json(
-            build_word_enrichment_repair_prompt(
+    prompt = build_word_enrichment_prompt(lexeme=lexeme, senses=senses)
+    last_error: RuntimeError | None = None
+    repair_attempts = 0
+    transient_retries = 0
+
+    while True:
+        try:
+            response = client.generate_json(prompt)
+            return _validate_openai_compatible_word_payload(response, lexeme=lexeme, senses=senses)
+        except RuntimeError as exc:
+            last_error = exc
+            if _is_retryable_word_generation_error(exc) and transient_retries < _DEFAULT_WORD_TRANSIENT_RETRIES:
+                transient_retries += 1
+                continue
+            if not _is_repairable_word_payload_error(exc) or repair_attempts >= _DEFAULT_WORD_REPAIR_ATTEMPTS:
+                raise
+            repair_attempts += 1
+            transient_retries = 0
+            prompt = build_word_enrichment_repair_prompt(
                 lexeme=lexeme,
                 senses=senses,
-                previous_error=str(exc),
+                previous_error=str(last_error),
             )
-        )
-        return _validate_openai_compatible_word_payload(repair_response, lexeme=lexeme, senses=senses)
 
 
 def _build_enrichment_record(*, lexeme: LexemeRecord, sense: SenseRecord, response: dict[str, Any], model_name: str, prompt_version: str, generation_run_id: str, review_status: str, generated_at: str) -> EnrichmentRecord:
@@ -738,6 +815,7 @@ def build_openai_compatible_node_enrichment_provider(
         api_key=settings.llm_api_key,
         model=str(effective_model_name),
         runner=runner,
+        timeout_seconds=settings.llm_timeout_seconds,
         reasoning_effort=effective_reasoning_effort,
     )
 
@@ -779,6 +857,7 @@ def build_openai_compatible_node_word_enrichment_provider(
         api_key=settings.llm_api_key,
         model=str(effective_model_name),
         runner=runner,
+        timeout_seconds=settings.llm_timeout_seconds,
         reasoning_effort=effective_reasoning_effort,
     )
 
@@ -825,6 +904,7 @@ def build_openai_compatible_enrichment_provider(
         api_key=settings.llm_api_key,
         model=str(effective_model_name),
         transport=transport,
+        timeout_seconds=settings.llm_timeout_seconds,
         reasoning_effort=effective_reasoning_effort,
     )
 
@@ -866,6 +946,7 @@ def build_openai_compatible_word_enrichment_provider(
         api_key=settings.llm_api_key,
         model=str(effective_model_name),
         transport=transport,
+        timeout_seconds=settings.llm_timeout_seconds,
         reasoning_effort=effective_reasoning_effort,
     )
 
@@ -1030,9 +1111,24 @@ def _reconcile_resumable_output(
     write_jsonl(output_path, reconciled_rows)
 
 
+def _reconcile_failures_output(
+    failures_path: Path,
+    *,
+    completed_lexeme_ids: set[str],
+) -> None:
+    if not failures_path.exists():
+        return
+    reconciled_rows = [
+        row for row in read_jsonl(failures_path)
+        if str(row.get('lexeme_id') or '') not in completed_lexeme_ids
+    ]
+    write_jsonl(failures_path, reconciled_rows)
+
+
 def _append_completed_lexeme_records(
     output_path: Path,
     checkpoint_path: Path,
+    failures_path: Path,
     *,
     lexeme: LexemeRecord,
     records: list[EnrichmentRecord],
@@ -1048,6 +1144,7 @@ def _append_completed_lexeme_records(
         completed_at=completed_at,
     )
     completed_lexeme_ids.add(lexeme.lexeme_id)
+    _reconcile_failures_output(failures_path, completed_lexeme_ids=completed_lexeme_ids)
 
 
 def _write_per_word_checkpoint(checkpoint_path: Path, *, lexeme: LexemeRecord, generation_run_id: str, completed_at: str) -> None:
@@ -1160,6 +1257,10 @@ def enrich_snapshot(
             completed_lexeme_ids=completed_lexeme_ids,
             lexeme_id_by_sense_id=lexeme_id_by_sense_id,
         )
+        _reconcile_failures_output(
+            failures_destination,
+            completed_lexeme_ids=completed_lexeme_ids,
+        )
     pending_lexemes = [lexeme for lexeme in ordered_lexemes if lexeme.lexeme_id not in completed_lexeme_ids]
     if not resume:
         write_jsonl(destination, [])
@@ -1208,6 +1309,7 @@ def enrich_snapshot(
             _append_completed_lexeme_records(
                 destination,
                 checkpoint_destination,
+                failures_destination,
                 lexeme=lexeme,
                 records=records,
                 generation_run_id=effective_generation_run_id,
@@ -1226,6 +1328,7 @@ def enrich_snapshot(
             _append_completed_lexeme_records(
                 destination,
                 checkpoint_destination,
+                failures_destination,
                 lexeme=lexeme,
                 records=records,
                 generation_run_id=effective_generation_run_id,
