@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # Rate limiting
     rate_limit_per_minute: int = 60
 
+    # Lexicon artifact root (admin read-only ops API)
+    lexicon_snapshot_root: str = "data/lexicon/snapshots"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     @model_validator(mode="after")
