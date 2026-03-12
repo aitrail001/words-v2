@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.lexicon.jsonl_io import read_jsonl
-from tools.lexicon.models import CompiledWordRecord, EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
+from tools.lexicon.models import AmbiguousFormRecord, CanonicalVariantRecord, CompiledWordRecord, EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 
 REQUIRED_TRANSLATION_LOCALES = ['zh-Hans', 'es', 'ar', 'pt-BR', 'ja']
 
@@ -149,4 +149,21 @@ def validate_snapshot_files(snapshot_dir: Path) -> list[str]:
             row = dict(row)
             row["examples"] = [SenseExample(**example) for example in row.get("examples", [])]
             enrichments.append(EnrichmentRecord(**row))
-    return validate_snapshot(lexemes=lexemes, senses=senses, enrichments=enrichments)
+
+    errors = validate_snapshot(lexemes=lexemes, senses=senses, enrichments=enrichments)
+
+    variants_path = snapshot_dir / "canonical_variants.jsonl"
+    ambiguous_path = snapshot_dir / "ambiguous_forms.jsonl"
+    variants = [CanonicalVariantRecord(**row) for row in read_jsonl(variants_path)] if variants_path.exists() else []
+    ambiguous_forms = [AmbiguousFormRecord(**row) for row in read_jsonl(ambiguous_path)] if ambiguous_path.exists() else []
+
+    lexeme_lemmas = {lexeme.lemma for lexeme in lexemes}
+    adjudication_variant_surfaces = {variant.surface_form for variant in variants if variant.needs_llm_adjudication}
+
+    for row in ambiguous_forms:
+        if row.surface_form in lexeme_lemmas:
+            errors.append(f"unresolved ambiguous form {row.surface_form} should not appear in lexemes.jsonl before adjudication")
+        if row.surface_form not in adjudication_variant_surfaces:
+            errors.append(f"ambiguous form {row.surface_form} is missing a matching needs_llm_adjudication variant record")
+
+    return errors

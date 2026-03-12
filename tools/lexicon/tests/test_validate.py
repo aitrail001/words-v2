@@ -170,6 +170,67 @@ class ValidateSnapshotTests(unittest.TestCase):
             self.assertEqual(errors, [])
 
 
+    def test_validate_snapshot_files_flags_unresolved_ambiguous_form_leaking_into_lexemes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            leaked_lexeme = LexemeRecord(
+                snapshot_id="snap-1",
+                lexeme_id="lx_ringed",
+                lemma="ringed",
+                language="en",
+                wordfreq_rank=1000,
+                is_wordnet_backed=False,
+                source_refs=["wordfreq"],
+                created_at="2026-03-12T00:00:00Z",
+            )
+            leaked_sense = SenseRecord(
+                snapshot_id="snap-1",
+                sense_id="sn_lx_ringed_1",
+                lexeme_id="lx_ringed",
+                wn_synset_id=None,
+                part_of_speech="noun",
+                canonical_gloss="fallback",
+                selection_reason="fallback learner sense",
+                sense_order=1,
+                is_high_polysemy=False,
+                created_at="2026-03-12T00:00:00Z",
+            )
+            (root / "lexemes.jsonl").write_text(json.dumps(leaked_lexeme.to_dict()) + "\n", encoding="utf-8")
+            (root / "senses.jsonl").write_text(json.dumps(leaked_sense.to_dict()) + "\n", encoding="utf-8")
+            (root / "canonical_variants.jsonl").write_text(json.dumps({
+                "snapshot_id": "snap-1",
+                "entry_id": "lx_ringed",
+                "surface_form": "ringed",
+                "canonical_form": "ringed",
+                "decision": "unknown_needs_llm",
+                "decision_reason": "deterministic signals found candidate forms but no strong canonical winner",
+                "confidence": 0.45,
+                "variant_type": "ambiguous",
+                "created_at": "2026-03-12T00:00:00Z",
+                "linked_canonical_form": None,
+                "is_separately_learner_worthy": True,
+                "candidate_forms": ["ring"],
+                "ambiguity_reason": "candidate set exists but deterministic score stayed below the collapse threshold",
+                "needs_llm_adjudication": True,
+            }) + "\n", encoding="utf-8")
+            (root / "ambiguous_forms.jsonl").write_text(json.dumps({
+                "surface_form": "ringed",
+                "deterministic_decision": "unknown_needs_llm",
+                "canonical_form": "ringed",
+                "linked_canonical_form": None,
+                "candidate_forms": ["ring"],
+                "decision_reason": "deterministic signals found candidate forms but no strong canonical winner",
+                "confidence": 0.45,
+                "wordfreq_rank": 1000,
+                "sense_labels": ["ring"],
+                "ambiguity_reason": "candidate set exists but deterministic score stayed below the collapse threshold",
+            }) + "\n", encoding="utf-8")
+
+            errors = validate_snapshot_files(root)
+
+            self.assertIn("unresolved ambiguous form ringed should not appear in lexemes.jsonl before adjudication", errors)
+
+
 class ValidateCompiledRecordTests(unittest.TestCase):
     def test_validate_compiled_record_flags_missing_required_top_level_fields(self) -> None:
         errors = validate_compiled_record(

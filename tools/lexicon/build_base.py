@@ -84,6 +84,7 @@ def build_base_records(
 
     source_forms_by_canonical: dict[str, list[str]] = {}
     linked_base_by_canonical: dict[str, str | None] = {}
+    deferred_canonical_forms: set[str] = set()
     for decision in canonicalization.decisions:
         if decision.canonical_form not in source_forms_by_canonical:
             source_forms_by_canonical[decision.canonical_form] = []
@@ -110,6 +111,9 @@ def build_base_records(
             )
         )
         if decision.needs_llm_adjudication:
+            should_defer_from_build = decision.surface_form not in set(decision.sense_labels)
+            if should_defer_from_build:
+                deferred_canonical_forms.add(decision.canonical_form)
             ambiguous_form_records.append(
                 AmbiguousFormRecord(
                     surface_form=decision.surface_form,
@@ -125,7 +129,9 @@ def build_base_records(
                 )
             )
 
-    for word in canonicalization.canonical_words:
+    buildable_canonical_words = [word for word in canonicalization.canonical_words if word not in deferred_canonical_forms]
+
+    for word in buildable_canonical_words:
         lexeme_id = make_lexeme_id(word)
         available_senses = get_senses(word)
         canonical_senses = list(select_learner_senses(available_senses, max_senses=max_senses))
