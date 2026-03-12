@@ -98,6 +98,37 @@ class CanonicalVariantRecord(SerializableRecord):
     created_at: str
     linked_canonical_form: str | None = None
     is_separately_learner_worthy: bool = False
+    candidate_forms: list[str] | None = None
+    ambiguity_reason: str | None = None
+    needs_llm_adjudication: bool = False
+
+
+@dataclass(frozen=True)
+class AmbiguousFormRecord(SerializableRecord):
+    surface_form: str
+    deterministic_decision: str
+    canonical_form: str
+    linked_canonical_form: str | None
+    candidate_forms: list[str]
+    decision_reason: str
+    confidence: float
+    wordfreq_rank: int
+    sense_labels: list[str]
+    ambiguity_reason: str
+
+
+@dataclass(frozen=True)
+class FormAdjudicationRecord(SerializableRecord):
+    surface_form: str
+    selected_action: str
+    selected_canonical_form: str
+    selected_linked_canonical_form: str | None
+    candidate_forms: list[str]
+    model_name: str
+    prompt_version: str
+    generation_run_id: str
+    confidence: float
+    adjudication_reason: str
 
 
 @dataclass(frozen=True)

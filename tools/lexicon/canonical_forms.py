@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional
 
 from tools.lexicon.wordfreq_utils import normalize_word_candidate, resolve_frequency_rank
@@ -31,6 +31,8 @@ _KEEP_BOTH_LINKED = {
     "found",
 }
 
+_ALLOWED_ADJUDICATION_ACTIONS = {"collapse_to_canonical", "keep_separate", "keep_both_linked"}
+
 
 @dataclass(frozen=True)
 class CanonicalDecision:
@@ -42,6 +44,10 @@ class CanonicalDecision:
     variant_type: str
     linked_canonical_form: str | None = None
     is_separately_learner_worthy: bool = False
+    candidate_forms: list[str] = field(default_factory=list)
+    ambiguity_reason: str | None = None
+    needs_llm_adjudication: bool = False
+    sense_labels: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -104,14 +110,69 @@ def _candidate_forms(surface_form: str, senses: list[dict[str, object]]) -> list
     return candidates
 
 
+def _apply_adjudication(surface_form: str, adjudication: dict[str, object], candidate_forms: list[str]) -> CanonicalDecision:
+    selected_action = str(adjudication.get("selected_action") or "").strip()
+    if selected_action not in _ALLOWED_ADJUDICATION_ACTIONS:
+        raise RuntimeError(f"Invalid adjudication action for {surface_form}: {selected_action}")
+
+    selected_canonical_form = normalize_word_candidate(str(adjudication.get("selected_canonical_form") or ""))
+    if not selected_canonical_form or (selected_canonical_form != surface_form and selected_canonical_form not in candidate_forms):
+        raise RuntimeError(
+            f"Adjudication selected_canonical_form for {surface_form} must be the surface form or one of the candidate forms"
+        )
+
+    linked = adjudication.get("selected_linked_canonical_form")
+    linked_canonical_form = normalize_word_candidate(str(linked)) if linked else None
+    if linked_canonical_form and linked_canonical_form not in candidate_forms:
+        raise RuntimeError(
+            f"Adjudication selected_linked_canonical_form for {surface_form} must be null or one of the candidate forms"
+        )
+
+    if selected_action == "collapse_to_canonical":
+        return CanonicalDecision(
+            surface_form=surface_form,
+            canonical_form=selected_canonical_form,
+            linked_canonical_form=linked_canonical_form,
+            decision=selected_action,
+            decision_reason="operator/LLM adjudication override selected a canonical form",
+            confidence=float(adjudication.get("confidence") or 0.8),
+            variant_type="adjudicated",
+            candidate_forms=candidate_forms,
+        )
+    if selected_action == "keep_both_linked":
+        return CanonicalDecision(
+            surface_form=surface_form,
+            canonical_form=surface_form,
+            linked_canonical_form=linked_canonical_form or selected_canonical_form,
+            decision=selected_action,
+            decision_reason="operator/LLM adjudication override kept the lexicalized surface form and linked it",
+            confidence=float(adjudication.get("confidence") or 0.8),
+            variant_type="lexicalized",
+            is_separately_learner_worthy=True,
+            candidate_forms=candidate_forms,
+        )
+    return CanonicalDecision(
+        surface_form=surface_form,
+        canonical_form=surface_form,
+        decision="keep_separate",
+        decision_reason="operator/LLM adjudication override kept the surface form separate",
+        confidence=float(adjudication.get("confidence") or 0.8),
+        variant_type="self",
+        is_separately_learner_worthy=True,
+        candidate_forms=candidate_forms,
+    )
+
+
 def canonicalize_words(
     *,
     words: Iterable[str],
     rank_provider: RankProvider,
     sense_provider: CanonicalSenseProvider,
+    adjudications: dict[str, dict[str, object]] | None = None,
 ) -> CanonicalizationResult:
     normalized_words = [word for word in (normalize_word_candidate(raw_word) for raw_word in words) if word]
     sense_cache: dict[str, list[dict[str, object]]] = {}
+    adjudication_map = adjudications or {}
 
     def get_senses(word: str) -> list[dict[str, object]]:
         if word not in sense_cache:
@@ -126,8 +187,20 @@ def canonicalize_words(
         surface_senses = get_senses(surface_form)
         candidate_forms = _candidate_forms(surface_form, surface_senses)
         surface_rank = resolve_frequency_rank(surface_form, rank_provider)
+        surface_labels = sorted(
+            {
+                normalized
+                for normalized in (
+                    normalize_word_candidate(str(sense.get("canonical_label") or ""))
+                    for sense in surface_senses
+                )
+                if normalized
+            }
+        )
 
-        if not candidate_forms:
+        if surface_form in adjudication_map:
+            decision = _apply_adjudication(surface_form, adjudication_map[surface_form], candidate_forms)
+        elif not candidate_forms:
             decision = CanonicalDecision(
                 surface_form=surface_form,
                 canonical_form=surface_form,
@@ -136,18 +209,12 @@ def canonicalize_words(
                 confidence=0.55,
                 variant_type="self",
                 is_separately_learner_worthy=True,
+                candidate_forms=candidate_forms,
+                sense_labels=surface_labels,
             )
         else:
-            surface_labels = {
-                normalized
-                for normalized in (
-                    normalize_word_candidate(str(sense.get("canonical_label") or ""))
-                    for sense in surface_senses
-                )
-                if normalized
-            }
-
             scored_candidates: list[tuple[int, str, list[str]]] = []
+            suffix_candidates = _suffix_candidates(surface_form)
             for candidate in candidate_forms:
                 score = 0
                 reasons: list[str] = []
@@ -161,7 +228,7 @@ def canonicalize_words(
                 if _IRREGULAR_BASES.get(surface_form) == candidate:
                     score += 3
                     reasons.append("irregular-form map points to candidate")
-                if candidate in _suffix_candidates(surface_form):
+                if candidate in suffix_candidates:
                     score += 2
                     reasons.append("suffix normalization points to candidate")
                 scored_candidates.append((score, candidate, reasons))
@@ -181,6 +248,8 @@ def canonicalize_words(
                     confidence=0.9,
                     variant_type="lexicalized",
                     is_separately_learner_worthy=True,
+                    candidate_forms=candidate_forms,
+                    sense_labels=surface_labels,
                 )
             elif best_score >= 5 and best_candidate != surface_form and (candidate_label_matches > 0 or standalone_surface_labels == 0):
                 decision = CanonicalDecision(
@@ -191,16 +260,22 @@ def canonicalize_words(
                     confidence=0.9,
                     variant_type="inflectional",
                     is_separately_learner_worthy=False,
+                    candidate_forms=candidate_forms,
+                    sense_labels=surface_labels,
                 )
             else:
                 decision = CanonicalDecision(
                     surface_form=surface_form,
                     canonical_form=surface_form,
-                    decision="keep_separate",
-                    decision_reason="surface form has standalone lexical evidence or no strong canonical winner",
-                    confidence=0.6,
-                    variant_type="self",
+                    decision="unknown_needs_llm",
+                    decision_reason="deterministic signals found candidate forms but no strong canonical winner",
+                    confidence=0.45,
+                    variant_type="ambiguous",
                     is_separately_learner_worthy=True,
+                    candidate_forms=candidate_forms,
+                    ambiguity_reason="candidate set exists but deterministic score stayed below the collapse threshold",
+                    needs_llm_adjudication=True,
+                    sense_labels=surface_labels,
                 )
 
         if decision.canonical_form not in canonical_seen:

@@ -241,6 +241,11 @@ To preserve continuity after compaction or session reset:
 - **Carry-forward files:** `tools/lexicon/models.py`, `tools/lexicon/build_base.py`, `tools/lexicon/canonical_forms.py`, `tools/lexicon/canonical_registry.py`, `tools/lexicon/cli.py`, `tools/lexicon/README.md`, `tools/lexicon/OPERATOR_GUIDE.md`, `docs/status/project-status.md`
 
 - **PR 2 branch:** `feat_lexicon_translations_20260312`
-- **PR 2 status:** implementation + verification complete locally
+- **PR 2 status:** merged
 - **PR 2 evidence:** `156` lexicon tests passed and a real placeholder smoke confirmed compiled sense translations for all required locales
 - **Next PR after merge:** PR 3 optional ambiguous-form LLM adjudication
+
+- **PR 3 branch:** `feat_lexicon_ambiguous_form_adjudication_20260312`
+- **PR 3 status:** implementation + verification complete locally
+- **PR 3 evidence:** `161` lexicon tests passed; real CLI smoke found `8` real ambiguous tails (`close`, `light`, `watch`, `content`, `object`, `scale`, `fine`, `play`), placeholder adjudication wrote bounded `form_adjudications.jsonl`, and `build-base --adjudications` rebuilt an adjudicated snapshot successfully
+- **Next PR after merge:** optional larger ambiguous-tail rollout / operator adoption decision

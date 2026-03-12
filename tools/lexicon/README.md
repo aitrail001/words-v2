@@ -19,6 +19,8 @@ Current scope:
 - `python3 -m tools.lexicon.cli benchmark-selection --output-dir ...` runs built-in tuning/holdout benchmark snapshots with optional rerank comparisons
 - `python3 -m tools.lexicon.cli score-selection-risk --snapshot-dir ...` scores deterministic selections and writes `selection_decisions.jsonl`
 - `python3 -m tools.lexicon.cli prepare-review --snapshot-dir ... --decisions ...` reranks only risky lexemes and writes reviewed decisions plus optional `review_queue.jsonl`
+- `python3 -m tools.lexicon.cli detect-ambiguous-forms --output ... <words...>` emits only the bounded canonicalization tail that needs optional LLM/operator adjudication
+- `python3 -m tools.lexicon.cli adjudicate-forms --input ambiguous_forms.jsonl --output form_adjudications.jsonl ...` runs bounded adjudication that may only choose the surface form or one of the deterministic candidate forms
 - `python3 -m tools.lexicon.cli lookup-entry --snapshot-dir ... <word>` resolves a surface form to the canonical entry chosen for this snapshot
 - `python3 -m tools.lexicon.cli status-entry --snapshot-dir ... [--check-db] <word>` reports canonical/build/enrich/compile status and can optionally confirm DB presence
 - `python3 -m tools.lexicon.cli validate --snapshot-dir ...` validates normalized snapshot JSONL files
@@ -48,15 +50,22 @@ This is intentional. The operator path should not silently fall back to fake lex
 For generated learner-facing lexicon content, the canonical final DB write path is:
 
 1. `build-base`
-2. optional review-prep flow (`score-selection-risk` / `prepare-review`)
-3. `enrich`
-4. `validate --snapshot-dir`
-5. `compile-export`
-6. `validate --compiled-input`
-7. `import-db`
+2. optional ambiguous-form adjudication flow (`detect-ambiguous-forms` / `adjudicate-forms` / rerun `build-base --adjudications ...`)
+3. optional review-prep flow (`score-selection-risk` / `prepare-review`)
+4. `enrich`
+5. `validate --snapshot-dir`
+6. `compile-export`
+7. `validate --compiled-input`
+8. `import-db`
 
 Use staged review as the decision/review layer, not as a competing final learner-enrichment publisher.
 Today, `import-db` is the only path that lands the richer learner-facing writeback (`meaning_examples`, `word_relations`, enrichment jobs/runs, phonetic provenance) into the local DB.
+
+Ambiguous-form adjudication is intentionally narrow:
+- it is optional and off the default path
+- it only touches surface forms that deterministic canonicalization marked as `unknown_needs_llm`
+- it may only keep the surface form or choose from bounded `candidate_forms` already emitted by the deterministic pass
+- it persists replayable artifacts as `ambiguous_forms.jsonl` and `form_adjudications.jsonl`
 
 See `docs/decisions/ADR-004-lexicon-canonical-final-ingestion-path.md` and `docs/runbooks/lexicon-working-gate.md`.
 
@@ -69,6 +78,9 @@ python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/le
 python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 # build-base now deterministically collapses obvious inflectional duplicates like things->thing and gives->give while keeping lexicalized forms like left as separate entries linked to their base family
+python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
+python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
+python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
 python3 -m tools.lexicon.cli lookup-entry --snapshot-dir data/lexicon/snapshots/demo things
 python3 -m tools.lexicon.cli status-entry --snapshot-dir data/lexicon/snapshots/demo --check-db thing
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
@@ -149,6 +161,9 @@ python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/le
 python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 # build-base now deterministically collapses obvious inflectional duplicates like things->thing and gives->give while keeping lexicalized forms like left as separate entries linked to their base family
+python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
+python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
+python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
 python3 -m tools.lexicon.cli lookup-entry --snapshot-dir data/lexicon/snapshots/demo things
 python3 -m tools.lexicon.cli status-entry --snapshot-dir data/lexicon/snapshots/demo --check-db thing
 ```
