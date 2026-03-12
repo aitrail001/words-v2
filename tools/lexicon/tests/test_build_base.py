@@ -118,6 +118,46 @@ class BuildBaseTests(unittest.TestCase):
         self.assertEqual(result.concepts, [])
         self.assertFalse(result.lexemes[0].is_wordnet_backed)
 
+    def test_build_base_records_skips_existing_published_canonical_words(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {"things": 10, "thing": 10, "run": 20}[word]
+
+        def sense_provider(word: str):
+            canonical_label = "thing" if word == "things" else word
+            synset_label = canonical_label
+            return [
+                {
+                    "wn_synset_id": f"{synset_label}.n.01",
+                    "part_of_speech": "noun",
+                    "canonical_gloss": f"gloss for {canonical_label}",
+                    "canonical_label": canonical_label,
+                }
+            ]
+
+        seen_lookup_inputs: list[list[str]] = []
+
+        def existing_lookup(words: list[str]) -> set[str]:
+            seen_lookup_inputs.append(list(words))
+            return {"thing"}
+
+        result = build_base_records(
+            words=["things", "run"],
+            snapshot_id="lexicon-20260312-wordnet-wordfreq",
+            created_at="2026-03-12T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+            existing_canonical_words_lookup=existing_lookup,
+        )
+
+        self.assertEqual(seen_lookup_inputs, [["thing", "run"]])
+        self.assertEqual([record.lemma for record in result.lexemes], ["run"])
+        self.assertEqual(result.skipped_existing_canonical_words, ["thing"])
+        self.assertEqual([record.canonical_form for record in result.canonical_entries], ["thing", "run"])
+        skipped_status = next(record for record in result.generation_status if record.canonical_form == "thing")
+        self.assertFalse(skipped_status.base_built)
+        self.assertTrue(skipped_status.published)
+        self.assertEqual(skipped_status.last_source_reference, "db_existing_skip")
+
     def test_build_base_records_only_calls_sense_provider_once_per_word(self) -> None:
         calls = []
 

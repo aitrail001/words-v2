@@ -21,6 +21,7 @@ from tools.lexicon.wordnet_utils import fallback_sense, select_learner_senses
 
 CanonicalSenseProvider = Callable[[str], Iterable[dict[str, object]]]
 RankProvider = Callable[[str], Optional[int]]
+ExistingCanonicalWordsLookup = Callable[[list[str]], set[str]]
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class BaseBuildResult:
     canonical_variants: list[CanonicalVariantRecord]
     generation_status: list[GenerationStatusRecord]
     ambiguous_forms: list[AmbiguousFormRecord]
+    skipped_existing_canonical_words: list[str]
 
 
 def normalize_seed_words(words: Iterable[str]) -> list[str]:
@@ -59,6 +61,7 @@ def build_base_records(
     sense_provider: CanonicalSenseProvider,
     max_senses: int = 8,
     adjudications: dict[str, dict[str, object]] | None = None,
+    existing_canonical_words_lookup: ExistingCanonicalWordsLookup | None = None,
 ) -> BaseBuildResult:
     lexeme_records: list[LexemeRecord] = []
     sense_records: list[SenseRecord] = []
@@ -130,9 +133,49 @@ def build_base_records(
             )
 
     buildable_canonical_words = [word for word in canonicalization.canonical_words if word not in deferred_canonical_forms]
+    existing_canonical_words = (
+        existing_canonical_words_lookup(list(buildable_canonical_words))
+        if existing_canonical_words_lookup is not None
+        else set()
+    )
+    skipped_existing_canonical_words: list[str] = []
 
     for word in buildable_canonical_words:
         lexeme_id = make_lexeme_id(word)
+        wordfreq_rank = resolve_frequency_rank(word, rank_provider)
+        is_existing_in_db = word in existing_canonical_words
+
+        if is_existing_in_db:
+            skipped_existing_canonical_words.append(word)
+            canonical_entry_records.append(
+                CanonicalEntryRecord(
+                    snapshot_id=snapshot_id,
+                    entry_id=lexeme_id,
+                    canonical_form=word,
+                    display_form=word,
+                    normalized_form=word,
+                    source_forms=source_forms_by_canonical.get(word, [word]),
+                    linked_canonical_form=linked_base_by_canonical.get(word),
+                    created_at=created_at,
+                    notes='skipped_existing_db',
+                )
+            )
+            generation_status_records.append(
+                GenerationStatusRecord(
+                    snapshot_id=snapshot_id,
+                    entry_id=lexeme_id,
+                    canonical_form=word,
+                    updated_at=created_at,
+                    discovered=True,
+                    base_built=False,
+                    enriched=False,
+                    compiled=False,
+                    published=True,
+                    last_source_reference='db_existing_skip',
+                )
+            )
+            continue
+
         available_senses = get_senses(word)
         canonical_senses = list(select_learner_senses(available_senses, max_senses=max_senses))
         is_wordnet_backed = bool(canonical_senses)
@@ -149,7 +192,7 @@ def build_base_records(
                 lexeme_id=lexeme_id,
                 lemma=word,
                 language='en',
-                wordfreq_rank=resolve_frequency_rank(word, rank_provider),
+                wordfreq_rank=wordfreq_rank,
                 is_wordnet_backed=is_wordnet_backed,
                 source_refs=['wordnet', 'wordfreq'] if is_wordnet_backed else ['wordfreq'],
                 created_at=created_at,
@@ -167,6 +210,7 @@ def build_base_records(
                 source_forms=source_forms_by_canonical.get(word, [word]),
                 linked_canonical_form=linked_base_by_canonical.get(word),
                 created_at=created_at,
+                notes=None if is_wordnet_backed else 'fallback_base_without_wordnet_senses',
             )
         )
         generation_status_records.append(
@@ -214,6 +258,7 @@ def build_base_records(
                     )
                 )
 
+
     return BaseBuildResult(
         lexemes=lexeme_records,
         senses=sense_records,
@@ -222,6 +267,7 @@ def build_base_records(
         canonical_variants=canonical_variant_records,
         generation_status=generation_status_records,
         ambiguous_forms=ambiguous_form_records,
+        skipped_existing_canonical_words=skipped_existing_canonical_words,
     )
 
 
