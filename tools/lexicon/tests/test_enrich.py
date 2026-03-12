@@ -23,6 +23,17 @@ from tools.lexicon.errors import LexiconDependencyError
 from tools.lexicon.models import EnrichmentRecord
 
 
+def _test_translations(definition: str = "translated definition", usage_note: str = "translated usage note", examples: list[str] | None = None) -> dict[str, dict[str, object]]:
+    example_rows = list(examples or ["translated example"])
+    return {
+        "zh-Hans": {"definition": f"zh:{definition}", "usage_note": f"zh:{usage_note}", "examples": [f"zh:{row}" for row in example_rows]},
+        "es": {"definition": f"es:{definition}", "usage_note": f"es:{usage_note}", "examples": [f"es:{row}" for row in example_rows]},
+        "ar": {"definition": f"ar:{definition}", "usage_note": f"ar:{usage_note}", "examples": [f"ar:{row}" for row in example_rows]},
+        "pt-BR": {"definition": f"pt:{definition}", "usage_note": f"pt:{usage_note}", "examples": [f"pt:{row}" for row in example_rows]},
+        "ja": {"definition": f"ja:{definition}", "usage_note": f"ja:{usage_note}", "examples": [f"ja:{row}" for row in example_rows]},
+    }
+
+
 class EnrichSnapshotTests(unittest.TestCase):
     def _write_snapshot(self, snapshot_dir: Path) -> None:
         (snapshot_dir / "lexemes.jsonl").write_text(
@@ -276,6 +287,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                                             "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
                                             "confusable_words": [{"word": "ran", "note": "Past tense form."}],
                                             "confidence": 0.91,
+                                            "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."]),
                                         }
                                     ),
                                 }
@@ -564,6 +576,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                             "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
                             "confusable_words": [{"word": "ran", "note": "Past tense form."}],
                             "confidence": 0.91,
+                            "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."]),
                         }
                     )
                 }
@@ -901,7 +914,8 @@ class EnrichPerWordModeTests(unittest.TestCase):
                                     "usage_note": "Common everyday verb.",
                                     "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
                                     "confusable_words": [],
-                                    "confidence": 0.91
+                                    "confidence": 0.91,
+                                    "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."])
                                 }]
                             })
                         }]
@@ -1001,6 +1015,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                                     "definition": "to move quickly on foot",
                                     "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
                                     "confidence": 0.91,
+                                    "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."]),
                                 }]
                             })
                         }]

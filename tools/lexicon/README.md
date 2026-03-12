@@ -12,7 +12,7 @@ Current scope:
 - `python3 -m tools.lexicon.cli build-base --top-words N ...` builds a filtered top-common-word inventory from `wordfreq`
 - `python3 -m tools.lexicon.cli build-base --rollout-stage 100|1000|5000|30000 ...` runs the staged common-word rollout aliases
 - `python3 -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files with shared entry metadata (`entry_id`, `entry_type`, `normalized_form`, `source_provenance`) plus canonical registry sidecars (`canonical_entries.jsonl`, `canonical_variants.jsonl`, `generation_status.jsonl`)
-- `python3 -m tools.lexicon.cli enrich --snapshot-dir ...` generates learner-facing `enrichments.jsonl` for an existing snapshot
+- `python3 -m tools.lexicon.cli enrich --snapshot-dir ...` generates learner-facing `enrichments.jsonl` for an existing snapshot, including required learner translations for `zh-Hans`, `es`, `ar`, `pt-BR`, and `ja`
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --max-concurrency ...` enriches one lexeme per LLM call, lets the model choose the learner-friendly subset of grounded meanings, repeats the hard meaning cap in the prompt, and performs one repair retry when a word-level payload is invalid
 - `python3 -m tools.lexicon.cli rerank-senses --snapshot-dir ...` writes grounded LLM rerank decisions for existing snapshots
 - `python3 -m tools.lexicon.cli compare-selection --snapshot-dir ... --rerank-file ...` compares deterministic selection against reranked selection
@@ -23,11 +23,11 @@ Current scope:
 - `python3 -m tools.lexicon.cli status-entry --snapshot-dir ... [--check-db] <word>` reports canonical/build/enrich/compile status and can optionally confirm DB presence
 - `python3 -m tools.lexicon.cli validate --snapshot-dir ...` validates normalized snapshot JSONL files
 - `python3 -m tools.lexicon.cli validate --compiled-input ...` validates compiled learner-facing JSONL rows (`--compiled-path` remains an alias)
-- `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --output ...` compiles normalized snapshot files into `words.enriched.jsonl`, preserving sense-level enrichment provenance needed for DB writeback
+- `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --output ...` compiles normalized snapshot files into `words.enriched.jsonl`, preserving sense-level enrichment provenance and translated sense payloads needed for DB/artifact writeback
 - `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --decisions ... --decision-filter mode_c_safe --output ...` compiles only deterministic-safe or auto-accepted lexemes from `selection_decisions.jsonl`
 - filtered compile runs require both `--decisions` and `--decision-filter`; passing one without the other now fails loudly
 - `python3 -m tools.lexicon.cli import-db --input ... --dry-run` loads compiled rows and prints a local-admin import summary, including learner-facing example/relation and enrichment provenance counts
-- `python3 -m tools.lexicon.cli import-db --input ... --source-type ... --source-reference ... --language ...` runs the local import path against the configured DB, writing `words`, `meanings`, `meaning_examples`, `word_relations`, and enrichment job/run metadata while safely replacing prior examples/relations and collapsing shared per-word `generation_run_id` groups to one enrichment run row
+- `python3 -m tools.lexicon.cli import-db --input ... --source-type ... --source-reference ... --language ...` runs the local import path against the configured DB, writing `words`, `meanings`, meaning-level `translations`, `meaning_examples`, `word_relations`, and enrichment job/run metadata while safely replacing prior examples/relations and collapsing shared per-word `generation_run_id` groups to one enrichment run row
 
 ## Dependencies
 
@@ -285,3 +285,8 @@ Notes:
 - If the workflow returns Cloudflare challenge HTML/403, the runner reached the gateway but was blocked upstream; first try `LEXICON_LLM_TRANSPORT=node`, then move to a self-hosted runner or gateway allow/bypass rules if GitHub-hosted runners are still challenged.
 - model benchmark conclusions and artifact notes for `gpt-5.1`/`gpt-5.2`/`gpt-5.3`/`gpt-5.4` live in `tools/lexicon/MODEL_BENCHMARKS.md`
 - non-dry-run import expects backend DB dependencies and settings to be available in the local environment
+
+
+Translation note:
+- PR 2 stores translated definitions in the DB `translations` table during `import-db`.
+- Translated usage notes and example translations remain in lexicon JSONL artifacts / compiled sense payloads for now; they are not yet exposed through backend/admin APIs in this slice.

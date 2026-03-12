@@ -138,6 +138,7 @@ class EnrichmentRecord(SerializableRecord):
     confidence: float
     review_status: str
     generated_at: str
+    translations: dict[str, dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)

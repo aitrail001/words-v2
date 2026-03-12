@@ -70,6 +70,7 @@ def compile_words(
                     "prompt_version": enrichment.prompt_version,
                     "confidence": enrichment.confidence,
                     "generated_at": enrichment.generated_at,
+                    "translations": enrichment.translations or {},
                 }
             )
 
