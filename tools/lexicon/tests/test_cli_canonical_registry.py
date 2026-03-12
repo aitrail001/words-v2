@@ -191,6 +191,100 @@ class CanonicalRegistryCliTests(unittest.TestCase):
             self.assertTrue(payload["compiled"])
             self.assertTrue(payload["published"])
 
+    def test_status_entry_command_reports_pending_ambiguous_adjudication(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_lines(
+                root / "canonical_variants.jsonl",
+                [{
+                    "snapshot_id": "snap-1",
+                    "entry_id": "lx_ringed",
+                    "surface_form": "ringed",
+                    "canonical_form": "ringed",
+                    "decision": "unknown_needs_llm",
+                    "decision_reason": "deterministic signals found candidate forms but no strong canonical winner",
+                    "confidence": 0.45,
+                    "variant_type": "ambiguous",
+                    "created_at": "2026-03-12T00:00:00Z",
+                    "linked_canonical_form": None,
+                    "is_separately_learner_worthy": True,
+                    "candidate_forms": ["ring"],
+                    "ambiguity_reason": "candidate set exists but deterministic score stayed below the collapse threshold",
+                    "needs_llm_adjudication": True,
+                }],
+            )
+            self._write_lines(
+                root / "ambiguous_forms.jsonl",
+                [{
+                    "surface_form": "ringed",
+                    "deterministic_decision": "unknown_needs_llm",
+                    "canonical_form": "ringed",
+                    "linked_canonical_form": None,
+                    "candidate_forms": ["ring"],
+                    "decision_reason": "deterministic signals found candidate forms but no strong canonical winner",
+                    "confidence": 0.45,
+                    "wordfreq_rank": 1000,
+                    "sense_labels": ["ring"],
+                    "ambiguity_reason": "candidate set exists but deterministic score stayed below the collapse threshold",
+                }],
+            )
+
+            code, stdout, _ = self.run_cli(["status-entry", "--snapshot-dir", str(root), "ringed"])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "status-entry")
+            self.assertTrue(payload["found"])
+            self.assertFalse(payload["base_built"])
+            self.assertFalse(payload["enriched"])
+            self.assertTrue(payload["needs_adjudication"])
+            self.assertEqual(payload["candidate_forms"], ["ring"])
+            self.assertIn("below the collapse threshold", payload["ambiguity_reason"])
+
+    def test_lookup_entry_prefers_direct_entry_over_variant_shadow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_lines(
+                root / "canonical_entries.jsonl",
+                [{
+                    "snapshot_id": "snap-1",
+                    "entry_id": "lx_ring",
+                    "canonical_form": "ring",
+                    "display_form": "ring",
+                    "normalized_form": "ring",
+                    "source_forms": ["ring"],
+                    "created_at": "2026-03-12T00:00:00Z",
+                    "language": "en",
+                    "entry_type": "word",
+                    "linked_canonical_form": None,
+                    "notes": None,
+                }],
+            )
+            self._write_lines(
+                root / "canonical_variants.jsonl",
+                [{
+                    "snapshot_id": "snap-1",
+                    "entry_id": "lx_ringed",
+                    "surface_form": "ringed",
+                    "canonical_form": "ring",
+                    "decision": "collapse_to_canonical",
+                    "decision_reason": "suffix normalization points to candidate",
+                    "confidence": 0.9,
+                    "variant_type": "inflectional",
+                    "created_at": "2026-03-12T00:00:00Z",
+                    "linked_canonical_form": None,
+                    "is_separately_learner_worthy": False,
+                }],
+            )
+
+            code, stdout, _ = self.run_cli(["lookup-entry", "--snapshot-dir", str(root), "ring"])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["canonical_form"], "ring")
+            self.assertEqual(payload["decision"], "direct_entry")
+            self.assertEqual(payload["entry_id"], "lx_ring")
+
 
 if __name__ == "__main__":
     unittest.main()

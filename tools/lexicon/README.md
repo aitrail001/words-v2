@@ -21,6 +21,7 @@ Current scope:
 - `python3 -m tools.lexicon.cli score-selection-risk --snapshot-dir ...` scores deterministic selections and writes `selection_decisions.jsonl`
 - `python3 -m tools.lexicon.cli prepare-review --snapshot-dir ... --decisions ...` reranks only risky lexemes and writes reviewed decisions plus optional `review_queue.jsonl`
 - `python3 -m tools.lexicon.cli detect-ambiguous-forms --output ... <words...>` emits only the bounded canonicalization tail that needs optional LLM/operator adjudication
+- unresolved ambiguous-form tails are now deferred from `lexemes.jsonl` / `senses.jsonl` until adjudication, while core headwords still build normally and remain deterministic-first
 - `python3 -m tools.lexicon.cli adjudicate-forms --input ambiguous_forms.jsonl --output form_adjudications.jsonl ...` runs bounded adjudication that may only choose the surface form or one of the deterministic candidate forms
 - `python3 -m tools.lexicon.cli lookup-entry --snapshot-dir ... <word>` resolves a surface form to the canonical entry chosen for this snapshot
 - `python3 -m tools.lexicon.cli status-entry --snapshot-dir ... [--check-db] <word>` reports canonical/build/enrich/compile status and can optionally confirm DB presence

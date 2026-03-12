@@ -64,6 +64,7 @@ Important:
 - for compiled per-word artifacts, `import-db` now groups senses that share the same `generation_run_id` into one DB enrichment run row per word request
 - the narrower staged-review publish path is transitional and should not be treated as the main learner-enrichment publisher
 - ambiguous-form adjudication is optional and only operates on `unknown_needs_llm` canonicalization tails with bounded `candidate_forms`
+- unresolved ambiguous tails are deferred from `lexemes.jsonl` / `senses.jsonl` until adjudication; inspect them with `status-entry` instead of treating them as ready for enrichment
 
 For the minimum pass/fail closure gate, use `docs/runbooks/lexicon-working-gate.md`.
 
@@ -139,6 +140,7 @@ Contract:
 - the adjudicator may only choose the surface form or one of deterministic `candidate_forms`
 - the artifacts are replayable and can be checked into an operator run directory if needed
 - the default rollout path is still deterministic-only unless you explicitly pass `--adjudications`
+- use adjudication for true canonicalization tails like `ringed -> ring`, not for common headwords that still build directly
 
 ## 5. Provider modes
 

@@ -50,6 +50,10 @@ class FormAdjudicationTests(unittest.TestCase):
         self.assertEqual(row.surface_form, "ringed")
         self.assertEqual(row.deterministic_decision, "unknown_needs_llm")
         self.assertIn("ring", row.candidate_forms)
+        self.assertEqual(result.lexemes, [])
+        self.assertEqual(result.senses, [])
+        self.assertEqual(result.concepts, [])
+
 
     def test_build_base_records_applies_adjudication_overrides(self) -> None:
         def rank_provider(word: str) -> int:
