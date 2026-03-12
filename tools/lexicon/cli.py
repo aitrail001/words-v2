@@ -110,6 +110,11 @@ def _enrich_command(args: argparse.Namespace) -> int:
             reasoning_effort=args.reasoning_effort,
             mode=args.mode,
             max_concurrency=args.max_concurrency,
+            resume=args.resume,
+            checkpoint_path=Path(args.checkpoint_path) if args.checkpoint_path else None,
+            failures_output=Path(args.failures_output) if args.failures_output else None,
+            max_failures=args.max_failures,
+            request_delay_seconds=args.request_delay_seconds,
         )
     except (LexiconDependencyError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
@@ -527,6 +532,11 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for real endpoint runs')
     enrich.add_argument('--mode', choices=['per_sense', 'per_word'], default='per_sense', help='enrichment execution mode')
     enrich.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel lexeme jobs for per_word enrichment mode')
+    enrich.add_argument('--resume', action='store_true', help='resume a prior per_word enrichment run using the checkpoint file')
+    enrich.add_argument('--checkpoint-path', help='optional override path for the per_word checkpoint JSONL file')
+    enrich.add_argument('--failures-output', help='optional override path for the per_word failures JSONL file')
+    enrich.add_argument('--max-failures', type=int, help='stop submitting new per_word jobs after this many lexeme failures')
+    enrich.add_argument('--request-delay-seconds', type=float, default=1.0, help='delay between per_word request starts in seconds')
     enrich.set_defaults(handler=_enrich_command)
 
     smoke_openai = subparsers.add_parser('smoke-openai-compatible', help='run a tiny real OpenAI-compatible smoke flow locally')

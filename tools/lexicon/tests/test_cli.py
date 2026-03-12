@@ -121,11 +121,30 @@ class CliTests(unittest.TestCase):
             self.assertEqual(mocked_enrich.call_args.kwargs["provider_mode"], "openai_compatible")
 
 
-    def test_enrich_command_passes_mode_and_concurrency(self) -> None:
+    def test_enrich_command_passes_mode_concurrency_and_resume_controls(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
+            checkpoint_path = snapshot_dir / "checkpoint.jsonl"
+            failures_path = snapshot_dir / "failures.jsonl"
             with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()], lexeme_count=2, mode="per_word")) as mocked_enrich:
-                code, stdout, _ = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir), "--mode", "per_word", "--max-concurrency", "8"] )
+                code, stdout, _ = self.run_cli([
+                    "enrich",
+                    "--snapshot-dir",
+                    str(snapshot_dir),
+                    "--mode",
+                    "per_word",
+                    "--max-concurrency",
+                    "8",
+                    "--resume",
+                    "--checkpoint-path",
+                    str(checkpoint_path),
+                    "--failures-output",
+                    str(failures_path),
+                    "--max-failures",
+                    "3",
+                    "--request-delay-seconds",
+                    "1.5",
+                ])
 
             self.assertEqual(code, 0)
             payload = json.loads(stdout)
@@ -133,6 +152,11 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["lexeme_count"], 2)
             self.assertEqual(mocked_enrich.call_args.kwargs["mode"], "per_word")
             self.assertEqual(mocked_enrich.call_args.kwargs["max_concurrency"], 8)
+            self.assertTrue(mocked_enrich.call_args.kwargs["resume"])
+            self.assertEqual(mocked_enrich.call_args.kwargs["checkpoint_path"], checkpoint_path)
+            self.assertEqual(mocked_enrich.call_args.kwargs["failures_output"], failures_path)
+            self.assertEqual(mocked_enrich.call_args.kwargs["max_failures"], 3)
+            self.assertEqual(mocked_enrich.call_args.kwargs["request_delay_seconds"], 1.5)
 
     def test_enrich_command_reports_provider_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

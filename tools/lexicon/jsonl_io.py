@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Any
+from typing import Any, Iterable
 import json
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('w', encoding='utf-8') as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + '\n')
+    return path
+
+
+def append_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a', encoding='utf-8') as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + '\n')
     return path
