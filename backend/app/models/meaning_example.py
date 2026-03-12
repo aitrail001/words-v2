@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.schema_names import lexicon_fk, lexicon_table_args
 
 if TYPE_CHECKING:
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
@@ -20,7 +21,7 @@ class MeaningExample(Base):
         UUID(as_uuid=True), primary_key=True, insert_default=uuid.uuid4
     )
     meaning_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("meanings.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("meanings"), ondelete="CASCADE"), nullable=False, index=True
     )
     sentence: Mapped[str] = mapped_column(Text, nullable=False)
     difficulty: Mapped[str | None] = mapped_column(String(10), nullable=True)
@@ -29,7 +30,7 @@ class MeaningExample(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     enrichment_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("lexicon_enrichment_runs.id", ondelete="SET NULL"),
+        ForeignKey(lexicon_fk("lexicon_enrichment_runs"), ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -45,7 +46,7 @@ class MeaningExample(Base):
         back_populates="meaning_examples",
     )
 
-    __table_args__ = (
+    __table_args__ = lexicon_table_args(
         UniqueConstraint("meaning_id", "sentence", name="uq_meaning_example_meaning_sentence"),
         CheckConstraint(
             "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",

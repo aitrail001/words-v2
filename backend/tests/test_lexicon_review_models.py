@@ -4,6 +4,7 @@ from sqlalchemy import UniqueConstraint
 
 from app.models.lexicon_review_batch import LexiconReviewBatch
 from app.models.lexicon_review_item import LexiconReviewItem
+from app.models.schema_names import LEXICON_SCHEMA
 
 
 class TestLexiconReviewBatchModel:
@@ -62,3 +63,7 @@ class TestLexiconReviewItemModel:
             and {column.name for column in constraint.columns} == {"batch_id", "lexeme_id"}
             for constraint in constraints
         )
+
+    def test_lexicon_review_tables_use_lexicon_schema(self):
+        assert LexiconReviewBatch.__table__.schema == LEXICON_SCHEMA
+        assert LexiconReviewItem.__table__.schema == LEXICON_SCHEMA

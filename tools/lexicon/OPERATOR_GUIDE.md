@@ -60,6 +60,7 @@ Use this as the canonical final DB write path for generated learner-facing lexic
 Important:
 - staged review is the review/decision layer
 - `compile-export -> import-db` is the canonical final learner-enrichment write path
+- lexicon-owned DB tables now live in the dedicated Postgres `lexicon` schema, while runtime/app tables remain outside that schema in the same database
 - for compiled per-word artifacts, `import-db` now groups senses that share the same `generation_run_id` into one DB enrichment run row per word request
 - the narrower staged-review publish path is transitional and should not be treated as the main learner-enrichment publisher
 - ambiguous-form adjudication is optional and only operates on `unknown_needs_llm` canonicalization tails with bounded `candidate_forms`
@@ -195,7 +196,7 @@ This stage is intentionally review-oriented:
 
 ## 7. Import into the local DB
 
-For a real non-dry-run import, your backend DB settings must be available in the shell. The backend settings loader now ignores unrelated extra env keys in the repo-root `.env`, so this command can run from the normal repository root flow:
+For a real non-dry-run import, your backend DB settings must be available in the shell. The backend settings loader now ignores unrelated extra env keys in the repo-root `.env`, so this command can run from the normal repository root flow. The importer writes into lexicon-owned tables under the dedicated `lexicon` schema while continuing to share the same database server as the backend runtime tables:
 
 ```bash
 python3 -m tools.lexicon.cli import-db \

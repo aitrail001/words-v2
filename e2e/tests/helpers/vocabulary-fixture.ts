@@ -47,14 +47,14 @@ const seedFixture = async (): Promise<FixtureIds> => {
     }>(
       `
       WITH upsert_word AS (
-        INSERT INTO words (id, word, language, phonetic, frequency_rank, created_at)
+        INSERT INTO lexicon.words (id, word, language, phonetic, frequency_rank, created_at)
         VALUES ($1::uuid, $2, 'en', NULL, $3, now())
         ON CONFLICT (word, language)
         DO UPDATE SET frequency_rank = EXCLUDED.frequency_rank
         RETURNING id
       ),
       upsert_meaning AS (
-        INSERT INTO meanings (
+        INSERT INTO lexicon.meanings (
           id,
           word_id,
           definition,

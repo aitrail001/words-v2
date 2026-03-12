@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.schema_names import LEXICON_TABLE_ARGS, lexicon_fk
 
 if TYPE_CHECKING:
     from app.models.translation import Translation
@@ -15,12 +16,13 @@ if TYPE_CHECKING:
 
 class Meaning(Base):
     __tablename__ = "meanings"
+    __table_args__ = LEXICON_TABLE_ARGS
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     word_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("words.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("words"), ondelete="CASCADE"), nullable=False
     )
     definition: Mapped[str] = mapped_column(Text, nullable=False)
     part_of_speech: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -51,4 +53,4 @@ class Meaning(Base):
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:
-        return f"<Meaning {self.definition[:50]}>"
+        return f"<Meaning {self.definition[:30]}>"

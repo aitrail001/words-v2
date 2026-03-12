@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.schema_names import lexicon_fk, lexicon_table_args
 
 if TYPE_CHECKING:
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
@@ -20,7 +21,7 @@ class LexiconEnrichmentJob(Base):
         UUID(as_uuid=True), primary_key=True, insert_default=uuid.uuid4
     )
     word_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("words.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("words"), ondelete="CASCADE"), nullable=False, index=True
     )
     phase: Mapped[str] = mapped_column(String(20), nullable=False, insert_default="phase1")
     status: Mapped[str] = mapped_column(String(20), nullable=False, insert_default="pending", index=True)
@@ -48,7 +49,7 @@ class LexiconEnrichmentJob(Base):
         cascade="all, delete-orphan",
     )
 
-    __table_args__ = (
+    __table_args__ = lexicon_table_args(
         UniqueConstraint("word_id", "phase", name="uq_lexicon_enrichment_job_word_phase"),
     )
 

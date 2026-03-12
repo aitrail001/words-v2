@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.schema_names import lexicon_fk
 
 
 class ReviewSession(Base):
@@ -48,17 +49,17 @@ class ReviewCard(Base):
         UUID(as_uuid=True), ForeignKey("review_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     word_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("words.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("words"), ondelete="CASCADE"), nullable=False
     )
     meaning_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("meanings.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("meanings"), ondelete="CASCADE"), nullable=False
     )
-    card_type: Mapped[str] = mapped_column(String(20), nullable=False)  # flashcard, cloze, listening
-    quality_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0-5 (SM-2)
+    card_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    quality_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     time_spent_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ease_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
     interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    repetitions: Mapped[int | None] = mapped_column(Integer, nullable=True)  # SM-2 repetition count
+    repetitions: Mapped[int | None] = mapped_column(Integer, nullable=True)
     next_review: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
@@ -67,7 +68,6 @@ class ReviewCard(Base):
     session: Mapped["ReviewSession"] = relationship("ReviewSession", back_populates="cards")
 
     def __init__(self, **kwargs):
-        # If quality_rating and interval_days are provided, calculate next_review
         if "quality_rating" in kwargs and "interval_days" in kwargs and "next_review" not in kwargs:
             interval = kwargs["interval_days"]
             kwargs["next_review"] = datetime.now(timezone.utc) + timedelta(days=interval)
@@ -87,7 +87,7 @@ class LearningQueueItem(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     meaning_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("meanings.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("meanings"), ondelete="CASCADE"), nullable=False
     )
     priority: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     review_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
@@ -122,7 +122,7 @@ class ReviewHistory(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     meaning_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("meanings.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("meanings"), ondelete="CASCADE"), nullable=False, index=True
     )
     card_type: Mapped[str] = mapped_column(String(20), nullable=False)
     quality_rating: Mapped[int] = mapped_column(Integer, nullable=False)

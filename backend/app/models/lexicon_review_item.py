@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.schema_names import lexicon_fk, lexicon_table_args
 
 if TYPE_CHECKING:
     from app.models.lexicon_review_batch import LexiconReviewBatch
@@ -19,7 +20,7 @@ class LexiconReviewItem(Base):
         UUID(as_uuid=True), primary_key=True, insert_default=uuid.uuid4
     )
     batch_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("lexicon_review_batches.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("lexicon_review_batches"), ondelete="CASCADE"), nullable=False, index=True
     )
     lexeme_id: Mapped[str] = mapped_column(String(255), nullable=False)
     lemma: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
@@ -46,7 +47,7 @@ class LexiconReviewItem(Base):
 
     batch: Mapped["LexiconReviewBatch"] = relationship("LexiconReviewBatch", back_populates="items")
 
-    __table_args__ = (
+    __table_args__ = lexicon_table_args(
         UniqueConstraint("batch_id", "lexeme_id", name="uq_lexicon_review_item_batch_lexeme"),
     )
 

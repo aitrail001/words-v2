@@ -1,6 +1,6 @@
 -- Seed deterministic vocabulary used by Playwright E2E tests.
 WITH upsert_word AS (
-  INSERT INTO words (id, word, language, phonetic, frequency_rank, created_at)
+  INSERT INTO lexicon.words (id, word, language, phonetic, frequency_rank, created_at)
   VALUES (
     '11111111-1111-1111-1111-111111111111'::uuid,
     'resilience',
@@ -13,7 +13,7 @@ WITH upsert_word AS (
   DO UPDATE SET frequency_rank = EXCLUDED.frequency_rank
   RETURNING id
 )
-INSERT INTO meanings (id, word_id, definition, part_of_speech, example_sentence, order_index, source, created_at)
+INSERT INTO lexicon.meanings (id, word_id, definition, part_of_speech, example_sentence, order_index, source, created_at)
 SELECT
   '22222222-2222-2222-2222-222222222222'::uuid,
   upsert_word.id,

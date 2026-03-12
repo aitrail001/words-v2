@@ -8,6 +8,7 @@ from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.word import Word
 from app.models.word_relation import WordRelation
+from app.models.schema_names import LEXICON_SCHEMA
 
 
 class TestWordEnrichmentFields:
@@ -92,3 +93,9 @@ class TestLexiconEnrichmentRunModel:
         assert run.created_at is not None
         constraints = [c for c in LexiconEnrichmentRun.__table__.constraints if isinstance(c, CheckConstraint)]
         assert any(c.name == "ck_lexicon_enrichment_runs_confidence_range" for c in constraints)
+
+    def test_lexicon_enrichment_tables_use_lexicon_schema(self):
+        assert MeaningExample.__table__.schema == LEXICON_SCHEMA
+        assert WordRelation.__table__.schema == LEXICON_SCHEMA
+        assert LexiconEnrichmentJob.__table__.schema == LEXICON_SCHEMA
+        assert LexiconEnrichmentRun.__table__.schema == LEXICON_SCHEMA

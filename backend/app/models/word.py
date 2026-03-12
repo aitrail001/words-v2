@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.schema_names import lexicon_fk, lexicon_table_args
 
 if TYPE_CHECKING:
     from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
@@ -29,7 +30,7 @@ class Word(Base):
     phonetic_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     phonetic_enrichment_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("lexicon_enrichment_runs.id", ondelete="SET NULL"),
+        ForeignKey(lexicon_fk("lexicon_enrichment_runs"), ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -68,7 +69,7 @@ class Word(Base):
         foreign_keys=[phonetic_enrichment_run_id],
     )
 
-    __table_args__ = (
+    __table_args__ = lexicon_table_args(
         UniqueConstraint("word", "language", name="uq_word_language"),
         CheckConstraint(
             "phonetic_confidence IS NULL OR (phonetic_confidence >= 0 AND phonetic_confidence <= 1)",
