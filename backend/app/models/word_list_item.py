@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.schema_names import lexicon_fk
 
 if TYPE_CHECKING:
     from app.models.word import Word
@@ -23,7 +24,7 @@ class WordListItem(Base):
         UUID(as_uuid=True), ForeignKey("word_lists.id", ondelete="CASCADE"), nullable=False, index=True
     )
     word_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("words.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey(lexicon_fk("words"), ondelete="CASCADE"), nullable=False, index=True
     )
     context_sentence: Mapped[str | None] = mapped_column(Text, nullable=True)
     frequency_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=1)

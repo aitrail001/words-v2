@@ -60,6 +60,7 @@ For generated learner-facing lexicon content, the canonical final DB write path 
 
 Use staged review as the decision/review layer, not as a competing final learner-enrichment publisher.
 Today, `import-db` is the only path that lands the richer learner-facing writeback (`meaning_examples`, `word_relations`, enrichment jobs/runs, phonetic provenance) into the local DB.
+The application still uses one Postgres database/server, but lexicon-owned tables now live in the dedicated `lexicon` schema so reference data is separated from runtime/app tables.
 
 Ambiguous-form adjudication is intentionally narrow:
 - it is optional and off the default path
@@ -270,6 +271,8 @@ python3 -m tools.lexicon.cli prepare-review --snapshot-dir data/lexicon/snapshot
 ```bash
 python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --source-type lexicon_snapshot --source-reference demo-snapshot-20260307 --language en
 ```
+
+This import still uses the normal backend DB connection settings, but the lexicon records are persisted under the dedicated Postgres `lexicon` schema while runtime/app tables remain outside that schema.
 
 ### Real local DB import smoke
 

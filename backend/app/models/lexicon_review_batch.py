@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.schema_names import lexicon_table_args
 
 if TYPE_CHECKING:
     from app.models.lexicon_review_item import LexiconReviewItem
@@ -42,7 +43,7 @@ class LexiconReviewBatch(Base):
         "LexiconReviewItem", back_populates="batch", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
+    __table_args__ = lexicon_table_args(
         UniqueConstraint("user_id", "source_hash", name="uq_lexicon_review_batch_user_hash"),
     )
 

@@ -5,6 +5,7 @@ from app.models.user import User
 from app.models.word import Word
 from app.models.meaning import Meaning
 from app.models.translation import Translation
+from app.models.schema_names import LEXICON_SCHEMA
 
 
 class TestUserModel:
@@ -57,6 +58,9 @@ class TestWordModel:
         assert word.source_type == "lexicon_snapshot"
         assert word.source_reference == "snapshot-20260307"
 
+    def test_word_table_uses_lexicon_schema(self):
+        assert Word.__table__.schema == LEXICON_SCHEMA
+
 
 class TestMeaningModel:
     def test_meaning_has_required_fields(self):
@@ -106,3 +110,7 @@ class TestTranslationModel:
         assert translation.meaning_id == meaning_id
         assert translation.language == "zh"
         assert translation.translation == "银行"
+
+    def test_meaning_and_translation_tables_use_lexicon_schema(self):
+        assert Meaning.__table__.schema == LEXICON_SCHEMA
+        assert Translation.__table__.schema == LEXICON_SCHEMA
