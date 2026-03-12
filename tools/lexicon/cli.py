@@ -11,6 +11,7 @@ from tools.lexicon.benchmark_selection import run_selection_benchmark
 from tools.lexicon.build_base import build_base_records, build_word_inventory, normalize_seed_words, write_base_snapshot
 from tools.lexicon.canonical_registry import lookup_entry, status_entry
 from tools.lexicon.compare_selection import compare_selection_artifacts
+from tools.lexicon.form_adjudication import adjudicate_forms, load_adjudications
 from tools.lexicon.compile_export import compile_snapshot
 from tools.lexicon.enrich import run_enrichment
 from tools.lexicon.ids import build_snapshot_id
@@ -66,6 +67,8 @@ def _build_base_command(args: argparse.Namespace) -> int:
         date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
         source_label='wordnet-wordfreq',
     )
+    adjudications_path = getattr(args, 'adjudications', None)
+    adjudications = load_adjudications(Path(adjudications_path)) if adjudications_path else None
     result = build_base_records(
         words=words,
         snapshot_id=snapshot_id,
@@ -73,6 +76,7 @@ def _build_base_command(args: argparse.Namespace) -> int:
         rank_provider=rank_provider,
         sense_provider=sense_provider,
         max_senses=args.max_senses,
+        adjudications=adjudications,
     )
     payload = {
         'command': 'build-base',
@@ -82,6 +86,7 @@ def _build_base_command(args: argparse.Namespace) -> int:
         'lexeme_count': len(result.lexemes),
         'sense_count': len(result.senses),
         'concept_count': len(result.concepts),
+        'ambiguous_form_count': len(result.ambiguous_forms),
     }
     if requested_top_words is not None:
         payload['requested_top_words'] = int(requested_top_words)
@@ -208,6 +213,62 @@ def _score_selection_risk_command(args: argparse.Namespace) -> int:
         'risk_band_counts': risk_band_counts,
     }
     print(json.dumps(payload))
+    return 0
+
+
+def _detect_ambiguous_forms_command(args: argparse.Namespace) -> int:
+    try:
+        rank_provider, sense_provider = _load_build_base_providers()
+    except (LexiconDependencyError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if not args.words:
+        print('detect-ambiguous-forms requires at least one word', file=sys.stderr)
+        return 2
+
+    result = build_base_records(
+        words=args.words,
+        snapshot_id=args.snapshot_id or build_snapshot_id(
+            date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
+            source_label='ambiguous-forms',
+        ),
+        created_at=_utc_now(),
+        rank_provider=rank_provider,
+        sense_provider=sense_provider,
+        max_senses=args.max_senses,
+    )
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload_text = '\n'.join(json.dumps(row.to_dict()) for row in result.ambiguous_forms)
+    output_path.write_text(payload_text + ('\n' if payload_text else ''), encoding='utf-8')
+    print(json.dumps({
+        'command': 'detect-ambiguous-forms',
+        'output': str(output_path),
+        'ambiguous_count': len(result.ambiguous_forms),
+        'words': [row.surface_form for row in result.ambiguous_forms],
+    }))
+    return 0
+
+
+def _adjudicate_forms_command(args: argparse.Namespace) -> int:
+    try:
+        result = adjudicate_forms(
+            args.input,
+            output_path=args.output,
+            provider_mode=args.provider_mode,
+            model_name=args.model,
+            reasoning_effort=args.reasoning_effort,
+        )
+    except (LexiconDependencyError, RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps({
+        'command': 'adjudicate-forms',
+        'input': str(Path(args.input)),
+        'output': str(result.output_path),
+        'adjudication_count': len(result.rows),
+    }))
     return 0
 
 
@@ -453,6 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_base.add_argument('--rollout-stage', type=int, choices=[100, 1000, 5000, 30000], help='named staged rollout size alias for top common words')
     build_base.add_argument('--snapshot-id', help='optional snapshot identifier override')
     build_base.add_argument('--max-senses', type=int, default=8, help='maximum learner-visible senses per word; adaptive selection typically keeps 4, 6, or 8')
+    build_base.add_argument('--adjudications', help='optional form_adjudications.jsonl file to apply as canonicalization overrides')
     build_base.add_argument('--output-dir', help='optional output directory for normalized snapshot JSONL files')
     build_base.set_defaults(handler=_build_base_command)
 
@@ -525,6 +587,21 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_review.add_argument('--candidate-limit', type=int, default=8, help='maximum WordNet candidates per lexeme for review preparation rerank runs')
     prepare_review.add_argument('--candidate-source', choices=RERANK_CANDIDATE_SOURCES, default='candidates', help='candidate pool to expose to the rerank model during review preparation')
     prepare_review.set_defaults(handler=_prepare_review_command)
+
+    detect_ambiguous = subparsers.add_parser('detect-ambiguous-forms', help='emit ambiguous canonicalization cases for optional LLM adjudication')
+    detect_ambiguous.add_argument('--output', required=True, help='path to write ambiguous_forms.jsonl')
+    detect_ambiguous.add_argument('--snapshot-id', help='optional snapshot identifier for the detection run')
+    detect_ambiguous.add_argument('--max-senses', type=int, default=8, help='maximum learner senses to preserve while building the temporary snapshot context')
+    detect_ambiguous.add_argument('words', nargs='+', help='surface forms to analyze')
+    detect_ambiguous.set_defaults(handler=_detect_ambiguous_forms_command)
+
+    adjudicate_forms_parser = subparsers.add_parser('adjudicate-forms', help='run bounded LLM adjudication over ambiguous surface-form rows')
+    adjudicate_forms_parser.add_argument('--input', required=True, help='ambiguous_forms.jsonl input path')
+    adjudicate_forms_parser.add_argument('--output', required=True, help='path to write form_adjudications.jsonl')
+    adjudicate_forms_parser.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='adjudication provider mode')
+    adjudicate_forms_parser.add_argument('--model', help='optional model override for adjudication')
+    adjudicate_forms_parser.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for adjudication')
+    adjudicate_forms_parser.set_defaults(handler=_adjudicate_forms_command)
 
     lookup_entry_parser = subparsers.add_parser('lookup-entry', help='resolve a surface form to its canonical lexicon entry within a snapshot')
     lookup_entry_parser.add_argument('--snapshot-dir', required=True, help='directory containing canonical snapshot JSONL files')

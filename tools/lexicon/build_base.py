@@ -8,6 +8,7 @@ from tools.lexicon.canonical_forms import canonicalize_words
 from tools.lexicon.ids import make_concept_id, make_lexeme_id, make_sense_id
 from tools.lexicon.jsonl_io import write_jsonl
 from tools.lexicon.models import (
+    AmbiguousFormRecord,
     CanonicalEntryRecord,
     CanonicalVariantRecord,
     ConceptRecord,
@@ -30,6 +31,7 @@ class BaseBuildResult:
     canonical_entries: list[CanonicalEntryRecord]
     canonical_variants: list[CanonicalVariantRecord]
     generation_status: list[GenerationStatusRecord]
+    ambiguous_forms: list[AmbiguousFormRecord]
 
 
 def normalize_seed_words(words: Iterable[str]) -> list[str]:
@@ -56,6 +58,7 @@ def build_base_records(
     rank_provider: RankProvider,
     sense_provider: CanonicalSenseProvider,
     max_senses: int = 8,
+    adjudications: dict[str, dict[str, object]] | None = None,
 ) -> BaseBuildResult:
     lexeme_records: list[LexemeRecord] = []
     sense_records: list[SenseRecord] = []
@@ -63,6 +66,7 @@ def build_base_records(
     canonical_entry_records: list[CanonicalEntryRecord] = []
     canonical_variant_records: list[CanonicalVariantRecord] = []
     generation_status_records: list[GenerationStatusRecord] = []
+    ambiguous_form_records: list[AmbiguousFormRecord] = []
 
     sense_cache: dict[str, list[dict[str, object]]] = {}
 
@@ -75,6 +79,7 @@ def build_base_records(
         words=normalize_seed_words(words),
         rank_provider=rank_provider,
         sense_provider=get_senses,
+        adjudications=adjudications,
     )
 
     source_forms_by_canonical: dict[str, list[str]] = {}
@@ -98,9 +103,27 @@ def build_base_records(
                 variant_type=decision.variant_type,
                 linked_canonical_form=decision.linked_canonical_form,
                 is_separately_learner_worthy=decision.is_separately_learner_worthy,
+                candidate_forms=decision.candidate_forms,
+                ambiguity_reason=decision.ambiguity_reason,
+                needs_llm_adjudication=decision.needs_llm_adjudication,
                 created_at=created_at,
             )
         )
+        if decision.needs_llm_adjudication:
+            ambiguous_form_records.append(
+                AmbiguousFormRecord(
+                    surface_form=decision.surface_form,
+                    deterministic_decision=decision.decision,
+                    canonical_form=decision.canonical_form,
+                    linked_canonical_form=decision.linked_canonical_form,
+                    candidate_forms=list(decision.candidate_forms),
+                    decision_reason=decision.decision_reason,
+                    confidence=decision.confidence,
+                    wordfreq_rank=resolve_frequency_rank(decision.surface_form, rank_provider),
+                    sense_labels=list(decision.sense_labels),
+                    ambiguity_reason=str(decision.ambiguity_reason or "deterministic canonicalization could not pick a single winner"),
+                )
+            )
 
     for word in canonicalization.canonical_words:
         lexeme_id = make_lexeme_id(word)
@@ -192,6 +215,7 @@ def build_base_records(
         canonical_entries=canonical_entry_records,
         canonical_variants=canonical_variant_records,
         generation_status=generation_status_records,
+        ambiguous_forms=ambiguous_form_records,
     )
 
 
@@ -204,6 +228,7 @@ def write_base_snapshot(output_dir: Path, result: BaseBuildResult) -> dict[str, 
         'canonical_entries': output_dir / 'canonical_entries.jsonl',
         'canonical_variants': output_dir / 'canonical_variants.jsonl',
         'generation_status': output_dir / 'generation_status.jsonl',
+        'ambiguous_forms': output_dir / 'ambiguous_forms.jsonl',
     }
     write_jsonl(paths['lexemes'], [record.to_dict() for record in result.lexemes])
     write_jsonl(paths['senses'], [record.to_dict() for record in result.senses])
@@ -211,4 +236,5 @@ def write_base_snapshot(output_dir: Path, result: BaseBuildResult) -> dict[str, 
     write_jsonl(paths['canonical_entries'], [record.to_dict() for record in result.canonical_entries])
     write_jsonl(paths['canonical_variants'], [record.to_dict() for record in result.canonical_variants])
     write_jsonl(paths['generation_status'], [record.to_dict() for record in result.generation_status])
+    write_jsonl(paths['ambiguous_forms'], [record.to_dict() for record in result.ambiguous_forms])
     return paths

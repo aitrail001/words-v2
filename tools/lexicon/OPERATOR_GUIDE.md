@@ -49,18 +49,20 @@ Important notes:
 Use this as the canonical final DB write path for generated learner-facing lexicon data:
 
 1. `build-base`
-2. optional review-prep flow
-3. `enrich`
-4. `validate --snapshot-dir`
-5. `compile-export`
-6. `validate --compiled-input`
-7. `import-db`
+2. optional ambiguous-form adjudication flow (`detect-ambiguous-forms` / `adjudicate-forms` / rerun `build-base --adjudications ...`)
+3. optional review-prep flow
+4. `enrich`
+5. `validate --snapshot-dir`
+6. `compile-export`
+7. `validate --compiled-input`
+8. `import-db`
 
 Important:
 - staged review is the review/decision layer
 - `compile-export -> import-db` is the canonical final learner-enrichment write path
 - for compiled per-word artifacts, `import-db` now groups senses that share the same `generation_run_id` into one DB enrichment run row per word request
 - the narrower staged-review publish path is transitional and should not be treated as the main learner-enrichment publisher
+- ambiguous-form adjudication is optional and only operates on `unknown_needs_llm` canonicalization tails with bounded `candidate_forms`
 
 For the minimum pass/fail closure gate, use `docs/runbooks/lexicon-working-gate.md`.
 
@@ -73,6 +75,9 @@ python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/le
 python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 # build-base now deterministically collapses obvious inflectional duplicates like things->thing and gives->give while keeping lexicalized forms like left as separate entries linked to their base family
+python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
+python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
+python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
 python3 -m tools.lexicon.cli lookup-entry --snapshot-dir data/lexicon/snapshots/demo things
 python3 -m tools.lexicon.cli status-entry --snapshot-dir data/lexicon/snapshots/demo --check-db thing
 ```
@@ -109,9 +114,24 @@ python3 -m tools.lexicon.cli score-selection-risk --snapshot-dir data/lexicon/sn
 python3 -m tools.lexicon.cli prepare-review --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --review-queue-output data/lexicon/snapshots/demo/review_queue.jsonl --provider-mode auto --candidate-source candidates --candidate-limit 8
 ```
 
+### 4.1 Optional ambiguous-form adjudication
+
+Use this only when deterministic canonicalization emitted `ambiguous_forms.jsonl` rows that you want to resolve before enrichment:
+
+```bash
+python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
+python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode auto
+python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
+```
+
+Contract:
+- the adjudicator may only choose the surface form or one of deterministic `candidate_forms`
+- the artifacts are replayable and can be checked into an operator run directory if needed
+- the default rollout path is still deterministic-only unless you explicitly pass `--adjudications`
+
 ## 5. Provider modes
 
-`enrich` supports these provider modes:
+`enrich` and `adjudicate-forms` support these provider modes:
 - `auto` — use `openai_compatible_node` when `LEXICON_LLM_TRANSPORT=node`, otherwise use the default endpoint path when LLM env is present, or placeholder mode when not
 - `placeholder` — generate deterministic fake learner-facing data for local non-LLM testing
 - `openai_compatible` — use the Python OpenAI-compatible Responses transport
