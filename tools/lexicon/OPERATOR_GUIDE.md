@@ -65,6 +65,7 @@ Important:
 - the narrower staged-review publish path is transitional and should not be treated as the main learner-enrichment publisher
 - ambiguous-form adjudication is optional and only operates on `unknown_needs_llm` canonicalization tails with bounded `candidate_forms`
 - unresolved ambiguous tails are deferred from `lexemes.jsonl` / `senses.jsonl` until adjudication; inspect them with `status-entry` instead of treating them as ready for enrichment
+- `build-base` now performs a bulk DB existence check on canonical headwords when `--database-url` or `DATABASE_URL_SYNC` is configured, and skips already-published words in that DB; use `--rerun-existing` when you intentionally want to regenerate them
 
 For the minimum pass/fail closure gate, use `docs/runbooks/lexicon-working-gate.md`.
 
@@ -77,6 +78,7 @@ python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/le
 python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 # build-base now deterministically collapses obvious inflectional duplicates like things->thing and gives->give while keeping lexicalized forms like left as separate entries linked to their base family
+# it also skips canonical words already present in the local DB unless you pass --rerun-existing
 python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
 python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
 python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated

@@ -12,6 +12,7 @@ Current scope:
 - `python3 -m tools.lexicon.cli build-base --top-words N ...` builds a filtered top-common-word inventory from `wordfreq`
 - `python3 -m tools.lexicon.cli build-base --rollout-stage 100|1000|5000|30000 ...` runs the staged common-word rollout aliases
 - `python3 -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files with shared entry metadata (`entry_id`, `entry_type`, `normalized_form`, `source_provenance`) plus canonical registry sidecars (`canonical_entries.jsonl`, `canonical_variants.jsonl`, `generation_status.jsonl`)
+- `build-base` now checks the local word DB when `--database-url` or `DATABASE_URL_SYNC` is configured and skips canonical words that already exist there; pass `--rerun-existing` to force regeneration for already-published words
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ...` generates learner-facing `enrichments.jsonl` for an existing snapshot, including required learner translations for `zh-Hans`, `es`, `ar`, `pt-BR`, and `ja`
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --max-concurrency ...` enriches one lexeme per LLM call, lets the model choose the learner-friendly subset of grounded meanings, repeats the hard meaning cap in the prompt, and performs one repair retry when a word-level payload is invalid
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --resume --checkpoint-path ... --failures-output ...` now writes incremental `enrichments.jsonl`, `enrich.checkpoint.jsonl`, and `enrich.failures.jsonl` artifacts so large 1K -> 5K -> 30K runs can resume safely after partial failure
@@ -81,6 +82,7 @@ python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/le
 python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 # build-base now deterministically collapses obvious inflectional duplicates like things->thing and gives->give while keeping lexicalized forms like left as separate entries linked to their base family
+# by default it also skips canonical words already published in the local DB; add --rerun-existing to force regeneration
 python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
 python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
 python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
