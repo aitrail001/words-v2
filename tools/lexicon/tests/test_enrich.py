@@ -852,6 +852,20 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             self.assertIn("at most 4 learner-friendly meanings", prompt.lower())
 
+    def test_build_word_enrichment_prompt_repeats_hard_output_constraints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=run_lexeme, senses=run_senses).lower()
+
+            self.assertIn("json object only", prompt)
+            self.assertIn("invalid if the senses array contains more than 8 items", prompt)
+            self.assertIn("if more than 8 candidates seem useful, keep only the strongest 8", prompt)
+
     def test_real_word_provider_accepts_subset_of_grounded_senses(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -942,3 +956,101 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     generation_run_id="run-123",
                     prompt_version="v1",
                 )
+
+    def test_real_word_provider_repairs_once_when_model_returns_too_many_senses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            low_priority = run_lexeme.__class__(**{**run_lexeme.to_dict(), "wordfreq_rank": 12000})
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+            extra_senses = [run_senses[0].__class__(**{**run_senses[0].to_dict(), "sense_id": f"sn_lx_run_extra_{idx}", "sense_order": idx + 2}) for idx in range(4)]
+            all_senses = run_senses + extra_senses
+            settings = LexiconSettings.from_env({
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-test",
+                "LEXICON_LLM_API_KEY": "secret-key",
+            })
+
+            prompts = []
+            call_count = 0
+
+            def transport(url, payload, headers):
+                nonlocal call_count
+                call_count += 1
+                prompts.append(payload["input"])
+                if call_count == 1:
+                    rows = []
+                    for sense in all_senses:
+                        rows.append({
+                            "sense_id": sense.sense_id,
+                            "definition": "x",
+                            "examples": [{"sentence": "x", "difficulty": "A1"}],
+                            "confidence": 0.9,
+                        })
+                    return {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"senses": rows})}]}]}
+                return {
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps({
+                                "senses": [{
+                                    "sense_id": "sn_lx_run_1",
+                                    "definition": "to move quickly on foot",
+                                    "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                    "confidence": 0.91,
+                                }]
+                            })
+                        }]
+                    }]
+                }
+
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            records = provider(
+                lexeme=low_priority,
+                senses=all_senses,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1"])
+            self.assertEqual(call_count, 2)
+            self.assertIn("repair the previous learner-facing enrichment response", prompts[1].lower())
+            self.assertIn("at most 4 learner-friendly meanings", prompts[1].lower())
+
+    def test_real_word_provider_does_not_retry_transport_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+            settings = LexiconSettings.from_env({
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-test",
+                "LEXICON_LLM_API_KEY": "secret-key",
+            })
+
+            call_count = 0
+
+            def transport(url, payload, headers):
+                nonlocal call_count
+                call_count += 1
+                raise RuntimeError("OpenAI-compatible endpoint request failed with status 403: blocked")
+
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            with self.assertRaisesRegex(RuntimeError, "status 403"):
+                provider(
+                    lexeme=run_lexeme,
+                    senses=run_senses,
+                    settings=settings,
+                    generated_at="2026-03-07T00:00:00Z",
+                    generation_run_id="run-123",
+                    prompt_version="v1",
+                )
+
+            self.assertEqual(call_count, 1)

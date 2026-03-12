@@ -23,3 +23,11 @@ def test_dev_test_users_enabled_env(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = get_settings()
     assert settings.dev_test_users_enabled is True
     get_settings.cache_clear()
+
+
+def test_settings_ignore_unrelated_env_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("POSTGRES_USER", "vocabapp")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    settings = Settings(_env_file=None)
+    assert settings.environment == "development"

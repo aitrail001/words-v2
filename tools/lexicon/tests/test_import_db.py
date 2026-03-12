@@ -483,6 +483,108 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertTrue(all(item.enrichment_run_id == imported_run.id for item in imported_examples))
         self.assertTrue(all(item.enrichment_run_id == imported_run.id for item in imported_relations))
 
+    def test_import_collapses_same_generation_run_id_to_one_enrichment_run_per_word(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [
+            _ScalarResult(None),
+            _ListResult([]),
+            _ScalarResult(None),
+            _ScalarResult(None),
+            _ListResult([]),
+            _ListResult([]),
+            _ListResult([]),
+            _ListResult([]),
+        ]
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "word": "set",
+                "part_of_speech": ["verb", "noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 10,
+                "forms": {
+                    "plural_forms": ["sets"],
+                    "verb_forms": {"base": "set", "third_person_singular": "sets", "past": "set", "past_participle": "set", "gerund": "setting"},
+                    "comparative": None,
+                    "superlative": None,
+                    "derivations": [],
+                },
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_set_1",
+                        "wn_synset_id": "set.v.01",
+                        "pos": "verb",
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "to put something in a place",
+                        "examples": [{"sentence": "She set the cup on the table.", "difficulty": "A1"}],
+                        "synonyms": ["place"],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": ["set + object + place"],
+                        "usage_note": "Common verb sense.",
+                        "enrichment_id": "en_sn_lx_set_1_v1",
+                        "generation_run_id": "word-run-1",
+                        "model_name": "gpt-5.1",
+                        "prompt_version": "v1",
+                        "confidence": 0.95,
+                        "generated_at": "2026-03-12T00:00:00Z",
+                    },
+                    {
+                        "sense_id": "sn_lx_set_2",
+                        "wn_synset_id": "set.n.01",
+                        "pos": "noun",
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "a group of things that belong together",
+                        "examples": [{"sentence": "This chess set is old.", "difficulty": "A1"}],
+                        "synonyms": ["collection"],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "Common noun sense.",
+                        "enrichment_id": "en_sn_lx_set_2_v1",
+                        "generation_run_id": "word-run-1",
+                        "model_name": "gpt-5.1",
+                        "prompt_version": "v1",
+                        "confidence": 0.94,
+                        "generated_at": "2026-03-12T00:00:00Z",
+                    },
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-03-12T00:00:00Z",
+            }
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260312",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            meaning_example_model=FakeMeaningExample,
+            word_relation_model=FakeWordRelation,
+            lexicon_enrichment_job_model=FakeLexiconEnrichmentJob,
+            lexicon_enrichment_run_model=FakeLexiconEnrichmentRun,
+        )
+
+        self.assertEqual(summary.created_enrichment_jobs, 1)
+        self.assertEqual(summary.created_enrichment_runs, 1)
+        imported_run = next(item for item in added if isinstance(item, FakeLexiconEnrichmentRun))
+        imported_examples = [item for item in added if isinstance(item, FakeMeaningExample)]
+        imported_relations = [item for item in added if isinstance(item, FakeWordRelation)]
+        self.assertEqual(len([item for item in added if isinstance(item, FakeLexiconEnrichmentRun)]), 1)
+        self.assertTrue(all(item.enrichment_run_id == imported_run.id for item in imported_examples))
+        self.assertTrue(all(item.enrichment_run_id == imported_run.id for item in imported_relations))
+
 
     def test_import_reuses_job_and_run_and_replaces_examples_and_relations(self) -> None:
         existing_word = FakeWord(word="run", language="en", frequency_rank=50)
@@ -610,6 +712,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(existing_meaning.grammar_patterns, ["run + adverb"])
         self.assertEqual(existing_meaning.usage_note, "Common everyday verb.")
         self.assertEqual(deleted, [old_example, old_relation])
+        self.assertEqual(session.flush.call_count, 2)
         self.assertEqual(
             [(item.relation_type, item.related_word) for item in added if isinstance(item, FakeWordRelation)],
             [("synonym", "jog"), ("antonym", "walk")],
