@@ -1,0 +1,211 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Iterable, Optional
+
+from tools.lexicon.wordfreq_utils import normalize_word_candidate, resolve_frequency_rank
+
+
+CanonicalSenseProvider = Callable[[str], Iterable[dict[str, object]]]
+RankProvider = Callable[[str], Optional[int]]
+
+_IRREGULAR_BASES = {
+    "gave": "give",
+    "given": "give",
+    "gone": "go",
+    "went": "go",
+    "better": "good",
+    "best": "good",
+    "worse": "bad",
+    "worst": "bad",
+    "left": "leave",
+}
+
+_KEEP_BOTH_LINKED = {
+    "left",
+    "better",
+    "best",
+    "worse",
+    "worst",
+    "given",
+    "found",
+}
+
+
+@dataclass(frozen=True)
+class CanonicalDecision:
+    surface_form: str
+    canonical_form: str
+    decision: str
+    decision_reason: str
+    confidence: float
+    variant_type: str
+    linked_canonical_form: str | None = None
+    is_separately_learner_worthy: bool = False
+
+
+@dataclass(frozen=True)
+class CanonicalizationResult:
+    canonical_words: list[str]
+    decisions: list[CanonicalDecision]
+
+
+def _suffix_candidates(surface_form: str) -> list[str]:
+    candidates: list[str] = []
+    if len(surface_form) > 3 and surface_form.endswith("ies"):
+        candidates.append(f"{surface_form[:-3]}y")
+    if len(surface_form) > 3 and surface_form.endswith("es"):
+        candidates.append(surface_form[:-2])
+    if len(surface_form) > 2 and surface_form.endswith("s"):
+        candidates.append(surface_form[:-1])
+    if len(surface_form) > 4 and surface_form.endswith("ing"):
+        stem = surface_form[:-3]
+        candidates.append(stem)
+        if stem:
+            candidates.append(f"{stem}e")
+    if len(surface_form) > 3 and surface_form.endswith("ed"):
+        stem = surface_form[:-2]
+        candidates.append(stem)
+        if stem:
+            candidates.append(f"{stem}e")
+    if len(surface_form) > 3 and surface_form.endswith("er"):
+        candidates.append(surface_form[:-2])
+    if len(surface_form) > 4 and surface_form.endswith("est"):
+        candidates.append(surface_form[:-3])
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized_candidate = normalize_word_candidate(candidate)
+        if not normalized_candidate or normalized_candidate == surface_form or normalized_candidate in seen:
+            continue
+        seen.add(normalized_candidate)
+        normalized.append(normalized_candidate)
+    return normalized
+
+
+def _candidate_forms(surface_form: str, senses: list[dict[str, object]]) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = {surface_form}
+
+    def add(candidate: str | None) -> None:
+        normalized_candidate = normalize_word_candidate(candidate or "")
+        if not normalized_candidate or normalized_candidate in seen:
+            return
+        seen.add(normalized_candidate)
+        candidates.append(normalized_candidate)
+
+    add(_IRREGULAR_BASES.get(surface_form))
+    for candidate in _suffix_candidates(surface_form):
+        add(candidate)
+    for sense in senses:
+        add(str(sense.get("canonical_label") or ""))
+
+    return candidates
+
+
+def canonicalize_words(
+    *,
+    words: Iterable[str],
+    rank_provider: RankProvider,
+    sense_provider: CanonicalSenseProvider,
+) -> CanonicalizationResult:
+    normalized_words = [word for word in (normalize_word_candidate(raw_word) for raw_word in words) if word]
+    sense_cache: dict[str, list[dict[str, object]]] = {}
+
+    def get_senses(word: str) -> list[dict[str, object]]:
+        if word not in sense_cache:
+            sense_cache[word] = list(sense_provider(word))
+        return sense_cache[word]
+
+    canonical_words: list[str] = []
+    canonical_seen: set[str] = set()
+    decisions: list[CanonicalDecision] = []
+
+    for surface_form in normalized_words:
+        surface_senses = get_senses(surface_form)
+        candidate_forms = _candidate_forms(surface_form, surface_senses)
+        surface_rank = resolve_frequency_rank(surface_form, rank_provider)
+
+        if not candidate_forms:
+            decision = CanonicalDecision(
+                surface_form=surface_form,
+                canonical_form=surface_form,
+                decision="keep_separate",
+                decision_reason="no canonical alternative was found",
+                confidence=0.55,
+                variant_type="self",
+                is_separately_learner_worthy=True,
+            )
+        else:
+            surface_labels = {
+                normalized
+                for normalized in (
+                    normalize_word_candidate(str(sense.get("canonical_label") or ""))
+                    for sense in surface_senses
+                )
+                if normalized
+            }
+
+            scored_candidates: list[tuple[int, str, list[str]]] = []
+            for candidate in candidate_forms:
+                score = 0
+                reasons: list[str] = []
+                candidate_rank = resolve_frequency_rank(candidate, rank_provider)
+                if candidate_rank < surface_rank:
+                    score += 3
+                    reasons.append("candidate is more common in wordfreq")
+                if candidate in surface_labels:
+                    score += 4
+                    reasons.append("WordNet canonical labels point to candidate")
+                if _IRREGULAR_BASES.get(surface_form) == candidate:
+                    score += 3
+                    reasons.append("irregular-form map points to candidate")
+                if candidate in _suffix_candidates(surface_form):
+                    score += 2
+                    reasons.append("suffix normalization points to candidate")
+                scored_candidates.append((score, candidate, reasons))
+
+            scored_candidates.sort(key=lambda item: (-item[0], resolve_frequency_rank(item[1], rank_provider), item[1]))
+            best_score, best_candidate, best_reasons = scored_candidates[0]
+            standalone_surface_labels = sum(1 for label in surface_labels if label == surface_form)
+            candidate_label_matches = sum(1 for label in surface_labels if label == best_candidate)
+
+            if best_score >= 5 and surface_form in _KEEP_BOTH_LINKED and candidate_label_matches > 0:
+                decision = CanonicalDecision(
+                    surface_form=surface_form,
+                    canonical_form=surface_form,
+                    linked_canonical_form=best_candidate,
+                    decision="keep_both_linked",
+                    decision_reason="surface form is learner-worthy on its own and also maps to a related base form",
+                    confidence=0.9,
+                    variant_type="lexicalized",
+                    is_separately_learner_worthy=True,
+                )
+            elif best_score >= 5 and best_candidate != surface_form and (candidate_label_matches > 0 or standalone_surface_labels == 0):
+                decision = CanonicalDecision(
+                    surface_form=surface_form,
+                    canonical_form=best_candidate,
+                    decision="collapse_to_canonical",
+                    decision_reason=", ".join(best_reasons) or "deterministic canonicalization selected a more suitable base form",
+                    confidence=0.9,
+                    variant_type="inflectional",
+                    is_separately_learner_worthy=False,
+                )
+            else:
+                decision = CanonicalDecision(
+                    surface_form=surface_form,
+                    canonical_form=surface_form,
+                    decision="keep_separate",
+                    decision_reason="surface form has standalone lexical evidence or no strong canonical winner",
+                    confidence=0.6,
+                    variant_type="self",
+                    is_separately_learner_worthy=True,
+                )
+
+        if decision.canonical_form not in canonical_seen:
+            canonical_seen.add(decision.canonical_form)
+            canonical_words.append(decision.canonical_form)
+        decisions.append(decision)
+
+    return CanonicalizationResult(canonical_words=canonical_words, decisions=decisions)

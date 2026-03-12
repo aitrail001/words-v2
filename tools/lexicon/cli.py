@@ -9,11 +9,12 @@ from typing import Sequence
 
 from tools.lexicon.benchmark_selection import run_selection_benchmark
 from tools.lexicon.build_base import build_base_records, build_word_inventory, normalize_seed_words, write_base_snapshot
+from tools.lexicon.canonical_registry import lookup_entry, status_entry
 from tools.lexicon.compare_selection import compare_selection_artifacts
 from tools.lexicon.compile_export import compile_snapshot
 from tools.lexicon.enrich import run_enrichment
 from tools.lexicon.ids import build_snapshot_id
-from tools.lexicon.import_db import load_compiled_rows, run_import_file
+from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, run_import_file
 from tools.lexicon.rerank import RERANK_CANDIDATE_SOURCES, run_rerank
 from tools.lexicon.selection_review import prepare_review, score_selection_risk
 from tools.lexicon.validate import validate_compiled_record, validate_snapshot_files
@@ -241,6 +242,50 @@ def _prepare_review_command(args: argparse.Namespace) -> int:
     }
     if result.review_queue_output is not None:
         payload['review_queue_output'] = str(result.review_queue_output)
+    print(json.dumps(payload))
+    return 0
+
+
+def _lookup_entry_command(args: argparse.Namespace) -> int:
+    payload = lookup_entry(Path(args.snapshot_dir), args.word)
+    if payload is None:
+        print(json.dumps({"command": "lookup-entry", "input_word": args.word, "found": False}))
+        return 0
+    payload = dict(payload)
+    payload["command"] = "lookup-entry"
+    print(json.dumps(payload))
+    return 0
+
+
+def _db_word_lookup(word: str, language: str) -> dict[str, object] | None:
+    _ensure_backend_path()
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+    from app.core.config import get_settings
+    from app.models.word import Word
+
+    settings = get_settings()
+    engine = create_engine(settings.database_url_sync)
+    with Session(engine) as session:
+        row = session.execute(select(Word).where(Word.word == word, Word.language == language)).scalar_one_or_none()
+        if row is None:
+            return None
+        return {"word": row.word, "language": row.language, "id": str(row.id)}
+
+
+def _status_entry_command(args: argparse.Namespace) -> int:
+    payload = status_entry(
+        Path(args.snapshot_dir),
+        args.word,
+        compiled_input=Path(args.compiled_input) if args.compiled_input else None,
+        db_lookup=_db_word_lookup if args.check_db else None,
+        language=args.language,
+    )
+    if payload is None:
+        print(json.dumps({"command": "status-entry", "input_word": args.word, "found": False}))
+        return 0
+    payload = dict(payload)
+    payload["command"] = "status-entry"
     print(json.dumps(payload))
     return 0
 
@@ -480,6 +525,19 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_review.add_argument('--candidate-limit', type=int, default=8, help='maximum WordNet candidates per lexeme for review preparation rerank runs')
     prepare_review.add_argument('--candidate-source', choices=RERANK_CANDIDATE_SOURCES, default='candidates', help='candidate pool to expose to the rerank model during review preparation')
     prepare_review.set_defaults(handler=_prepare_review_command)
+
+    lookup_entry_parser = subparsers.add_parser('lookup-entry', help='resolve a surface form to its canonical lexicon entry within a snapshot')
+    lookup_entry_parser.add_argument('--snapshot-dir', required=True, help='directory containing canonical snapshot JSONL files')
+    lookup_entry_parser.add_argument('word', help='surface form or canonical word to look up')
+    lookup_entry_parser.set_defaults(handler=_lookup_entry_command)
+
+    status_entry_parser = subparsers.add_parser('status-entry', help='report canonical/build/enrich/compile status for a word within a snapshot and optionally the DB')
+    status_entry_parser.add_argument('--snapshot-dir', required=True, help='directory containing canonical snapshot JSONL files')
+    status_entry_parser.add_argument('--compiled-input', help='optional compiled learner JSONL path; defaults to <snapshot-dir>/words.enriched.jsonl when present')
+    status_entry_parser.add_argument('--check-db', action='store_true', help='also query the configured local DB for the canonical word')
+    status_entry_parser.add_argument('--language', default='en', help='language code for DB status checks')
+    status_entry_parser.add_argument('word', help='surface form or canonical word to inspect')
+    status_entry_parser.set_defaults(handler=_status_entry_command)
 
     validate = subparsers.add_parser('validate', help='validate normalized or compiled lexicon outputs')
     validate_group = validate.add_mutually_exclusive_group(required=True)

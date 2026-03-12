@@ -11,7 +11,7 @@ Current scope:
 - `python3 -m tools.lexicon.cli build-base ...` builds a bounded normalized base summary from explicit seed words
 - `python3 -m tools.lexicon.cli build-base --top-words N ...` builds a filtered top-common-word inventory from `wordfreq`
 - `python3 -m tools.lexicon.cli build-base --rollout-stage 100|1000|5000|30000 ...` runs the staged common-word rollout aliases
-- `python3 -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files with shared entry metadata (`entry_id`, `entry_type`, `normalized_form`, `source_provenance`)
+- `python3 -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files with shared entry metadata (`entry_id`, `entry_type`, `normalized_form`, `source_provenance`) plus canonical registry sidecars (`canonical_entries.jsonl`, `canonical_variants.jsonl`, `generation_status.jsonl`)
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ...` generates learner-facing `enrichments.jsonl` for an existing snapshot
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --max-concurrency ...` enriches one lexeme per LLM call, lets the model choose the learner-friendly subset of grounded meanings, repeats the hard meaning cap in the prompt, and performs one repair retry when a word-level payload is invalid
 - `python3 -m tools.lexicon.cli rerank-senses --snapshot-dir ...` writes grounded LLM rerank decisions for existing snapshots
@@ -19,6 +19,8 @@ Current scope:
 - `python3 -m tools.lexicon.cli benchmark-selection --output-dir ...` runs built-in tuning/holdout benchmark snapshots with optional rerank comparisons
 - `python3 -m tools.lexicon.cli score-selection-risk --snapshot-dir ...` scores deterministic selections and writes `selection_decisions.jsonl`
 - `python3 -m tools.lexicon.cli prepare-review --snapshot-dir ... --decisions ...` reranks only risky lexemes and writes reviewed decisions plus optional `review_queue.jsonl`
+- `python3 -m tools.lexicon.cli lookup-entry --snapshot-dir ... <word>` resolves a surface form to the canonical entry chosen for this snapshot
+- `python3 -m tools.lexicon.cli status-entry --snapshot-dir ... [--check-db] <word>` reports canonical/build/enrich/compile status and can optionally confirm DB presence
 - `python3 -m tools.lexicon.cli validate --snapshot-dir ...` validates normalized snapshot JSONL files
 - `python3 -m tools.lexicon.cli validate --compiled-input ...` validates compiled learner-facing JSONL rows (`--compiled-path` remains an alias)
 - `python3 -m tools.lexicon.cli compile-export --snapshot-dir ... --output ...` compiles normalized snapshot files into `words.enriched.jsonl`, preserving sense-level enrichment provenance needed for DB writeback
@@ -66,6 +68,9 @@ Recommended offline flow:
 python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/lexicon/snapshots/words-100
 python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
+# build-base now deterministically collapses obvious inflectional duplicates like things->thing and gives->give while keeping lexicalized forms like left as separate entries linked to their base family
+python3 -m tools.lexicon.cli lookup-entry --snapshot-dir data/lexicon/snapshots/demo things
+python3 -m tools.lexicon.cli status-entry --snapshot-dir data/lexicon/snapshots/demo --check-db thing
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
 # per_word prompts use WordNet as grounding context, repeat the hard 8/6/4 meaning cap, require a JSON object only, and retry once with a repair prompt if the first payload is invalid
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
@@ -143,6 +148,9 @@ python3 -m tools.lexicon.cli build-base run set lead
 python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/lexicon/snapshots/words-100
 python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
+# build-base now deterministically collapses obvious inflectional duplicates like things->thing and gives->give while keeping lexicalized forms like left as separate entries linked to their base family
+python3 -m tools.lexicon.cli lookup-entry --snapshot-dir data/lexicon/snapshots/demo things
+python3 -m tools.lexicon.cli status-entry --snapshot-dir data/lexicon/snapshots/demo --check-db thing
 ```
 
 ### Generate learner-facing enrichments
