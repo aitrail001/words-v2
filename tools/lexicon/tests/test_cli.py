@@ -38,7 +38,7 @@ class CliTests(unittest.TestCase):
 
     def test_build_base_command_emits_json_summary(self) -> None:
         with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: {"run": 5, "set": 10}[word], lambda word: [{"wn_synset_id": f"{word}.n.01", "part_of_speech": "noun", "canonical_gloss": f"gloss for {word}", "canonical_label": word}])):
-            code, stdout, _ = self.run_cli(["build-base", "Run", "SET", "run"])
+            code, stdout, _ = self.run_cli(["build-base", "--rerun-existing", "Run", "SET", "run"])
 
         self.assertEqual(code, 0)
         payload = json.loads(stdout)
@@ -50,7 +50,7 @@ class CliTests(unittest.TestCase):
     def test_build_base_command_can_source_top_words_inventory(self) -> None:
         with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: 10, lambda word: [])), \
              patch("tools.lexicon.cli._load_word_inventory_provider", return_value=lambda limit: ["The", "and", "co-op", "123"]):
-            code, stdout, _ = self.run_cli(["build-base", "--top-words", "4"])
+            code, stdout, _ = self.run_cli(["build-base", "--rerun-existing", "--top-words", "4"])
 
         self.assertEqual(code, 0)
         payload = json.loads(stdout)
@@ -61,7 +61,7 @@ class CliTests(unittest.TestCase):
     def test_build_base_command_supports_rollout_stage_alias(self) -> None:
         with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: 10, lambda word: [])), \
              patch("tools.lexicon.cli._load_word_inventory_provider", return_value=lambda limit: ["one", "two", "three"]):
-            code, stdout, _ = self.run_cli(["build-base", "--rollout-stage", "100"])
+            code, stdout, _ = self.run_cli(["build-base", "--rerun-existing", "--rollout-stage", "100"])
 
         self.assertEqual(code, 0)
         payload = json.loads(stdout)
@@ -81,12 +81,54 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("WordNet corpus is unavailable", stderr)
 
+    def test_build_base_command_skips_existing_db_words_by_default(self) -> None:
+        fake_result = type("FakeBaseResult", (), {
+            "lexemes": [type("Lexeme", (), {"lemma": "run"})()],
+            "senses": [object()],
+            "concepts": [object()],
+            "ambiguous_forms": [],
+            "skipped_existing_canonical_words": ["set"],
+        })()
+        with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
+             patch("tools.lexicon.cli._load_existing_db_words", return_value={"set"}) as mocked_existing, \
+             patch("tools.lexicon.cli.build_base_records", return_value=fake_result) as mocked_build:
+            code, stdout, _ = self.run_cli(["build-base", "run", "set"])
+            callback = mocked_build.call_args.kwargs["existing_canonical_words_lookup"]
+            self.assertIsNotNone(callback)
+            self.assertEqual(callback(["run", "set"]), {"set"})
+            mocked_existing.assert_called_once_with(["run", "set"], language="en", database_url=None)
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertTrue(payload["skip_existing_db"])
+        self.assertEqual(payload["skipped_existing_db_count"], 1)
+
+    def test_build_base_command_rerun_existing_disables_db_skip_lookup(self) -> None:
+        fake_result = type("FakeBaseResult", (), {
+            "lexemes": [type("Lexeme", (), {"lemma": "run"})()],
+            "senses": [object()],
+            "concepts": [object()],
+            "ambiguous_forms": [],
+            "skipped_existing_canonical_words": [],
+        })()
+        with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
+             patch("tools.lexicon.cli._load_existing_db_words") as mocked_existing, \
+             patch("tools.lexicon.cli.build_base_records", return_value=fake_result) as mocked_build:
+            code, stdout, _ = self.run_cli(["build-base", "--rerun-existing", "run"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertFalse(payload["skip_existing_db"])
+        self.assertEqual(payload["skipped_existing_db_count"], 0)
+        mocked_existing.assert_not_called()
+        self.assertIsNone(mocked_build.call_args.kwargs["existing_canonical_words_lookup"])
+
     def test_build_base_command_writes_snapshot_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "snapshot"
 
             with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: {"run": 5, "set": 10}[word], lambda word: [{"wn_synset_id": f"{word}.n.01", "part_of_speech": "noun", "canonical_gloss": f"gloss for {word}", "canonical_label": word}])):
-                code, stdout, _ = self.run_cli(["build-base", "Run", "SET", "--output-dir", str(output_dir)])
+                code, stdout, _ = self.run_cli(["build-base", "--rerun-existing", "Run", "SET", "--output-dir", str(output_dir)])
 
             self.assertEqual(code, 0)
             payload = json.loads(stdout)
@@ -297,6 +339,7 @@ class CliTests(unittest.TestCase):
         args = parser.parse_args(["build-base", "run"])
 
         self.assertEqual(args.max_senses, 8)
+        self.assertFalse(args.rerun_existing)
 
     def test_smoke_openai_compatible_command_defaults_to_bounded_values(self) -> None:
         parser = cli.build_parser()

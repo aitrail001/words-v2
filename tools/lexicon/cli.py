@@ -28,6 +28,35 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 
+def _load_existing_db_words(words: Sequence[str], language: str = 'en', database_url: str | None = None) -> set[str]:
+    normalized_words = [str(word).strip() for word in words if str(word).strip()]
+    if not normalized_words:
+        return set()
+
+    try:
+        _ensure_backend_path()
+        from sqlalchemy import create_engine, select
+        from sqlalchemy.orm import Session
+        from app.core.config import get_settings
+        from app.models.word import Word
+
+        settings = get_settings()
+        engine = create_engine(database_url or settings.database_url_sync)
+        try:
+            with Session(engine) as session:
+                rows = session.execute(
+                    select(Word.word).where(
+                        Word.word.in_(normalized_words),
+                        Word.language == language,
+                    )
+                ).scalars().all()
+                return {str(row) for row in rows}
+        finally:
+            engine.dispose()
+    except Exception as exc:  # pragma: no cover - error path exercised via CLI wrapper tests
+        raise RuntimeError(f'Database existing-word check failed: {exc}') from exc
+
+
 def _load_build_base_providers():
     return build_wordfreq_rank_provider(), build_wordnet_sense_provider()
 
@@ -69,15 +98,29 @@ def _build_base_command(args: argparse.Namespace) -> int:
     )
     adjudications_path = getattr(args, 'adjudications', None)
     adjudications = load_adjudications(Path(adjudications_path)) if adjudications_path else None
-    result = build_base_records(
-        words=words,
-        snapshot_id=snapshot_id,
-        created_at=_utc_now(),
-        rank_provider=rank_provider,
-        sense_provider=sense_provider,
-        max_senses=args.max_senses,
-        adjudications=adjudications,
-    )
+    existing_canonical_words_lookup = None
+    if not args.rerun_existing:
+        def existing_canonical_words_lookup(canonical_words: list[str]) -> set[str]:
+            return _load_existing_db_words(
+                canonical_words,
+                language='en',
+                database_url=args.database_url,
+            )
+
+    try:
+        result = build_base_records(
+            words=words,
+            snapshot_id=snapshot_id,
+            created_at=_utc_now(),
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+            max_senses=args.max_senses,
+            adjudications=adjudications,
+            existing_canonical_words_lookup=existing_canonical_words_lookup,
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     payload = {
         'command': 'build-base',
         'snapshot_id': snapshot_id,
@@ -87,6 +130,8 @@ def _build_base_command(args: argparse.Namespace) -> int:
         'sense_count': len(result.senses),
         'concept_count': len(result.concepts),
         'ambiguous_form_count': len(result.ambiguous_forms),
+        'skip_existing_db': not args.rerun_existing,
+        'skipped_existing_db_count': len(result.skipped_existing_canonical_words),
     }
     if requested_top_words is not None:
         payload['requested_top_words'] = int(requested_top_words)
@@ -520,6 +565,8 @@ def build_parser() -> argparse.ArgumentParser:
     build_base.add_argument('--snapshot-id', help='optional snapshot identifier override')
     build_base.add_argument('--max-senses', type=int, default=8, help='maximum learner-visible senses per word; adaptive selection typically keeps 4, 6, or 8')
     build_base.add_argument('--adjudications', help='optional form_adjudications.jsonl file to apply as canonicalization overrides')
+    build_base.add_argument('--database-url', help='optional sync database URL override for existing-word skip checks')
+    build_base.add_argument('--rerun-existing', action='store_true', help='include canonical words even if they already exist in the DB')
     build_base.add_argument('--output-dir', help='optional output directory for normalized snapshot JSONL files')
     build_base.set_defaults(handler=_build_base_command)
 
