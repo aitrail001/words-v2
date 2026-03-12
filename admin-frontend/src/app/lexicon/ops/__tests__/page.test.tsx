@@ -1,0 +1,223 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import LexiconOpsPage from "@/app/lexicon/ops/page";
+import { redirectToLogin } from "@/lib/auth-redirect";
+import { readAccessToken } from "@/lib/auth-session";
+import {
+  getLexiconOpsSnapshot,
+  listLexiconOpsSnapshots,
+} from "@/lib/lexicon-ops-client";
+
+jest.mock("@/lib/lexicon-ops-client", () => ({
+  listLexiconOpsSnapshots: jest.fn(),
+  getLexiconOpsSnapshot: jest.fn(),
+}));
+
+jest.mock("@/lib/auth-session", () => ({
+  readAccessToken: jest.fn(() => "active-token"),
+}));
+
+jest.mock("@/lib/auth-redirect", () => ({
+  redirectToLogin: jest.fn(),
+}));
+
+describe("LexiconOpsPage", () => {
+  const mockListLexiconOpsSnapshots = listLexiconOpsSnapshots as jest.Mock;
+  const mockGetLexiconOpsSnapshot = getLexiconOpsSnapshot as jest.Mock;
+  const mockReadAccessToken = readAccessToken as jest.Mock;
+  const mockRedirectToLogin = redirectToLogin as jest.Mock;
+
+  const snapshots = [
+    {
+      snapshot: "words-100-20260312",
+      snapshot_path: "/data/lexicon/snapshots/words-100-20260312",
+      snapshot_id: "lexicon-20260312-wordnet-wordfreq",
+      updated_at: "2026-03-12T07:40:00Z",
+      artifact_counts: {
+        lexemes: 100,
+        senses: 320,
+        enrichments: 48,
+        compiled_words: 0,
+        selection_decisions: 100,
+        ambiguous_forms: 9,
+      },
+      has_enrichments: true,
+      has_compiled_export: false,
+      has_selection_decisions: true,
+      has_ambiguous_forms: true,
+    },
+    {
+      snapshot: "words-50-20260311",
+      snapshot_path: "/data/lexicon/snapshots/words-50-20260311",
+      snapshot_id: "lexicon-20260311-wordnet-wordfreq",
+      updated_at: "2026-03-11T07:40:00Z",
+      artifact_counts: {
+        lexemes: 50,
+        senses: 156,
+        enrichments: 156,
+        compiled_words: 50,
+        selection_decisions: 50,
+        ambiguous_forms: 0,
+      },
+      has_enrichments: true,
+      has_compiled_export: true,
+      has_selection_decisions: true,
+      has_ambiguous_forms: false,
+    },
+  ];
+
+  const detail = {
+    snapshot: "words-100-20260312",
+    snapshot_path: "/data/lexicon/snapshots/words-100-20260312",
+    snapshot_id: "lexicon-20260312-wordnet-wordfreq",
+    updated_at: "2026-03-12T07:40:00Z",
+    artifact_counts: {
+      lexemes: 100,
+      senses: 320,
+      enrichments: 48,
+      compiled_words: 0,
+      selection_decisions: 100,
+      ambiguous_forms: 9,
+    },
+    has_enrichments: true,
+    has_compiled_export: false,
+    has_selection_decisions: true,
+    has_ambiguous_forms: true,
+    artifacts: [
+      {
+        file_name: "lexemes.jsonl",
+        exists: true,
+        row_count: 100,
+        size_bytes: 4000,
+        modified_at: "2026-03-12T07:35:00Z",
+        read_error: null,
+      },
+      {
+        file_name: "enrichments.jsonl",
+        exists: true,
+        row_count: 48,
+        size_bytes: 24000,
+        modified_at: "2026-03-12T07:40:00Z",
+        read_error: null,
+      },
+      {
+        file_name: "notes.json",
+        exists: true,
+        row_count: null,
+        size_bytes: 120,
+        modified_at: "2026-03-12T07:39:00Z",
+        read_error: null,
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockReadAccessToken.mockReturnValue("active-token");
+    mockListLexiconOpsSnapshots.mockResolvedValue(snapshots);
+    mockGetLexiconOpsSnapshot.mockResolvedValue(detail);
+  });
+
+  it("loads snapshot list and selected snapshot detail using backend contract fields", async () => {
+    render(<LexiconOpsPage />);
+
+    await waitFor(() => {
+      expect(mockListLexiconOpsSnapshots.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(mockGetLexiconOpsSnapshot).toHaveBeenCalledWith("words-100-20260312");
+    });
+
+    expect(screen.getByTestId("lexicon-ops-snapshots-list")).toHaveTextContent(
+      "words-100-20260312",
+    );
+    expect(screen.getByTestId("lexicon-ops-snapshots-list")).toHaveTextContent(
+      "snapshot_id: lexicon-20260312-wordnet-wordfreq",
+    );
+    expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
+      "enrichments.jsonl",
+    );
+    expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
+      "rows: 48",
+    );
+  });
+
+  it("refreshes snapshots from the refresh action", async () => {
+    const user = userEvent.setup();
+    render(<LexiconOpsPage />);
+
+    await waitFor(() =>
+      expect(mockListLexiconOpsSnapshots.mock.calls.length).toBeGreaterThanOrEqual(1),
+    );
+
+    const callsBeforeRefresh = mockListLexiconOpsSnapshots.mock.calls.length;
+    await user.click(screen.getByTestId("lexicon-ops-refresh-button"));
+
+    await waitFor(() =>
+      expect(mockListLexiconOpsSnapshots.mock.calls.length).toBeGreaterThan(
+        callsBeforeRefresh,
+      ),
+    );
+  });
+
+  it("clears stale detail while switching snapshots", async () => {
+    const user = userEvent.setup();
+    let resolveSecondDetail: ((value: typeof detail) => void) | null = null;
+
+    mockGetLexiconOpsSnapshot
+      .mockResolvedValueOnce(detail)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondDetail = resolve;
+          }),
+      );
+
+    render(<LexiconOpsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
+        "enrichments.jsonl",
+      ),
+    );
+
+    await user.click(screen.getByTestId("lexicon-ops-snapshot-words-50-20260311"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-detail-panel")).not.toHaveTextContent(
+        "enrichments.jsonl",
+      ),
+    );
+
+    resolveSecondDetail?.({
+      ...detail,
+      snapshot: "words-50-20260311",
+      snapshot_path: "/data/lexicon/snapshots/words-50-20260311",
+      snapshot_id: "lexicon-20260311-wordnet-wordfreq",
+      artifacts: [
+        {
+          file_name: "words.enriched.jsonl",
+          exists: true,
+          row_count: 50,
+          size_bytes: 12000,
+          modified_at: "2026-03-11T07:40:00Z",
+          read_error: null,
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
+        "words.enriched.jsonl",
+      ),
+    );
+  });
+
+  it("redirects unauthenticated users to login", async () => {
+    mockReadAccessToken.mockReturnValue(null);
+
+    render(<LexiconOpsPage />);
+
+    await waitFor(() => {
+      expect(mockRedirectToLogin).toHaveBeenCalledWith("/lexicon/ops");
+    });
+  });
+});
