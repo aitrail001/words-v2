@@ -438,7 +438,7 @@ def learner_meaning_cap(wordfreq_rank: int) -> int:
         return 6
     return 4
 
-def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord]) -> str:
+def _word_enrichment_grounding_payload(*, senses: list[SenseRecord]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     sense_rows = [
         {
             'sense_id': sense.sense_id,
@@ -450,7 +450,6 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
         }
         for sense in sorted(senses, key=lambda item: item.sense_order)
     ]
-    max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
     schema_hint = {
         'senses': [
             {
@@ -478,14 +477,74 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
             }
         ]
     }
+    return sense_rows, schema_hint
+
+
+def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord]) -> str:
+    sense_rows, schema_hint = _word_enrichment_grounding_payload(senses=senses)
+    max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
     return (
         f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
         f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
         f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
         f"Select at most {max_meanings} learner-friendly meanings. You may omit weak tail senses.\n"
+        f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
+        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
         "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
+        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
         f"Return JSON only with this schema: {json.dumps(schema_hint)}"
     )
+
+
+def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], previous_error: str) -> str:
+    sense_rows, schema_hint = _word_enrichment_grounding_payload(senses=senses)
+    max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
+    return (
+        f"Repair the previous learner-facing enrichment response for the English word '{lexeme.lemma}'.\n"
+        f"The previous response was invalid: {previous_error}\n"
+        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
+        f"Select at most {max_meanings} learner-friendly meanings.\n"
+        f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
+        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
+        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
+        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
+        f"Return JSON only with this schema: {json.dumps(schema_hint)}"
+    )
+
+
+def _is_repairable_word_payload_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    non_repairable_markers = (
+        'request failed',
+        'transport failed',
+        'timed out',
+        'cloudflare',
+        'status 4',
+        'status 5',
+    )
+    return not any(marker in message for marker in non_repairable_markers)
+
+
+def _generate_validated_word_payload(
+    *,
+    client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
+    lexeme: LexemeRecord,
+    senses: list[SenseRecord],
+) -> list[dict[str, Any]]:
+    try:
+        first_response = client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=senses))
+        return _validate_openai_compatible_word_payload(first_response, lexeme=lexeme, senses=senses)
+    except RuntimeError as exc:
+        if not _is_repairable_word_payload_error(exc):
+            raise
+        repair_response = client.generate_json(
+            build_word_enrichment_repair_prompt(
+                lexeme=lexeme,
+                senses=senses,
+                previous_error=str(exc),
+            )
+        )
+        return _validate_openai_compatible_word_payload(repair_response, lexeme=lexeme, senses=senses)
 
 
 def _build_enrichment_record(*, lexeme: LexemeRecord, sense: SenseRecord, response: dict[str, Any], model_name: str, prompt_version: str, generation_run_id: str, review_status: str, generated_at: str) -> EnrichmentRecord:
@@ -677,7 +736,7 @@ def build_openai_compatible_node_word_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
         ordered_senses = sorted(senses, key=lambda item: item.sense_order)
-        response = _validate_openai_compatible_word_payload(client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=ordered_senses)), lexeme=lexeme, senses=ordered_senses)
+        response = _generate_validated_word_payload(client=client, lexeme=lexeme, senses=ordered_senses)
         sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
         return [
             _build_enrichment_record(
@@ -764,7 +823,7 @@ def build_openai_compatible_word_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
         ordered_senses = sorted(senses, key=lambda item: item.sense_order)
-        response = _validate_openai_compatible_word_payload(client.generate_json(build_word_enrichment_prompt(lexeme=lexeme, senses=ordered_senses)), lexeme=lexeme, senses=ordered_senses)
+        response = _generate_validated_word_payload(client=client, lexeme=lexeme, senses=ordered_senses)
         sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
         return [
             _build_enrichment_record(

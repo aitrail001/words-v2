@@ -200,19 +200,33 @@ def _load_existing_relations(session: Any, relation_model: Type[Any], meaning_id
     return list(result.scalars().all())
 
 
-def _make_prompt_hash(source_type: str, source_reference: str, word: str, sense: dict[str, Any]) -> str:
+def _make_word_prompt_hash(
+    source_type: str,
+    source_reference: str,
+    word: str,
+    generation_run_id: str | None,
+    model_name: str | None,
+    prompt_version: str | None,
+) -> str:
     payload = "|".join(
         [
             source_type,
             source_reference,
             word,
-            str(sense.get("sense_id") or ""),
-            str(sense.get("generation_run_id") or ""),
-            str(sense.get("model_name") or ""),
-            str(sense.get("prompt_version") or ""),
+            str(generation_run_id or ""),
+            str(model_name or ""),
+            str(prompt_version or ""),
         ]
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _sense_run_group_key(sense: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    return (
+        str(sense.get("generation_run_id") or "") or None,
+        str(sense.get("model_name") or "") or None,
+        str(sense.get("prompt_version") or "") or None,
+    )
 
 
 def _sync_word_level_enrichment_fields(word: Any, row: dict[str, Any], run: Any | None, source_type: str) -> None:
@@ -323,6 +337,8 @@ def import_compiled_rows(
         matched_meaning_ids: set[Any] = set()
         enrichment_job = None
 
+        enrichment_run_by_group: dict[tuple[str | None, str | None, str | None], Any] = {}
+
         if lexicon_enrichment_job_model is not None and lexicon_enrichment_run_model is not None:
             enrichment_job = _find_existing_enrichment_job(
                 session,
@@ -347,6 +363,52 @@ def import_compiled_rows(
                 if hasattr(enrichment_job, "completed_at"):
                     enrichment_job.completed_at = _parse_timestamp(row.get("generated_at"))
                 summary = _increment(summary, reused_enrichment_jobs=1)
+
+            for sense in row.get("senses") or []:
+                group_key = _sense_run_group_key(sense)
+                if group_key in enrichment_run_by_group:
+                    continue
+                generation_run_id, model_name, prompt_version = group_key
+                prompt_hash = _make_word_prompt_hash(
+                    source_type,
+                    source_reference,
+                    row["word"],
+                    generation_run_id,
+                    model_name,
+                    prompt_version,
+                )
+                enrichment_run = _find_existing_enrichment_run(
+                    session,
+                    lexicon_enrichment_run_model,
+                    enrichment_job.id,
+                    prompt_version,
+                    prompt_hash,
+                )
+                if enrichment_run is None:
+                    enrichment_run = lexicon_enrichment_run_model(
+                        enrichment_job_id=enrichment_job.id,
+                        generator_provider=source_type,
+                        generator_model=model_name,
+                        prompt_version=prompt_version,
+                        prompt_hash=prompt_hash,
+                        verdict="imported",
+                        confidence=_normalize_confidence(sense.get("confidence")),
+                        created_at=_parse_timestamp(sense.get("generated_at") or row.get("generated_at")),
+                    )
+                    session.add(enrichment_run)
+                    session.flush()
+                    summary = _increment(summary, created_enrichment_runs=1)
+                else:
+                    if hasattr(enrichment_run, "generator_provider"):
+                        enrichment_run.generator_provider = source_type
+                    if hasattr(enrichment_run, "generator_model"):
+                        enrichment_run.generator_model = model_name
+                    if hasattr(enrichment_run, "verdict"):
+                        enrichment_run.verdict = "imported"
+                    if hasattr(enrichment_run, "confidence"):
+                        enrichment_run.confidence = _normalize_confidence(sense.get("confidence"))
+                    summary = _increment(summary, reused_enrichment_runs=1)
+                enrichment_run_by_group[group_key] = enrichment_run
 
         for index, sense in enumerate(row.get("senses") or []):
             sense_source_reference = f"{source_reference}:{sense['sense_id']}"
@@ -390,51 +452,25 @@ def import_compiled_rows(
 
             enrichment_run = None
             if enrichment_job is not None and lexicon_enrichment_run_model is not None:
-                prompt_version = sense.get("prompt_version")
-                prompt_hash = _make_prompt_hash(source_type, source_reference, row["word"], sense)
-                enrichment_run = _find_existing_enrichment_run(
-                    session,
-                    lexicon_enrichment_run_model,
-                    enrichment_job.id,
-                    prompt_version,
-                    prompt_hash,
-                )
-                if enrichment_run is None:
-                    enrichment_run = lexicon_enrichment_run_model(
-                        enrichment_job_id=enrichment_job.id,
-                        generator_provider=source_type,
-                        generator_model=sense.get("model_name"),
-                        prompt_version=prompt_version,
-                        prompt_hash=prompt_hash,
-                        verdict="imported",
-                        confidence=_normalize_confidence(sense.get("confidence")),
-                        created_at=_parse_timestamp(sense.get("generated_at") or row.get("generated_at")),
-                    )
-                    session.add(enrichment_run)
-                    session.flush()
-                    summary = _increment(summary, created_enrichment_runs=1)
-                else:
-                    if hasattr(enrichment_run, "generator_provider"):
-                        enrichment_run.generator_provider = source_type
-                    if hasattr(enrichment_run, "generator_model"):
-                        enrichment_run.generator_model = sense.get("model_name")
-                    if hasattr(enrichment_run, "verdict"):
-                        enrichment_run.verdict = "imported"
-                    if hasattr(enrichment_run, "confidence"):
-                        enrichment_run.confidence = _normalize_confidence(sense.get("confidence"))
-                    summary = _increment(summary, reused_enrichment_runs=1)
+                enrichment_run = enrichment_run_by_group.get(_sense_run_group_key(sense))
 
             _sync_word_level_enrichment_fields(word, row, enrichment_run, source_type)
 
             if meaning_example_model is not None:
                 existing_examples = _load_existing_examples(session, meaning_example_model, meaning.id, source_type)
+                deleted_any_examples = False
                 for existing_example in existing_examples:
                     session.delete(existing_example)
+                    deleted_any_examples = True
                     summary = _increment(summary, deleted_examples=1)
+                if deleted_any_examples:
+                    session.flush()
+                seen_example_sentences: set[str] = set()
                 for example_index, example in enumerate(sense.get("examples") or []):
                     sentence = str((example or {}).get("sentence") or "").strip()
-                    if not sentence:
+                    if not sentence or sentence in seen_example_sentences:
                         continue
+                    seen_example_sentences.add(sentence)
                     meaning_example = meaning_example_model(
                         meaning_id=meaning.id,
                         sentence=sentence,
@@ -449,14 +485,21 @@ def import_compiled_rows(
 
             if word_relation_model is not None:
                 existing_relations = _load_existing_relations(session, word_relation_model, meaning.id, source_type)
+                deleted_any_relations = False
                 for existing_relation in existing_relations:
                     session.delete(existing_relation)
+                    deleted_any_relations = True
                     summary = _increment(summary, deleted_relations=1)
+                if deleted_any_relations:
+                    session.flush()
+                seen_relations: set[tuple[str, str]] = set()
                 for relation_type, source_field in SUPPORTED_RELATION_FIELDS:
                     for related_word in sense.get(source_field) or []:
                         related_text = str(related_word or "").strip()
-                        if not related_text:
+                        relation_key = (relation_type, related_text)
+                        if not related_text or relation_key in seen_relations:
                             continue
+                        seen_relations.add(relation_key)
                         relation = word_relation_model(
                             word_id=word.id,
                             meaning_id=meaning.id,

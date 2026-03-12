@@ -59,6 +59,7 @@ Use this as the canonical final DB write path for generated learner-facing lexic
 Important:
 - staged review is the review/decision layer
 - `compile-export -> import-db` is the canonical final learner-enrichment write path
+- for compiled per-word artifacts, `import-db` now groups senses that share the same `generation_run_id` into one DB enrichment run row per word request
 - the narrower staged-review publish path is transitional and should not be treated as the main learner-enrichment publisher
 
 For the minimum pass/fail closure gate, use `docs/runbooks/lexicon-working-gate.md`.
@@ -77,7 +78,7 @@ Enrich the learner-facing layer:
 
 ```bash
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
-# per_word mode uses WordNet-grounded candidates as context only; the LLM may omit weak tail senses and keeps at most 8/6/4 meanings by frequency band
+# per_word mode uses WordNet-grounded candidates as context only; the prompt repeats the hard 8/6/4 meaning cap, requires a JSON object only, and retries once with a repair prompt if the first payload is invalid
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
 ```
 
@@ -171,7 +172,7 @@ This stage is intentionally review-oriented:
 
 ## 7. Import into the local DB
 
-For a real non-dry-run import, your backend DB settings must be available in the shell:
+For a real non-dry-run import, your backend DB settings must be available in the shell. The backend settings loader now ignores unrelated extra env keys in the repo-root `.env`, so this command can run from the normal repository root flow:
 
 ```bash
 python3 -m tools.lexicon.cli import-db \
