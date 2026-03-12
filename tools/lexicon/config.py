@@ -7,6 +7,7 @@ import os
 
 
 _ALLOWED_REASONING_EFFORTS = {"low", "medium", "high"}
+_DEFAULT_LLM_TIMEOUT_SECONDS = 60
 
 
 def _normalize_reasoning_effort(value: str | None) -> str | None:
@@ -22,6 +23,21 @@ def _normalize_reasoning_effort(value: str | None) -> str | None:
     return normalized
 
 
+def _normalize_positive_int(value: str | None, *, field_name: str, default: int) -> int:
+    if value is None:
+        return default
+    normalized = value.strip()
+    if not normalized:
+        return default
+    try:
+        parsed = int(normalized)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a positive integer.") from exc
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be a positive integer.")
+    return parsed
+
+
 @dataclass(frozen=True)
 class LexiconSettings:
     output_root: Path
@@ -30,6 +46,7 @@ class LexiconSettings:
     llm_api_key: str | None
     llm_transport: str | None
     llm_reasoning_effort: str | None
+    llm_timeout_seconds: int
 
     @property
     def llm_provider(self) -> str | None:
@@ -47,4 +64,9 @@ class LexiconSettings:
             llm_api_key=source.get("LEXICON_LLM_API_KEY"),
             llm_transport=source.get("LEXICON_LLM_TRANSPORT"),
             llm_reasoning_effort=_normalize_reasoning_effort(source.get("LEXICON_LLM_REASONING_EFFORT")),
+            llm_timeout_seconds=_normalize_positive_int(
+                source.get("LEXICON_LLM_TIMEOUT_SECONDS"),
+                field_name="LEXICON_LLM_TIMEOUT_SECONDS",
+                default=_DEFAULT_LLM_TIMEOUT_SECONDS,
+            ),
         )
