@@ -89,6 +89,9 @@ Enrich the learner-facing layer:
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
 # per_word mode uses WordNet-grounded candidates as context only; the prompt repeats the hard 8/6/4 meaning cap, requires a JSON object only, retries once with a repair prompt if the first payload is invalid, and now requires learner translations for zh-Hans/es/ar/pt-BR/ja
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/words-1000 --provider-mode auto --mode per_word --max-concurrency 4 --request-delay-seconds 1.0 --max-failures 25
+python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/words-1000 --provider-mode auto --mode per_word --max-concurrency 4 --request-delay-seconds 1.0 --max-failures 25 --resume
+# large per_word runs now append directly to enrichments.jsonl and keep enrich.checkpoint.jsonl + enrich.failures.jsonl beside the snapshot by default
 ```
 
 Validate the normalized snapshot plus enrichments:
@@ -96,6 +99,13 @@ Validate the normalized snapshot plus enrichments:
 ```bash
 python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
 ```
+
+For staged common-word runs, the operator-safe pattern is:
+
+- `build-base --rollout-stage 100`, verify the outputs, then run `enrich --mode per_word`
+- scale to `--rollout-stage 1000` only after the checkpoint/resume path is clean
+- keep `enrich.checkpoint.jsonl` and `enrich.failures.jsonl` with the snapshot so `--resume` can restart without losing completed lexemes
+- use `--request-delay-seconds` to respect gateway pacing limits and `--max-failures` to fail loudly before burning through a large batch
 
 Compile the final export:
 

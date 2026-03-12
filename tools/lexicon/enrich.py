@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,12 +10,13 @@ import json
 import math
 import shutil
 import subprocess
+import time
 from urllib import error, request
 
 from tools.lexicon.config import LexiconSettings
 from tools.lexicon.errors import LexiconDependencyError
 from tools.lexicon.ids import make_enrichment_id
-from tools.lexicon.jsonl_io import read_jsonl, write_jsonl
+from tools.lexicon.jsonl_io import append_jsonl, read_jsonl, write_jsonl
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 
 EnrichmentProvider = Callable[..., EnrichmentRecord]
@@ -992,6 +994,83 @@ def read_snapshot_inputs(snapshot_dir: Path) -> tuple[list[LexemeRecord], list[S
     return lexemes, senses
 
 
+def _read_jsonl_if_exists(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    return read_jsonl(path)
+
+
+def _load_completed_lexeme_ids(checkpoint_path: Path) -> set[str]:
+    completed: set[str] = set()
+    for row in _read_jsonl_if_exists(checkpoint_path):
+        if str(row.get('status') or '') == 'completed' and row.get('lexeme_id'):
+            completed.add(str(row['lexeme_id']))
+    return completed
+
+
+def _load_existing_enrichments(output_path: Path) -> list[EnrichmentRecord]:
+    if not output_path.exists():
+        return []
+    return [EnrichmentRecord(**row) for row in read_jsonl(output_path)]
+
+
+def _reconcile_resumable_output(
+    output_path: Path,
+    *,
+    completed_lexeme_ids: set[str],
+    lexeme_id_by_sense_id: dict[str, str],
+) -> None:
+    if not output_path.exists():
+        return
+    reconciled_rows: list[dict[str, Any]] = []
+    for row in read_jsonl(output_path):
+        lexeme_id = lexeme_id_by_sense_id.get(str(row.get('sense_id') or ''))
+        if lexeme_id and lexeme_id in completed_lexeme_ids:
+            reconciled_rows.append(row)
+    write_jsonl(output_path, reconciled_rows)
+
+
+def _append_completed_lexeme_records(
+    output_path: Path,
+    checkpoint_path: Path,
+    *,
+    lexeme: LexemeRecord,
+    records: list[EnrichmentRecord],
+    generation_run_id: str,
+    completed_lexeme_ids: set[str],
+) -> None:
+    append_jsonl(output_path, [record.to_dict() for record in records])
+    completed_at = _utc_now()
+    _write_per_word_checkpoint(
+        checkpoint_path,
+        lexeme=lexeme,
+        generation_run_id=generation_run_id,
+        completed_at=completed_at,
+    )
+    completed_lexeme_ids.add(lexeme.lexeme_id)
+
+
+def _write_per_word_checkpoint(checkpoint_path: Path, *, lexeme: LexemeRecord, generation_run_id: str, completed_at: str) -> None:
+    append_jsonl(checkpoint_path, [{
+        'lexeme_id': lexeme.lexeme_id,
+        'lemma': lexeme.lemma,
+        'status': 'completed',
+        'generation_run_id': generation_run_id,
+        'completed_at': completed_at,
+    }])
+
+
+def _write_per_word_failure(failures_output: Path, *, lexeme: LexemeRecord, generation_run_id: str, error_message: str, failed_at: str) -> None:
+    append_jsonl(failures_output, [{
+        'lexeme_id': lexeme.lexeme_id,
+        'lemma': lexeme.lemma,
+        'status': 'failed',
+        'generation_run_id': generation_run_id,
+        'failed_at': failed_at,
+        'error': error_message,
+    }])
+
+
 def enrich_snapshot(
     snapshot_dir: Path,
     *,
@@ -1009,6 +1088,11 @@ def enrich_snapshot(
     reasoning_effort: str | None = None,
     mode: str = 'per_sense',
     max_concurrency: int = 1,
+    resume: bool = False,
+    checkpoint_path: Path | None = None,
+    failures_output: Path | None = None,
+    max_failures: int | None = None,
+    request_delay_seconds: float = 0.0,
 ) -> list[EnrichmentRecord]:
     if mode not in _ENRICHMENT_MODES:
         raise ValueError(f'Unsupported enrichment mode: {mode}')
@@ -1020,6 +1104,8 @@ def enrich_snapshot(
     senses_by_lexeme: dict[str, list[SenseRecord]] = {}
     for sense in senses:
         senses_by_lexeme.setdefault(sense.lexeme_id, []).append(sense)
+
+    destination = output_path or snapshot_dir / 'enrichments.jsonl'
 
     if mode == 'per_sense':
         enrichment_provider = provider or build_enrichment_provider(
@@ -1045,63 +1131,168 @@ def enrich_snapshot(
                     prompt_version=prompt_version,
                 )
             )
-    else:
-        effective_max_concurrency = max(1, int(max_concurrency or 1))
-        word_enrichment_provider = word_provider or build_word_enrichment_provider(
-            settings=effective_settings,
-            provider_mode=provider_mode,
-            model_name=model_name,
-            reasoning_effort=reasoning_effort,
-            review_status=review_status,
-            transport=transport,
+        write_jsonl(destination, [record.to_dict() for record in enrichments])
+        return enrichments
+
+    effective_max_concurrency = max(1, int(max_concurrency or 1))
+    effective_request_delay_seconds = max(0.0, float(request_delay_seconds or 0.0))
+    checkpoint_destination = checkpoint_path or snapshot_dir / 'enrich.checkpoint.jsonl'
+    failures_destination = failures_output or snapshot_dir / 'enrich.failures.jsonl'
+    effective_max_failures = None if max_failures is None else max(1, int(max_failures))
+    word_enrichment_provider = word_provider or build_word_enrichment_provider(
+        settings=effective_settings,
+        provider_mode=provider_mode,
+        model_name=model_name,
+        reasoning_effort=reasoning_effort,
+        review_status=review_status,
+        transport=transport,
+    )
+    ordered_lexemes = sorted(lexemes, key=lambda item: item.lemma)
+    ordered_sense_lists = {
+        lexeme.lexeme_id: sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
+        for lexeme in ordered_lexemes
+    }
+    lexeme_id_by_sense_id = {sense.sense_id: sense.lexeme_id for sense in senses}
+    completed_lexeme_ids = _load_completed_lexeme_ids(checkpoint_destination) if resume else set()
+    if resume:
+        _reconcile_resumable_output(
+            destination,
+            completed_lexeme_ids=completed_lexeme_ids,
+            lexeme_id_by_sense_id=lexeme_id_by_sense_id,
         )
-        ordered_lexemes = sorted(lexemes, key=lambda item: item.lemma)
-        ordered_sense_lists = {
-            lexeme.lexeme_id: sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
-            for lexeme in ordered_lexemes
-        }
-        failures: list[str] = []
-        per_lexeme_results: dict[str, list[EnrichmentRecord]] = {}
+    pending_lexemes = [lexeme for lexeme in ordered_lexemes if lexeme.lexeme_id not in completed_lexeme_ids]
+    if not resume:
+        write_jsonl(destination, [])
+        write_jsonl(checkpoint_destination, [])
+        write_jsonl(failures_destination, [])
 
-        def run_word_job(lexeme: LexemeRecord) -> list[EnrichmentRecord]:
-            word_senses = ordered_sense_lists.get(lexeme.lexeme_id, [])
-            if not word_senses:
-                return []
-            return word_enrichment_provider(
+    completed_results: dict[str, list[EnrichmentRecord]] = {}
+    failures: list[str] = []
+    next_flush_index = 0
+    while next_flush_index < len(ordered_lexemes) and ordered_lexemes[next_flush_index].lexeme_id in completed_lexeme_ids:
+        next_flush_index += 1
+    request_start_lock = Lock()
+    last_request_started_at = [0.0]
+
+    def run_word_job(lexeme: LexemeRecord) -> list[EnrichmentRecord]:
+        word_senses = ordered_sense_lists.get(lexeme.lexeme_id, [])
+        if not word_senses:
+            return []
+        if effective_request_delay_seconds > 0:
+            with request_start_lock:
+                now = time.monotonic()
+                wait_for = effective_request_delay_seconds - (now - last_request_started_at[0])
+                if wait_for > 0:
+                    time.sleep(wait_for)
+                    now = time.monotonic()
+                last_request_started_at[0] = now
+        return word_enrichment_provider(
+            lexeme=lexeme,
+            senses=word_senses,
+            settings=effective_settings,
+            generated_at=effective_generated_at,
+            generation_run_id=effective_generation_run_id,
+            prompt_version=prompt_version,
+        )
+
+    def flush_completed() -> None:
+        nonlocal next_flush_index
+        while next_flush_index < len(ordered_lexemes):
+            lexeme = ordered_lexemes[next_flush_index]
+            if lexeme.lexeme_id in completed_lexeme_ids:
+                next_flush_index += 1
+                continue
+            records = completed_results.get(lexeme.lexeme_id)
+            if records is None:
+                break
+            _append_completed_lexeme_records(
+                destination,
+                checkpoint_destination,
                 lexeme=lexeme,
-                senses=word_senses,
-                settings=effective_settings,
-                generated_at=effective_generated_at,
+                records=records,
                 generation_run_id=effective_generation_run_id,
-                prompt_version=prompt_version,
+                completed_lexeme_ids=completed_lexeme_ids,
             )
+            completed_results.pop(lexeme.lexeme_id, None)
+            next_flush_index += 1
 
-        if effective_max_concurrency == 1:
-            for lexeme in ordered_lexemes:
-                try:
-                    per_lexeme_results[lexeme.lexeme_id] = run_word_job(lexeme)
-                except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
-                    failures.append(f'{lexeme.lemma}: {exc}')
-        else:
-            with ThreadPoolExecutor(max_workers=effective_max_concurrency) as executor:
-                future_map = {executor.submit(run_word_job, lexeme): lexeme for lexeme in ordered_lexemes}
-                for future in as_completed(future_map):
-                    lexeme = future_map[future]
-                    try:
-                        per_lexeme_results[lexeme.lexeme_id] = future.result()
-                    except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
-                        failures.append(f'{lexeme.lemma}: {exc}')
-
-        if failures:
-            raise RuntimeError('Per-word enrichment failed for ' + '; '.join(sorted(failures)))
-
-        enrichments = []
+    def flush_remaining_completed() -> None:
         for lexeme in ordered_lexemes:
-            enrichments.extend(per_lexeme_results.get(lexeme.lexeme_id, []))
+            if lexeme.lexeme_id in completed_lexeme_ids:
+                continue
+            records = completed_results.get(lexeme.lexeme_id)
+            if records is None:
+                continue
+            _append_completed_lexeme_records(
+                destination,
+                checkpoint_destination,
+                lexeme=lexeme,
+                records=records,
+                generation_run_id=effective_generation_run_id,
+                completed_lexeme_ids=completed_lexeme_ids,
+            )
+            completed_results.pop(lexeme.lexeme_id, None)
 
-    destination = output_path or snapshot_dir / 'enrichments.jsonl'
-    write_jsonl(destination, [record.to_dict() for record in enrichments])
-    return enrichments
+    def handle_failure(lexeme: LexemeRecord, exc: Exception) -> None:
+        message = f'{lexeme.lemma}: {exc}'
+        failures.append(message)
+        _write_per_word_failure(
+            failures_destination,
+            lexeme=lexeme,
+            generation_run_id=effective_generation_run_id,
+            error_message=str(exc),
+            failed_at=_utc_now(),
+        )
+
+    if effective_max_concurrency == 1:
+        for lexeme in pending_lexemes:
+            try:
+                completed_results[lexeme.lexeme_id] = run_word_job(lexeme)
+                flush_completed()
+            except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
+                handle_failure(lexeme, exc)
+                if effective_max_failures is not None and len(failures) >= effective_max_failures:
+                    break
+    else:
+        with ThreadPoolExecutor(max_workers=effective_max_concurrency) as executor:
+            pending_iter = iter(pending_lexemes)
+            future_map: dict[Any, LexemeRecord] = {}
+
+            def submit_next() -> bool:
+                try:
+                    lexeme = next(pending_iter)
+                except StopIteration:
+                    return False
+                future_map[executor.submit(run_word_job, lexeme)] = lexeme
+                return True
+
+            while len(future_map) < effective_max_concurrency and submit_next():
+                pass
+
+            stop_submitting = False
+            while future_map:
+                future = next(as_completed(list(future_map)))
+                lexeme = future_map.pop(future)
+                try:
+                    completed_results[lexeme.lexeme_id] = future.result()
+                    flush_completed()
+                except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
+                    handle_failure(lexeme, exc)
+                    if effective_max_failures is not None and len(failures) >= effective_max_failures:
+                        stop_submitting = True
+                if stop_submitting:
+                    continue
+                while len(future_map) < effective_max_concurrency and submit_next():
+                    pass
+
+    if failures:
+        flush_remaining_completed()
+        raise RuntimeError('Per-word enrichment failed for ' + '; '.join(sorted(failures)))
+
+    if resume:
+        return _load_existing_enrichments(destination)
+
+    return _load_existing_enrichments(destination)
 
 
 def run_enrichment(
@@ -1121,6 +1312,11 @@ def run_enrichment(
     reasoning_effort: str | None = None,
     mode: str = 'per_sense',
     max_concurrency: int = 1,
+    resume: bool = False,
+    checkpoint_path: Path | None = None,
+    failures_output: Path | None = None,
+    max_failures: int | None = None,
+    request_delay_seconds: float = 0.0,
 ) -> EnrichmentRunResult:
     destination = output_path or snapshot_dir / 'enrichments.jsonl'
     lexemes, _ = read_snapshot_inputs(snapshot_dir)
@@ -1140,5 +1336,10 @@ def run_enrichment(
         reasoning_effort=reasoning_effort,
         mode=mode,
         max_concurrency=max_concurrency,
+        resume=resume,
+        checkpoint_path=checkpoint_path,
+        failures_output=failures_output,
+        max_failures=max_failures,
+        request_delay_seconds=request_delay_seconds,
     )
     return EnrichmentRunResult(output_path=destination, enrichments=enrichments, lexeme_count=len(lexemes), mode=mode)
