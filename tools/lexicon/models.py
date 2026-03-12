@@ -71,6 +71,50 @@ class ConceptRecord(SerializableRecord):
 
 
 @dataclass(frozen=True)
+class CanonicalEntryRecord(SerializableRecord):
+    snapshot_id: str
+    entry_id: str
+    canonical_form: str
+    display_form: str
+    normalized_form: str
+    source_forms: list[str]
+    created_at: str
+    language: str = "en"
+    entry_type: str = "word"
+    linked_canonical_form: str | None = None
+    notes: str | None = None
+
+
+@dataclass(frozen=True)
+class CanonicalVariantRecord(SerializableRecord):
+    snapshot_id: str
+    entry_id: str
+    surface_form: str
+    canonical_form: str
+    decision: str
+    decision_reason: str
+    confidence: float
+    variant_type: str
+    created_at: str
+    linked_canonical_form: str | None = None
+    is_separately_learner_worthy: bool = False
+
+
+@dataclass(frozen=True)
+class GenerationStatusRecord(SerializableRecord):
+    snapshot_id: str
+    entry_id: str
+    canonical_form: str
+    updated_at: str
+    discovered: bool = True
+    base_built: bool = True
+    enriched: bool = False
+    compiled: bool = False
+    published: bool = False
+    last_source_reference: str | None = None
+
+
+@dataclass(frozen=True)
 class EnrichmentRecord(SerializableRecord):
     snapshot_id: str
     enrichment_id: str
