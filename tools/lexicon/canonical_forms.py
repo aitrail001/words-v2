@@ -141,6 +141,10 @@ def _plural_suffix_candidates(surface_form: str) -> set[str]:
     return candidates
 
 
+def _non_plural_suffix_candidates(surface_form: str) -> set[str]:
+    return set(_suffix_candidates(surface_form)) - _plural_suffix_candidates(surface_form)
+
+
 def _apply_adjudication(surface_form: str, adjudication: dict[str, object], candidate_forms: list[str]) -> CanonicalDecision:
     selected_action = str(adjudication.get("selected_action") or "").strip()
     if selected_action not in _ALLOWED_ADJUDICATION_ACTIONS:
@@ -231,6 +235,21 @@ def canonicalize_words(
                 if candidate not in plural_suffix_candidates or candidate in supported_suffix_candidates
             ]
         surface_rank = resolve_frequency_rank(surface_form, rank_provider)
+        non_plural_suffix_candidates = _non_plural_suffix_candidates(surface_form)
+        if non_plural_suffix_candidates:
+            filtered_candidates: list[str] = []
+            for candidate in candidate_forms:
+                if candidate not in non_plural_suffix_candidates:
+                    filtered_candidates.append(candidate)
+                    continue
+                candidate_rank = resolve_frequency_rank(candidate, rank_provider)
+                if (
+                    _sense_labels_support_candidate(candidate, surface_senses)
+                    or _sense_labels_support_candidate(candidate, get_senses(candidate))
+                    or (candidate_rank < 999_999 and candidate_rank <= surface_rank)
+                ):
+                    filtered_candidates.append(candidate)
+            candidate_forms = filtered_candidates
         surface_labels = sorted(
             {
                 normalized
@@ -333,6 +352,7 @@ def canonicalize_words(
                 morph_score is not None
                 and morph_candidate != surface_form
                 and standalone_surface_labels > 0
+                and morph_candidate not in plural_suffix_candidates
                 and morph_candidate_label_matches > 0
             ):
                 decision = CanonicalDecision(

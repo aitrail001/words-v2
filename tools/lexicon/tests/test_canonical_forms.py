@@ -276,6 +276,54 @@ class CanonicalFormsTests(unittest.TestCase):
         self.assertEqual(result.canonical_variants[0].decision, "keep_both_linked")
         self.assertEqual(result.canonical_variants[0].linked_canonical_form, "meet")
 
+    def test_build_base_records_keeps_lexicalized_plural_with_own_meaning_separate(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "things": 120,
+                "thing": 40,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "things":
+                return [
+                    {
+                        "wn_synset_id": "things.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "personal effects or possessions",
+                        "canonical_label": "things",
+                    },
+                    {
+                        "wn_synset_id": "thing.n.08",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "an entity that is not named specifically",
+                        "canonical_label": "thing",
+                    },
+                ]
+            if word == "thing":
+                return [
+                    {
+                        "wn_synset_id": "thing.n.08",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "an entity that is not named specifically",
+                        "canonical_label": "thing",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["things"],
+            snapshot_id="lexicon-20260313-wordnet-wordfreq",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["things"])
+        self.assertEqual(result.canonical_variants[0].surface_form, "things")
+        self.assertEqual(result.canonical_variants[0].canonical_form, "things")
+        self.assertEqual(result.canonical_variants[0].decision, "keep_separate")
+        self.assertIsNone(result.canonical_variants[0].linked_canonical_form)
+
     def test_build_base_records_prefers_morphology_backed_candidate_over_semantic_neighbor(self) -> None:
         def rank_provider(word: str) -> int:
             return {
@@ -489,6 +537,67 @@ class CanonicalFormsTests(unittest.TestCase):
         self.assertEqual(variants["pesos"].decision, "unknown_needs_llm")
         self.assertIn("rupee", variants["rupees"].candidate_forms)
         self.assertEqual(variants["rupees"].decision, "unknown_needs_llm")
+
+    def test_build_base_records_filters_unsupported_non_plural_suffix_guesses(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "something": 70,
+                "someth": 999_999,
+                "somethe": 999_999,
+                "anything": 75,
+                "anyth": 999_999,
+                "anythe": 999_999,
+                "everything": 80,
+                "everyth": 999_999,
+                "everythe": 999_999,
+                "during": 85,
+                "dur": 999_999,
+                "dure": 999_999,
+                "whether": 90,
+                "wheth": 999_999,
+                "added": 95,
+                "add": 20,
+                "coming": 100,
+                "come": 30,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "added":
+                return [
+                    {
+                        "wn_synset_id": "add.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "make an addition",
+                        "canonical_label": "add",
+                    }
+                ]
+            if word == "coming":
+                return [
+                    {
+                        "wn_synset_id": "come.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "move toward",
+                        "canonical_label": "come",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["something", "anything", "everything", "during", "whether", "added", "coming"],
+            snapshot_id="lexicon-20260313-wordnet-wordfreq",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        variants = {record.surface_form: record for record in result.canonical_variants}
+        for surface_form in ("something", "anything", "everything", "during", "whether"):
+            self.assertEqual(variants[surface_form].decision, "keep_separate")
+            self.assertEqual(variants[surface_form].candidate_forms, [])
+        self.assertEqual(variants["added"].canonical_form, "add")
+        self.assertEqual(variants["added"].decision, "collapse_to_canonical")
+        self.assertEqual(variants["coming"].canonical_form, "come")
+        self.assertEqual(variants["coming"].decision, "collapse_to_canonical")
 
 
 if __name__ == "__main__":
