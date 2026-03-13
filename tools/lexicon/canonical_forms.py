@@ -238,19 +238,28 @@ def canonicalize_words(
 
             scored_candidates.sort(key=lambda item: (-item[0], resolve_frequency_rank(item[1], rank_provider), item[1]))
             best_score, best_candidate, best_reasons, best_has_morphology_evidence = scored_candidates[0]
+            best_morphology_candidate = next((item for item in scored_candidates if item[3]), None)
             standalone_surface_labels = sum(1 for label in surface_labels if label == surface_form)
             candidate_label_matches = sum(1 for label in surface_labels if label == best_candidate)
 
+            morph_score = None
+            morph_candidate = None
+            morph_reasons: list[str] = []
+            morph_candidate_label_matches = 0
+            if best_morphology_candidate is not None:
+                morph_score, morph_candidate, morph_reasons, _ = best_morphology_candidate
+                morph_candidate_label_matches = sum(1 for label in surface_labels if label == morph_candidate)
+
             if (
-                best_score >= 5
-                and best_has_morphology_evidence
+                morph_score is not None
+                and morph_score >= 5
                 and surface_form in _KEEP_BOTH_LINKED
-                and candidate_label_matches > 0
+                and morph_candidate_label_matches > 0
             ):
                 decision = CanonicalDecision(
                     surface_form=surface_form,
                     canonical_form=surface_form,
-                    linked_canonical_form=best_candidate,
+                    linked_canonical_form=morph_candidate,
                     decision="keep_both_linked",
                     decision_reason="surface form is learner-worthy on its own and also maps to a related base form",
                     confidence=0.9,
@@ -260,31 +269,48 @@ def canonicalize_words(
                     sense_labels=surface_labels,
                 )
             elif (
-                best_score >= 5
-                and best_has_morphology_evidence
-                and best_candidate != surface_form
+                morph_score is not None
+                and morph_score >= 5
+                and morph_candidate != surface_form
                 and standalone_surface_labels == 0
             ):
                 decision = CanonicalDecision(
                     surface_form=surface_form,
-                    canonical_form=best_candidate,
+                    canonical_form=morph_candidate,
                     decision="collapse_to_canonical",
-                    decision_reason=", ".join(best_reasons) or "deterministic morphology selected a more suitable base form",
+                    decision_reason=", ".join(morph_reasons) or "deterministic morphology selected a more suitable base form",
                     confidence=0.9,
                     variant_type="inflectional",
                     is_separately_learner_worthy=False,
                     candidate_forms=candidate_forms,
                     sense_labels=surface_labels,
                 )
-            elif best_candidate != surface_form and best_has_morphology_evidence and standalone_surface_labels > 0:
+            elif (
+                morph_score is not None
+                and morph_candidate != surface_form
+                and standalone_surface_labels > 0
+                and morph_candidate_label_matches > 0
+            ):
                 decision = CanonicalDecision(
                     surface_form=surface_form,
                     canonical_form=surface_form,
-                    linked_canonical_form=best_candidate,
+                    linked_canonical_form=morph_candidate,
                     decision="keep_both_linked",
                     decision_reason="surface form has standalone learner-worthy meaning and should stay linked rather than collapsed",
                     confidence=0.8,
                     variant_type="lexicalized",
+                    is_separately_learner_worthy=True,
+                    candidate_forms=candidate_forms,
+                    sense_labels=surface_labels,
+                )
+            elif morph_score is not None and morph_candidate != surface_form and standalone_surface_labels > 0:
+                decision = CanonicalDecision(
+                    surface_form=surface_form,
+                    canonical_form=surface_form,
+                    decision="keep_separate",
+                    decision_reason="surface form has standalone learner-worthy meaning and morphology evidence alone is not enough to link it",
+                    confidence=0.7,
+                    variant_type="self",
                     is_separately_learner_worthy=True,
                     candidate_forms=candidate_forms,
                     sense_labels=surface_labels,

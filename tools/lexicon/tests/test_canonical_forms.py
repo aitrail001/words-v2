@@ -275,6 +275,92 @@ class CanonicalFormsTests(unittest.TestCase):
         self.assertEqual(result.canonical_variants[0].decision, "keep_both_linked")
         self.assertEqual(result.canonical_variants[0].linked_canonical_form, "meet")
 
+    def test_build_base_records_prefers_morphology_backed_candidate_over_semantic_neighbor(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "growing": 120,
+                "grow": 40,
+                "increase": 10,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "growing":
+                return [
+                    {
+                        "wn_synset_id": "increase.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to become larger",
+                        "canonical_label": "increase",
+                    }
+                ]
+            if word in {"grow", "increase"}:
+                return [
+                    {
+                        "wn_synset_id": f"{word}.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": word,
+                        "canonical_label": word,
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["growing"],
+            snapshot_id="lexicon-20260313-wordnet-wordfreq",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["grow"])
+        self.assertEqual(len(result.canonical_variants), 1)
+        self.assertEqual(result.canonical_variants[0].surface_form, "growing")
+        self.assertEqual(result.canonical_variants[0].canonical_form, "grow")
+        self.assertEqual(result.canonical_variants[0].decision, "collapse_to_canonical")
+
+    def test_build_base_records_does_not_link_weak_morphology_guess_without_label_support(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "glasses": 80,
+                "glass": 30,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "glasses":
+                return [
+                    {
+                        "wn_synset_id": "spectacles.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "eyewear with lenses",
+                        "canonical_label": "glasses",
+                    }
+                ]
+            if word == "glass":
+                return [
+                    {
+                        "wn_synset_id": "glass.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "a hard brittle transparent solid",
+                        "canonical_label": "glass",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["glasses"],
+            snapshot_id="lexicon-20260313-wordnet-wordfreq",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["glasses"])
+        self.assertEqual(len(result.canonical_variants), 1)
+        self.assertEqual(result.canonical_variants[0].surface_form, "glasses")
+        self.assertEqual(result.canonical_variants[0].canonical_form, "glasses")
+        self.assertEqual(result.canonical_variants[0].decision, "keep_separate")
+        self.assertIsNone(result.canonical_variants[0].linked_canonical_form)
+
 
 if __name__ == "__main__":
     unittest.main()
