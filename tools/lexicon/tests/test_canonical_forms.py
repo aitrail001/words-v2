@@ -128,6 +128,153 @@ class CanonicalFormsTests(unittest.TestCase):
         self.assertEqual(result.canonical_variants[0].linked_canonical_form, "leave")
         self.assertEqual(result.canonical_variants[0].decision, "keep_both_linked")
 
+    def test_build_base_records_does_not_collapse_semantic_neighbor_about(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "almost": 60,
+                "about": 25,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "almost":
+                return [
+                    {
+                        "wn_synset_id": "about.r.01",
+                        "part_of_speech": "adverb",
+                        "canonical_gloss": "approximately or nearly",
+                        "canonical_label": "about",
+                    }
+                ]
+            if word == "about":
+                return [
+                    {
+                        "wn_synset_id": "about.r.01",
+                        "part_of_speech": "adverb",
+                        "canonical_gloss": "approximately or nearly",
+                        "canonical_label": "about",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["almost"],
+            snapshot_id="lexicon-20260313-wordnet-wordfreq",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["almost"])
+        self.assertEqual(len(result.canonical_variants), 1)
+        self.assertEqual(result.canonical_variants[0].surface_form, "almost")
+        self.assertEqual(result.canonical_variants[0].canonical_form, "almost")
+        self.assertEqual(result.canonical_variants[0].decision, "keep_separate")
+
+    def test_build_base_records_does_not_collapse_semantic_neighbor_full(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "total": 70,
+                "full": 40,
+                "sum": 140,
+                "entire": 130,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "total":
+                return [
+                    {
+                        "wn_synset_id": "sum.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "the whole amount",
+                        "canonical_label": "sum",
+                    },
+                    {
+                        "wn_synset_id": "entire.s.01",
+                        "part_of_speech": "adjective",
+                        "canonical_gloss": "complete in extent",
+                        "canonical_label": "entire",
+                    },
+                    {
+                        "wn_synset_id": "full.s.06",
+                        "part_of_speech": "adjective",
+                        "canonical_gloss": "constituting the full quantity",
+                        "canonical_label": "full",
+                    },
+                ]
+            if word in {"full", "sum", "entire"}:
+                return [
+                    {
+                        "wn_synset_id": f"{word}.01",
+                        "part_of_speech": "adjective",
+                        "canonical_gloss": word,
+                        "canonical_label": word,
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["total"],
+            snapshot_id="lexicon-20260313-wordnet-wordfreq",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["total"])
+        self.assertEqual(len(result.canonical_variants), 1)
+        self.assertEqual(result.canonical_variants[0].surface_form, "total")
+        self.assertEqual(result.canonical_variants[0].canonical_form, "total")
+        self.assertEqual(result.canonical_variants[0].decision, "keep_separate")
+
+    def test_build_base_records_keeps_morph_related_surface_form_with_own_meaning(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "meeting": 80,
+                "meet": 30,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "meeting":
+                return [
+                    {
+                        "wn_synset_id": "meeting.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "an event where people gather",
+                        "canonical_label": "meeting",
+                    },
+                    {
+                        "wn_synset_id": "meet.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to come together with someone",
+                        "canonical_label": "meet",
+                    },
+                ]
+            if word == "meet":
+                return [
+                    {
+                        "wn_synset_id": "meet.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to come together with someone",
+                        "canonical_label": "meet",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["meeting"],
+            snapshot_id="lexicon-20260313-wordnet-wordfreq",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["meeting"])
+        self.assertEqual(len(result.canonical_variants), 1)
+        self.assertEqual(result.canonical_variants[0].surface_form, "meeting")
+        self.assertEqual(result.canonical_variants[0].canonical_form, "meeting")
+        self.assertEqual(result.canonical_variants[0].decision, "keep_both_linked")
+        self.assertEqual(result.canonical_variants[0].linked_canonical_form, "meet")
+
 
 if __name__ == "__main__":
     unittest.main()
