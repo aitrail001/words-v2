@@ -1,6 +1,7 @@
 import unittest
 
 from tools.lexicon.build_base import build_base_records
+from tools.lexicon.canonical_forms import _suffix_candidates
 
 
 class CanonicalFormsTests(unittest.TestCase):
@@ -12,7 +13,7 @@ class CanonicalFormsTests(unittest.TestCase):
             }.get(word, 999_999)
 
         def sense_provider(word: str):
-            if word == "things":
+            if word in {"things", "thing"}:
                 return [
                     {
                         "wn_synset_id": "thing.n.01",
@@ -360,6 +361,134 @@ class CanonicalFormsTests(unittest.TestCase):
         self.assertEqual(result.canonical_variants[0].canonical_form, "glasses")
         self.assertEqual(result.canonical_variants[0].decision, "keep_separate")
         self.assertIsNone(result.canonical_variants[0].linked_canonical_form)
+
+    def test_suffix_candidates_skip_invalid_short_chops_for_double_s_words(self) -> None:
+        self.assertNotIn("pas", _suffix_candidates("pass"))
+        self.assertNotIn("glas", _suffix_candidates("glass"))
+        self.assertNotIn("clas", _suffix_candidates("class"))
+        self.assertIn("thing", _suffix_candidates("things"))
+        self.assertIn("give", _suffix_candidates("gives"))
+
+    def test_build_base_records_filters_weak_plain_s_suffix_candidates_without_lexical_support(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "this": 10,
+                "thi": 500,
+                "his": 20,
+                "hi": 300,
+                "chris": 40,
+                "chri": 999_999,
+                "series": 50,
+                "seri": 999_999,
+                "sery": 999_999,
+                "itunes": 60,
+                "itun": 999_999,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "hi":
+                return [
+                    {
+                        "wn_synset_id": "hello.n.01",
+                        "part_of_speech": "interjection",
+                        "canonical_gloss": "a greeting",
+                        "canonical_label": "hello",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["this", "his", "chris", "series", "itunes"],
+            snapshot_id="lexicon-20260313-suffix-hardening",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual(sorted(record.lemma for record in result.lexemes), ["chris", "his", "itunes", "series", "this"])
+        variants = {record.surface_form: record for record in result.canonical_variants}
+        self.assertEqual(variants["this"].decision, "keep_separate")
+        self.assertEqual(variants["this"].candidate_forms, [])
+        self.assertEqual(variants["his"].decision, "keep_separate")
+        self.assertEqual(variants["his"].candidate_forms, [])
+        self.assertEqual(variants["chris"].decision, "keep_separate")
+        self.assertEqual(variants["chris"].candidate_forms, [])
+        self.assertEqual(variants["series"].decision, "keep_separate")
+        self.assertEqual(variants["series"].candidate_forms, [])
+        self.assertEqual(variants["itunes"].decision, "keep_separate")
+        self.assertEqual(variants["itunes"].candidate_forms, [])
+
+    def test_build_base_records_keeps_plain_s_suffix_candidates_with_lexical_support(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "things": 120,
+                "thing": 40,
+                "gives": 150,
+                "give": 20,
+                "pesos": 220,
+                "peso": 240,
+                "rupees": 250,
+                "rupee": 260,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "things":
+                return [
+                    {
+                        "wn_synset_id": "thing.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "an object",
+                        "canonical_label": "thing",
+                    }
+                ]
+            if word == "gives":
+                return [
+                    {
+                        "wn_synset_id": "give.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to hand something to someone",
+                        "canonical_label": "give",
+                    }
+                ]
+            if word == "pesos":
+                return [
+                    {
+                        "wn_synset_id": "mexican_peso.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "the currency of Mexico",
+                        "canonical_label": "Mexican peso",
+                    }
+                ]
+            if word == "rupees":
+                return [
+                    {
+                        "wn_synset_id": "indian_rupee.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "the currency of India",
+                        "canonical_label": "Indian rupee",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["things", "gives", "pesos", "rupees"],
+            snapshot_id="lexicon-20260313-suffix-hardening",
+            created_at="2026-03-13T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        variants = {record.surface_form: record for record in result.canonical_variants}
+        self.assertIn("thing", variants["things"].candidate_forms)
+        self.assertEqual(variants["things"].canonical_form, "thing")
+        self.assertEqual(variants["things"].decision, "collapse_to_canonical")
+        self.assertIn("give", variants["gives"].candidate_forms)
+        self.assertEqual(variants["gives"].canonical_form, "give")
+        self.assertEqual(variants["gives"].decision, "collapse_to_canonical")
+        self.assertIn("peso", variants["pesos"].candidate_forms)
+        self.assertEqual(variants["pesos"].decision, "unknown_needs_llm")
+        self.assertIn("rupee", variants["rupees"].candidate_forms)
+        self.assertEqual(variants["rupees"].decision, "unknown_needs_llm")
 
 
 if __name__ == "__main__":

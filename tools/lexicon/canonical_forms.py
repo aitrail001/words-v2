@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Callable, Iterable, Optional
 
 from tools.lexicon.wordfreq_utils import normalize_word_candidate, resolve_frequency_rank
@@ -62,7 +63,9 @@ def _suffix_candidates(surface_form: str) -> list[str]:
         candidates.append(f"{surface_form[:-3]}y")
     if len(surface_form) > 3 and surface_form.endswith("es"):
         candidates.append(surface_form[:-2])
-    if len(surface_form) > 2 and surface_form.endswith("s"):
+    # Avoid weak double-s chops like pass->pas or glass->glas.
+    # Keep the broader -s fallback for ordinary plural/3sg forms like things->thing.
+    if len(surface_form) > 2 and surface_form.endswith("s") and not surface_form.endswith("ss"):
         candidates.append(surface_form[:-1])
     if len(surface_form) > 4 and surface_form.endswith("ing"):
         stem = surface_form[:-3]
@@ -107,6 +110,34 @@ def _candidate_forms(surface_form: str, senses: list[dict[str, object]]) -> list
     for sense in senses:
         add(str(sense.get("canonical_label") or ""))
 
+    return candidates
+
+
+def _sense_labels_support_candidate(candidate: str, senses: list[dict[str, object]]) -> bool:
+    for sense in senses:
+        label = normalize_word_candidate(str(sense.get("canonical_label") or ""))
+        if label == candidate:
+            return True
+        raw_label = str(sense.get("canonical_label") or "").strip().lower()
+        if candidate in re.findall(r"[a-z]+", raw_label):
+            return True
+    return False
+
+
+def _plural_suffix_candidates(surface_form: str) -> set[str]:
+    candidates: set[str] = set()
+    if len(surface_form) > 3 and surface_form.endswith("ies"):
+        candidate = normalize_word_candidate(f"{surface_form[:-3]}y")
+        if candidate:
+            candidates.add(candidate)
+    if len(surface_form) > 3 and surface_form.endswith("es"):
+        candidate = normalize_word_candidate(surface_form[:-2])
+        if candidate:
+            candidates.add(candidate)
+    if len(surface_form) > 2 and surface_form.endswith("s") and not surface_form.endswith("ss"):
+        candidate = normalize_word_candidate(surface_form[:-1])
+        if candidate:
+            candidates.add(candidate)
     return candidates
 
 
@@ -186,6 +217,19 @@ def canonicalize_words(
     for surface_form in normalized_words:
         surface_senses = get_senses(surface_form)
         candidate_forms = _candidate_forms(surface_form, surface_senses)
+        plural_suffix_candidates = _plural_suffix_candidates(surface_form)
+        if plural_suffix_candidates:
+            supported_suffix_candidates = {
+                candidate
+                for candidate in plural_suffix_candidates
+                if _sense_labels_support_candidate(candidate, surface_senses)
+                or _sense_labels_support_candidate(candidate, get_senses(candidate))
+            }
+            candidate_forms = [
+                candidate
+                for candidate in candidate_forms
+                if candidate not in plural_suffix_candidates or candidate in supported_suffix_candidates
+            ]
         surface_rank = resolve_frequency_rank(surface_form, rank_provider)
         surface_labels = sorted(
             {
