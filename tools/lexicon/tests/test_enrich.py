@@ -1191,6 +1191,33 @@ class EnrichPerWordModeTests(unittest.TestCase):
             self.assertIn("generate only the meanings that are distinct or special to 'meeting'", prompt)
             self.assertIn("include a short usage note that says it is another form of 'meet'", prompt)
 
+    def test_build_word_enrichment_prompt_hardens_distinct_derived_variant_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            distinct_variant_lexeme = run_lexeme.__class__(**{
+                **run_lexeme.to_dict(),
+                "lemma": "building",
+                "lexeme_id": "lx_building",
+                "entry_id": "lx_building",
+                "normalized_form": "building",
+                "is_variant_with_distinct_meanings": True,
+                "variant_base_form": "build",
+                "variant_relationship": "distinct_derived_form",
+                "variant_prompt_note": "Focus on the standalone noun meanings, not the ordinary act of build.",
+                "variant_source": "dataset",
+            })
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=distinct_variant_lexeme, senses=run_senses).lower()
+
+            self.assertIn("related to the base word 'build'", prompt)
+            self.assertIn("do not restate the ordinary inflectional or base-word meanings", prompt)
+            self.assertIn("only the standalone meanings and uses that justify keeping 'building' as its own entry", prompt)
+            self.assertIn("focus on the standalone noun meanings, not the ordinary act of build", prompt)
+
     def test_build_word_enrichment_prompt_adds_entity_category_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
