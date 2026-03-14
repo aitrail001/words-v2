@@ -1,0 +1,27 @@
+{
+  "apostrophe_s_contraction_stems": [
+    "he",
+    "here",
+    "how",
+    "i",
+    "it",
+    "let",
+    "one",
+    "she",
+    "that",
+    "there",
+    "what",
+    "where",
+    "who"
+  ],
+  "keep_both_linked_forms": [
+    "best",
+    "better",
+    "found",
+    "given",
+    "gone",
+    "left",
+    "worse",
+    "worst"
+  ]
+}

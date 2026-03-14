@@ -20,6 +20,7 @@ from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, ru
 from tools.lexicon.rerank import RERANK_CANDIDATE_SOURCES, run_rerank
 from tools.lexicon.selection_review import prepare_review, score_selection_risk
 from tools.lexicon.validate import validate_compiled_record, validate_snapshot_files
+from tools.lexicon.policy_data import excluded_canonical_forms
 from tools.lexicon.wordfreq_provider import build_wordfreq_rank_provider
 from tools.lexicon.wordfreq_utils import build_wordfreq_inventory_provider
 from tools.lexicon.wordnet_provider import LexiconDependencyError, build_wordnet_sense_provider
@@ -110,6 +111,7 @@ def _build_base_command(args: argparse.Namespace) -> int:
     adjudications = load_adjudications(Path(adjudications_path)) if adjudications_path else None
     existing_canonical_words_lookup = None
     existing_db_url = None
+    policy_tail_exclusions = excluded_canonical_forms() if requested_top_words is not None else set()
     if not args.rerun_existing:
         existing_db_url = _resolve_existing_db_url(args.database_url)
         if existing_db_url:
@@ -130,6 +132,7 @@ def _build_base_command(args: argparse.Namespace) -> int:
             max_senses=args.max_senses,
             adjudications=adjudications,
             existing_canonical_words_lookup=existing_canonical_words_lookup,
+            excluded_canonical_words=policy_tail_exclusions,
         )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
@@ -145,6 +148,7 @@ def _build_base_command(args: argparse.Namespace) -> int:
         'ambiguous_form_count': len(result.ambiguous_forms),
         'skip_existing_db': existing_canonical_words_lookup is not None,
         'skipped_existing_db_count': len(result.skipped_existing_canonical_words),
+        'tail_exclusion_count': len(getattr(result, 'excluded_tail_canonical_words', [])),
     }
     if requested_top_words is not None:
         payload['requested_top_words'] = int(requested_top_words)

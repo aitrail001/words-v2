@@ -34,6 +34,10 @@ class LexemeRecord(SerializableRecord):
     entry_type: str = "word"
     normalized_form: str | None = None
     source_provenance: list[dict[str, Any]] | None = None
+    is_variant_with_distinct_meanings: bool = False
+    variant_base_form: str | None = None
+    variant_relationship: str | None = None
+    entity_category: str = "general"
 
     def __post_init__(self) -> None:
         if self.entry_id is None:
@@ -201,6 +205,7 @@ class CompiledWordRecord(SerializableRecord):
     entry_type: str = "word"
     normalized_form: str | None = None
     source_provenance: list[dict[str, Any]] | None = None
+    entity_category: str = "general"
 
     def __post_init__(self) -> None:
         if self.entry_id is None:
@@ -217,6 +222,7 @@ class CompiledWordRecord(SerializableRecord):
             "entry_type": self.entry_type,
             "normalized_form": self.normalized_form,
             "source_provenance": self.source_provenance,
+            "entity_category": self.entity_category,
             "word": self.word,
             "part_of_speech": self.part_of_speech,
             "cefr_level": self.cefr_level,

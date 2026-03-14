@@ -1166,6 +1166,53 @@ class EnrichPerWordModeTests(unittest.TestCase):
             self.assertIn("invalid if the senses array contains more than 8 items", prompt)
             self.assertIn("if more than 8 candidates seem useful, keep only the strongest 8", prompt)
 
+    def test_build_word_enrichment_prompt_adds_variant_specific_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            variant_lexeme = run_lexeme.__class__(**{
+                **run_lexeme.to_dict(),
+                "lemma": "meeting",
+                "lexeme_id": "lx_meeting",
+                "entry_id": "lx_meeting",
+                "normalized_form": "meeting",
+                "is_variant_with_distinct_meanings": True,
+                "variant_base_form": "meet",
+                "variant_relationship": "lexicalized_form",
+            })
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=variant_lexeme, senses=run_senses).lower()
+
+            self.assertIn("another form of the base word 'meet'", prompt)
+            self.assertIn("do not repeat the ordinary meanings already covered by the base word", prompt)
+            self.assertIn("generate only the meanings that are distinct or special to 'meeting'", prompt)
+            self.assertIn("include a short usage note that says it is another form of 'meet'", prompt)
+
+    def test_build_word_enrichment_prompt_adds_entity_category_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            place_lexeme = run_lexeme.__class__(**{
+                **run_lexeme.to_dict(),
+                "lemma": "kinshasa",
+                "lexeme_id": "lx_kinshasa",
+                "entry_id": "lx_kinshasa",
+                "normalized_form": "kinshasa",
+                "entity_category": "place",
+            })
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=place_lexeme, senses=run_senses).lower()
+
+            self.assertIn("categorized as 'place'", prompt)
+            self.assertIn("specific named-entity or specialized-entity use", prompt)
+            self.assertIn("do not broaden it into unrelated ordinary meanings", prompt)
+
     def test_real_word_provider_accepts_subset_of_grounded_senses(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)

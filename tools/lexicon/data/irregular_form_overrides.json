@@ -1,0 +1,262 @@
+{
+  "collapse_to_canonical": {
+    "analyses": {
+      "canonical_form": "analysis",
+      "reason": "irregular_plural"
+    },
+    "appendices": {
+      "canonical_form": "appendix",
+      "reason": "irregular_plural"
+    },
+    "airmen": {
+      "canonical_form": "airman",
+      "reason": "compound_irregular_plural"
+    },
+    "aldermen": {
+      "canonical_form": "alderman",
+      "reason": "compound_irregular_plural"
+    },
+    "batsmen": {
+      "canonical_form": "batsman",
+      "reason": "compound_irregular_plural"
+    },
+    "businessmen": {
+      "canonical_form": "businessman",
+      "reason": "compound_irregular_plural"
+    },
+    "children": {
+      "canonical_form": "child",
+      "reason": "irregular_plural"
+    },
+    "chairmen": {
+      "canonical_form": "chairman",
+      "reason": "compound_irregular_plural"
+    },
+    "congressmen": {
+      "canonical_form": "congressman",
+      "reason": "compound_irregular_plural"
+    },
+    "countrymen": {
+      "canonical_form": "countryman",
+      "reason": "compound_irregular_plural"
+    },
+    "craftsmen": {
+      "canonical_form": "craftsman",
+      "reason": "compound_irregular_plural"
+    },
+    "criteria": {
+      "canonical_form": "criterion",
+      "reason": "irregular_plural"
+    },
+    "crises": {
+      "canonical_form": "crisis",
+      "reason": "irregular_plural"
+    },
+    "cuter": {
+      "canonical_form": "cute",
+      "reason": "comparative_spelling_exception"
+    },
+    "cutest": {
+      "canonical_form": "cute",
+      "reason": "superlative_spelling_exception"
+    },
+    "diagnoses": {
+      "canonical_form": "diagnosis",
+      "reason": "irregular_plural"
+    },
+    "englishmen": {
+      "canonical_form": "englishman",
+      "reason": "compound_irregular_plural"
+    },
+    "firemen": {
+      "canonical_form": "fireman",
+      "reason": "compound_irregular_plural"
+    },
+    "fishermen": {
+      "canonical_form": "fisherman",
+      "reason": "compound_irregular_plural"
+    },
+    "frenchmen": {
+      "canonical_form": "frenchman",
+      "reason": "compound_irregular_plural"
+    },
+    "freshmen": {
+      "canonical_form": "freshman",
+      "reason": "compound_irregular_plural"
+    },
+    "gentlemen": {
+      "canonical_form": "gentleman",
+      "reason": "compound_irregular_plural"
+    },
+    "grandchildren": {
+      "canonical_form": "grandchild",
+      "reason": "compound_irregular_plural"
+    },
+    "gunmen": {
+      "canonical_form": "gunman",
+      "reason": "compound_irregular_plural"
+    },
+    "henchmen": {
+      "canonical_form": "henchman",
+      "reason": "compound_irregular_plural"
+    },
+    "horsemen": {
+      "canonical_form": "horseman",
+      "reason": "compound_irregular_plural"
+    },
+    "feet": {
+      "canonical_form": "foot",
+      "reason": "irregular_plural"
+    },
+    "geese": {
+      "canonical_form": "goose",
+      "reason": "irregular_plural"
+    },
+    "hypotheses": {
+      "canonical_form": "hypothesis",
+      "reason": "irregular_plural"
+    },
+    "indices": {
+      "canonical_form": "index",
+      "reason": "irregular_plural"
+    },
+    "lice": {
+      "canonical_form": "louse",
+      "reason": "irregular_plural"
+    },
+    "linemen": {
+      "canonical_form": "lineman",
+      "reason": "compound_irregular_plural"
+    },
+    "matrices": {
+      "canonical_form": "matrix",
+      "reason": "irregular_plural"
+    },
+    "men": {
+      "canonical_form": "man",
+      "reason": "irregular_plural"
+    },
+    "policemen": {
+      "canonical_form": "policeman",
+      "reason": "compound_irregular_plural"
+    },
+    "mice": {
+      "canonical_form": "mouse",
+      "reason": "irregular_plural"
+    },
+    "oxen": {
+      "canonical_form": "ox",
+      "reason": "irregular_plural"
+    },
+    "parentheses": {
+      "canonical_form": "parenthesis",
+      "reason": "irregular_plural"
+    },
+    "phenomena": {
+      "canonical_form": "phenomenon",
+      "reason": "irregular_plural"
+    },
+    "teeth": {
+      "canonical_form": "tooth",
+      "reason": "irregular_plural"
+    },
+    "theses": {
+      "canonical_form": "thesis",
+      "reason": "irregular_plural"
+    },
+    "schoolchildren": {
+      "canonical_form": "schoolchild",
+      "reason": "compound_irregular_plural"
+    },
+    "middlemen": {
+      "canonical_form": "middleman",
+      "reason": "compound_irregular_plural"
+    },
+    "salesmen": {
+      "canonical_form": "salesman",
+      "reason": "compound_irregular_plural"
+    },
+    "vertices": {
+      "canonical_form": "vertex",
+      "reason": "irregular_plural"
+    },
+    "seamen": {
+      "canonical_form": "seaman",
+      "reason": "compound_irregular_plural"
+    },
+    "servicemen": {
+      "canonical_form": "serviceman",
+      "reason": "compound_irregular_plural"
+    },
+    "sportsmen": {
+      "canonical_form": "sportsman",
+      "reason": "compound_irregular_plural"
+    },
+    "statesmen": {
+      "canonical_form": "statesman",
+      "reason": "compound_irregular_plural"
+    },
+    "tradesmen": {
+      "canonical_form": "tradesman",
+      "reason": "compound_irregular_plural"
+    },
+    "tribesmen": {
+      "canonical_form": "tribesman",
+      "reason": "compound_irregular_plural"
+    },
+    "watchmen": {
+      "canonical_form": "watchman",
+      "reason": "compound_irregular_plural"
+    },
+    "women": {
+      "canonical_form": "woman",
+      "reason": "irregular_plural"
+    },
+    "workmen": {
+      "canonical_form": "workman",
+      "reason": "compound_irregular_plural"
+    },
+    "curricula": {
+      "canonical_form": "curriculum",
+      "reason": "irregular_plural"
+    }
+  },
+  "keep_both_linked": {
+    "best": {
+      "canonical_form": "good",
+      "reason": "lexicalized_irregular_superlative"
+    },
+    "better": {
+      "canonical_form": "good",
+      "reason": "lexicalized_irregular_comparative"
+    },
+    "elder": {
+      "canonical_form": "old",
+      "reason": "kinship_specific_irregular_comparative"
+    },
+    "eldest": {
+      "canonical_form": "old",
+      "reason": "kinship_specific_irregular_superlative"
+    },
+    "left": {
+      "canonical_form": "leave",
+      "reason": "lexicalized_irregular_past"
+    },
+    "least": {
+      "canonical_form": "little",
+      "reason": "quantifier_irregular_superlative"
+    },
+    "less": {
+      "canonical_form": "little",
+      "reason": "quantifier_irregular_comparative"
+    },
+    "worse": {
+      "canonical_form": "bad",
+      "reason": "lexicalized_irregular_comparative"
+    },
+    "worst": {
+      "canonical_form": "bad",
+      "reason": "lexicalized_irregular_superlative"
+    }
+  }
+}

@@ -13,20 +13,34 @@ class BuildBaseTests(unittest.TestCase):
         self.assertEqual(words, ["run", "set", "lead"])
 
     def test_normalize_seed_words_filters_obvious_junk_tokens(self) -> None:
-        words = normalize_seed_words([" Run ", "can't", "co-op", "foo bar", "123", "a1", "___", "e-mail"])
+        words = normalize_seed_words(
+            [" Run ", "can't", "co-op", "foo bar", "123", "a1", "___", "e-mail", "a's", "n't"]
+        )
 
         self.assertEqual(words, ["run", "can't", "co-op", "e-mail"])
+
+    def test_normalize_seed_words_applies_surface_form_overrides(self) -> None:
+        words = normalize_seed_words(["gov't", "int'l", "ya'll", "GOV'T", "ya'll"])
+
+        self.assertEqual(words, ["government", "international", "y'all"])
+
+    def test_normalize_seed_words_drops_curated_noise_surface_forms(self) -> None:
+        words = normalize_seed_words(
+            ["childrens", "womens", "dont", "atleast", "bl", "seperate", "longterm", "lyin", "actual"]
+        )
+
+        self.assertEqual(words, ["actual"])
 
     def test_build_word_inventory_normalizes_filters_and_bounds_top_words(self) -> None:
         from tools.lexicon.build_base import build_word_inventory
 
         def inventory_provider(limit: int):
             self.assertEqual(limit, 5)
-            return ["The", "and", "foo bar", "co-op", "123", "can't", "THE"]
+            return ["The", "and", "gov't", "foo bar", "a's", "can't", "THE"]
 
         words = build_word_inventory(limit=5, inventory_provider=inventory_provider)
 
-        self.assertEqual(words, ["the", "and", "co-op", "can't"])
+        self.assertEqual(words, ["the", "and", "government", "can't"])
 
     def test_build_base_records_builds_linked_records_from_providers(self) -> None:
         def rank_provider(word: str) -> int:
@@ -96,6 +110,37 @@ class BuildBaseTests(unittest.TestCase):
         self.assertEqual(len(result.senses), 4)
         self.assertTrue(all(record.is_high_polysemy for record in result.senses))
 
+    def test_build_base_records_dedupes_selected_senses_with_same_pos_and_gloss(self) -> None:
+        def rank_provider(word: str) -> int:
+            return 10
+
+        def sense_provider(word: str):
+            return [
+                {
+                    "wn_synset_id": "occasional.s.01",
+                    "part_of_speech": "adjective",
+                    "canonical_gloss": "occurring from time to time",
+                    "canonical_label": "occasional",
+                },
+                {
+                    "wn_synset_id": "occasional.s.02",
+                    "part_of_speech": "adjective",
+                    "canonical_gloss": "occurring from time to time",
+                    "canonical_label": "occasional",
+                },
+            ]
+
+        result = build_base_records(
+            words=["occasional"],
+            snapshot_id="lexicon-20260314-wordnet-wordfreq",
+            created_at="2026-03-14T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual(len(result.senses), 1)
+        self.assertEqual(result.senses[0].canonical_gloss, "occurring from time to time")
+
     def test_build_base_records_falls_back_when_no_canonical_senses_exist(self) -> None:
         def rank_provider(word: str) -> int:
             return 200
@@ -157,6 +202,110 @@ class BuildBaseTests(unittest.TestCase):
         self.assertFalse(skipped_status.base_built)
         self.assertTrue(skipped_status.published)
         self.assertEqual(skipped_status.last_source_reference, "db_existing_skip")
+
+    def test_build_base_records_marks_linked_lexicalized_variants_in_lexeme_rows(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "meeting": 80,
+                "meet": 30,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "meeting":
+                return [
+                    {
+                        "wn_synset_id": "meeting.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "an event where people gather",
+                        "canonical_label": "meeting",
+                    },
+                    {
+                        "wn_synset_id": "meet.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to come together with someone",
+                        "canonical_label": "meet",
+                    },
+                ]
+            if word == "meet":
+                return [
+                    {
+                        "wn_synset_id": "meet.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to come together with someone",
+                        "canonical_label": "meet",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["meeting"],
+            snapshot_id="lexicon-20260314-wordnet-wordfreq",
+            created_at="2026-03-14T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["meeting"])
+        self.assertTrue(result.lexemes[0].is_variant_with_distinct_meanings)
+        self.assertEqual(result.lexemes[0].variant_base_form, "meet")
+        self.assertEqual(result.lexemes[0].variant_relationship, "lexicalized_form")
+
+    def test_build_base_records_applies_entity_categories_from_dataset(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {"kinshasa": 39386}[word]
+
+        def sense_provider(word: str):
+            return [
+                {
+                    "wn_synset_id": "kinshasa.n.01",
+                    "part_of_speech": "noun",
+                    "canonical_gloss": "the capital city of the Democratic Republic of the Congo",
+                    "canonical_label": "Kinshasa",
+                }
+            ]
+
+        result = build_base_records(
+            words=["kinshasa"],
+            snapshot_id="lexicon-20260314-wordnet-wordfreq",
+            created_at="2026-03-14T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual(result.lexemes[0].entity_category, "place")
+        self.assertIn(
+            {"source": "entity_categories", "role": "entity_category", "category": "place", "reason": "place_name"},
+            result.lexemes[0].source_provenance,
+        )
+
+    def test_build_base_records_excludes_tail_canonical_forms_only_when_requested(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {"json": 39378, "merlot": 39424}[word]
+
+        def sense_provider(word: str):
+            if word == "json":
+                return []
+            return [
+                {
+                    "wn_synset_id": "merlot.n.01",
+                    "part_of_speech": "noun",
+                    "canonical_gloss": "a dark red wine grape and wine",
+                    "canonical_label": "merlot",
+                }
+            ]
+
+        result = build_base_records(
+            words=["json", "merlot"],
+            snapshot_id="lexicon-20260314-wordnet-wordfreq",
+            created_at="2026-03-14T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+            excluded_canonical_words={"json"},
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["merlot"])
+        self.assertEqual(result.excluded_tail_canonical_words, ["json"])
+        self.assertEqual([record.surface_form for record in result.canonical_variants], ["merlot"])
 
     def test_build_base_records_only_calls_sense_provider_once_per_word(self) -> None:
         calls = []
