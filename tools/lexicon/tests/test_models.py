@@ -14,6 +14,10 @@ class ModelSerializationTests(unittest.TestCase):
             is_wordnet_backed=True,
             source_refs=["wordnet", "wordfreq"],
             created_at="2026-03-07T00:00:00Z",
+            is_variant_with_distinct_meanings=True,
+            variant_base_form="run-base",
+            variant_relationship="lexicalized_form",
+            entity_category="place",
         )
 
         payload = record.to_dict()
@@ -24,6 +28,10 @@ class ModelSerializationTests(unittest.TestCase):
         self.assertEqual(payload["entry_id"], "lx_run")
         self.assertEqual(payload["normalized_form"], "run")
         self.assertEqual(payload["source_provenance"], [{"source": "wordnet"}, {"source": "wordfreq"}])
+        self.assertTrue(payload["is_variant_with_distinct_meanings"])
+        self.assertEqual(payload["variant_base_form"], "run-base")
+        self.assertEqual(payload["variant_relationship"], "lexicalized_form")
+        self.assertEqual(payload["entity_category"], "place")
 
     def test_compiled_word_record_supports_full_learner_jsonl_shape(self) -> None:
         record = CompiledWordRecord(
@@ -71,6 +79,7 @@ class ModelSerializationTests(unittest.TestCase):
         self.assertEqual(payload["entry_id"], "run")
         self.assertEqual(payload["normalized_form"], "run")
         self.assertEqual(payload["source_provenance"], [])
+        self.assertEqual(payload["entity_category"], "general")
         self.assertEqual(payload["senses"][0]["examples"][0]["sentence"], "I run every morning.")
 
     def test_supporting_records_serialize_with_links(self) -> None:

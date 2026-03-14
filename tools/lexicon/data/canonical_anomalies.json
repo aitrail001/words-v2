@@ -1,0 +1,249 @@
+{
+  "force_keep_separate": {
+    "analytics": {
+      "reason": "discipline_noun_not_same_word_as_analytic"
+    },
+    "angeles": {
+      "reason": "place_name_like"
+    },
+    "andrews": {
+      "reason": "surname_like"
+    },
+    "arms": {
+      "reason": "lexicalized_plural_common_noun"
+    },
+    "belcher": {
+      "reason": "surname_like"
+    },
+    "berger": {
+      "reason": "surname_like"
+    },
+    "brooks": {
+      "reason": "surname_like"
+    },
+    "crocker": {
+      "reason": "surname_like"
+    },
+    "chester": {
+      "reason": "place_name_like"
+    },
+    "clothes": {
+      "reason": "lexicalized_plural_common_noun"
+    },
+    "curated": {
+      "reason": "derived_adjective_with_distinct_meaning"
+    },
+    "dolores": {
+      "reason": "given_name_like"
+    },
+    "ernest": {
+      "reason": "given_name_like"
+    },
+    "edwards": {
+      "reason": "surname_like"
+    },
+    "glasses": {
+      "reason": "lexicalized_plural_common_noun"
+    },
+    "goods": {
+      "reason": "lexicalized_plural_common_noun"
+    },
+    "hines": {
+      "reason": "surname_like"
+    },
+    "hayes": {
+      "reason": "surname_like"
+    },
+    "jacobs": {
+      "reason": "surname_like"
+    },
+    "james": {
+      "reason": "given_name_like"
+    },
+    "jemima": {
+      "reason": "given_name_like"
+    },
+    "johns": {
+      "reason": "surname_like"
+    },
+    "kansas": {
+      "reason": "place_name_like"
+    },
+    "kohler": {
+      "reason": "brand_or_surname_like"
+    },
+    "levi's": {
+      "reason": "brand_like"
+    },
+    "midfielder": {
+      "reason": "agentive_role_noun"
+    },
+    "mayer": {
+      "reason": "surname_like"
+    },
+    "maastricht": {
+      "reason": "place_name_like"
+    },
+    "mainz": {
+      "reason": "place_name_like"
+    },
+    "marla": {
+      "reason": "given_name_like"
+    },
+    "mattis": {
+      "reason": "surname_like"
+    },
+    "mcarthur": {
+      "reason": "surname_like"
+    },
+    "mcclain": {
+      "reason": "surname_like"
+    },
+    "mccord": {
+      "reason": "surname_like"
+    },
+    "mower": {
+      "reason": "agentive_or_tool_noun"
+    },
+    "nuanced": {
+      "reason": "derived_adjective_with_distinct_meaning"
+    },
+    "o'brien": {
+      "reason": "surname_like"
+    },
+    "o'connell": {
+      "reason": "surname_like"
+    },
+    "o'connor": {
+      "reason": "surname_like"
+    },
+    "o'donnell": {
+      "reason": "surname_like"
+    },
+    "o'grady": {
+      "reason": "surname_like"
+    },
+    "o'keefe": {
+      "reason": "surname_like"
+    },
+    "o'leary": {
+      "reason": "surname_like"
+    },
+    "o'malley": {
+      "reason": "surname_like"
+    },
+    "o'neal": {
+      "reason": "surname_like"
+    },
+    "o'neil": {
+      "reason": "surname_like"
+    },
+    "o'neill": {
+      "reason": "surname_like"
+    },
+    "o'reilly": {
+      "reason": "surname_like"
+    },
+    "o'rourke": {
+      "reason": "surname_like"
+    },
+    "o'shea": {
+      "reason": "surname_like"
+    },
+    "o'sullivan": {
+      "reason": "surname_like"
+    },
+    "o'toole": {
+      "reason": "surname_like"
+    },
+    "owens": {
+      "reason": "surname_like"
+    },
+    "lowndes": {
+      "reason": "surname_or_place_like"
+    },
+    "pickering": {
+      "reason": "place_or_surname_like"
+    },
+    "pinterest": {
+      "reason": "brand_like"
+    },
+    "parker": {
+      "reason": "surname_like"
+    },
+    "quarters": {
+      "reason": "lexicalized_plural_common_noun"
+    },
+    "regards": {
+      "reason": "lexicalized_plural_fixed_expression"
+    },
+    "reputed": {
+      "reason": "derived_adjective_with_distinct_meaning"
+    },
+    "sanders": {
+      "reason": "surname_like"
+    },
+    "sexting": {
+      "reason": "lexicalized_gerund_noun"
+    },
+    "skywalker": {
+      "reason": "brand_or_name_like"
+    },
+    "spitzer": {
+      "reason": "surname_or_eponym_like"
+    },
+    "spirits": {
+      "reason": "lexicalized_plural_common_noun"
+    },
+    "kinshasa": {
+      "reason": "place_name_like"
+    },
+    "kourtney": {
+      "reason": "given_name_like"
+    },
+    "launceston": {
+      "reason": "place_name_like"
+    },
+    "leif": {
+      "reason": "given_name_like"
+    },
+    "loire": {
+      "reason": "place_name_like"
+    },
+    "torres": {
+      "reason": "surname_like"
+    },
+    "wales": {
+      "reason": "place_name_like"
+    },
+    "roberts": {
+      "reason": "surname_like"
+    }
+  },
+  "force_collapse_to_canonical": {
+    "boomers": {
+      "canonical_form": "boomer",
+      "reason": "regular_plural_exception"
+    },
+    "millennials": {
+      "canonical_form": "millennial",
+      "reason": "regular_plural_exception"
+    },
+    "orioles": {
+      "canonical_form": "oriole",
+      "reason": "regular_plural_exception"
+    },
+    "perks": {
+      "canonical_form": "perk",
+      "reason": "regular_plural_exception"
+    },
+    "pesos": {
+      "canonical_form": "peso",
+      "reason": "regular_plural_exception"
+    },
+    "rupees": {
+      "canonical_form": "rupee",
+      "reason": "regular_plural_exception"
+    }
+  }
+}

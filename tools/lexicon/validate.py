@@ -5,6 +5,7 @@ from typing import Any
 
 from tools.lexicon.jsonl_io import read_jsonl
 from tools.lexicon.models import AmbiguousFormRecord, CanonicalVariantRecord, CompiledWordRecord, EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
+from tools.lexicon.policy_data import ALLOWED_ENTITY_CATEGORIES
 
 REQUIRED_TRANSLATION_LOCALES = ['zh-Hans', 'es', 'ar', 'pt-BR', 'ja']
 
@@ -87,6 +88,8 @@ def validate_snapshot(
             errors.append(f"lexeme {lexeme.lexeme_id} is missing normalized_form")
         if not isinstance(lexeme.source_provenance, list) or not lexeme.source_provenance:
             errors.append(f"lexeme {lexeme.lexeme_id} must include source_provenance")
+        if lexeme.entity_category not in ALLOWED_ENTITY_CATEGORIES:
+            errors.append(f"lexeme {lexeme.lexeme_id} has unsupported entity_category {lexeme.entity_category}")
 
     for sense in senses:
         if sense.lexeme_id not in lexeme_ids:
@@ -122,6 +125,9 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
     source_provenance = payload.get("source_provenance")
     if source_provenance is not None and not isinstance(source_provenance, list):
         errors.append("source_provenance must be a list")
+    entity_category = payload.get("entity_category", "general")
+    if entity_category not in ALLOWED_ENTITY_CATEGORIES:
+        errors.append(f"unsupported entity_category: {entity_category}")
 
     senses = payload.get("senses", [])
     if isinstance(senses, list):

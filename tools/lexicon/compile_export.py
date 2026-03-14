@@ -84,6 +84,7 @@ def compile_words(
                 entry_type=lexeme.entry_type,
                 normalized_form=lexeme.normalized_form,
                 source_provenance=lexeme.source_provenance,
+                entity_category=lexeme.entity_category,
                 word=lexeme.lemma,
                 part_of_speech=top_level_pos,
                 cefr_level=top_level_cefr or "B1",

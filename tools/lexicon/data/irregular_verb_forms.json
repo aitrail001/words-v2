@@ -1,0 +1,354 @@
+{
+  "collapse_to_canonical": {
+    "ate": {
+      "canonical_form": "eat",
+      "reason": "irregular_verb_past"
+    },
+    "became": {
+      "canonical_form": "become",
+      "reason": "irregular_verb_past"
+    },
+    "began": {
+      "canonical_form": "begin",
+      "reason": "irregular_verb_past"
+    },
+    "built": {
+      "canonical_form": "build",
+      "reason": "irregular_verb_past"
+    },
+    "bled": {
+      "canonical_form": "bleed",
+      "reason": "irregular_verb_past"
+    },
+    "been": {
+      "canonical_form": "be",
+      "reason": "irregular_verb_past_participle"
+    },
+    "became": {
+      "canonical_form": "become",
+      "reason": "irregular_verb_past"
+    },
+    "began": {
+      "canonical_form": "begin",
+      "reason": "irregular_verb_past"
+    },
+    "bought": {
+      "canonical_form": "buy",
+      "reason": "irregular_verb_past"
+    },
+    "brought": {
+      "canonical_form": "bring",
+      "reason": "irregular_verb_past"
+    },
+    "came": {
+      "canonical_form": "come",
+      "reason": "irregular_verb_past"
+    },
+    "caught": {
+      "canonical_form": "catch",
+      "reason": "irregular_verb_past"
+    },
+    "chose": {
+      "canonical_form": "choose",
+      "reason": "irregular_verb_past"
+    },
+    "chose": {
+      "canonical_form": "choose",
+      "reason": "irregular_verb_past"
+    },
+    "did": {
+      "canonical_form": "do",
+      "reason": "irregular_verb_past"
+    },
+    "dreamt": {
+      "canonical_form": "dream",
+      "reason": "irregular_verb_past"
+    },
+    "drank": {
+      "canonical_form": "drink",
+      "reason": "irregular_verb_past"
+    },
+    "drew": {
+      "canonical_form": "draw",
+      "reason": "irregular_verb_past"
+    },
+    "fought": {
+      "canonical_form": "fight",
+      "reason": "irregular_verb_past"
+    },
+    "fled": {
+      "canonical_form": "flee",
+      "reason": "irregular_verb_past"
+    },
+    "flew": {
+      "canonical_form": "fly",
+      "reason": "irregular_verb_past"
+    },
+    "forgot": {
+      "canonical_form": "forget",
+      "reason": "irregular_verb_past"
+    },
+    "froze": {
+      "canonical_form": "freeze",
+      "reason": "irregular_verb_past"
+    },
+    "got": {
+      "canonical_form": "get",
+      "reason": "irregular_verb_past"
+    },
+    "gave": {
+      "canonical_form": "give",
+      "reason": "irregular_verb_past"
+    },
+    "grew": {
+      "canonical_form": "grow",
+      "reason": "irregular_verb_past"
+    },
+    "had": {
+      "canonical_form": "have",
+      "reason": "irregular_verb_past"
+    },
+    "heard": {
+      "canonical_form": "hear",
+      "reason": "irregular_verb_past"
+    },
+    "held": {
+      "canonical_form": "hold",
+      "reason": "irregular_verb_past"
+    },
+    "kept": {
+      "canonical_form": "keep",
+      "reason": "irregular_verb_past"
+    },
+    "kept": {
+      "canonical_form": "keep",
+      "reason": "irregular_verb_past"
+    },
+    "knew": {
+      "canonical_form": "know",
+      "reason": "irregular_verb_past"
+    },
+    "laid": {
+      "canonical_form": "lay",
+      "reason": "irregular_verb_past"
+    },
+    "lain": {
+      "canonical_form": "lie",
+      "reason": "irregular_verb_past_participle"
+    },
+    "led": {
+      "canonical_form": "lead",
+      "reason": "irregular_verb_past"
+    },
+    "lent": {
+      "canonical_form": "lend",
+      "reason": "irregular_verb_past"
+    },
+    "made": {
+      "canonical_form": "make",
+      "reason": "irregular_verb_past"
+    },
+    "meant": {
+      "canonical_form": "mean",
+      "reason": "irregular_verb_past"
+    },
+    "met": {
+      "canonical_form": "meet",
+      "reason": "irregular_verb_past"
+    },
+    "ran": {
+      "canonical_form": "run",
+      "reason": "irregular_verb_past"
+    },
+    "rode": {
+      "canonical_form": "ride",
+      "reason": "irregular_verb_past"
+    },
+    "sat": {
+      "canonical_form": "sit",
+      "reason": "irregular_verb_past"
+    },
+    "sang": {
+      "canonical_form": "sing",
+      "reason": "irregular_verb_past"
+    },
+    "sent": {
+      "canonical_form": "send",
+      "reason": "irregular_verb_past"
+    },
+    "slept": {
+      "canonical_form": "sleep",
+      "reason": "irregular_verb_past"
+    },
+    "sold": {
+      "canonical_form": "sell",
+      "reason": "irregular_verb_past"
+    },
+    "sought": {
+      "canonical_form": "seek",
+      "reason": "irregular_verb_past"
+    },
+    "spoke": {
+      "canonical_form": "speak",
+      "reason": "irregular_verb_past"
+    },
+    "stood": {
+      "canonical_form": "stand",
+      "reason": "irregular_verb_past"
+    },
+    "swore": {
+      "canonical_form": "swear",
+      "reason": "irregular_verb_past"
+    },
+    "swam": {
+      "canonical_form": "swim",
+      "reason": "irregular_verb_past"
+    },
+    "seen": {
+      "canonical_form": "see",
+      "reason": "irregular_verb_past_participle"
+    },
+    "taught": {
+      "canonical_form": "teach",
+      "reason": "irregular_verb_past"
+    },
+    "told": {
+      "canonical_form": "tell",
+      "reason": "irregular_verb_past"
+    },
+    "threw": {
+      "canonical_form": "throw",
+      "reason": "irregular_verb_past"
+    },
+    "took": {
+      "canonical_form": "take",
+      "reason": "irregular_verb_past"
+    },
+    "understood": {
+      "canonical_form": "understand",
+      "reason": "irregular_verb_past"
+    },
+    "was": {
+      "canonical_form": "be",
+      "reason": "irregular_verb_past"
+    },
+    "went": {
+      "canonical_form": "go",
+      "reason": "irregular_verb_past"
+    },
+    "were": {
+      "canonical_form": "be",
+      "reason": "irregular_verb_past"
+    },
+    "woke": {
+      "canonical_form": "wake",
+      "reason": "irregular_verb_past"
+    },
+    "won": {
+      "canonical_form": "win",
+      "reason": "irregular_verb_past"
+    },
+    "wore": {
+      "canonical_form": "wear",
+      "reason": "irregular_verb_past"
+    },
+    "wrote": {
+      "canonical_form": "write",
+      "reason": "irregular_verb_past"
+    },
+    "told": {
+      "canonical_form": "tell",
+      "reason": "irregular_verb_past"
+    },
+    "understood": {
+      "canonical_form": "understand",
+      "reason": "irregular_verb_past"
+    }
+  },
+  "keep_both_linked": {
+    "broken": {
+      "canonical_form": "break",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "done": {
+      "canonical_form": "do",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "driven": {
+      "canonical_form": "drive",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "drunk": {
+      "canonical_form": "drink",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "fallen": {
+      "canonical_form": "fall",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "fed": {
+      "canonical_form": "feed",
+      "reason": "lexicalized_irregular_form"
+    },
+    "felt": {
+      "canonical_form": "feel",
+      "reason": "lexicalized_irregular_form"
+    },
+    "forgotten": {
+      "canonical_form": "forget",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "given": {
+      "canonical_form": "give",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "gone": {
+      "canonical_form": "go",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "grown": {
+      "canonical_form": "grow",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "hidden": {
+      "canonical_form": "hide",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "known": {
+      "canonical_form": "know",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "lost": {
+      "canonical_form": "lose",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "paid": {
+      "canonical_form": "pay",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "spoken": {
+      "canonical_form": "speak",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "spent": {
+      "canonical_form": "spend",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "taken": {
+      "canonical_form": "take",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "thought": {
+      "canonical_form": "think",
+      "reason": "lexicalized_irregular_form"
+    },
+    "worn": {
+      "canonical_form": "wear",
+      "reason": "lexicalized_irregular_participle"
+    },
+    "written": {
+      "canonical_form": "write",
+      "reason": "lexicalized_irregular_participle"
+    }
+  }
+}

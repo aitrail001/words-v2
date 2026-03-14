@@ -1,0 +1,36 @@
+{
+  "snapshot_dir": "data/lexicon/snapshots/words-30000-20260314-main-real-entity-tail-hardened",
+  "lexeme_count": 30000,
+  "suspicious_count": 553,
+  "review_priority_buckets": [
+    "apostrophe_name_or_abbreviation_candidate",
+    "derived_form_candidate",
+    "lexicalized_plural_candidate",
+    "name_brand_place_like_candidate",
+    "non_general_entity",
+    "possessive_surface_form"
+  ],
+  "entity_category_counts": {
+    "brand": 5,
+    "entity_other": 4,
+    "name": 36,
+    "place": 11
+  },
+  "bucket_counts": {
+    "apostrophe_name_or_abbreviation_candidate": 23,
+    "baseline_safe": 14592,
+    "common_contraction": 72,
+    "derived_form_candidate": 174,
+    "derived_morph_candidate": 2062,
+    "lexicalized_plural_candidate": 299,
+    "linked_variant": 1521,
+    "morph_candidate_present": 12591,
+    "multi_source_form": 6467,
+    "no_wordnet_backing": 64,
+    "non_general_entity": 56,
+    "plural_morph_candidate": 301,
+    "possessive_surface_form": 1,
+    "punctuation_token": 96,
+    "short_candidate_tail": 3814
+  }
+}

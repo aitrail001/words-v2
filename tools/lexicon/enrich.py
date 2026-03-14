@@ -219,6 +219,27 @@ def _default_example(lemma: str, part_of_speech: str) -> str:
     return f'This {lemma} is useful for learners.'
 
 
+def _variant_prompt_guidance(lexeme: LexemeRecord) -> str:
+    if not lexeme.is_variant_with_distinct_meanings or not lexeme.variant_base_form:
+        return ""
+    return (
+        f"This word is another form of the base word '{lexeme.variant_base_form}', but it remains a separate learner entry because it has distinct meanings of its own.\n"
+        "Do not repeat the ordinary meanings already covered by the base word.\n"
+        f"Generate only the meanings that are distinct or special to '{lexeme.lemma}'.\n"
+        f"Include a short usage note that says it is another form of '{lexeme.variant_base_form}'.\n"
+    )
+
+
+def _entity_category_prompt_guidance(lexeme: LexemeRecord) -> str:
+    if lexeme.entity_category == "general":
+        return ""
+    return (
+        f"This entry is categorized as '{lexeme.entity_category}', not a plain general-vocabulary item.\n"
+        "Keep the explanation grounded in the specific named-entity or specialized-entity use of this entry.\n"
+        "Do not broaden it into unrelated ordinary meanings from similarly spelled common words.\n"
+    )
+
+
 def build_enrichment_prompt(*, lexeme: LexemeRecord, sense: SenseRecord) -> str:
     schema_hint = {
         'definition': 'string',
@@ -248,6 +269,7 @@ def build_enrichment_prompt(*, lexeme: LexemeRecord, sense: SenseRecord) -> str:
         f"Part of speech: {sense.part_of_speech}.\n"
         f"Canonical gloss: {sense.canonical_gloss}.\n"
         f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
+        f"{_entity_category_prompt_guidance(lexeme)}"
         f"Return JSON only with this schema: {json.dumps(schema_hint)}"
     )
 
@@ -577,6 +599,8 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
     return (
         f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
         f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
+        f"{_entity_category_prompt_guidance(lexeme)}"
+        f"{_variant_prompt_guidance(lexeme)}"
         f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
         f"Select at most {max_meanings} learner-friendly meanings. You may omit weak tail senses.\n"
         f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
@@ -595,6 +619,8 @@ def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[Se
     return (
         f"Repair the previous learner-facing enrichment response for the English word '{lexeme.lemma}'.\n"
         f"The previous response was invalid: {previous_error}\n"
+        f"{_entity_category_prompt_guidance(lexeme)}"
+        f"{_variant_prompt_guidance(lexeme)}"
         f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
         f"Select at most {max_meanings} learner-friendly meanings.\n"
         f"The response is invalid if the senses array contains more than {max_meanings} items.\n"

@@ -16,12 +16,28 @@ from tools.lexicon.models import (
     LexemeRecord,
     SenseRecord,
 )
+from tools.lexicon.policy_data import resolve_entity_category
 from tools.lexicon.wordfreq_utils import InventoryProvider, normalize_word_candidate, resolve_frequency_rank
 from tools.lexicon.wordnet_utils import fallback_sense, select_learner_senses
 
 CanonicalSenseProvider = Callable[[str], Iterable[dict[str, object]]]
 RankProvider = Callable[[str], Optional[int]]
 ExistingCanonicalWordsLookup = Callable[[list[str]], set[str]]
+
+
+def _dedupe_selected_senses(senses: list[dict[str, object]]) -> list[dict[str, object]]:
+    deduped: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for sense in senses:
+        key = (
+            str(sense.get("part_of_speech") or "noun").strip().lower(),
+            str(sense.get("canonical_gloss") or "").strip().lower(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(sense)
+    return deduped
 
 
 @dataclass(frozen=True)
@@ -34,6 +50,7 @@ class BaseBuildResult:
     generation_status: list[GenerationStatusRecord]
     ambiguous_forms: list[AmbiguousFormRecord]
     skipped_existing_canonical_words: list[str]
+    excluded_tail_canonical_words: list[str]
 
 
 def normalize_seed_words(words: Iterable[str]) -> list[str]:
@@ -62,6 +79,7 @@ def build_base_records(
     max_senses: int = 8,
     adjudications: dict[str, dict[str, object]] | None = None,
     existing_canonical_words_lookup: ExistingCanonicalWordsLookup | None = None,
+    excluded_canonical_words: set[str] | None = None,
 ) -> BaseBuildResult:
     lexeme_records: list[LexemeRecord] = []
     sense_records: list[SenseRecord] = []
@@ -88,7 +106,25 @@ def build_base_records(
     source_forms_by_canonical: dict[str, list[str]] = {}
     linked_base_by_canonical: dict[str, str | None] = {}
     deferred_canonical_forms: set[str] = set()
+    normalized_excluded_canonical_words = {
+        normalized
+        for normalized in (
+            normalize_word_candidate(word)
+            for word in (excluded_canonical_words or set())
+        )
+        if normalized
+    }
+    excluded_tail_canonical_words = sorted(
+        {
+            decision.canonical_form
+            for decision in canonicalization.decisions
+            if decision.canonical_form in normalized_excluded_canonical_words
+        }
+    )
+
     for decision in canonicalization.decisions:
+        if decision.canonical_form in normalized_excluded_canonical_words:
+            continue
         if decision.canonical_form not in source_forms_by_canonical:
             source_forms_by_canonical[decision.canonical_form] = []
         if decision.surface_form not in source_forms_by_canonical[decision.canonical_form]:
@@ -132,7 +168,11 @@ def build_base_records(
                 )
             )
 
-    buildable_canonical_words = [word for word in canonicalization.canonical_words if word not in deferred_canonical_forms]
+    buildable_canonical_words = [
+        word
+        for word in canonicalization.canonical_words
+        if word not in deferred_canonical_forms and word not in normalized_excluded_canonical_words
+    ]
     existing_canonical_words = (
         existing_canonical_words_lookup(list(buildable_canonical_words))
         if existing_canonical_words_lookup is not None
@@ -181,10 +221,21 @@ def build_base_records(
         is_wordnet_backed = bool(canonical_senses)
         if not canonical_senses:
             canonical_senses = [fallback_sense(word)]
+        canonical_senses = _dedupe_selected_senses(canonical_senses)
 
         source_provenance = [{"source": "wordfreq", "role": "frequency_rank"}]
         if is_wordnet_backed:
             source_provenance.append({"source": "wordnet", "role": "sense_grounding"})
+        entity_category, entity_reason = resolve_entity_category(word)
+        if entity_category != "general":
+            source_provenance.append(
+                {
+                    "source": "entity_categories",
+                    "role": "entity_category",
+                    "category": entity_category,
+                    "reason": entity_reason,
+                }
+            )
 
         lexeme_records.append(
             LexemeRecord(
@@ -197,6 +248,10 @@ def build_base_records(
                 source_refs=['wordnet', 'wordfreq'] if is_wordnet_backed else ['wordfreq'],
                 created_at=created_at,
                 source_provenance=source_provenance,
+                is_variant_with_distinct_meanings=linked_base_by_canonical.get(word) is not None,
+                variant_base_form=linked_base_by_canonical.get(word),
+                variant_relationship='lexicalized_form' if linked_base_by_canonical.get(word) is not None else None,
+                entity_category=entity_category,
             )
         )
 
@@ -268,6 +323,7 @@ def build_base_records(
         generation_status=generation_status_records,
         ambiguous_forms=ambiguous_form_records,
         skipped_existing_canonical_words=skipped_existing_canonical_words,
+        excluded_tail_canonical_words=excluded_tail_canonical_words,
     )
 
 

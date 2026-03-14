@@ -1,0 +1,26 @@
+{
+  "drop_surface_forms": [
+    "atleast",
+    "bl",
+    "childrens",
+    "csp",
+    "ctv",
+    "danforth",
+    "dont",
+    "effie",
+    "elmore",
+    "eph",
+    "galatians",
+    "infact",
+    "longterm",
+    "lyin",
+    "n't",
+    "seperate",
+    "womens"
+  ],
+  "normalize_surface_forms": {
+    "gov't": "government",
+    "int'l": "international",
+    "ya'll": "y'all"
+  }
+}
