@@ -53,6 +53,10 @@ def _write_case_progress(progress_path: Path, payload: dict[str, Any]) -> None:
     progress_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _failure_rows_without_lemma(rows: list[dict[str, Any]], lemma: str) -> list[dict[str, Any]]:
+    return [row for row in rows if str(row.get("lemma") or "") != lemma]
+
+
 def _resolve_benchmark_path(dataset: str | Path) -> tuple[str, Path]:
     if isinstance(dataset, Path):
         return dataset.stem, dataset
@@ -215,10 +219,11 @@ def _default_case_runner(
     }
     repair_count = int(progress.get("repair_count") or 0)
     retry_count = int(progress.get("retry_count") or 0)
+    response_schema_fallback_count = int(progress.get("response_schema_fallback_count") or 0)
     batch_started_at = perf_counter()
 
     for lexeme in lexemes:
-        if lexeme.lemma in completed_lemma_set or lexeme.lemma in failed_lemma_set:
+        if lexeme.lemma in completed_lemma_set:
             continue
         ordered_senses = sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
         started_at = perf_counter()
@@ -239,6 +244,7 @@ def _default_case_runner(
                 "failed_at": _utc_now(),
             }
             append_jsonl(failures_path, [failure_payload])
+            failure_rows = _failure_rows_without_lemma(failure_rows, lexeme.lemma)
             failure_rows.append(failure_payload)
             failed_lemma_set.add(lexeme.lemma)
             _write_case_progress(
@@ -255,6 +261,7 @@ def _default_case_runner(
                     "cefr_distribution": cefr_distribution,
                     "repair_count": repair_count,
                     "retry_count": retry_count,
+                    "response_schema_fallback_count": response_schema_fallback_count + int(getattr(client, "response_schema_fallback_count", 0) or 0),
                 },
             )
             continue
@@ -287,6 +294,8 @@ def _default_case_runner(
         if new_rows:
             append_jsonl(rows_path, new_rows)
         completed_lemma_set.add(lexeme.lemma)
+        failed_lemma_set.discard(lexeme.lemma)
+        failure_rows = _failure_rows_without_lemma(failure_rows, lexeme.lemma)
         _write_case_progress(
             progress_path,
             {
@@ -301,6 +310,7 @@ def _default_case_runner(
                 "cefr_distribution": cefr_distribution,
                 "repair_count": repair_count,
                 "retry_count": retry_count,
+                "response_schema_fallback_count": response_schema_fallback_count + int(getattr(client, "response_schema_fallback_count", 0) or 0),
             },
         )
 
@@ -314,7 +324,7 @@ def _default_case_runner(
         "failed_lexeme_count": len(failed_lemma_set),
         "repair_count": repair_count,
         "retry_count": retry_count,
-        "response_schema_fallback_count": int(getattr(client, "response_schema_fallback_count", 0) or 0),
+        "response_schema_fallback_count": response_schema_fallback_count + int(getattr(client, "response_schema_fallback_count", 0) or 0),
         "batch_duration_seconds": round(batch_duration, 3),
         "average_latency_seconds": round(statistics.mean(latencies), 3) if latencies else 0.0,
         "average_confidence": round(statistics.mean(confidences), 3) if confidences else 0.0,
