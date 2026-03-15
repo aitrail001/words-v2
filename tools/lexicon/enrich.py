@@ -411,6 +411,15 @@ def _default_example(lemma: str, part_of_speech: str) -> str:
 def _variant_prompt_guidance(lexeme: LexemeRecord) -> str:
     if not lexeme.is_variant_with_distinct_meanings or not lexeme.variant_base_form:
         return ""
+    if lexeme.variant_relationship == "distinct_derived_form":
+        note = f"Special note for this entry: {lexeme.variant_prompt_note}\n" if lexeme.variant_prompt_note else ""
+        return (
+            f"This entry is morphologically related to the base word '{lexeme.variant_base_form}', but it must be treated as its own learner entry.\n"
+            "Do not restate the ordinary inflectional or base-word meanings already covered by the base word.\n"
+            f"Generate only the standalone meanings and uses that justify keeping '{lexeme.lemma}' as its own entry.\n"
+            f"Include a short usage note that links '{lexeme.lemma}' back to '{lexeme.variant_base_form}'.\n"
+            f"{note}"
+        )
     return (
         f"This word is another form of the base word '{lexeme.variant_base_form}', but it remains a separate learner entry because it has distinct meanings of its own.\n"
         "Do not repeat the ordinary meanings already covered by the base word.\n"
