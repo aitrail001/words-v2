@@ -25,6 +25,7 @@ Transport = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
 NodeRunner = Callable[[dict[str, Any]], dict[str, Any]]
 _PROVIDER_MODES = {"auto", "placeholder", "openai_compatible", "openai_compatible_node"}
 _ENRICHMENT_MODES = {"per_sense", "per_word"}
+_WORD_PROMPT_MODES = {"grounded", "word_only"}
 _ALLOWED_CEFR_LEVELS = {'A1', 'A2', 'B1', 'B2', 'C1', 'C2'}
 _ALLOWED_REGISTERS = {'neutral', 'formal', 'informal'}
 _STRING_LIST_FIELDS = ('secondary_domains', 'synonyms', 'antonyms', 'collocations', 'grammar_patterns')
@@ -593,19 +594,30 @@ def _word_enrichment_grounding_payload(*, senses: list[SenseRecord]) -> tuple[li
     return sense_rows, schema_hint
 
 
-def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord]) -> str:
+def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], prompt_mode: str = "grounded") -> str:
     sense_rows, schema_hint = _word_enrichment_grounding_payload(senses=senses)
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
+    if prompt_mode not in _WORD_PROMPT_MODES:
+        raise ValueError(f"Unsupported word prompt mode: {prompt_mode}")
+    allowed_sense_ids = [sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)]
+    grounding_block = (
+        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
+        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
+        if prompt_mode == "grounded"
+        else (
+            f"Allowed sense IDs for this word are: {json.dumps(allowed_sense_ids)}.\n"
+            "Do not invent new sense IDs. Reuse only sense_id values from the allowed list.\n"
+        )
+    )
     return (
         f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
         f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
         f"{_entity_category_prompt_guidance(lexeme)}"
         f"{_variant_prompt_guidance(lexeme)}"
-        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
+        f"{grounding_block}"
         f"Select at most {max_meanings} learner-friendly meanings. You may omit weak tail senses.\n"
         f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
         f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
-        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
         f"For every selected sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
         "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
         "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
@@ -613,19 +625,30 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
     )
 
 
-def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], previous_error: str) -> str:
+def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], previous_error: str, prompt_mode: str = "grounded") -> str:
     sense_rows, schema_hint = _word_enrichment_grounding_payload(senses=senses)
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
+    if prompt_mode not in _WORD_PROMPT_MODES:
+        raise ValueError(f"Unsupported word prompt mode: {prompt_mode}")
+    allowed_sense_ids = [sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)]
+    grounding_block = (
+        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
+        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
+        if prompt_mode == "grounded"
+        else (
+            f"Allowed sense IDs for this word are: {json.dumps(allowed_sense_ids)}.\n"
+            "Do not invent new sense IDs. Reuse only sense_id values from the allowed list.\n"
+        )
+    )
     return (
         f"Repair the previous learner-facing enrichment response for the English word '{lexeme.lemma}'.\n"
         f"The previous response was invalid: {previous_error}\n"
         f"{_entity_category_prompt_guidance(lexeme)}"
         f"{_variant_prompt_guidance(lexeme)}"
-        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
+        f"{grounding_block}"
         f"Select at most {max_meanings} learner-friendly meanings.\n"
         f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
         f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
-        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
         f"Every selected sense must include these translation locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
         "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
         "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
@@ -658,13 +681,14 @@ def _is_retryable_word_generation_error(error: RuntimeError) -> bool:
     return any(marker in message for marker in retryable_markers)
 
 
-def _generate_validated_word_payload(
+def _generate_validated_word_payload_with_stats(
     *,
     client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
     lexeme: LexemeRecord,
     senses: list[SenseRecord],
-) -> list[dict[str, Any]]:
-    prompt = build_word_enrichment_prompt(lexeme=lexeme, senses=senses)
+    prompt_mode: str = "grounded",
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    prompt = build_word_enrichment_prompt(lexeme=lexeme, senses=senses, prompt_mode=prompt_mode)
     last_error: RuntimeError | None = None
     repair_attempts = 0
     transient_retries = 0
@@ -672,7 +696,10 @@ def _generate_validated_word_payload(
     while True:
         try:
             response = client.generate_json(prompt)
-            return _validate_openai_compatible_word_payload(response, lexeme=lexeme, senses=senses)
+            return _validate_openai_compatible_word_payload(response, lexeme=lexeme, senses=senses), {
+                "repair_count": repair_attempts,
+                "retry_count": transient_retries,
+            }
         except RuntimeError as exc:
             last_error = exc
             if _is_retryable_word_generation_error(exc) and transient_retries < _DEFAULT_WORD_TRANSIENT_RETRIES:
@@ -686,7 +713,24 @@ def _generate_validated_word_payload(
                 lexeme=lexeme,
                 senses=senses,
                 previous_error=str(last_error),
+                prompt_mode=prompt_mode,
             )
+
+
+def _generate_validated_word_payload(
+    *,
+    client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
+    lexeme: LexemeRecord,
+    senses: list[SenseRecord],
+    prompt_mode: str = "grounded",
+) -> list[dict[str, Any]]:
+    rows, _ = _generate_validated_word_payload_with_stats(
+        client=client,
+        lexeme=lexeme,
+        senses=senses,
+        prompt_mode=prompt_mode,
+    )
+    return rows
 
 
 def _build_enrichment_record(*, lexeme: LexemeRecord, sense: SenseRecord, response: dict[str, Any], model_name: str, prompt_version: str, generation_run_id: str, review_status: str, generated_at: str) -> EnrichmentRecord:

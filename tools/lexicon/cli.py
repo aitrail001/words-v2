@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from tools.lexicon.benchmark_selection import run_selection_benchmark
+from tools.lexicon.enrichment_benchmark import run_enrichment_benchmark
 from tools.lexicon.build_base import build_base_records, build_word_inventory, normalize_seed_words, write_base_snapshot
 from tools.lexicon.canonical_registry import lookup_entry, status_entry
 from tools.lexicon.compare_selection import compare_selection_artifacts
@@ -251,6 +252,26 @@ def _benchmark_selection_command(args: argparse.Namespace) -> int:
     payload = dict(result.payload)
     payload['command'] = 'benchmark-selection'
     payload['summary'] = str(result.summary_path)
+    print(json.dumps(payload))
+    return 0
+
+
+def _benchmark_enrichment_command(args: argparse.Namespace) -> int:
+    try:
+        result = run_enrichment_benchmark(
+            Path(args.output_dir),
+            dataset=args.dataset,
+            prompt_modes=args.prompt_modes or ["grounded"],
+            model_names=args.models or ["gpt-5.1-chat"],
+            provider_mode=args.provider_mode,
+            reasoning_effort=args.reasoning_effort,
+        )
+    except (LexiconDependencyError, RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    payload = dict(result.payload)
+    payload["command"] = "benchmark-enrichment"
+    payload["summary"] = str(result.summary_path)
     print(json.dumps(payload))
     return 0
 
@@ -643,6 +664,15 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_selection.add_argument('--candidate-limit', type=int, default=8, help='maximum WordNet candidates per lexeme for the `candidates` rerank mode')
     benchmark_selection.add_argument('--candidate-source', dest='candidate_sources', action='append', choices=RERANK_CANDIDATE_SOURCES, help='rerank candidate source to compare; repeat to run multiple modes')
     benchmark_selection.set_defaults(handler=_benchmark_selection_command)
+
+    benchmark_enrichment = subparsers.add_parser('benchmark-enrichment', help='run live lexicon enrichment prompt/model benchmarks')
+    benchmark_enrichment.add_argument('--output-dir', required=True, help='directory to write benchmark artifacts')
+    benchmark_enrichment.add_argument('--dataset', default='default', help='benchmark dataset name or JSON file path')
+    benchmark_enrichment.add_argument('--prompt-mode', dest='prompt_modes', action='append', choices=['grounded', 'word_only'], help='prompt mode to compare; repeat to run multiple modes')
+    benchmark_enrichment.add_argument('--model', dest='models', action='append', help='model to compare; repeat to run multiple models')
+    benchmark_enrichment.add_argument('--provider-mode', choices=['openai_compatible', 'openai_compatible_node'], default='openai_compatible_node', help='enrichment provider mode for benchmark runs')
+    benchmark_enrichment.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for models that support it')
+    benchmark_enrichment.set_defaults(handler=_benchmark_enrichment_command)
 
     score_selection = subparsers.add_parser('score-selection-risk', help='score deterministic selections and write selection_decisions.jsonl for a snapshot')
     score_selection.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')

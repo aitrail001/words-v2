@@ -1020,6 +1020,25 @@ class EnrichPerWordModeTests(unittest.TestCase):
             self.assertIn("do not invent new sense ids", prompt.lower())
             self.assertIn("you may omit weak tail senses", prompt.lower())
 
+    def test_build_word_enrichment_prompt_word_only_mode_omits_grounding_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=run_lexeme, senses=run_senses, prompt_mode="word_only")
+
+            self.assertNotIn("grounding context", prompt.lower())
+            self.assertIn("allowed sense ids for this word are:", prompt.lower())
+            self.assertIn("sn_lx_run_1", prompt.lower())
+            self.assertIn("sn_lx_run_2", prompt.lower())
+            self.assertIn("do not invent new sense ids", prompt.lower())
+            self.assertIn("english word 'run'", prompt.lower())
+            self.assertIn("return a json object only", prompt.lower())
+            self.assertIn("at most 8 learner-friendly meanings", prompt.lower())
+
     def test_enrich_snapshot_per_word_mode_writes_existing_enrichments_jsonl_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)

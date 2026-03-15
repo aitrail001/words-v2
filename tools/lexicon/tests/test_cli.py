@@ -33,6 +33,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("rerank-senses", stdout)
         self.assertIn("compare-selection", stdout)
         self.assertIn("benchmark-selection", stdout)
+        self.assertIn("benchmark-enrichment", stdout)
         self.assertIn("validate", stdout)
         self.assertIn("compile-export", stdout)
         self.assertIn("import-db", stdout)
@@ -653,6 +654,48 @@ class CliTests(unittest.TestCase):
             self.assertEqual(mocked_benchmark.call_args.kwargs["reasoning_effort"], "low")
             self.assertEqual(mocked_benchmark.call_args.kwargs["candidate_limit"], 12)
             self.assertEqual(mocked_benchmark.call_args.kwargs["candidate_sources"], ["selected_only", "full_wordnet"])
+
+    def test_benchmark_enrichment_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "benchmarks"
+            fake_result = type(
+                "FakeBenchmarkResult",
+                (),
+                {
+                    "summary_path": output_dir / "summary.json",
+                    "payload": {
+                        "output_dir": str(output_dir),
+                        "dataset": "default",
+                        "prompt_modes": ["word_only", "grounded"],
+                        "models": ["gpt-5.1-chat", "gpt-5.4"],
+                        "runs": [],
+                    },
+                },
+            )()
+            with patch("tools.lexicon.cli.run_enrichment_benchmark", return_value=fake_result) as mocked_benchmark:
+                code, stdout, _ = self.run_cli(
+                    [
+                        "benchmark-enrichment",
+                        "--output-dir",
+                        str(output_dir),
+                        "--prompt-mode",
+                        "word_only",
+                        "--prompt-mode",
+                        "grounded",
+                        "--model",
+                        "gpt-5.1-chat",
+                        "--model",
+                        "gpt-5.4",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "benchmark-enrichment")
+            self.assertEqual(payload["dataset"], "default")
+            self.assertEqual(payload["prompt_modes"], ["word_only", "grounded"])
+            self.assertEqual(payload["models"], ["gpt-5.1-chat", "gpt-5.4"])
+            mocked_benchmark.assert_called_once()
 
     def test_validate_command_validates_snapshot_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
