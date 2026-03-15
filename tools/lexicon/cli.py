@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from tools.lexicon.benchmark_selection import run_selection_benchmark
+from tools.lexicon.enrichment_benchmark import run_enrichment_benchmark
 from tools.lexicon.build_base import build_base_records, build_word_inventory, normalize_seed_words, write_base_snapshot
 from tools.lexicon.canonical_registry import lookup_entry, status_entry
 from tools.lexicon.compare_selection import compare_selection_artifacts
@@ -24,6 +25,8 @@ from tools.lexicon.policy_data import excluded_canonical_forms
 from tools.lexicon.wordfreq_provider import build_wordfreq_rank_provider
 from tools.lexicon.wordfreq_utils import build_wordfreq_inventory_provider
 from tools.lexicon.wordnet_provider import LexiconDependencyError, build_wordnet_sense_provider
+
+_REASONING_EFFORT_CHOICES = ['none', 'low', 'medium', 'high']
 
 
 def _utc_now() -> str:
@@ -251,6 +254,26 @@ def _benchmark_selection_command(args: argparse.Namespace) -> int:
     payload = dict(result.payload)
     payload['command'] = 'benchmark-selection'
     payload['summary'] = str(result.summary_path)
+    print(json.dumps(payload))
+    return 0
+
+
+def _benchmark_enrichment_command(args: argparse.Namespace) -> int:
+    try:
+        result = run_enrichment_benchmark(
+            Path(args.output_dir),
+            dataset=args.dataset,
+            prompt_modes=args.prompt_modes or ["grounded"],
+            model_names=args.models or ["gpt-5.1-chat"],
+            provider_mode=args.provider_mode,
+            reasoning_effort=args.reasoning_effort,
+        )
+    except (LexiconDependencyError, RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    payload = dict(result.payload)
+    payload["command"] = "benchmark-enrichment"
+    payload["summary"] = str(result.summary_path)
     print(json.dumps(payload))
     return 0
 
@@ -593,7 +616,7 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument('--prompt-version', default='v1', help='prompt version tag for generated enrichment rows')
     enrich.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='enrichment provider mode')
     enrich.add_argument('--model', help='optional model override for this enrichment run')
-    enrich.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for real endpoint runs')
+    enrich.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for real endpoint runs')
     enrich.add_argument('--mode', choices=['per_sense', 'per_word'], default='per_sense', help='enrichment execution mode')
     enrich.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel lexeme jobs for per_word enrichment mode')
     enrich.add_argument('--resume', action='store_true', help='resume a prior per_word enrichment run using the checkpoint file')
@@ -611,7 +634,7 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_openai.add_argument('--prompt-version', default='v1', help='prompt version tag for generated enrichment rows')
     smoke_openai.add_argument('--provider-mode', choices=['openai_compatible', 'openai_compatible_node'], default='openai_compatible', help='real endpoint provider mode for the smoke run')
     smoke_openai.add_argument('--model', help='optional model override for this smoke run')
-    smoke_openai.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for the smoke run')
+    smoke_openai.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for the smoke run')
     smoke_openai.add_argument('words', nargs='*', default=['run'], help='tiny seed words for the smoke run')
     smoke_openai.set_defaults(handler=_smoke_openai_compatible_command)
 
@@ -620,7 +643,7 @@ def build_parser() -> argparse.ArgumentParser:
     rerank.add_argument('--output', help='optional output path for sense_reranks.jsonl')
     rerank.add_argument('--provider-mode', choices=['auto', 'openai_compatible', 'openai_compatible_node'], default='auto', help='rerank provider mode')
     rerank.add_argument('--model', help='optional model override for this rerank run')
-    rerank.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for rerank runs')
+    rerank.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for rerank runs')
     rerank.add_argument('--candidate-limit', type=int, default=8, help='maximum WordNet candidates per lexeme to present to the rerank model')
     rerank.add_argument('--candidate-source', choices=RERANK_CANDIDATE_SOURCES, default='candidates', help='candidate pool to expose to the rerank model')
     rerank.add_argument('words', nargs='*', default=[], help='optional subset of lemmas to rerank')
@@ -639,10 +662,19 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_selection.add_argument('--with-rerank', action='store_true', help='run rerank and comparison after building the deterministic snapshot')
     benchmark_selection.add_argument('--provider-mode', choices=['auto', 'openai_compatible', 'openai_compatible_node'], default='auto', help='rerank provider mode for benchmark runs')
     benchmark_selection.add_argument('--model', help='optional model override for rerank benchmark runs')
-    benchmark_selection.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for rerank benchmark runs')
+    benchmark_selection.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for rerank benchmark runs')
     benchmark_selection.add_argument('--candidate-limit', type=int, default=8, help='maximum WordNet candidates per lexeme for the `candidates` rerank mode')
     benchmark_selection.add_argument('--candidate-source', dest='candidate_sources', action='append', choices=RERANK_CANDIDATE_SOURCES, help='rerank candidate source to compare; repeat to run multiple modes')
     benchmark_selection.set_defaults(handler=_benchmark_selection_command)
+
+    benchmark_enrichment = subparsers.add_parser('benchmark-enrichment', help='run live lexicon enrichment prompt/model benchmarks')
+    benchmark_enrichment.add_argument('--output-dir', required=True, help='directory to write benchmark artifacts')
+    benchmark_enrichment.add_argument('--dataset', default='default', help='benchmark dataset name or JSON file path')
+    benchmark_enrichment.add_argument('--prompt-mode', dest='prompt_modes', action='append', choices=['grounded', 'word_only'], help='prompt mode to compare; repeat to run multiple modes')
+    benchmark_enrichment.add_argument('--model', dest='models', action='append', help='model to compare; repeat to run multiple models')
+    benchmark_enrichment.add_argument('--provider-mode', choices=['openai_compatible', 'openai_compatible_node'], default='openai_compatible_node', help='enrichment provider mode for benchmark runs')
+    benchmark_enrichment.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for models that support it')
+    benchmark_enrichment.set_defaults(handler=_benchmark_enrichment_command)
 
     score_selection = subparsers.add_parser('score-selection-risk', help='score deterministic selections and write selection_decisions.jsonl for a snapshot')
     score_selection.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')
@@ -657,7 +689,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_review.add_argument('--review-queue-output', help='optional output path for flagged review_queue.jsonl')
     prepare_review.add_argument('--provider-mode', choices=['auto', 'openai_compatible', 'openai_compatible_node'], default='auto', help='rerank provider mode for review preparation runs')
     prepare_review.add_argument('--model', help='optional model override for rerank review preparation runs')
-    prepare_review.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for rerank review preparation runs')
+    prepare_review.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for rerank review preparation runs')
     prepare_review.add_argument('--candidate-limit', type=int, default=8, help='maximum WordNet candidates per lexeme for review preparation rerank runs')
     prepare_review.add_argument('--candidate-source', choices=RERANK_CANDIDATE_SOURCES, default='candidates', help='candidate pool to expose to the rerank model during review preparation')
     prepare_review.set_defaults(handler=_prepare_review_command)
@@ -674,7 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
     adjudicate_forms_parser.add_argument('--output', required=True, help='path to write form_adjudications.jsonl')
     adjudicate_forms_parser.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='adjudication provider mode')
     adjudicate_forms_parser.add_argument('--model', help='optional model override for adjudication')
-    adjudicate_forms_parser.add_argument('--reasoning-effort', choices=['low', 'medium', 'high'], help='optional reasoning effort override for adjudication')
+    adjudicate_forms_parser.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for adjudication')
     adjudicate_forms_parser.set_defaults(handler=_adjudicate_forms_command)
 
     lookup_entry_parser = subparsers.add_parser('lookup-entry', help='resolve a surface form to its canonical lexicon entry within a snapshot')

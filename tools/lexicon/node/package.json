@@ -1,0 +1,8 @@
+{
+  "name": "lexicon-node-transport",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "openai": "^6.5.0"
+  }
+}

@@ -1,0 +1,10 @@
+[
+  {"word": "right", "category": "common_polysemous"},
+  {"word": "open", "category": "noun_verb_crossover"},
+  {"word": "break", "category": "common_polysemous"},
+  {"word": "record", "category": "common_polysemous"},
+  {"word": "building", "category": "distinct_variant"},
+  {"word": "kinshasa", "category": "entity"},
+  {"word": "bank", "category": "common_polysemous"},
+  {"word": "light", "category": "noun_verb_crossover"}
+]

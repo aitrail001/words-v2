@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import atexit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import count
 from pathlib import Path
 from typing import Any, Callable
 import json
 import math
+import select
 import shutil
 import subprocess
 import time
@@ -25,13 +28,14 @@ Transport = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
 NodeRunner = Callable[[dict[str, Any]], dict[str, Any]]
 _PROVIDER_MODES = {"auto", "placeholder", "openai_compatible", "openai_compatible_node"}
 _ENRICHMENT_MODES = {"per_sense", "per_word"}
+_WORD_PROMPT_MODES = {"grounded", "word_only"}
 _ALLOWED_CEFR_LEVELS = {'A1', 'A2', 'B1', 'B2', 'C1', 'C2'}
 _ALLOWED_REGISTERS = {'neutral', 'formal', 'informal'}
 _STRING_LIST_FIELDS = ('secondary_domains', 'synonyms', 'antonyms', 'collocations', 'grammar_patterns')
 _REQUIRED_TRANSLATION_LOCALES = ('zh-Hans', 'es', 'ar', 'pt-BR', 'ja')
 _DEFAULT_LLM_TIMEOUT_SECONDS = 60
-_DEFAULT_WORD_TRANSIENT_RETRIES = 2
-_DEFAULT_WORD_REPAIR_ATTEMPTS = 2
+_DEFAULT_WORD_TRANSIENT_RETRIES = 5
+_DEFAULT_WORD_REPAIR_ATTEMPTS = 4
 _NODE_RUN_TIMEOUT_SECONDS = _DEFAULT_LLM_TIMEOUT_SECONDS
 
 
@@ -67,18 +71,19 @@ class OpenAICompatibleResponsesClient:
             )
         )
         self.reasoning_effort = reasoning_effort
+        self.response_schema_fallback_count = 0
 
     def responses_url(self) -> str:
         if self.endpoint.endswith("/responses"):
             return self.endpoint
         return f"{self.endpoint}/responses"
 
-    def generate_json(self, prompt: str) -> dict[str, Any]:
+    def generate_json(self, prompt: str, *, response_schema: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = {
             "model": self.model,
             "instructions": _SYSTEM_PROMPT,
             "input": prompt,
-            "text": {"format": {"type": "json_object"}},
+            "text": {"format": _response_text_format(response_schema)},
         }
         if self.reasoning_effort:
             payload["reasoning"] = {"effort": self.reasoning_effort}
@@ -86,7 +91,16 @@ class OpenAICompatibleResponsesClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        response = self.transport(self.responses_url(), payload, headers)
+        try:
+            response = self.transport(self.responses_url(), payload, headers)
+        except RuntimeError as exc:
+            if response_schema is not None and _should_fallback_from_response_schema(exc):
+                fallback_payload = dict(payload)
+                fallback_payload["text"] = {"format": {"type": "json_object"}}
+                self.response_schema_fallback_count += 1
+                response = self.transport(self.responses_url(), fallback_payload, headers)
+            else:
+                raise
         text = _extract_output_text(response)
         try:
             return _parse_json_payload_text(text)
@@ -144,6 +158,123 @@ def _default_node_runner(payload: dict[str, Any], *, timeout_seconds: int = _NOD
         raise RuntimeError('Node OpenAI-compatible transport returned non-JSON output') from exc
 
 
+class _PersistentNodeRunner:
+    def __init__(self, *, timeout_seconds: int = _NODE_RUN_TIMEOUT_SECONDS) -> None:
+        self.timeout_seconds = timeout_seconds
+        self._lock = Lock()
+        self._request_ids = count(1)
+        self._process: subprocess.Popen[str] | None = None
+        atexit.register(self.close)
+
+    def _start_process(self) -> subprocess.Popen[str]:
+        node_bin = shutil.which('node')
+        if not node_bin:
+            raise LexiconDependencyError('Node.js is required for openai_compatible_node enrichment mode')
+
+        script_path = Path(__file__).resolve().parent / 'node' / 'openai_compatible_responses.mjs'
+        if not script_path.exists():
+            raise LexiconDependencyError(f'Node enrichment script is missing: {script_path}')
+
+        self._process = subprocess.Popen(
+            [node_bin, str(script_path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        return self._process
+
+    def _ensure_process(self) -> subprocess.Popen[str]:
+        if self._process is not None and self._process.poll() is None:
+            return self._process
+        self.close()
+        return self._start_process()
+
+    def _read_response_line(self, process: subprocess.Popen[str], *, request_id: str) -> str:
+        stdout = process.stdout
+        if stdout is None:
+            raise RuntimeError('Node OpenAI-compatible transport is missing stdout')
+        deadline = time.monotonic() + self.timeout_seconds
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self.close()
+                raise RuntimeError(f'Node OpenAI-compatible transport timed out after {self.timeout_seconds} seconds')
+            ready, _, _ = select.select([stdout], [], [], remaining)
+            if not ready:
+                continue
+            line = stdout.readline()
+            if line:
+                return line
+            stderr_output = ''
+            if process.stderr is not None:
+                stderr_output = process.stderr.read().strip()
+            self.close()
+            raise RuntimeError(
+                stderr_output
+                or f'Node OpenAI-compatible transport exited before returning a response for request {request_id}'
+            )
+
+    def __call__(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            process = self._ensure_process()
+            stdin = process.stdin
+            if stdin is None:
+                self.close()
+                raise RuntimeError('Node OpenAI-compatible transport is missing stdin')
+
+            request_id = str(next(self._request_ids))
+            message = dict(payload)
+            message['request_id'] = request_id
+
+            try:
+                stdin.write(json.dumps(message) + '\n')
+                stdin.flush()
+            except BrokenPipeError as exc:
+                self.close()
+                raise RuntimeError('Node OpenAI-compatible transport failed while writing request payload') from exc
+
+            raw_line = self._read_response_line(process, request_id=request_id).strip()
+            try:
+                envelope = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                self.close()
+                raise RuntimeError('Node OpenAI-compatible transport returned non-JSON output') from exc
+
+            if envelope.get('request_id') != request_id:
+                raise RuntimeError(
+                    f"Node OpenAI-compatible transport response ID mismatch: expected {request_id}, got {envelope.get('request_id')!r}"
+                )
+            if not envelope.get('ok'):
+                raise RuntimeError(str(envelope.get('error') or 'Node OpenAI-compatible transport failed'))
+            response = envelope.get('response')
+            if not isinstance(response, dict):
+                raise RuntimeError('Node OpenAI-compatible transport returned a non-object response envelope')
+            return response
+
+    def close(self) -> None:
+        process, self._process = self._process, None
+        if process is None:
+            return
+        try:
+            if process.stdin is not None:
+                process.stdin.close()
+        except OSError:
+            pass
+        if process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+
+
 class NodeOpenAICompatibleResponsesClient:
     def __init__(
         self,
@@ -159,10 +290,11 @@ class NodeOpenAICompatibleResponsesClient:
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
-        self.runner = runner or (lambda payload: _default_node_runner(payload, timeout_seconds=self.timeout_seconds))
+        self.runner = runner or _PersistentNodeRunner(timeout_seconds=self.timeout_seconds)
         self.reasoning_effort = reasoning_effort
+        self.response_schema_fallback_count = 0
 
-    def generate_json(self, prompt: str) -> dict[str, Any]:
+    def generate_json(self, prompt: str, *, response_schema: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = {
             'base_url': self.endpoint,
             'api_key': self.api_key,
@@ -172,7 +304,18 @@ class NodeOpenAICompatibleResponsesClient:
         }
         if self.reasoning_effort:
             payload['reasoning_effort'] = self.reasoning_effort
-        response = self.runner(payload)
+        if response_schema is not None:
+            payload['response_schema'] = response_schema
+        try:
+            response = self.runner(payload)
+        except RuntimeError as exc:
+            if response_schema is not None and _should_fallback_from_response_schema(exc):
+                fallback_payload = dict(payload)
+                fallback_payload.pop('response_schema', None)
+                self.response_schema_fallback_count += 1
+                response = self.runner(fallback_payload)
+            else:
+                raise
         text = _extract_output_text(response)
         try:
             return _parse_json_payload_text(text)
@@ -184,6 +327,52 @@ _SYSTEM_PROMPT = (
     "You are enriching English vocabulary records for learners. "
     "Return only a single JSON object matching the requested schema."
 )
+
+
+def _response_text_format(response_schema: dict[str, Any] | None) -> dict[str, Any]:
+    if response_schema is None:
+        return {"type": "json_object"}
+    return {
+        "type": "json_schema",
+        "name": str(response_schema["name"]),
+        "schema": response_schema["schema"],
+        "strict": bool(response_schema.get("strict", True)),
+    }
+
+
+def _client_generate_json(
+    client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient | Any,
+    prompt: str,
+    *,
+    response_schema: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if response_schema is None:
+        return client.generate_json(prompt)
+    try:
+        return client.generate_json(prompt, response_schema=response_schema)
+    except TypeError as exc:
+        if "response_schema" not in str(exc):
+            raise
+        return client.generate_json(prompt)
+
+
+def _should_fallback_from_response_schema(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    fallback_markers = (
+        'bad gateway',
+        'error code 502',
+        'error code 503',
+        'error code 504',
+        'cloudflare',
+        'status 429',
+        'status 502',
+        'status 503',
+        'status 504',
+        'rate limit',
+        'service unavailable',
+        'gateway timeout',
+    )
+    return any(marker in message for marker in fallback_markers)
 
 
 def _utc_now() -> str:
@@ -250,36 +439,21 @@ def _entity_category_prompt_guidance(lexeme: LexemeRecord) -> str:
 
 
 def build_enrichment_prompt(*, lexeme: LexemeRecord, sense: SenseRecord) -> str:
-    schema_hint = {
-        'definition': 'string',
-        'examples': [{'sentence': 'string', 'difficulty': 'A1|A2|B1|B2|C1|C2'}],
-        'cefr_level': 'A1|A2|B1|B2|C1|C2',
-        'primary_domain': 'string',
-        'secondary_domains': ['string'],
-        'register': 'neutral|formal|informal',
-        'synonyms': ['string'],
-        'antonyms': ['string'],
-        'collocations': ['string'],
-        'grammar_patterns': ['string'],
-        'usage_note': 'string',
-        'forms': {
-            'plural_forms': ['string'],
-            'verb_forms': {'base': 'string', 'third_person_singular': 'string', 'past': 'string', 'past_participle': 'string', 'gerund': 'string'},
-            'comparative': 'string|null',
-            'superlative': 'string|null',
-            'derivations': ['string'],
-        },
-        'confusable_words': [{'word': 'string', 'note': 'string'}],
-        'confidence': 'number',
-        'translations': {locale: {'definition': 'string', 'usage_note': 'string', 'examples': ['string']} for locale in _REQUIRED_TRANSLATION_LOCALES},
-    }
     return (
+        "Return only valid content for the required fields.\n"
+        "Top-level output shape: a single JSON object with the enrichment fields only.\n"
+        "Required top-level fields: definition, examples, confidence, and translations.\n"
+        "The confidence field must be a numeric value between 0 and 1.\n"
+        f"For every selected sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+        "For each translation locale, include definition, usage_note, and examples.\n"
+        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
         f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
         f"Part of speech: {sense.part_of_speech}.\n"
         f"Canonical gloss: {sense.canonical_gloss}.\n"
         f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
         f"{_entity_category_prompt_guidance(lexeme)}"
-        f"Return JSON only with this schema: {json.dumps(schema_hint)}"
+        f"{_variant_prompt_guidance(lexeme)}"
     )
 
 
@@ -349,9 +523,12 @@ def _validate_string_list_field(value: Any, *, field: str) -> list[str] | None:
 
     normalized: list[str] = []
     for index, item in enumerate(value):
-        if not isinstance(item, str) or not item.strip():
+        if not isinstance(item, str):
             raise _payload_error(f'{field}[{index}]', 'must be a non-empty string')
-        normalized.append(item.strip())
+        candidate = item.strip()
+        if not candidate:
+            continue
+        normalized.append(candidate)
     return normalized
 
 
@@ -559,7 +736,7 @@ def learner_meaning_cap(wordfreq_rank: int) -> int:
         return 6
     return 4
 
-def _word_enrichment_grounding_payload(*, senses: list[SenseRecord]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _word_enrichment_grounding_payload(*, senses: list[SenseRecord]) -> list[dict[str, Any]]:
     sense_rows = [
         {
             'sense_id': sense.sense_id,
@@ -571,75 +748,209 @@ def _word_enrichment_grounding_payload(*, senses: list[SenseRecord]) -> tuple[li
         }
         for sense in sorted(senses, key=lambda item: item.sense_order)
     ]
-    schema_hint = {
-        'senses': [
-            {
-                'sense_id': 'string',
-                'definition': 'string',
-                'examples': [{'sentence': 'string', 'difficulty': 'A1|A2|B1|B2|C1|C2'}],
-                'cefr_level': 'A1|A2|B1|B2|C1|C2',
-                'primary_domain': 'string',
-                'secondary_domains': ['string'],
-                'register': 'neutral|formal|informal',
-                'synonyms': ['string'],
-                'antonyms': ['string'],
-                'collocations': ['string'],
-                'grammar_patterns': ['string'],
-                'usage_note': 'string',
-                'forms': {
-                    'plural_forms': ['string'],
-                    'verb_forms': {'base': 'string', 'third_person_singular': 'string', 'past': 'string', 'past_participle': 'string', 'gerund': 'string'},
-                    'comparative': 'string|null',
-                    'superlative': 'string|null',
-                    'derivations': ['string'],
-                },
-                'confusable_words': [{'word': 'string', 'note': 'string'}],
-                'confidence': 'number',
-                'translations': {locale: {'definition': 'string', 'usage_note': 'string', 'examples': ['string']} for locale in _REQUIRED_TRANSLATION_LOCALES},
-            }
-        ]
-    }
-    return sense_rows, schema_hint
+    return sense_rows
 
 
-def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord]) -> str:
-    sense_rows, schema_hint = _word_enrichment_grounding_payload(senses=senses)
+def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], prompt_mode: str = "grounded") -> str:
+    sense_rows = _word_enrichment_grounding_payload(senses=senses)
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
+    if prompt_mode not in _WORD_PROMPT_MODES:
+        raise ValueError(f"Unsupported word prompt mode: {prompt_mode}")
+    allowed_sense_ids = [sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)]
+    grounding_block = (
+        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
+        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
+        if prompt_mode == "grounded"
+        else (
+            f"Allowed sense IDs for this word are: {json.dumps(allowed_sense_ids)}.\n"
+            "Do not invent new sense IDs. Reuse only sense_id values from the allowed list.\n"
+        )
+    )
     return (
+        f"Select at most {max_meanings} learner-friendly meanings. You may omit weak tail senses.\n"
+        f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
+        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
+        "Top-level output shape: {\"senses\": [...]}.\n"
+        "Each senses item must include sense_id, definition, examples, confidence, and translations.\n"
+        "The sense_id must exactly match one allowed sense ID, and confidence must be a numeric value between 0 and 1.\n"
+        f"For every selected sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+        "For each translation locale, include definition, usage_note, and examples.\n"
+        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        "Return only valid content for the required fields.\n"
+        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
         f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
         f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
         f"{_entity_category_prompt_guidance(lexeme)}"
         f"{_variant_prompt_guidance(lexeme)}"
-        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
-        f"Select at most {max_meanings} learner-friendly meanings. You may omit weak tail senses.\n"
-        f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
-        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
-        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
-        f"For every selected sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
-        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
-        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
-        f"Return JSON only with this schema: {json.dumps(schema_hint)}"
+        f"{grounding_block}"
     )
 
 
-def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], previous_error: str) -> str:
-    sense_rows, schema_hint = _word_enrichment_grounding_payload(senses=senses)
+def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], previous_error: str, prompt_mode: str = "grounded") -> str:
+    sense_rows = _word_enrichment_grounding_payload(senses=senses)
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
+    if prompt_mode not in _WORD_PROMPT_MODES:
+        raise ValueError(f"Unsupported word prompt mode: {prompt_mode}")
+    allowed_sense_ids = [sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)]
+    grounding_block = (
+        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
+        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
+        if prompt_mode == "grounded"
+        else (
+            f"Allowed sense IDs for this word are: {json.dumps(allowed_sense_ids)}.\n"
+            "Do not invent new sense IDs. Reuse only sense_id values from the allowed list.\n"
+        )
+    )
     return (
+        f"Select at most {max_meanings} learner-friendly meanings.\n"
+        f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
+        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
+        "Top-level output shape: {\"senses\": [...]}.\n"
+        "Each senses item must include sense_id, definition, examples, confidence, and translations.\n"
+        "The sense_id must exactly match one allowed sense ID, and confidence must be a numeric value between 0 and 1.\n"
+        f"Every selected sense must include these translation locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+        "For each translation locale, include definition, usage_note, and examples.\n"
+        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        "Return only valid content for the required fields.\n"
+        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
         f"Repair the previous learner-facing enrichment response for the English word '{lexeme.lemma}'.\n"
         f"The previous response was invalid: {previous_error}\n"
         f"{_entity_category_prompt_guidance(lexeme)}"
         f"{_variant_prompt_guidance(lexeme)}"
-        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
-        f"Select at most {max_meanings} learner-friendly meanings.\n"
-        f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
-        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
-        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
-        f"Every selected sense must include these translation locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
-        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
-        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
-        f"Return JSON only with this schema: {json.dumps(schema_hint)}"
+        f"{grounding_block}"
     )
+
+
+def _base_enrichment_item_schema() -> dict[str, Any]:
+    def nullable_schema(inner: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "anyOf": [
+                inner,
+                {"type": "null"},
+            ]
+        }
+
+    verb_forms_schema = {
+        "type": "object",
+        "properties": {
+            "base": {"type": "string"},
+            "third_person_singular": {"type": "string"},
+            "past": {"type": "string"},
+            "past_participle": {"type": "string"},
+            "gerund": {"type": "string"},
+        },
+        "required": [
+            "base",
+            "third_person_singular",
+            "past",
+            "past_participle",
+            "gerund",
+        ],
+        "additionalProperties": False,
+    }
+
+    example_schema = {
+        "type": "object",
+        "properties": {
+            "sentence": {"type": "string"},
+            "difficulty": {"type": "string", "enum": sorted(_ALLOWED_CEFR_LEVELS)},
+        },
+        "required": ["sentence", "difficulty"],
+        "additionalProperties": False,
+    }
+    translation_schema = {
+        "type": "object",
+        "properties": {
+            "definition": {"type": "string"},
+            "usage_note": {"type": "string"},
+            "examples": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["definition", "usage_note", "examples"],
+        "additionalProperties": False,
+    }
+    properties = {
+        "definition": {"type": "string"},
+        "examples": {"type": "array", "items": example_schema, "minItems": 1},
+        "cefr_level": nullable_schema({"type": "string", "enum": sorted(_ALLOWED_CEFR_LEVELS)}),
+        "primary_domain": nullable_schema({"type": "string"}),
+        "secondary_domains": nullable_schema({"type": "array", "items": {"type": "string"}}),
+        "register": nullable_schema({"type": "string", "enum": sorted(_ALLOWED_REGISTERS)}),
+        "synonyms": nullable_schema({"type": "array", "items": {"type": "string"}}),
+        "antonyms": nullable_schema({"type": "array", "items": {"type": "string"}}),
+        "collocations": nullable_schema({"type": "array", "items": {"type": "string"}}),
+        "grammar_patterns": nullable_schema({"type": "array", "items": {"type": "string"}}),
+        "usage_note": nullable_schema({"type": "string"}),
+        "forms": nullable_schema({
+            "type": "object",
+            "properties": {
+                "plural_forms": {"type": "array", "items": {"type": "string"}},
+                "verb_forms": verb_forms_schema,
+                "comparative": nullable_schema({"type": "string"}),
+                "superlative": nullable_schema({"type": "string"}),
+                "derivations": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["plural_forms", "verb_forms", "comparative", "superlative", "derivations"],
+            "additionalProperties": False,
+        }),
+        "confusable_words": nullable_schema({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "word": {"type": "string"},
+                    "note": {"type": "string"},
+                },
+                "required": ["word", "note"],
+                "additionalProperties": False,
+            },
+        }),
+        "confidence": {"type": "number"},
+        "translations": {
+            "type": "object",
+            "properties": {locale: translation_schema for locale in _REQUIRED_TRANSLATION_LOCALES},
+            "required": list(_REQUIRED_TRANSLATION_LOCALES),
+            "additionalProperties": False,
+        },
+    }
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties.keys()),
+        "additionalProperties": False,
+    }
+
+
+def _single_sense_response_schema() -> dict[str, Any]:
+    return {
+        "name": "lexicon_enrichment_single_sense",
+        "strict": True,
+        "schema": _base_enrichment_item_schema(),
+    }
+
+
+def _word_enrichment_response_schema() -> dict[str, Any]:
+    item_schema = dict(_base_enrichment_item_schema())
+    item_properties = dict(item_schema["properties"])
+    item_properties["sense_id"] = {"type": "string"}
+    item_required = ["sense_id", *list(item_properties.keys())[:-1]]
+    item_schema["properties"] = item_properties
+    item_schema["required"] = item_required
+    return {
+        "name": "lexicon_enrichment_word",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "senses": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": item_schema,
+                }
+            },
+            "required": ["senses"],
+            "additionalProperties": False,
+        },
+    }
 
 
 def _is_repairable_word_payload_error(error: RuntimeError) -> bool:
@@ -663,29 +974,51 @@ def _is_retryable_word_generation_error(error: RuntimeError) -> bool:
         'temporarily unavailable',
         'connection reset',
         'connection aborted',
+        'bad gateway',
+        'error code 502',
+        'error code 503',
+        'error code 504',
+        'cloudflare',
+        'status 429',
+        'status 502',
+        'status 503',
+        'status 504',
+        'rate limit',
+        'service unavailable',
+        'gateway timeout',
     )
     return any(marker in message for marker in retryable_markers)
 
 
-def _generate_validated_word_payload(
+def _transient_retry_backoff_seconds(retry_number: int) -> float:
+    return min(0.5 * (2 ** max(retry_number - 1, 0)), 5.0)
+
+
+def _generate_validated_word_payload_with_stats(
     *,
     client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
     lexeme: LexemeRecord,
     senses: list[SenseRecord],
-) -> list[dict[str, Any]]:
-    prompt = build_word_enrichment_prompt(lexeme=lexeme, senses=senses)
+    prompt_mode: str = "grounded",
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    prompt = build_word_enrichment_prompt(lexeme=lexeme, senses=senses, prompt_mode=prompt_mode)
+    response_schema = _word_enrichment_response_schema()
     last_error: RuntimeError | None = None
     repair_attempts = 0
     transient_retries = 0
 
     while True:
         try:
-            response = client.generate_json(prompt)
-            return _validate_openai_compatible_word_payload(response, lexeme=lexeme, senses=senses)
+            response = _client_generate_json(client, prompt, response_schema=response_schema)
+            return _validate_openai_compatible_word_payload(response, lexeme=lexeme, senses=senses), {
+                "repair_count": repair_attempts,
+                "retry_count": transient_retries,
+            }
         except RuntimeError as exc:
             last_error = exc
             if _is_retryable_word_generation_error(exc) and transient_retries < _DEFAULT_WORD_TRANSIENT_RETRIES:
                 transient_retries += 1
+                time.sleep(_transient_retry_backoff_seconds(transient_retries))
                 continue
             if not _is_repairable_word_payload_error(exc) or repair_attempts >= _DEFAULT_WORD_REPAIR_ATTEMPTS:
                 raise
@@ -695,7 +1028,24 @@ def _generate_validated_word_payload(
                 lexeme=lexeme,
                 senses=senses,
                 previous_error=str(last_error),
+                prompt_mode=prompt_mode,
             )
+
+
+def _generate_validated_word_payload(
+    *,
+    client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
+    lexeme: LexemeRecord,
+    senses: list[SenseRecord],
+    prompt_mode: str = "grounded",
+) -> list[dict[str, Any]]:
+    rows, _ = _generate_validated_word_payload_with_stats(
+        client=client,
+        lexeme=lexeme,
+        senses=senses,
+        prompt_mode=prompt_mode,
+    )
+    return rows
 
 
 def _build_enrichment_record(*, lexeme: LexemeRecord, sense: SenseRecord, response: dict[str, Any], model_name: str, prompt_version: str, generation_run_id: str, review_status: str, generated_at: str) -> EnrichmentRecord:
@@ -855,7 +1205,13 @@ def build_openai_compatible_node_enrichment_provider(
     )
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
-        response = _validate_openai_compatible_payload(client.generate_json(build_enrichment_prompt(lexeme=lexeme, sense=sense)))
+        response = _validate_openai_compatible_payload(
+            _client_generate_json(
+                client,
+                build_enrichment_prompt(lexeme=lexeme, sense=sense),
+                response_schema=_single_sense_response_schema(),
+            )
+        )
         return _build_enrichment_record(
             lexeme=lexeme,
             sense=sense,
@@ -944,7 +1300,13 @@ def build_openai_compatible_enrichment_provider(
     )
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
-        response = _validate_openai_compatible_payload(client.generate_json(build_enrichment_prompt(lexeme=lexeme, sense=sense)))
+        response = _validate_openai_compatible_payload(
+            _client_generate_json(
+                client,
+                build_enrichment_prompt(lexeme=lexeme, sense=sense),
+                response_schema=_single_sense_response_schema(),
+            )
+        )
         return _build_enrichment_record(
             lexeme=lexeme,
             sense=sense,

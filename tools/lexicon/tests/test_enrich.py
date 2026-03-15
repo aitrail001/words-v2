@@ -8,7 +8,12 @@ from pathlib import Path
 
 from tools.lexicon.config import LexiconSettings
 from tools.lexicon.enrich import (
+    NodeOpenAICompatibleResponsesClient,
     OpenAICompatibleResponsesClient,
+    _generate_validated_word_payload_with_stats,
+    _single_sense_response_schema,
+    _validate_string_list_field,
+    _word_enrichment_response_schema,
     build_enrichment_prompt,
     build_word_enrichment_prompt,
     build_enrichment_provider,
@@ -244,6 +249,126 @@ class EnrichSnapshotTests(unittest.TestCase):
         client.generate_json("hello")
 
         self.assertEqual(captured["payload"]["reasoning"], {"effort": "low"})
+
+    def test_node_openai_compatible_client_forwards_reasoning_none_and_json_schema(self) -> None:
+        captured = {}
+
+        def runner(payload):
+            captured.update(payload)
+            return {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps({"definition": "ok"}),
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        client = NodeOpenAICompatibleResponsesClient(
+            endpoint="https://example.test/v1",
+            api_key="secret-key",
+            model="gpt-test",
+            reasoning_effort="none",
+            runner=runner,
+        )
+
+        client.generate_json(
+            "hello",
+            response_schema={
+                "name": "test_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {"definition": {"type": "string"}},
+                    "required": ["definition"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        )
+
+        self.assertEqual(captured["reasoning_effort"], "none")
+        self.assertEqual(captured["response_schema"]["name"], "test_schema")
+        self.assertTrue(captured["response_schema"]["strict"])
+
+    def test_node_openai_compatible_client_falls_back_when_schema_request_hits_gateway_error(self) -> None:
+        payloads = []
+
+        def runner(payload):
+            payloads.append(dict(payload))
+            if payload.get("response_schema") is not None:
+                raise RuntimeError("502 Bad gateway")
+            return {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps({"definition": "ok"}),
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        client = NodeOpenAICompatibleResponsesClient(
+            endpoint="https://example.test/v1",
+            api_key="secret-key",
+            model="gpt-test",
+            runner=runner,
+        )
+
+        payload = client.generate_json(
+            "hello",
+            response_schema={
+                "name": "test_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {"definition": {"type": "string"}},
+                    "required": ["definition"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        )
+
+        self.assertEqual(payload["definition"], "ok")
+        self.assertEqual(len(payloads), 2)
+        self.assertIn("response_schema", payloads[0])
+        self.assertNotIn("response_schema", payloads[1])
+        self.assertEqual(client.response_schema_fallback_count, 1)
+
+    def test_word_enrichment_response_schema_uses_anyof_for_nullable_fields(self) -> None:
+        schema = _word_enrichment_response_schema()["schema"]
+        item_schema = schema["properties"]["senses"]["items"]
+        forms_schema = item_schema["properties"]["forms"]
+
+        self.assertEqual(set(item_schema["required"]), set(item_schema["properties"]))
+
+        single_schema = _single_sense_response_schema()["schema"]
+        self.assertEqual(set(single_schema["required"]), set(single_schema["properties"]))
+
+        self.assertIn("anyOf", forms_schema)
+        self.assertNotIn("type", forms_schema)
+
+        object_branch = next(branch for branch in forms_schema["anyOf"] if branch.get("type") == "object")
+        self.assertEqual(
+            object_branch["required"],
+            ["plural_forms", "verb_forms", "comparative", "superlative", "derivations"],
+        )
+        verb_forms = object_branch["properties"]["verb_forms"]
+        self.assertEqual(
+            verb_forms["required"],
+            ["base", "third_person_singular", "past", "past_participle", "gerund"],
+        )
+        self.assertFalse(verb_forms["additionalProperties"])
+        self.assertIn("anyOf", object_branch["properties"]["comparative"])
+        self.assertIn("anyOf", item_schema["properties"]["usage_note"])
 
     def test_real_provider_requires_endpoint_model_and_api_key(self) -> None:
         settings = LexiconSettings.from_env({"LEXICON_LLM_MODEL": "gpt-test"})
@@ -1019,6 +1144,42 @@ class EnrichPerWordModeTests(unittest.TestCase):
             self.assertIn("at most 8 learner-friendly meanings", prompt.lower())
             self.assertIn("do not invent new sense ids", prompt.lower())
             self.assertIn("you may omit weak tail senses", prompt.lower())
+
+    def test_build_word_enrichment_prompt_word_only_mode_omits_grounding_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=run_lexeme, senses=run_senses, prompt_mode="word_only")
+
+            self.assertNotIn("grounding context", prompt.lower())
+            self.assertIn("allowed sense ids for this word are:", prompt.lower())
+            self.assertIn("sn_lx_run_1", prompt.lower())
+            self.assertIn("sn_lx_run_2", prompt.lower())
+            self.assertIn("do not invent new sense ids", prompt.lower())
+            self.assertIn("english word 'run'", prompt.lower())
+            self.assertIn("return only valid content for the required fields", prompt.lower())
+            self.assertIn("at most 8 learner-friendly meanings", prompt.lower())
+            self.assertNotIn("return json only with this schema:", prompt.lower())
+
+    def test_build_word_enrichment_prompt_front_loads_stable_rules_before_word_specific_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+
+            prompt = build_word_enrichment_prompt(lexeme=run_lexeme, senses=run_senses, prompt_mode="word_only")
+            stable_index = prompt.lower().find("select at most")
+            dynamic_index = prompt.lower().find("english word 'run'")
+
+            self.assertNotEqual(stable_index, -1)
+            self.assertNotEqual(dynamic_index, -1)
+            self.assertLess(stable_index, dynamic_index)
 
     def test_enrich_snapshot_per_word_mode_writes_existing_enrichments_jsonl_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1861,3 +2022,118 @@ class EnrichPerWordModeTests(unittest.TestCase):
             sorted_times = sorted(start_times)
             self.assertGreaterEqual(sorted_times[1] - sorted_times[0], 0.045)
             self.assertGreaterEqual(sorted_times[2] - sorted_times[1], 0.045)
+
+
+class EnrichmentValidationHardeningTests(unittest.TestCase):
+    def _write_snapshot(self, snapshot_dir: Path) -> None:
+        EnrichPerWordModeTests()._write_snapshot(snapshot_dir)
+
+    def _word_payload(self, sense_id: str) -> dict[str, object]:
+        return {
+            "senses": [
+                {
+                    "sense_id": sense_id,
+                    "definition": "move quickly on foot",
+                    "examples": [{"sentence": "I run every day.", "difficulty": "A1"}],
+                    "cefr_level": "A1",
+                    "primary_domain": "general",
+                    "secondary_domains": [],
+                    "register": "neutral",
+                    "synonyms": [],
+                    "antonyms": [],
+                    "collocations": [],
+                    "grammar_patterns": [],
+                    "usage_note": "Common verb.",
+                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "confusable_words": [],
+                    "translations": _test_translations(definition="move quickly", usage_note="common verb"),
+                    "confidence": 0.9,
+                }
+            ]
+        }
+
+    def _build_lexeme_and_senses(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            return lexemes[0], senses
+
+    def test_validate_string_list_field_drops_blank_items(self) -> None:
+        self.assertEqual(
+            _validate_string_list_field([" opposite ", "", "   ", "reverse"], field="antonyms"),
+            ["opposite", "reverse"],
+        )
+
+    def test_generate_validated_word_payload_retries_after_validation_failure(self) -> None:
+        lexeme, senses = self._build_lexeme_and_senses()
+        sense_id = senses[0].sense_id
+        invalid_one = self._word_payload(sense_id)
+        invalid_one["senses"][0]["antonyms"] = [123]
+        invalid_two = self._word_payload(sense_id)
+        invalid_two["senses"][0]["synonyms"] = [None, "sprint"]
+        valid = self._word_payload(sense_id)
+
+        class StubClient:
+            def __init__(self, responses):
+                self._responses = list(responses)
+
+            def generate_json(self, prompt: str):
+                return self._responses.pop(0)
+
+        rows, stats = _generate_validated_word_payload_with_stats(
+            client=StubClient([invalid_one, invalid_two, valid]),
+            lexeme=lexeme,
+            senses=senses,
+            prompt_mode="word_only",
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sense_id"], sense_id)
+        self.assertGreaterEqual(int(stats["repair_count"]), 2)
+
+    def test_generate_validated_word_payload_still_fails_after_bounded_validation_retries(self) -> None:
+        lexeme, senses = self._build_lexeme_and_senses()
+        sense_id = senses[0].sense_id
+        invalid = self._word_payload(sense_id)
+        invalid["senses"][0]["antonyms"] = [123]
+
+        class StubClient:
+            def generate_json(self, prompt: str):
+                return invalid
+
+        with self.assertRaises(RuntimeError):
+            _generate_validated_word_payload_with_stats(
+                client=StubClient(),
+                lexeme=lexeme,
+                senses=senses,
+                prompt_mode="word_only",
+            )
+
+    def test_generate_validated_word_payload_retries_after_bad_gateway_failure(self) -> None:
+        lexeme, senses = self._build_lexeme_and_senses()
+        sense_id = senses[0].sense_id
+        valid = self._word_payload(sense_id)
+
+        class StubClient:
+            def __init__(self):
+                self.calls = 0
+
+            def generate_json(self, prompt: str):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("502 Bad gateway")
+                return valid
+
+        client = StubClient()
+        rows, stats = _generate_validated_word_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            senses=senses,
+            prompt_mode="word_only",
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sense_id"], sense_id)
+        self.assertEqual(client.calls, 2)
+        self.assertEqual(int(stats["retry_count"]), 1)
