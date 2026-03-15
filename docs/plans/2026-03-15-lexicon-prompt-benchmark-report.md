@@ -1,57 +1,67 @@
 # Lexicon Prompt Benchmark Report
 
-Date: 2026-03-15
+Date: 2026-03-16
 Owner: Codex
 
 ## Goal
 
-Compare live speed and output quality for the lexicon per-word enrichment path across:
+Compare live speed, completion stability, and learner-facing output quality for the lexicon per-word enrichment path across:
 
 - `gpt-5.1-chat`
 - `gpt-5.1`
-- `gpt-5.4`
+- `gpt-5-mini`
+- `gpt-5-nano`
 
 and across two prompt modes:
 
 - `word_only`
 - `grounded`
 
-## Important Scope Note
+This report supersedes the earlier partial benchmark notes from the same branch. The earlier small-set results were collected before the structured-output schema was hardened to the gateway's strict `text.format.schema` requirements. The final recommendation below is based on the completed fixed-schema `curated_100` matrix.
+
+## Scope
 
 This benchmark compares:
 
-- a bare word prompt with only allowed `sense_id` anchors, versus
-- the existing lexicon grounded prompt with selected WordNet sense context
+- a bare word prompt with only allowed `sense_id` anchors (`word_only`), versus
+- the production-style grounded prompt with selected WordNet sense context (`grounded`)
 
-It does **not** compare against a true "full WordNet candidate pool" prompt. The grounded mode here is the production-style selected-sense grounding path from `tools/lexicon/enrich.py`.
+It does not compare against a full WordNet candidate-pool prompt. The grounded mode here is the current selected-sense enrichment prompt from `tools/lexicon/enrich.py`.
 
-## Benchmark Setup
+## Final Setup
 
 - Transport: `openai_compatible_node`
-- Base URL: operator-provided custom gateway
-- Shared schema/validator: existing lexicon per-word JSON schema and `_validate_openai_compatible_word_payload()`
-- Prompt modes:
-  - `word_only`
-  - `grounded`
-- Small tracked live set: `["right", "break", "building", "kinshasa"]`
-  - mixed POS
-  - common polysemy
-  - distinct-derived variant entry
-  - named-entity entry
+- Node path: persistent worker process, not one subprocess per lexeme
+- Request mode: schema-first structured outputs with gateway fallback when needed
+- Reasoning effort: `none`
+- Dataset: `curated_100`
+- Output dir: `/tmp/lexicon-prompt-benchmark-20260315-curated100-schemafixed`
+- Shared validator: `_validate_openai_compatible_word_payload()`
 
-Artifacts:
+### Structured Output Hardening
 
-- `gpt-5.1-chat` small-set runs: `/tmp/lexicon-prompt-benchmark-20260315-small4`
-- `gpt-5.1` small-set runs: `/tmp/lexicon-prompt-benchmark-20260315-gpt51-small4`
-- partial larger-set `gpt-5.1-chat` runs: `/tmp/lexicon-prompt-benchmark-20260315`
+The upstream gateway enforced the same strict structured-output subset documented by OpenAI:
 
-### Tracked 100-word benchmark set
+- every object must use `additionalProperties: false`
+- every key listed in `properties` must also appear in `required`
+- optionality must be represented with `null`, not by omitting keys
+- open-ended nested objects such as free-form `additionalProperties` maps are not acceptable in strict schemas
 
-The repo now also carries a fixed `curated_100` dataset for broader repeatable benchmark work:
+The final fixed schema therefore:
+
+- uses `anyOf` for nullable fields
+- makes all declared per-sense keys required
+- uses a closed explicit `verb_forms` object schema
+
+After this hardening, raw schema-enforced probes against the real endpoint no longer failed with `invalid_json_schema`, and the full benchmark matrix completed.
+
+### Tracked 100-word Benchmark Set
+
+The repo carries a fixed `curated_100` dataset for repeatable benchmark work:
 
 - word list: `tools/lexicon/benchmarks/enrichment_prompt_words_100.json`
 - metadata: `tools/lexicon/benchmarks/enrichment_prompt_words_100.meta.json`
-- deterministic rubric support in: `tools/lexicon/enrichment_benchmark.py`
+- rubric support: `tools/lexicon/enrichment_benchmark.py`
 
 Category mix:
 
@@ -62,7 +72,7 @@ Category mix:
 - `entity`: `10`
 - `harder_tail`: `15`
 
-This set is validated in tests for exact size, uniqueness, and metadata alignment, and the benchmark summary now records both `category_counts` and a lightweight rubric summary for each run:
+Each run records:
 
 - `dropped_row_count`
 - `distinct_variant_rows`
@@ -71,174 +81,223 @@ This set is validated in tests for exact size, uniqueness, and metadata alignmen
 - `entity_specific_note_hits`
 - `suspicious_generated_forms`
 
-## Live Results
+## Final Matrix
 
-### Small 4-word set
-
-| Model | Prompt mode | Batch seconds | Avg lexeme seconds | Valid rows | Avg confidence | Avg definition chars | Avg usage-note chars |
+| Model | Prompt mode | Valid rows | Failed lexemes | Repairs | Avg / lexeme (s) | Batch (s) | Avg confidence |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `gpt-5.1-chat` | `word_only` | `98.914` | `24.728` | `17/17` | `0.938` | `71.7` | `120.8` |
-| `gpt-5.1-chat` | `grounded` | `75.489` | `18.872` | `15/17` | `0.916` | `80.2` | `120.7` |
-| `gpt-5.1` | `word_only` | `111.567` | `27.891` | `17/17` | `0.934` | `67.8` | `123.7` |
-| `gpt-5.1` | `grounded` | `79.133` | `19.783` | `15/17` | `0.909` | `74.9` | `143.2` |
-| `gpt-5.4` | `word_only` | `179.414` | `44.853` | `16/17` | `0.924` | `55.9` | `89.3` |
-| `gpt-5.4` | `grounded` | `177.370` | `44.342` | `15/17` | `0.873` | `62.3` | `120.8` |
+| `gpt-5.1-chat` | `word_only` | `397` | `0` | `5` | `22.890` | `2290.104` | `0.931` |
+| `gpt-5.1-chat` | `grounded` | `376` | `1` | `30` | `32.165` | `3352.663` | `0.922` |
+| `gpt-5.1` | `word_only` | `398` | `0` | `3` | `23.816` | `2382.779` | `0.931` |
+| `gpt-5.1` | `grounded` | `375` | `2` | `44` | `35.615` | `3822.496` | `0.920` |
+| `gpt-5-mini` | `word_only` | `397` | `0` | `7` | `24.499` | `2451.011` | `0.932` |
+| `gpt-5-mini` | `grounded` | `385` | `0` | `32` | `29.810` | `2982.069` | `0.919` |
+| `gpt-5-nano` | `word_only` | `399` | `0` | `4` | `21.965` | `2197.699` | `0.928` |
+| `gpt-5-nano` | `grounded` | `389` | `0` | `28` | `29.416` | `2942.746` | `0.920` |
 
-### Larger 8-word set
+### Rubric Summary
 
-The larger 8-word batch completed only for `gpt-5.1-chat` within the practical benchmark window:
+| Model | Prompt mode | Dropped rows | Distinct variant rows | Variant link hits | Entity rows | Entity-specific note hits | Suspicious forms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `gpt-5.1-chat` | `word_only` | `5` | `59` | `45` | `10` | `8` | `0` |
+| `gpt-5.1-chat` | `grounded` | `26` | `46` | `31` | `10` | `9` | `1` |
+| `gpt-5.1` | `word_only` | `4` | `60` | `38` | `10` | `9` | `0` |
+| `gpt-5.1` | `grounded` | `27` | `44` | `34` | `10` | `9` | `0` |
+| `gpt-5-mini` | `word_only` | `5` | `59` | `46` | `10` | `7` | `0` |
+| `gpt-5-mini` | `grounded` | `17` | `45` | `28` | `10` | `8` | `0` |
+| `gpt-5-nano` | `word_only` | `3` | `60` | `40` | `10` | `7` | `0` |
+| `gpt-5-nano` | `grounded` | `13` | `49` | `34` | `10` | `7` | `0` |
 
-| Model | Prompt mode | Batch seconds | Avg lexeme seconds | Valid rows | Avg confidence |
-|---|---:|---:|---:|---:|---:|
-| `gpt-5.1-chat` | `word_only` | `189.655` | `23.706` | `39/39` | `0.942` |
-| `gpt-5.1-chat` | `grounded` | `162.328` | `20.291` | `37/39` | `0.914` |
+## Key Findings
 
-Operational note:
+### 1. Schema hardening was the real unlock
 
-- the original 8-word `gpt-5.4` run failed at the default `60s` timeout
-- `gpt-5.4` required raising `LEXICON_LLM_TIMEOUT_SECONDS` to `180` even for the small-set completion
+Before the strict schema fix, the benchmark was dominated by:
 
-## What Changed With Grounding
+- upstream `invalid_json_schema` rejections
+- gateway `502` failures on malformed strict schemas
+- fallback-mode degradation that made results hard to interpret
 
-### Speed
+After aligning the schema with the documented structured-output subset, the matrix completed end-to-end. This confirms the old failures were primarily schema-contract problems, not an inherent limitation of the models.
 
-Contrary to the naive expectation that a shorter prompt should always be faster, the grounded prompt was faster than `word_only` for both `gpt-5.1-chat` and `gpt-5.1`.
+### 2. `word_only` beat `grounded` operationally across the board
 
-Observed on the 4-word set:
+Across all four models, `word_only` was:
 
-- `gpt-5.1-chat`: `75.5s grounded` vs `98.9s word_only`
-- `gpt-5.1`: `79.1s grounded` vs `111.6s word_only`
-- `gpt-5.4`: nearly flat, `177.4s grounded` vs `179.4s word_only`
+- faster
+- much less repair-heavy
+- equal or better on failed-lexeme count
+- equal or better on dropped-row count
 
-Interpretation:
+Grounded mode remained usable, but it never won on the overall speed/stability tradeoff in this matrix.
 
-- the grounding context appears to reduce search/disambiguation work for the smaller models
-- removing the semantic grounding did not buy latency in this setup
+### 3. `gpt-5-nano word_only` was the strongest operational default
 
-### Quality
+`gpt-5-nano word_only` delivered:
 
-`word_only` tends to preserve total valid row count slightly better, but that is not the whole quality story.
+- the fastest average latency: `21.965s` per lexeme
+- the highest valid-row total: `399`
+- zero failed lexemes
+- only `4` repairs
 
-The grounded prompt consistently gave better semantic steering on:
+That makes it the best pure throughput candidate for the eventual 30K run.
 
-- named-entity behavior like `kinshasa`
-- base-word linkage for derived entries like `building`
-- narrower domain targeting for harder senses
+### 4. `gpt-5.1 word_only` is the best conservative fallback
 
-Representative examples:
+`gpt-5.1 word_only` delivered:
 
-- `gpt-5.1 grounded` on `kinshasa` explicitly treated it as a proper noun and added location/travel guidance rather than a generic city gloss
-- `gpt-5.1 grounded` on `building` explicitly explained the relation to base word `build` while keeping the noun meaning separate
-- `gpt-5.4 grounded` did improve entity guidance, but it also produced a clear form-generation error for `building` (`buildinged` verb forms), which is a quality regression
+- `398` valid rows
+- zero failed lexemes
+- only `3` repairs
 
-## Model Comparison
+It is slower than `nano`, but still highly stable and slightly stronger than `gpt-5.1-chat` on dropped rows and repair count.
+
+### 5. Grounded mode remained semantically attractive in theory but not enough in practice
+
+The grounded runs still preserved entity coverage and variant handling, but they paid for it with:
+
+- far higher repair counts
+- slower per-lexeme latency
+- a small but real failure tail for `gpt-5.1-chat` and `gpt-5.1`
+
+Observed grounded failures:
+
+- `gpt-5.1-chat grounded`: failed lexeme `right`
+- `gpt-5.1 grounded`: failed lexemes `case`, `fine`
+
+Those were not infrastructure failures. They were output-selection failures such as duplicate `sense_id` returns.
+
+## Model-by-Model Analysis
 
 ### `gpt-5.1-chat`
 
-Strengths:
+`word_only` is strong and production-viable:
 
-- fastest completed model on both the 4-word and 8-word sets
-- stable and concise output
-- no repair loops in grounded mode
-- operationally viable for batch work
+- `397` valid rows
+- zero failed lexemes
+- `5` repairs
+- `22.890s` per lexeme
 
-Weaknesses:
+`grounded` is clearly weaker operationally:
 
-- grounded mode dropped some selected rows (`15/17` on the 4-word set, `37/39` on the 8-word set)
-- quality is solid, but not obviously better than `gpt-5.1` on the harder entity/variant notes
+- `376` valid rows
+- one failed lexeme
+- `30` repairs
+- `32.165s` per lexeme
+
+Conclusion: if using `gpt-5.1-chat`, use `word_only`.
 
 ### `gpt-5.1`
 
-Strengths:
+`word_only` is strong and slightly more conservative than `gpt-5.1-chat`:
 
-- slower than `gpt-5.1-chat`, as expected, but still far faster than `gpt-5.4`
-- grounded mode produced the strongest overall balance on this benchmark:
-  - good entity handling
-  - good variant-aware explanations
-  - practical batch latency
+- `398` valid rows
+- zero failed lexemes
+- `3` repairs
+- `23.816s` per lexeme
 
-Weaknesses:
+`grounded` is the weakest finished case in the matrix:
 
-- `word_only` needed one repair cycle
-- still dropped to `15/17` valid rows in grounded mode
+- `375` valid rows
+- two failed lexemes
+- `44` repairs
+- `35.615s` per lexeme
 
-### `gpt-5.4`
+Conclusion: if using `gpt-5.1`, use `word_only`.
 
-Strengths:
+### `gpt-5-mini`
 
-- can produce concise outputs
-- grounded mode still gave good named-entity framing on `kinshasa`
+`word_only` completed cleanly:
 
-Weaknesses:
+- `397` valid rows
+- zero failed lexemes
+- `7` repairs
+- `24.499s` per lexeme
 
-- clearly the slowest model on this gateway
-- default timeout was not sufficient for the larger batch
-- grounded quality was not clearly superior to `gpt-5.1`
-- produced at least one concrete form-quality regression (`buildinged`)
+`grounded` also completed cleanly, but at much higher repair cost:
+
+- `385` valid rows
+- zero failed lexemes
+- `32` repairs
+- `29.810s` per lexeme
+
+Conclusion: usable, but not the best winner in either speed or repair burden.
+
+### `gpt-5-nano`
+
+`word_only` was the operational winner:
+
+- `399` valid rows
+- zero failed lexemes
+- `4` repairs
+- `21.965s` per lexeme
+
+`grounded` also completed cleanly:
+
+- `389` valid rows
+- zero failed lexemes
+- `28` repairs
+- `29.416s` per lexeme
+
+Conclusion: best throughput candidate for 30K, but still prefer `word_only`.
 
 ## Recommendation
 
-### Best practical default
+### Best default for the 30K enrichment run
 
-Use `gpt-5.1` with the grounded prompt.
-
-Reason:
-
-- faster than `gpt-5.4` by a large margin
-- slower than `gpt-5.1-chat`, but still practical
-- better qualitative steering than `word_only`
-- better overall quality/speed tradeoff than `gpt-5.4` on this gateway
-
-### Best throughput fallback
-
-Use `gpt-5.1-chat` with the grounded prompt.
+Use `gpt-5-nano` with `word_only`.
 
 Reason:
 
-- fastest completed grounded mode
-- grounding improved speed instead of hurting it
-- keeps the entity/variant steering that `word_only` loses
+- fastest completed configuration
+- zero failed lexemes
+- best valid-row total
+- low repair burden
 
-### Do not prefer `word_only`
+### Best conservative fallback
 
-For this lexicon workflow, `word_only` is not currently attractive as the default benchmark winner:
+Use `gpt-5.1` with `word_only`.
 
-- it was slower than grounded for `gpt-5.1-chat` and `gpt-5.1`
-- it reduces semantic steering for entities and derived variants
-- it only wins narrowly on raw valid-row count, not on the overall learner-facing output quality
+Reason:
 
-### Do not choose `gpt-5.4` as the operational default here
+- zero failed lexemes
+- lowest repair count among the large non-nano models
+- near-top valid-row total
 
-On this gateway and prompt path:
+### Do not use grounded mode as the rollout default
 
-- it is much slower
-- it needed a higher timeout
-- it did not show enough quality gain to justify the runtime penalty
+Reason:
 
-## 100-word matrix status
+- consistently slower
+- consistently more repair-heavy
+- slightly lower row retention
+- real failure tail on `gpt-5.1-chat` and `gpt-5.1`
 
-The full live `curated_100` matrix across `3 models x 2 prompt modes` is now operationally defined, but it was not executed end-to-end in this change set because the measured small-set latencies make it a multi-hour run on this gateway rather than a quick benchmark.
+Grounded mode may still be worth revisiting for narrow follow-up quality slices, but it is not the best operational default for the 30K run on this gateway.
 
-Using the observed small-set `Avg lexeme seconds` as the planning baseline:
+## 30K Rollout Implications
 
-- `gpt-5.1-chat grounded` projects to about `31.5 minutes` per 100-word run
-- `gpt-5.1 grounded` projects to about `33.0 minutes` per 100-word run
-- `gpt-5.4 grounded` projects to about `73.9 minutes` per 100-word run
-- the full six-run matrix projects to roughly `3.2` to `7.5` hours wall-clock, depending on model mix and retry behavior
+The current benchmark outcome suggests the 30K run should be launched with:
 
-That is why this slice focused on:
+- persistent Node transport
+- the fixed strict schema
+- schema-first requests
+- fallback behavior retained as a safety valve
+- `word_only` prompt mode
+- `gpt-5-nano` as the primary model
 
-- making the benchmark harness reproducible
-- committing the fixed 100-word dataset and metadata
-- adding deterministic rubric summaries for broader live runs
-- re-verifying the lexicon suite after the prompt-mode and benchmark changes
+The benchmark harness changes also proved the right operational shape for 30K:
 
-The current recommendation still rests on the completed live 4-word and 8-word runs plus the now-verified larger benchmark harness.
+- incremental `.rows.jsonl` writes
+- `.progress.json` checkpoints
+- `.failures.jsonl` sidecars
+- continue-after-terminal-failure case handling instead of aborting the whole run
+
+That means the remaining risk is no longer "will the infrastructure survive the run?" It is now mostly "which model/prompt combination gives the best cost-quality tradeoff?" The answer from this matrix is `gpt-5-nano word_only`.
 
 ## Verification
 
+- `/Users/johnson/AI/src/words-v2/.venv-lexicon/bin/python -m pytest tools/lexicon/tests/test_enrich.py -q`
 - `/Users/johnson/AI/src/words-v2/.venv-lexicon/bin/python -m pytest tools/lexicon/tests -q`
-- `/Users/johnson/AI/src/words-v2/.venv-lexicon/bin/python -m pytest tools/lexicon/tests/test_cli.py tools/lexicon/tests/test_enrich.py tools/lexicon/tests/test_enrichment_benchmark.py -q`
-- live benchmark commands:
-  - `/Users/johnson/AI/src/words-v2/.venv-lexicon/bin/python -m tools.lexicon.cli benchmark-enrichment --output-dir /tmp/lexicon-prompt-benchmark-20260315-small4 --dataset /tmp/lexicon-prompt-benchmark-small4.json --provider-mode openai_compatible_node --prompt-mode word_only --prompt-mode grounded --model gpt-5.1-chat --model gpt-5.4`
-  - `/Users/johnson/AI/src/words-v2/.venv-lexicon/bin/python -m tools.lexicon.cli benchmark-enrichment --output-dir /tmp/lexicon-prompt-benchmark-20260315-gpt51-small4 --dataset /tmp/lexicon-prompt-benchmark-small4.json --provider-mode openai_compatible_node --prompt-mode word_only --prompt-mode grounded --model gpt-5.1`
+- live matrix artifact:
+  - `/tmp/lexicon-prompt-benchmark-20260315-curated100-schemafixed/summary.json`
+

@@ -333,6 +333,39 @@ class CliTests(unittest.TestCase):
             self.assertEqual(mocked_enrich.call_args.kwargs["model_name"], "gpt-5.4")
             self.assertEqual(mocked_enrich.call_args.kwargs["reasoning_effort"], "low")
 
+    def test_benchmark_enrichment_command_accepts_reasoning_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "benchmarks"
+            fake_result = type(
+                "FakeBenchmarkResult",
+                (),
+                {
+                    "summary_path": output_dir / "summary.json",
+                    "payload": {
+                        "output_dir": str(output_dir),
+                        "dataset": "default",
+                        "prompt_modes": ["word_only"],
+                        "models": ["gpt-5.1"],
+                        "runs": [],
+                    },
+                },
+            )()
+            with patch("tools.lexicon.cli.run_enrichment_benchmark", return_value=fake_result) as mocked_benchmark:
+                code, _, _ = self.run_cli(
+                    [
+                        "benchmark-enrichment",
+                        "--output-dir",
+                        str(output_dir),
+                        "--model",
+                        "gpt-5.1",
+                        "--reasoning-effort",
+                        "none",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(mocked_benchmark.call_args.kwargs["reasoning_effort"], "none")
+
     def test_openai_compatible_smoke_command_reports_validation_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "smoke"

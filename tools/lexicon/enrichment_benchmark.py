@@ -16,6 +16,7 @@ from tools.lexicon.enrich import (
     _build_enrichment_record,
     _generate_validated_word_payload_with_stats,
 )
+from tools.lexicon.jsonl_io import append_jsonl
 from tools.lexicon.wordfreq_provider import build_wordfreq_rank_provider
 from tools.lexicon.wordnet_provider import build_wordnet_sense_provider
 
@@ -37,6 +38,19 @@ class EnrichmentBenchmarkResult:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _load_case_progress(progress_path: Path) -> dict[str, Any]:
+    if not progress_path.exists():
+        return {}
+    payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _write_case_progress(progress_path: Path, payload: dict[str, Any]) -> None:
+    progress_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def _resolve_benchmark_path(dataset: str | Path) -> tuple[str, Path]:
@@ -147,6 +161,10 @@ def _default_case_runner(
     lexemes,
     senses,
     output_path: Path,
+    checkpoint_path: Path | None = None,
+    rows_output_path: Path | None = None,
+    failures_output_path: Path | None = None,
+    completed_lexemes: list[str] | None = None,
     provider_mode: str,
     model_name: str,
     prompt_mode: str,
@@ -180,31 +198,73 @@ def _default_case_runner(
     for sense in senses:
         senses_by_lexeme.setdefault(sense.lexeme_id, []).append(sense)
 
-    rows: list[dict[str, Any]] = []
-    latencies: list[float] = []
-    definition_lengths: list[int] = []
-    usage_note_lengths: list[int] = []
-    confidences: list[float] = []
-    cefr_distribution: dict[str, int] = {}
-    repair_count = 0
-    retry_count = 0
+    progress_path = checkpoint_path or output_path.with_suffix(".progress.json")
+    rows_path = rows_output_path or output_path.with_suffix(".rows.jsonl")
+    failures_path = failures_output_path or output_path.with_suffix(".failures.jsonl")
+    progress = _load_case_progress(progress_path)
+    completed_lemma_set = set(completed_lexemes or progress.get("completed_lexemes") or [])
+    failed_lemma_set = set(progress.get("failed_lexemes") or [])
+    rows: list[dict[str, Any]] = list(progress.get("rows") or [])
+    failure_rows: list[dict[str, Any]] = list(progress.get("failure_rows") or [])
+    latencies: list[float] = [float(item) for item in list(progress.get("latencies") or [])]
+    definition_lengths: list[int] = [int(item) for item in list(progress.get("definition_lengths") or [])]
+    usage_note_lengths: list[int] = [int(item) for item in list(progress.get("usage_note_lengths") or [])]
+    confidences: list[float] = [float(item) for item in list(progress.get("confidences") or [])]
+    cefr_distribution: dict[str, int] = {
+        str(key): int(value) for key, value in dict(progress.get("cefr_distribution") or {}).items()
+    }
+    repair_count = int(progress.get("repair_count") or 0)
+    retry_count = int(progress.get("retry_count") or 0)
     batch_started_at = perf_counter()
 
     for lexeme in lexemes:
+        if lexeme.lemma in completed_lemma_set or lexeme.lemma in failed_lemma_set:
+            continue
         ordered_senses = sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
         started_at = perf_counter()
-        response_rows, stats = _generate_validated_word_payload_with_stats(
-            client=client,
-            lexeme=lexeme,
-            senses=ordered_senses,
-            prompt_mode=prompt_mode,
-        )
+        try:
+            response_rows, stats = _generate_validated_word_payload_with_stats(
+                client=client,
+                lexeme=lexeme,
+                senses=ordered_senses,
+                prompt_mode=prompt_mode,
+            )
+        except RuntimeError as exc:
+            failure_payload = {
+                "lemma": lexeme.lemma,
+                "lexeme_id": lexeme.lexeme_id,
+                "model_name": model_name,
+                "prompt_mode": prompt_mode,
+                "error": str(exc),
+                "failed_at": _utc_now(),
+            }
+            append_jsonl(failures_path, [failure_payload])
+            failure_rows.append(failure_payload)
+            failed_lemma_set.add(lexeme.lemma)
+            _write_case_progress(
+                progress_path,
+                {
+                    "completed_lexemes": sorted(completed_lemma_set),
+                    "failed_lexemes": sorted(failed_lemma_set),
+                    "rows": rows,
+                    "failure_rows": failure_rows,
+                    "latencies": latencies,
+                    "definition_lengths": definition_lengths,
+                    "usage_note_lengths": usage_note_lengths,
+                    "confidences": confidences,
+                    "cefr_distribution": cefr_distribution,
+                    "repair_count": repair_count,
+                    "retry_count": retry_count,
+                },
+            )
+            continue
         elapsed = perf_counter() - started_at
         latencies.append(elapsed)
         repair_count += int(stats.get("repair_count") or 0)
         retry_count += int(stats.get("retry_count") or 0)
 
         sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
+        new_rows: list[dict[str, Any]] = []
         for response_row in response_rows:
             sense = sense_by_id[response_row["sense_id"]]
             record = _build_enrichment_record(
@@ -221,7 +281,28 @@ def _default_case_runner(
             usage_note_lengths.append(len(record.usage_note))
             confidences.append(record.confidence)
             cefr_distribution[record.cefr_level] = cefr_distribution.get(record.cefr_level, 0) + 1
-            rows.append(record.to_dict())
+            row_payload = record.to_dict()
+            rows.append(row_payload)
+            new_rows.append(row_payload)
+        if new_rows:
+            append_jsonl(rows_path, new_rows)
+        completed_lemma_set.add(lexeme.lemma)
+        _write_case_progress(
+            progress_path,
+            {
+                "completed_lexemes": sorted(completed_lemma_set),
+                "failed_lexemes": sorted(failed_lemma_set),
+                "rows": rows,
+                "failure_rows": failure_rows,
+                "latencies": latencies,
+                "definition_lengths": definition_lengths,
+                "usage_note_lengths": usage_note_lengths,
+                "confidences": confidences,
+                "cefr_distribution": cefr_distribution,
+                "repair_count": repair_count,
+                "retry_count": retry_count,
+            },
+        )
 
     batch_duration = perf_counter() - batch_started_at
     payload = {
@@ -230,14 +311,18 @@ def _default_case_runner(
         "lexeme_count": len(lexemes),
         "selected_sense_count": sum(len(senses_by_lexeme.get(lexeme.lexeme_id, [])) for lexeme in lexemes),
         "valid_response_count": len(rows),
+        "failed_lexeme_count": len(failed_lemma_set),
         "repair_count": repair_count,
         "retry_count": retry_count,
+        "response_schema_fallback_count": int(getattr(client, "response_schema_fallback_count", 0) or 0),
         "batch_duration_seconds": round(batch_duration, 3),
         "average_latency_seconds": round(statistics.mean(latencies), 3) if latencies else 0.0,
         "average_confidence": round(statistics.mean(confidences), 3) if confidences else 0.0,
         "average_definition_chars": round(statistics.mean(definition_lengths), 1) if definition_lengths else 0.0,
         "average_usage_note_chars": round(statistics.mean(usage_note_lengths), 1) if usage_note_lengths else 0.0,
         "cefr_distribution": dict(sorted(cefr_distribution.items())),
+        "failed_lexemes": sorted(failed_lemma_set),
+        "failure_rows": failure_rows,
         "rows": rows,
     }
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -283,10 +368,18 @@ def run_enrichment_benchmark(
     for model_name in resolved_models:
         for prompt_mode in resolved_prompt_modes:
             case_output = output_dir / f"{model_name}.{prompt_mode}.json"
+            checkpoint_path = case_output.with_suffix(".progress.json")
+            rows_output_path = case_output.with_suffix(".rows.jsonl")
+            failures_output_path = case_output.with_suffix(".failures.jsonl")
+            progress = _load_case_progress(checkpoint_path)
             case_payload = effective_run_case(
                 lexemes=base_result.lexemes,
                 senses=base_result.senses,
                 output_path=case_output,
+                checkpoint_path=checkpoint_path,
+                rows_output_path=rows_output_path,
+                failures_output_path=failures_output_path,
+                completed_lexemes=list(progress.get("completed_lexemes") or []),
                 provider_mode=provider_mode,
                 model_name=model_name,
                 prompt_mode=prompt_mode,
