@@ -250,6 +250,135 @@ class BuildBaseTests(unittest.TestCase):
         self.assertEqual(result.lexemes[0].variant_base_form, "meet")
         self.assertEqual(result.lexemes[0].variant_relationship, "lexicalized_form")
 
+    def test_build_base_records_marks_explicit_distinct_derived_variants_in_lexeme_rows(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "building": 120,
+                "build": 40,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "building":
+                return [
+                    {
+                        "wn_synset_id": "building.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "a structure with walls and a roof",
+                        "canonical_label": "building",
+                    }
+                ]
+            if word == "build":
+                return [
+                    {
+                        "wn_synset_id": "build.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to make by putting parts together",
+                        "canonical_label": "build",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["building"],
+            snapshot_id="lexicon-20260314-wordnet-wordfreq",
+            created_at="2026-03-14T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["building"])
+        self.assertTrue(result.lexemes[0].is_variant_with_distinct_meanings)
+        self.assertEqual(result.lexemes[0].variant_base_form, "build")
+        self.assertEqual(result.lexemes[0].variant_relationship, "distinct_derived_form")
+        self.assertEqual(result.lexemes[0].variant_source, "dataset")
+        self.assertEqual(
+            result.lexemes[0].variant_prompt_note,
+            "Focus on the standalone noun meanings, not the ordinary act of build.",
+        )
+
+    def test_build_base_records_inferrs_distinct_derived_variants_when_not_explicitly_listed(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "rewarding": 800,
+                "reward": 300,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "rewarding":
+                return [
+                    {
+                        "wn_synset_id": "rewarding.s.01",
+                        "part_of_speech": "adjective",
+                        "canonical_gloss": "providing satisfaction or value",
+                        "canonical_label": "rewarding",
+                    }
+                ]
+            if word == "reward":
+                return [
+                    {
+                        "wn_synset_id": "reward.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to give something in return for good action",
+                        "canonical_label": "reward",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["rewarding"],
+            snapshot_id="lexicon-20260314-wordnet-wordfreq",
+            created_at="2026-03-14T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["rewarding"])
+        self.assertTrue(result.lexemes[0].is_variant_with_distinct_meanings)
+        self.assertEqual(result.lexemes[0].variant_base_form, "reward")
+        self.assertEqual(result.lexemes[0].variant_relationship, "distinct_derived_form")
+        self.assertEqual(result.lexemes[0].variant_source, "inferred")
+
+    def test_build_base_records_does_not_infer_distinct_variant_for_plain_ing_form(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "running": 200,
+                "run": 30,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            if word == "running":
+                return [
+                    {
+                        "wn_synset_id": "run.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to move fast by using your legs",
+                        "canonical_label": "run",
+                    }
+                ]
+            if word == "run":
+                return [
+                    {
+                        "wn_synset_id": "run.v.01",
+                        "part_of_speech": "verb",
+                        "canonical_gloss": "to move fast by using your legs",
+                        "canonical_label": "run",
+                    }
+                ]
+            return []
+
+        result = build_base_records(
+            words=["running"],
+            snapshot_id="lexicon-20260314-wordnet-wordfreq",
+            created_at="2026-03-14T00:00:00Z",
+            rank_provider=rank_provider,
+            sense_provider=sense_provider,
+        )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["running"])
+        self.assertFalse(result.lexemes[0].is_variant_with_distinct_meanings)
+        self.assertIsNone(result.lexemes[0].variant_base_form)
+        self.assertIsNone(result.lexemes[0].variant_source)
+
     def test_build_base_records_applies_entity_categories_from_dataset(self) -> None:
         def rank_provider(word: str) -> int:
             return {"kinshasa": 39386}[word]

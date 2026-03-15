@@ -37,6 +37,8 @@ class LexemeRecord(SerializableRecord):
     is_variant_with_distinct_meanings: bool = False
     variant_base_form: str | None = None
     variant_relationship: str | None = None
+    variant_prompt_note: str | None = None
+    variant_source: str | None = None
     entity_category: str = "general"
 
     def __post_init__(self) -> None:

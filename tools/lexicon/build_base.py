@@ -16,7 +16,7 @@ from tools.lexicon.models import (
     LexemeRecord,
     SenseRecord,
 )
-from tools.lexicon.policy_data import resolve_entity_category
+from tools.lexicon.policy_data import resolve_distinct_variant_entry, resolve_entity_category
 from tools.lexicon.wordfreq_utils import InventoryProvider, normalize_word_candidate, resolve_frequency_rank
 from tools.lexicon.wordnet_utils import fallback_sense, select_learner_senses
 
@@ -38,6 +38,88 @@ def _dedupe_selected_senses(senses: list[dict[str, object]]) -> list[dict[str, o
         seen.add(key)
         deduped.append(sense)
     return deduped
+
+
+def _sense_pos_set(senses: list[dict[str, object]]) -> set[str]:
+    return {
+        str(sense.get("part_of_speech") or "").strip().lower()
+        for sense in senses
+        if str(sense.get("part_of_speech") or "").strip()
+    }
+
+
+def _derived_base_candidates(word: str) -> list[str]:
+    candidates: list[str] = []
+    if len(word) > 4 and word.endswith("ing"):
+        stem = normalize_word_candidate(word[:-3])
+        if stem:
+            candidates.append(stem)
+        stem_e = normalize_word_candidate(f"{word[:-3]}e")
+        if stem_e:
+            candidates.append(stem_e)
+    if len(word) > 3 and word.endswith("ed"):
+        stem = normalize_word_candidate(word[:-2])
+        if stem:
+            candidates.append(stem)
+        stem_e = normalize_word_candidate(f"{word[:-2]}e")
+        if stem_e:
+            candidates.append(stem_e)
+    if len(word) > 3 and word.endswith("er"):
+        stem = normalize_word_candidate(word[:-2])
+        if stem:
+            candidates.append(stem)
+    if len(word) > 4 and word.endswith("est"):
+        stem = normalize_word_candidate(word[:-3])
+        if stem:
+            candidates.append(stem)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate == word or candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
+def _infer_distinct_variant_metadata(
+    *,
+    word: str,
+    get_senses: CanonicalSenseProvider,
+) -> dict[str, str] | None:
+    surface_senses = list(get_senses(word))
+    surface_pos = _sense_pos_set(surface_senses)
+    if not (surface_pos & {"noun", "adjective", "adverb"}):
+        return None
+
+    for candidate in _derived_base_candidates(word):
+        base_senses = list(get_senses(candidate))
+        if not base_senses:
+            continue
+        base_pos = _sense_pos_set(base_senses)
+
+        if word.endswith("ing"):
+            if not (("verb" in base_pos) and (surface_pos & {"noun", "adjective"})):
+                continue
+        elif word.endswith("ed"):
+            if not (("verb" in base_pos) and ("adjective" in surface_pos)):
+                continue
+        elif word.endswith("er") or word.endswith("est"):
+            if not ((surface_pos & {"adjective", "adverb"}) and (base_pos & {"adjective", "adverb"})):
+                continue
+        else:
+            continue
+
+        return {
+            "base_word": candidate,
+            "relationship": "distinct_derived_form",
+            "reason": "bounded_suffix_inference",
+            "prompt_note": f"Focus on the standalone meanings of '{word}', not the ordinary base-word meanings of '{candidate}'.",
+            "source": "inferred",
+        }
+
+    return None
 
 
 @dataclass(frozen=True)
@@ -237,6 +319,34 @@ def build_base_records(
                 }
             )
 
+        variant_metadata = resolve_distinct_variant_entry(word)
+        if variant_metadata is not None:
+            variant_metadata["source"] = "dataset"
+        elif linked_base_by_canonical.get(word) is not None:
+            variant_metadata = {
+                "base_word": linked_base_by_canonical[word],
+                "relationship": "lexicalized_form",
+                "reason": "canonicalization_linked_variant",
+                "prompt_note": "",
+                "source": "canonicalization",
+            }
+        else:
+            variant_metadata = _infer_distinct_variant_metadata(
+                word=word,
+                get_senses=get_senses,
+            )
+
+        if variant_metadata is not None:
+            source_provenance.append(
+                {
+                    "source": "distinct_variant_entries" if variant_metadata["source"] == "dataset" else variant_metadata["source"],
+                    "role": "distinct_variant",
+                    "base_word": variant_metadata["base_word"],
+                    "relationship": variant_metadata["relationship"],
+                    "reason": variant_metadata["reason"],
+                }
+            )
+
         lexeme_records.append(
             LexemeRecord(
                 snapshot_id=snapshot_id,
@@ -248,9 +358,11 @@ def build_base_records(
                 source_refs=['wordnet', 'wordfreq'] if is_wordnet_backed else ['wordfreq'],
                 created_at=created_at,
                 source_provenance=source_provenance,
-                is_variant_with_distinct_meanings=linked_base_by_canonical.get(word) is not None,
-                variant_base_form=linked_base_by_canonical.get(word),
-                variant_relationship='lexicalized_form' if linked_base_by_canonical.get(word) is not None else None,
+                is_variant_with_distinct_meanings=variant_metadata is not None,
+                variant_base_form=(variant_metadata or {}).get("base_word"),
+                variant_relationship=(variant_metadata or {}).get("relationship"),
+                variant_prompt_note=((variant_metadata or {}).get("prompt_note") or None),
+                variant_source=(variant_metadata or {}).get("source"),
                 entity_category=entity_category,
             )
         )

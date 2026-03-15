@@ -31,7 +31,34 @@ class ModelSerializationTests(unittest.TestCase):
         self.assertTrue(payload["is_variant_with_distinct_meanings"])
         self.assertEqual(payload["variant_base_form"], "run-base")
         self.assertEqual(payload["variant_relationship"], "lexicalized_form")
+        self.assertIsNone(payload["variant_prompt_note"])
+        self.assertIsNone(payload["variant_source"])
         self.assertEqual(payload["entity_category"], "place")
+
+    def test_lexeme_record_round_trips_distinct_variant_prompt_metadata(self) -> None:
+        record = LexemeRecord(
+            snapshot_id="lexicon-20260314-wordnet-wordfreq",
+            lexeme_id="lx_building",
+            lemma="building",
+            language="en",
+            wordfreq_rank=120,
+            is_wordnet_backed=True,
+            source_refs=["wordnet", "wordfreq"],
+            created_at="2026-03-14T00:00:00Z",
+            is_variant_with_distinct_meanings=True,
+            variant_base_form="build",
+            variant_relationship="distinct_derived_form",
+            variant_prompt_note="Focus on the standalone noun meanings.",
+            variant_source="dataset",
+        )
+
+        payload = record.to_dict()
+        reloaded = LexemeRecord(**payload)
+
+        self.assertEqual(reloaded.variant_base_form, "build")
+        self.assertEqual(reloaded.variant_relationship, "distinct_derived_form")
+        self.assertEqual(reloaded.variant_prompt_note, "Focus on the standalone noun meanings.")
+        self.assertEqual(reloaded.variant_source, "dataset")
 
     def test_compiled_word_record_supports_full_learner_jsonl_shape(self) -> None:
         record = CompiledWordRecord(

@@ -1,0 +1,20 @@
+{
+  "building": {
+    "base_word": "build",
+    "relationship": "distinct_derived_form",
+    "reason": "standalone_noun_entry",
+    "prompt_note": "Focus on the standalone noun meanings, not the ordinary act of build."
+  },
+  "ceiling": {
+    "base_word": "ceil",
+    "relationship": "distinct_derived_form",
+    "reason": "standalone_noun_entry",
+    "prompt_note": "Focus on the noun meanings such as an upper interior surface or limit, not the ordinary act of ceil."
+  },
+  "charming": {
+    "base_word": "charm",
+    "relationship": "distinct_derived_form",
+    "reason": "standalone_adjective_entry",
+    "prompt_note": "Focus on the adjective meanings like attractive or delightful, not the ordinary act of charm."
+  }
+}
