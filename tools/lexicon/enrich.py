@@ -18,12 +18,11 @@ from urllib import error, request
 
 from tools.lexicon.config import LexiconSettings
 from tools.lexicon.errors import LexiconDependencyError
-from tools.lexicon.ids import make_enrichment_id
+from tools.lexicon.ids import make_enrichment_id, make_sense_id
 from tools.lexicon.jsonl_io import append_jsonl, read_jsonl, write_jsonl
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 
 EnrichmentProvider = Callable[..., EnrichmentRecord]
-WordEnrichmentProvider = Callable[..., list[EnrichmentRecord]]
 Transport = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
 NodeRunner = Callable[[dict[str, Any]], dict[str, Any]]
 _PROVIDER_MODES = {"auto", "placeholder", "openai_compatible", "openai_compatible_node"}
@@ -37,6 +36,8 @@ _DEFAULT_LLM_TIMEOUT_SECONDS = 60
 _DEFAULT_WORD_TRANSIENT_RETRIES = 5
 _DEFAULT_WORD_REPAIR_ATTEMPTS = 4
 _NODE_RUN_TIMEOUT_SECONDS = _DEFAULT_LLM_TIMEOUT_SECONDS
+_WORD_DECISIONS = {"discard", "keep_standard", "keep_derived_special"}
+_WORD_SENSE_KINDS = {"standard_meaning", "base_form_reference", "special_meaning"}
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,26 @@ class EnrichmentRunResult:
     enrichments: list[EnrichmentRecord]
     lexeme_count: int = 0
     mode: str = "per_sense"
+
+
+@dataclass(frozen=True)
+class WordJobOutcome:
+    records: list[EnrichmentRecord]
+    decision: str
+    base_word: str | None = None
+    discard_reason: str | None = None
+
+    def __iter__(self):
+        return iter(self.records)
+
+    def __len__(self) -> int:
+        return len(self.records)
+
+    def __bool__(self) -> bool:
+        return bool(self.records)
+
+
+WordEnrichmentProvider = Callable[..., WordJobOutcome | list[EnrichmentRecord]]
 
 
 class OpenAICompatibleResponsesClient:
@@ -730,6 +751,10 @@ def learner_meaning_cap(wordfreq_rank: int) -> int:
     rank = int(wordfreq_rank or 0)
     if rank <= 0:
         return 4
+    if rank <= 250:
+        return 5
+    if rank <= 1000:
+        return 6
     if rank <= 5000:
         return 8
     if rank <= 10000:
@@ -752,72 +777,58 @@ def _word_enrichment_grounding_payload(*, senses: list[SenseRecord]) -> list[dic
 
 
 def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], prompt_mode: str = "grounded") -> str:
-    sense_rows = _word_enrichment_grounding_payload(senses=senses)
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
     if prompt_mode not in _WORD_PROMPT_MODES:
         raise ValueError(f"Unsupported word prompt mode: {prompt_mode}")
-    allowed_sense_ids = [sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)]
-    grounding_block = (
-        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
-        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
-        if prompt_mode == "grounded"
-        else (
-            f"Allowed sense IDs for this word are: {json.dumps(allowed_sense_ids)}.\n"
-            "Do not invent new sense IDs. Reuse only sense_id values from the allowed list.\n"
+    guidance_lines = [
+        f"Select at most {max_meanings} learner-friendly meanings in total.",
+        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.",
+        "For very common grammar or function words, merge closely related micro-uses into broader learner-facing senses.",
+        "Do not split tiny contextual variants into separate senses when one broader sense can cover them clearly.",
+        "Return only valid content for the required fields.",
+        f"Decide whether the English word '{lexeme.lemma}' should be discarded or kept as a learner entry.",
+        f"Word frequency rank: {lexeme.wordfreq_rank}.",
+        f"Valid decisions are exactly: {', '.join(sorted(_WORD_DECISIONS))}.",
+        "Use 'discard' when the surface word is not a useful standalone learner entry or is only an ordinary inflectional form with no special meaning of its own.",
+        "Do not discard common closed-class grammar words such as pronouns, determiners, and possessives just because they are morphologically related to another word.",
+        "Plain auxiliary verb inflections such as is, are, and has should still be discarded unless they have a truly separate lexicalized meaning of their own.",
+        "Plain contractions such as \"it's\" or \"i'm\" should be discarded unless they have a truly separate lexicalized meaning of their own.",
+        "Use 'keep_standard' when the word should be kept as a normal standalone learner entry.",
+        "Use 'keep_derived_special' when the word is related to a base word but has lexicalized or otherwise special meanings worth teaching separately.",
+        "If a word is primarily an inflected or derived form of another word and is kept only because of a smaller subset of special, shifted, or lexicalized uses, prefer keep_derived_special over keep_standard.",
+        "Do not return internal meaning IDs. Internal IDs are assigned by the tool after validation.",
+        "Each kept sense must include part_of_speech and sense_kind.",
+        "Allowed sense_kind values are: standard_meaning, base_form_reference, special_meaning.",
+        "For 'keep_standard', use only standard_meaning senses and leave base_word null.",
+        "For 'keep_derived_special', set base_word to the related base word, include exactly one brief base_form_reference sense, and focus the remaining senses on special_meaning entries rather than ordinary base-word meanings.",
+        "For 'discard', return an empty senses array and a short discard_reason.",
+        f"For every kept sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.",
+        "For each translation locale, include definition, usage_note, and examples.",
+        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.",
+        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.",
+        _entity_category_prompt_guidance(lexeme).strip(),
+        _variant_prompt_guidance(lexeme).strip(),
+    ]
+    if prompt_mode == "grounded" and senses:
+        guidance_lines.append(
+            f"Optional grounding context only, not a hard schema contract: {json.dumps(_word_enrichment_grounding_payload(senses=senses))}."
         )
-    )
     return (
-        f"Select at most {max_meanings} learner-friendly meanings. You may omit weak tail senses.\n"
         f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
-        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
-        "Top-level output shape: {\"senses\": [...]}.\n"
-        "Each senses item must include sense_id, definition, examples, confidence, and translations.\n"
-        "The sense_id must exactly match one allowed sense ID, and confidence must be a numeric value between 0 and 1.\n"
-        f"For every selected sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
-        "For each translation locale, include definition, usage_note, and examples.\n"
-        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
-        "Return only valid content for the required fields.\n"
-        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
-        f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
-        f"Word frequency rank: {lexeme.wordfreq_rank}.\n"
-        f"{_entity_category_prompt_guidance(lexeme)}"
-        f"{_variant_prompt_guidance(lexeme)}"
-        f"{grounding_block}"
+        + "\n".join(line for line in guidance_lines if line)
+        + "\n"
     )
 
 
 def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], previous_error: str, prompt_mode: str = "grounded") -> str:
-    sense_rows = _word_enrichment_grounding_payload(senses=senses)
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
     if prompt_mode not in _WORD_PROMPT_MODES:
         raise ValueError(f"Unsupported word prompt mode: {prompt_mode}")
-    allowed_sense_ids = [sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)]
-    grounding_block = (
-        f"Use these WordNet-grounded candidate senses as grounding context only: {json.dumps(sense_rows)}\n"
-        "Do not invent new sense IDs. Reuse only sense_id values from the provided grounding context.\n"
-        if prompt_mode == "grounded"
-        else (
-            f"Allowed sense IDs for this word are: {json.dumps(allowed_sense_ids)}.\n"
-            "Do not invent new sense IDs. Reuse only sense_id values from the allowed list.\n"
-        )
-    )
     return (
-        f"Select at most {max_meanings} learner-friendly meanings.\n"
-        f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
-        f"If more than {max_meanings} candidates seem useful, keep only the strongest {max_meanings}.\n"
-        "Top-level output shape: {\"senses\": [...]}.\n"
-        "Each senses item must include sense_id, definition, examples, confidence, and translations.\n"
-        "The sense_id must exactly match one allowed sense ID, and confidence must be a numeric value between 0 and 1.\n"
-        f"Every selected sense must include these translation locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
-        "For each translation locale, include definition, usage_note, and examples.\n"
-        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
-        "Return only valid content for the required fields.\n"
-        "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
         f"Repair the previous learner-facing enrichment response for the English word '{lexeme.lemma}'.\n"
         f"The previous response was invalid: {previous_error}\n"
-        f"{_entity_category_prompt_guidance(lexeme)}"
-        f"{_variant_prompt_guidance(lexeme)}"
-        f"{grounding_block}"
+        f"The repaired response is invalid if the senses array contains more than {max_meanings} items.\n"
+        + build_word_enrichment_prompt(lexeme=lexeme, senses=senses, prompt_mode=prompt_mode)
     )
 
 
@@ -931,8 +942,9 @@ def _single_sense_response_schema() -> dict[str, Any]:
 def _word_enrichment_response_schema() -> dict[str, Any]:
     item_schema = dict(_base_enrichment_item_schema())
     item_properties = dict(item_schema["properties"])
-    item_properties["sense_id"] = {"type": "string"}
-    item_required = ["sense_id", *list(item_properties.keys())[:-1]]
+    item_properties["part_of_speech"] = {"type": "string"}
+    item_properties["sense_kind"] = {"type": "string", "enum": sorted(_WORD_SENSE_KINDS)}
+    item_required = ["part_of_speech", "sense_kind", *list(item_schema["properties"].keys())]
     item_schema["properties"] = item_properties
     item_schema["required"] = item_required
     return {
@@ -941,13 +953,16 @@ def _word_enrichment_response_schema() -> dict[str, Any]:
         "schema": {
             "type": "object",
             "properties": {
+                "decision": {"type": "string", "enum": sorted(_WORD_DECISIONS)},
+                "discard_reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "base_word": {"anyOf": [{"type": "string"}, {"type": "null"}]},
                 "senses": {
                     "type": "array",
-                    "minItems": 1,
+                    "minItems": 0,
                     "items": item_schema,
                 }
             },
-            "required": ["senses"],
+            "required": ["decision", "discard_reason", "base_word", "senses"],
             "additionalProperties": False,
         },
     }
@@ -1000,7 +1015,7 @@ def _generate_validated_word_payload_with_stats(
     lexeme: LexemeRecord,
     senses: list[SenseRecord],
     prompt_mode: str = "grounded",
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+) -> tuple[dict[str, Any], dict[str, int]]:
     prompt = build_word_enrichment_prompt(lexeme=lexeme, senses=senses, prompt_mode=prompt_mode)
     response_schema = _word_enrichment_response_schema()
     last_error: RuntimeError | None = None
@@ -1038,7 +1053,7 @@ def _generate_validated_word_payload(
     lexeme: LexemeRecord,
     senses: list[SenseRecord],
     prompt_mode: str = "grounded",
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     rows, _ = _generate_validated_word_payload_with_stats(
         client=client,
         lexeme=lexeme,
@@ -1073,15 +1088,114 @@ def _build_enrichment_record(*, lexeme: LexemeRecord, sense: SenseRecord, respon
         confidence=response['confidence'],
         review_status=review_status,
         generated_at=generated_at,
+        lexeme_id=lexeme.lexeme_id,
+        sense_order=sense.sense_order,
+        part_of_speech=sense.part_of_speech,
     )
 
 
-def _validate_openai_compatible_word_payload(response: dict[str, Any], *, lexeme: LexemeRecord, senses: list[SenseRecord]) -> list[dict[str, Any]]:
+def _build_word_enrichment_records(
+    *,
+    lexeme: LexemeRecord,
+    response: dict[str, Any],
+    model_name: str,
+    prompt_version: str,
+    generation_run_id: str,
+    review_status: str,
+    generated_at: str,
+) -> list[EnrichmentRecord]:
+    decision = str(response["decision"])
+    base_word_value = response.get("base_word")
+    base_word = str(base_word_value).strip() if isinstance(base_word_value, str) and base_word_value.strip() else None
+    records: list[EnrichmentRecord] = []
+    for index, row in enumerate(response.get("senses") or [], start=1):
+        sense_id = make_sense_id(lexeme.lexeme_id, index)
+        part_of_speech = str(row.get("part_of_speech") or "").strip() or "noun"
+        records.append(
+            EnrichmentRecord(
+                snapshot_id=lexeme.snapshot_id,
+                enrichment_id=make_enrichment_id(sense_id, prompt_version),
+                sense_id=sense_id,
+                definition=row["definition"],
+                examples=row["examples"],
+                cefr_level=row.get("cefr_level") or "B1",
+                primary_domain=str(row.get("primary_domain") or "general"),
+                secondary_domains=row.get("secondary_domains") or [],
+                register=row.get("register") or "neutral",
+                synonyms=row.get("synonyms") or [],
+                antonyms=row.get("antonyms") or [],
+                collocations=row.get("collocations") or [],
+                grammar_patterns=row.get("grammar_patterns") or [],
+                usage_note=str(row.get("usage_note") or f"Auto-generated learner note for {lexeme.lemma}."),
+                forms=row.get("forms") or _default_forms(lexeme.lemma, part_of_speech),
+                confusable_words=row.get("confusable_words") or [],
+                translations=row.get("translations") or {},
+                model_name=str(model_name),
+                prompt_version=prompt_version,
+                generation_run_id=generation_run_id,
+                confidence=row["confidence"],
+                review_status=review_status,
+                generated_at=generated_at,
+                lexeme_id=lexeme.lexeme_id,
+                sense_order=index,
+                part_of_speech=part_of_speech,
+                sense_kind=str(row.get("sense_kind") or "standard_meaning"),
+                decision=decision,
+                base_word=base_word,
+            )
+        )
+    return records
+
+
+def _build_word_job_outcome(
+    *,
+    lexeme: LexemeRecord,
+    response: dict[str, Any],
+    model_name: str,
+    prompt_version: str,
+    generation_run_id: str,
+    review_status: str,
+    generated_at: str,
+) -> WordJobOutcome:
+    decision = str(response["decision"])
+    base_word_value = response.get("base_word")
+    base_word = str(base_word_value).strip() if isinstance(base_word_value, str) and base_word_value.strip() else None
+    discard_reason_value = response.get("discard_reason")
+    discard_reason = (
+        str(discard_reason_value).strip()
+        if isinstance(discard_reason_value, str) and discard_reason_value.strip()
+        else None
+    )
+    records = _build_word_enrichment_records(
+        lexeme=lexeme,
+        response=response,
+        model_name=model_name,
+        prompt_version=prompt_version,
+        generation_run_id=generation_run_id,
+        review_status=review_status,
+        generated_at=generated_at,
+    )
+    return WordJobOutcome(
+        records=records,
+        decision=decision,
+        base_word=base_word,
+        discard_reason=discard_reason,
+    )
+
+
+def _validate_openai_compatible_word_payload(response: dict[str, Any], *, lexeme: LexemeRecord, senses: list[SenseRecord]) -> dict[str, Any]:
     if not isinstance(response, dict):
         raise RuntimeError('OpenAI-compatible endpoint returned a non-object word enrichment payload')
     value = response.get('senses')
-    if not isinstance(value, list) or not value:
-        raise RuntimeError("OpenAI-compatible word enrichment payload field 'senses' must be a non-empty list")
+    if not isinstance(value, list):
+        raise RuntimeError("OpenAI-compatible word enrichment payload field 'senses' must be a list")
+    decision_value = response.get('decision')
+    if decision_value is None and value:
+        decision = 'keep_standard'
+    else:
+        decision = _require_non_empty_string(decision_value, field='decision')
+        if decision not in _WORD_DECISIONS:
+            raise RuntimeError(f"OpenAI-compatible word enrichment payload returned unsupported decision '{decision}'")
 
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
     if len(value) > max_meanings:
@@ -1089,23 +1203,71 @@ def _validate_openai_compatible_word_payload(response: dict[str, Any], *, lexeme
             f"OpenAI-compatible word enrichment payload must select at most {max_meanings} learner-friendly meanings for frequency rank {lexeme.wordfreq_rank}"
         )
 
-    expected_set = {sense.sense_id for sense in sorted(senses, key=lambda item: item.sense_order)}
+    discard_reason_value = response.get('discard_reason')
+    if discard_reason_value is None:
+        discard_reason = None
+    elif isinstance(discard_reason_value, str):
+        discard_reason = discard_reason_value.strip() or None
+    else:
+        raise RuntimeError("OpenAI-compatible word enrichment payload field 'discard_reason' must be a string or null")
+
+    base_word_value = response.get('base_word')
+    if base_word_value is None:
+        base_word = None
+    elif isinstance(base_word_value, str) and base_word_value.strip():
+        base_word = base_word_value.strip()
+    else:
+        raise RuntimeError("OpenAI-compatible word enrichment payload field 'base_word' must be a non-empty string or null")
+
     normalized_rows: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    source_senses_by_id = {sense.sense_id: sense for sense in senses}
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise RuntimeError(f"OpenAI-compatible word enrichment payload field 'senses[{index}]' must be an object")
-        sense_id = _require_non_empty_string(item.get('sense_id'), field=f'senses[{index}].sense_id')
-        if sense_id not in expected_set:
-            raise RuntimeError(f"OpenAI-compatible word enrichment payload returned unknown sense_id '{sense_id}'")
-        if sense_id in seen_ids:
-            raise RuntimeError(f"OpenAI-compatible word enrichment payload returned duplicate sense_id '{sense_id}'")
-        seen_ids.add(sense_id)
         normalized = _validate_openai_compatible_payload(item)
-        normalized['sense_id'] = sense_id
+        legacy_sense_id = item.get('sense_id')
+        source_sense = source_senses_by_id.get(str(legacy_sense_id or '').strip())
+        if isinstance(legacy_sense_id, str) and legacy_sense_id.strip():
+            normalized['sense_id'] = legacy_sense_id.strip()
+        part_of_speech_value = item.get('part_of_speech')
+        if part_of_speech_value is None and source_sense is not None:
+            part_of_speech_value = source_sense.part_of_speech
+        normalized['part_of_speech'] = _require_non_empty_string(part_of_speech_value, field=f'senses[{index}].part_of_speech')
+        sense_kind_value = item.get('sense_kind') or 'standard_meaning'
+        normalized['sense_kind'] = _require_non_empty_string(sense_kind_value, field=f'senses[{index}].sense_kind')
+        if normalized['sense_kind'] not in _WORD_SENSE_KINDS:
+            raise RuntimeError(
+                f"OpenAI-compatible word enrichment payload field 'senses[{index}].sense_kind' must be one of {sorted(_WORD_SENSE_KINDS)}"
+            )
         normalized_rows.append(normalized)
 
-    return normalized_rows
+    if decision == 'discard':
+        if normalized_rows:
+            raise RuntimeError("OpenAI-compatible word enrichment payload for decision 'discard' must use an empty senses array")
+        if not discard_reason:
+            raise RuntimeError("OpenAI-compatible word enrichment payload for decision 'discard' must include discard_reason")
+    elif not normalized_rows:
+        raise RuntimeError(f"OpenAI-compatible word enrichment payload for decision '{decision}' must include at least one sense")
+
+    if decision == 'keep_standard':
+        if base_word is not None:
+            raise RuntimeError("OpenAI-compatible word enrichment payload for decision 'keep_standard' must leave base_word null")
+        if any(row['sense_kind'] != 'standard_meaning' for row in normalized_rows):
+            raise RuntimeError("OpenAI-compatible word enrichment payload for decision 'keep_standard' may use only standard_meaning senses")
+    elif decision == 'keep_derived_special':
+        if not base_word:
+            raise RuntimeError("OpenAI-compatible word enrichment payload for decision 'keep_derived_special' must include base_word")
+        if sum(1 for row in normalized_rows if row['sense_kind'] == 'base_form_reference') != 1:
+            raise RuntimeError("OpenAI-compatible word enrichment payload for decision 'keep_derived_special' must include exactly one base_form_reference sense")
+        if not any(row['sense_kind'] == 'special_meaning' for row in normalized_rows):
+            raise RuntimeError("OpenAI-compatible word enrichment payload for decision 'keep_derived_special' must include at least one special_meaning sense")
+
+    return {
+        'decision': decision,
+        'discard_reason': discard_reason,
+        'base_word': base_word,
+        'senses': normalized_rows,
+    }
 
 
 def build_placeholder_enrichment_provider(
@@ -1254,21 +1416,16 @@ def build_openai_compatible_node_word_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
         ordered_senses = sorted(senses, key=lambda item: item.sense_order)
-        response = _generate_validated_word_payload(client=client, lexeme=lexeme, senses=ordered_senses)
-        sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
-        return [
-            _build_enrichment_record(
-                lexeme=lexeme,
-                sense=sense_by_id[row['sense_id']],
-                response=row,
-                model_name=str(effective_model_name),
-                prompt_version=prompt_version,
-                generation_run_id=generation_run_id,
-                review_status=review_status,
-                generated_at=generated_at,
-            )
-            for row in response
-        ]
+        response = _generate_validated_word_payload(client=client, lexeme=lexeme, senses=ordered_senses, prompt_mode="word_only")
+        return _build_word_job_outcome(
+            lexeme=lexeme,
+            response=response,
+            model_name=str(effective_model_name),
+            prompt_version=prompt_version,
+            generation_run_id=generation_run_id,
+            review_status=review_status,
+            generated_at=generated_at,
+        )
 
     return provider
 
@@ -1349,21 +1506,16 @@ def build_openai_compatible_word_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
         ordered_senses = sorted(senses, key=lambda item: item.sense_order)
-        response = _generate_validated_word_payload(client=client, lexeme=lexeme, senses=ordered_senses)
-        sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
-        return [
-            _build_enrichment_record(
-                lexeme=lexeme,
-                sense=sense_by_id[row['sense_id']],
-                response=row,
-                model_name=str(effective_model_name),
-                prompt_version=prompt_version,
-                generation_run_id=generation_run_id,
-                review_status=review_status,
-                generated_at=generated_at,
-            )
-            for row in response
-        ]
+        response = _generate_validated_word_payload(client=client, lexeme=lexeme, senses=ordered_senses, prompt_mode="word_only")
+        return _build_word_job_outcome(
+            lexeme=lexeme,
+            response=response,
+            model_name=str(effective_model_name),
+            prompt_version=prompt_version,
+            generation_run_id=generation_run_id,
+            review_status=review_status,
+            generated_at=generated_at,
+        )
 
     return provider
 
@@ -1492,6 +1644,34 @@ def _load_existing_enrichments(output_path: Path) -> list[EnrichmentRecord]:
     return [EnrichmentRecord(**row) for row in read_jsonl(output_path)]
 
 
+def _reconcile_decisions_output(
+    decisions_path: Path,
+    *,
+    completed_lexeme_ids: set[str],
+) -> None:
+    if not decisions_path.exists():
+        return
+    reconciled_rows = [
+        row for row in read_jsonl(decisions_path)
+        if str(row.get('lexeme_id') or '') in completed_lexeme_ids
+    ]
+    write_jsonl(decisions_path, reconciled_rows)
+
+
+def _coerce_word_job_outcome(result: WordJobOutcome | list[EnrichmentRecord]) -> WordJobOutcome:
+    if isinstance(result, WordJobOutcome):
+        return result
+    records = list(result)
+    decision = records[0].decision if records else 'discard'
+    base_word = records[0].base_word if records else None
+    return WordJobOutcome(
+        records=records,
+        decision=decision,
+        base_word=base_word,
+        discard_reason=None,
+    )
+
+
 def _reconcile_resumable_output(
     output_path: Path,
     *,
@@ -1524,16 +1704,25 @@ def _reconcile_failures_output(
 
 def _append_completed_lexeme_records(
     output_path: Path,
+    decisions_path: Path,
     checkpoint_path: Path,
     failures_path: Path,
     *,
     lexeme: LexemeRecord,
-    records: list[EnrichmentRecord],
+    outcome: WordJobOutcome,
     generation_run_id: str,
     completed_lexeme_ids: set[str],
 ) -> None:
-    append_jsonl(output_path, [record.to_dict() for record in records])
     completed_at = _utc_now()
+    if outcome.records:
+        append_jsonl(output_path, [record.to_dict() for record in outcome.records])
+    _write_per_word_decision(
+        decisions_path,
+        lexeme=lexeme,
+        generation_run_id=generation_run_id,
+        completed_at=completed_at,
+        outcome=outcome,
+    )
     _write_per_word_checkpoint(
         checkpoint_path,
         lexeme=lexeme,
@@ -1542,6 +1731,27 @@ def _append_completed_lexeme_records(
     )
     completed_lexeme_ids.add(lexeme.lexeme_id)
     _reconcile_failures_output(failures_path, completed_lexeme_ids=completed_lexeme_ids)
+
+
+def _write_per_word_decision(
+    decisions_path: Path,
+    *,
+    lexeme: LexemeRecord,
+    generation_run_id: str,
+    completed_at: str,
+    outcome: WordJobOutcome,
+) -> None:
+    append_jsonl(decisions_path, [{
+        'lexeme_id': lexeme.lexeme_id,
+        'lemma': lexeme.lemma,
+        'status': 'completed',
+        'generation_run_id': generation_run_id,
+        'completed_at': completed_at,
+        'decision': outcome.decision,
+        'base_word': outcome.base_word,
+        'discard_reason': outcome.discard_reason,
+        'accepted_sense_count': len(outcome.records),
+    }])
 
 
 def _write_per_word_checkpoint(checkpoint_path: Path, *, lexeme: LexemeRecord, generation_run_id: str, completed_at: str) -> None:
@@ -1587,6 +1797,7 @@ def enrich_snapshot(
     failures_output: Path | None = None,
     max_failures: int | None = None,
     request_delay_seconds: float = 0.0,
+    max_new_completed_lexemes: int | None = None,
 ) -> list[EnrichmentRecord]:
     if mode not in _ENRICHMENT_MODES:
         raise ValueError(f'Unsupported enrichment mode: {mode}')
@@ -1632,7 +1843,13 @@ def enrich_snapshot(
     effective_request_delay_seconds = max(0.0, float(request_delay_seconds or 0.0))
     checkpoint_destination = checkpoint_path or snapshot_dir / 'enrich.checkpoint.jsonl'
     failures_destination = failures_output or snapshot_dir / 'enrich.failures.jsonl'
+    decisions_destination = snapshot_dir / 'enrich.decisions.jsonl'
     effective_max_failures = None if max_failures is None else max(1, int(max_failures))
+    effective_max_new_completed_lexemes = (
+        None
+        if max_new_completed_lexemes is None
+        else max(1, int(max_new_completed_lexemes))
+    )
     word_enrichment_provider = word_provider or build_word_enrichment_provider(
         settings=effective_settings,
         provider_mode=provider_mode,
@@ -1641,13 +1858,14 @@ def enrich_snapshot(
         review_status=review_status,
         transport=transport,
     )
-    ordered_lexemes = sorted(lexemes, key=lambda item: item.lemma)
+    ordered_lexemes = sorted(lexemes, key=lambda item: (item.wordfreq_rank, item.lemma))
     ordered_sense_lists = {
         lexeme.lexeme_id: sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
         for lexeme in ordered_lexemes
     }
     lexeme_id_by_sense_id = {sense.sense_id: sense.lexeme_id for sense in senses}
     completed_lexeme_ids = _load_completed_lexeme_ids(checkpoint_destination) if resume else set()
+    completed_count_before_run = len(completed_lexeme_ids)
     if resume:
         _reconcile_resumable_output(
             destination,
@@ -1658,13 +1876,19 @@ def enrich_snapshot(
             failures_destination,
             completed_lexeme_ids=completed_lexeme_ids,
         )
+        _reconcile_decisions_output(
+            decisions_destination,
+            completed_lexeme_ids=completed_lexeme_ids,
+        )
     pending_lexemes = [lexeme for lexeme in ordered_lexemes if lexeme.lexeme_id not in completed_lexeme_ids]
     if not resume:
         write_jsonl(destination, [])
         write_jsonl(checkpoint_destination, [])
         write_jsonl(failures_destination, [])
+        write_jsonl(decisions_destination, [])
+        completed_count_before_run = 0
 
-    completed_results: dict[str, list[EnrichmentRecord]] = {}
+    completed_results: dict[str, WordJobOutcome] = {}
     failures: list[str] = []
     next_flush_index = 0
     while next_flush_index < len(ordered_lexemes) and ordered_lexemes[next_flush_index].lexeme_id in completed_lexeme_ids:
@@ -1672,10 +1896,20 @@ def enrich_snapshot(
     request_start_lock = Lock()
     last_request_started_at = [0.0]
 
-    def run_word_job(lexeme: LexemeRecord) -> list[EnrichmentRecord]:
+    def reached_completion_cap() -> bool:
+        if effective_max_new_completed_lexemes is None:
+            return False
+        return (len(completed_lexeme_ids) - completed_count_before_run) >= effective_max_new_completed_lexemes
+
+    def submission_capacity_remaining(future_map_size: int) -> bool:
+        if effective_max_new_completed_lexemes is None:
+            return True
+        in_progress_or_buffered = len(completed_results) + future_map_size
+        completed_this_run = len(completed_lexeme_ids) - completed_count_before_run
+        return (completed_this_run + in_progress_or_buffered) < effective_max_new_completed_lexemes
+
+    def run_word_job(lexeme: LexemeRecord) -> WordJobOutcome:
         word_senses = ordered_sense_lists.get(lexeme.lexeme_id, [])
-        if not word_senses:
-            return []
         if effective_request_delay_seconds > 0:
             with request_start_lock:
                 now = time.monotonic()
@@ -1684,13 +1918,15 @@ def enrich_snapshot(
                     time.sleep(wait_for)
                     now = time.monotonic()
                 last_request_started_at[0] = now
-        return word_enrichment_provider(
-            lexeme=lexeme,
-            senses=word_senses,
-            settings=effective_settings,
-            generated_at=effective_generated_at,
-            generation_run_id=effective_generation_run_id,
-            prompt_version=prompt_version,
+        return _coerce_word_job_outcome(
+            word_enrichment_provider(
+                lexeme=lexeme,
+                senses=word_senses,
+                settings=effective_settings,
+                generated_at=effective_generated_at,
+                generation_run_id=effective_generation_run_id,
+                prompt_version=prompt_version,
+            )
         )
 
     def flush_completed() -> None:
@@ -1700,15 +1936,16 @@ def enrich_snapshot(
             if lexeme.lexeme_id in completed_lexeme_ids:
                 next_flush_index += 1
                 continue
-            records = completed_results.get(lexeme.lexeme_id)
-            if records is None:
+            outcome = completed_results.get(lexeme.lexeme_id)
+            if outcome is None:
                 break
             _append_completed_lexeme_records(
                 destination,
+                decisions_destination,
                 checkpoint_destination,
                 failures_destination,
                 lexeme=lexeme,
-                records=records,
+                outcome=outcome,
                 generation_run_id=effective_generation_run_id,
                 completed_lexeme_ids=completed_lexeme_ids,
             )
@@ -1719,15 +1956,16 @@ def enrich_snapshot(
         for lexeme in ordered_lexemes:
             if lexeme.lexeme_id in completed_lexeme_ids:
                 continue
-            records = completed_results.get(lexeme.lexeme_id)
-            if records is None:
+            outcome = completed_results.get(lexeme.lexeme_id)
+            if outcome is None:
                 continue
             _append_completed_lexeme_records(
                 destination,
+                decisions_destination,
                 checkpoint_destination,
                 failures_destination,
                 lexeme=lexeme,
-                records=records,
+                outcome=outcome,
                 generation_run_id=effective_generation_run_id,
                 completed_lexeme_ids=completed_lexeme_ids,
             )
@@ -1746,9 +1984,13 @@ def enrich_snapshot(
 
     if effective_max_concurrency == 1:
         for lexeme in pending_lexemes:
+            if reached_completion_cap():
+                break
             try:
                 completed_results[lexeme.lexeme_id] = run_word_job(lexeme)
                 flush_completed()
+                if reached_completion_cap():
+                    break
             except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
                 handle_failure(lexeme, exc)
                 if effective_max_failures is not None and len(failures) >= effective_max_failures:
@@ -1759,6 +2001,8 @@ def enrich_snapshot(
             future_map: dict[Any, LexemeRecord] = {}
 
             def submit_next() -> bool:
+                if not submission_capacity_remaining(len(future_map)):
+                    return False
                 try:
                     lexeme = next(pending_iter)
                 except StopIteration:
@@ -1776,6 +2020,8 @@ def enrich_snapshot(
                 try:
                     completed_results[lexeme.lexeme_id] = future.result()
                     flush_completed()
+                    if reached_completion_cap():
+                        stop_submitting = True
                 except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
                     handle_failure(lexeme, exc)
                     if effective_max_failures is not None and len(failures) >= effective_max_failures:
@@ -1817,6 +2063,7 @@ def run_enrichment(
     failures_output: Path | None = None,
     max_failures: int | None = None,
     request_delay_seconds: float = 0.0,
+    max_new_completed_lexemes: int | None = None,
 ) -> EnrichmentRunResult:
     destination = output_path or snapshot_dir / 'enrichments.jsonl'
     lexemes, _ = read_snapshot_inputs(snapshot_dir)
@@ -1841,5 +2088,6 @@ def run_enrichment(
         failures_output=failures_output,
         max_failures=max_failures,
         request_delay_seconds=request_delay_seconds,
+        max_new_completed_lexemes=max_new_completed_lexemes,
     )
     return EnrichmentRunResult(output_path=destination, enrichments=enrichments, lexeme_count=len(lexemes), mode=mode)

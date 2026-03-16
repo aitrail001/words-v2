@@ -17,16 +17,24 @@ def compile_words(
     enrichments: list[EnrichmentRecord],
 ) -> list[CompiledWordRecord]:
     senses_by_lexeme: dict[str, list[SenseRecord]] = defaultdict(list)
+    sense_by_id: dict[str, SenseRecord] = {}
     for sense in senses:
         senses_by_lexeme[sense.lexeme_id].append(sense)
+        sense_by_id[sense.sense_id] = sense
 
-    enrichments_by_sense: dict[str, list[EnrichmentRecord]] = defaultdict(list)
+    enrichments_by_lexeme: dict[str, list[EnrichmentRecord]] = defaultdict(list)
     for enrichment in enrichments:
-        enrichments_by_sense[enrichment.sense_id].append(enrichment)
+        source_sense = sense_by_id.get(enrichment.sense_id)
+        lexeme_id = enrichment.lexeme_id or (source_sense.lexeme_id if source_sense is not None else None)
+        if lexeme_id:
+            enrichments_by_lexeme[lexeme_id].append(enrichment)
 
     compiled: list[CompiledWordRecord] = []
     for lexeme in lexemes:
-        ordered_senses = sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
+        ordered_enrichments = sorted(
+            enrichments_by_lexeme.get(lexeme.lexeme_id, []),
+            key=lambda item: (item.sense_order, item.sense_id),
+        )
         compiled_senses: list[dict] = []
         top_level_pos: list[str] = []
         top_level_forms = None
@@ -34,13 +42,11 @@ def compile_words(
         top_level_cefr = None
         generated_at = None
 
-        for sense in ordered_senses:
-            candidates = enrichments_by_sense.get(sense.sense_id, [])
-            if not candidates:
-                continue
-            enrichment = sorted(candidates, key=lambda item: (-item.confidence, item.generated_at))[0]
-            if sense.part_of_speech not in top_level_pos:
-                top_level_pos.append(sense.part_of_speech)
+        for enrichment in ordered_enrichments:
+            source_sense = sense_by_id.get(enrichment.sense_id)
+            part_of_speech = enrichment.part_of_speech or (source_sense.part_of_speech if source_sense is not None else None)
+            if part_of_speech and part_of_speech not in top_level_pos:
+                top_level_pos.append(part_of_speech)
             if top_level_forms is None:
                 top_level_forms = enrichment.forms
             if top_level_confusables is None:
@@ -51,9 +57,12 @@ def compile_words(
                 generated_at = enrichment.generated_at
             compiled_senses.append(
                 {
-                    "sense_id": sense.sense_id,
-                    "wn_synset_id": sense.wn_synset_id,
-                    "pos": sense.part_of_speech,
+                    "sense_id": enrichment.sense_id,
+                    "wn_synset_id": source_sense.wn_synset_id if source_sense is not None else None,
+                    "pos": part_of_speech,
+                    "sense_kind": enrichment.sense_kind,
+                    "decision": enrichment.decision,
+                    "base_word": enrichment.base_word,
                     "primary_domain": enrichment.primary_domain,
                     "secondary_domains": enrichment.secondary_domains,
                     "register": enrichment.register,

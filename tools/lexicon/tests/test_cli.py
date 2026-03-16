@@ -60,6 +60,27 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["requested_top_words"], 4)
         self.assertEqual(payload["words"], ["the", "and", "co-op"])
 
+    def test_build_base_command_top_words_does_not_require_wordnet(self) -> None:
+        with patch("tools.lexicon.cli._load_build_base_providers", side_effect=LexiconDependencyError("WordNet corpus is unavailable")), \
+             patch("tools.lexicon.cli._load_word_inventory_provider", return_value=lambda limit: ["The", "and", "co-op"]):
+            code, stdout, stderr = self.run_cli(["build-base", "--rerun-existing", "--top-words", "3"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        payload = json.loads(stdout)
+        self.assertEqual(payload["inventory_mode"], "top_words")
+        self.assertEqual(payload["requested_top_words"], 3)
+        self.assertEqual(payload["words"], ["the", "and", "co-op"])
+
+    def test_build_base_command_top_words_applies_tail_exclusions_dataset(self) -> None:
+        with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: 10, lambda word: [])), \
+             patch("tools.lexicon.cli._load_word_inventory_provider", return_value=lambda limit: ["a", "an", "the", "cat"]):
+            code, stdout, _ = self.run_cli(["build-base", "--rerun-existing", "--top-words", "4"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["words"], ["the", "cat"])
+
     def test_build_base_command_supports_rollout_stage_alias(self) -> None:
         with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: 10, lambda word: [])), \
              patch("tools.lexicon.cli._load_word_inventory_provider", return_value=lambda limit: ["one", "two", "three"]):
@@ -208,6 +229,8 @@ class CliTests(unittest.TestCase):
                     "3",
                     "--request-delay-seconds",
                     "1.5",
+                    "--max-new-completed-lexemes",
+                    "250",
                 ])
 
             self.assertEqual(code, 0)
@@ -221,6 +244,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(mocked_enrich.call_args.kwargs["failures_output"], failures_path)
             self.assertEqual(mocked_enrich.call_args.kwargs["max_failures"], 3)
             self.assertEqual(mocked_enrich.call_args.kwargs["request_delay_seconds"], 1.5)
+            self.assertEqual(mocked_enrich.call_args.kwargs["max_new_completed_lexemes"], 250)
 
     def test_enrich_command_reports_provider_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

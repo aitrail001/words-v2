@@ -12,8 +12,10 @@ from tools.lexicon.enrich import (
     OpenAICompatibleResponsesClient,
     _generate_validated_word_payload_with_stats,
     _single_sense_response_schema,
+    _validate_openai_compatible_word_payload,
     _validate_string_list_field,
     _word_enrichment_response_schema,
+    learner_meaning_cap,
     build_enrichment_prompt,
     build_word_enrichment_prompt,
     build_enrichment_provider,
@@ -147,6 +149,156 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertIn("move fast by using your legs", prompt)
             self.assertIn("word frequency rank: 5", prompt.lower())
             self.assertIn("json", prompt.lower())
+
+    def test_build_word_enrichment_prompt_uses_word_level_decision_contract_without_sense_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexeme, senses = read_snapshot_inputs(snapshot_dir)
+
+            prompt = build_word_enrichment_prompt(lexeme=lexeme[0], senses=senses, prompt_mode="word_only")
+
+            self.assertIn("discard", prompt)
+            self.assertIn("keep_standard", prompt)
+            self.assertIn("keep_derived_special", prompt)
+            self.assertNotIn("Allowed sense IDs", prompt)
+            self.assertNotIn("sense_id", prompt)
+            self.assertNotIn("WordNet-grounded", prompt)
+
+    def test_learner_meaning_cap_compresses_the_highest_frequency_band(self) -> None:
+        self.assertEqual(learner_meaning_cap(25), 5)
+        self.assertEqual(learner_meaning_cap(250), 5)
+        self.assertEqual(learner_meaning_cap(251), 6)
+        self.assertEqual(learner_meaning_cap(5000), 8)
+        self.assertEqual(learner_meaning_cap(10001), 4)
+
+    def test_build_word_enrichment_prompt_adds_compression_guidance_for_common_words(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            common_lexeme = run_lexeme.__class__(**{
+                **run_lexeme.to_dict(),
+                "lemma": "to",
+                "lexeme_id": "lx_to",
+                "entry_id": "lx_to",
+                "normalized_form": "to",
+                "wordfreq_rank": 2,
+            })
+
+            prompt = build_word_enrichment_prompt(lexeme=common_lexeme, senses=senses, prompt_mode="word_only").lower()
+
+            self.assertIn("select at most 5 learner-friendly meanings in total", prompt)
+            self.assertIn("for very common grammar or function words", prompt)
+            self.assertIn("merge closely related micro-uses", prompt)
+            self.assertIn("do not split tiny contextual variants into separate senses", prompt)
+
+    def test_build_word_enrichment_prompt_preserves_closed_class_grammar_words(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            possessive_lexeme = run_lexeme.__class__(**{
+                **run_lexeme.to_dict(),
+                "lemma": "our",
+                "lexeme_id": "lx_our",
+                "entry_id": "lx_our",
+                "normalized_form": "our",
+                "wordfreq_rank": 70,
+            })
+
+            prompt = build_word_enrichment_prompt(lexeme=possessive_lexeme, senses=senses, prompt_mode="word_only").lower()
+
+            self.assertIn("do not discard common closed-class grammar words", prompt)
+            self.assertIn("pronouns, determiners, and possessives", prompt)
+            self.assertIn("plain auxiliary verb inflections such as", prompt)
+            self.assertIn("is, are, and has", prompt)
+
+    def test_build_word_enrichment_prompt_discards_plain_contractions_and_prefers_derived_special_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            said_lexeme = run_lexeme.__class__(**{
+                **run_lexeme.to_dict(),
+                "lemma": "said",
+                "lexeme_id": "lx_said",
+                "entry_id": "lx_said",
+                "normalized_form": "said",
+                "wordfreq_rank": 95,
+            })
+
+            prompt = build_word_enrichment_prompt(lexeme=said_lexeme, senses=senses, prompt_mode="word_only").lower()
+
+            self.assertIn("plain contractions such as", prompt)
+            self.assertIn("\"it's\" or \"i'm\"", prompt)
+            self.assertIn("prefer keep_derived_special", prompt)
+            self.assertIn("smaller subset of special, shifted, or lexicalized uses", prompt)
+
+    def test_validate_openai_compatible_word_payload_accepts_derived_special_without_sense_ids(self) -> None:
+        lexeme = type("Lexeme", (), {
+            "lemma": "meeting",
+            "wordfreq_rank": 80,
+            "entity_category": "general",
+            "is_variant_with_distinct_meanings": False,
+            "variant_base_form": None,
+            "variant_relationship": None,
+            "variant_prompt_note": None,
+        })()
+        response = {
+            "decision": "keep_derived_special",
+            "base_word": "meet",
+            "discard_reason": None,
+            "senses": [
+                {
+                    "sense_kind": "base_form_reference",
+                    "part_of_speech": "noun",
+                    "definition": "the noun meeting is also a form related to meet",
+                    "examples": [{"sentence": "We scheduled a meeting for Friday.", "difficulty": "A1"}],
+                    "cefr_level": "A1",
+                    "primary_domain": "general",
+                    "secondary_domains": [],
+                    "register": "neutral",
+                    "synonyms": [],
+                    "antonyms": [],
+                    "collocations": ["schedule a meeting"],
+                    "grammar_patterns": ["a meeting"],
+                    "usage_note": "Use this only as a brief link to the base word.",
+                    "forms": {"plural_forms": ["meetings"], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "confusable_words": [],
+                    "confidence": 0.8,
+                    "translations": _test_translations(),
+                },
+                {
+                    "sense_kind": "special_meaning",
+                    "part_of_speech": "noun",
+                    "definition": "an event where people gather to talk or decide something",
+                    "examples": [{"sentence": "The team meeting starts at noon.", "difficulty": "A1"}],
+                    "cefr_level": "A1",
+                    "primary_domain": "general",
+                    "secondary_domains": [],
+                    "register": "neutral",
+                    "synonyms": ["session"],
+                    "antonyms": [],
+                    "collocations": ["team meeting"],
+                    "grammar_patterns": ["hold a meeting"],
+                    "usage_note": "This is the standalone noun meaning learners should study.",
+                    "forms": {"plural_forms": ["meetings"], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "confusable_words": [],
+                    "confidence": 0.93,
+                    "translations": _test_translations(),
+                },
+            ],
+        }
+
+        payload = _validate_openai_compatible_word_payload(response, lexeme=lexeme, senses=[])
+
+        self.assertEqual(payload["decision"], "keep_derived_special")
+        self.assertEqual(payload["base_word"], "meet")
+        self.assertEqual([sense["sense_kind"] for sense in payload["senses"]], ["base_form_reference", "special_meaning"])
 
     def test_openai_compatible_client_uses_endpoint_and_authorization_header(self) -> None:
         captured = {}
@@ -1035,6 +1187,420 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(sorted(row["sense_id"] for row in enrichments), ["sn_lx_alpha_1", "sn_lx_beta_1"])
             self.assertEqual(sorted(record.sense_id for record in records), ["sn_lx_alpha_1", "sn_lx_beta_1"])
 
+    def test_enrich_snapshot_per_word_stops_after_max_new_completed_lexemes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            (snapshot_dir / "lexemes.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "lexeme_id": "lx_alpha",
+                        "lemma": "alpha",
+                        "language": "en",
+                        "wordfreq_rank": 10,
+                        "is_wordnet_backed": True,
+                        "source_refs": ["wordnet", "wordfreq"],
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "lexeme_id": "lx_beta",
+                        "lemma": "beta",
+                        "language": "en",
+                        "wordfreq_rank": 20,
+                        "is_wordnet_backed": True,
+                        "source_refs": ["wordnet", "wordfreq"],
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "lexeme_id": "lx_gamma",
+                        "lemma": "gamma",
+                        "language": "en",
+                        "wordfreq_rank": 30,
+                        "is_wordnet_backed": True,
+                        "source_refs": ["wordnet", "wordfreq"],
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            (snapshot_dir / "senses.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "sense_id": "sn_lx_alpha_1",
+                        "lexeme_id": "lx_alpha",
+                        "wn_synset_id": "alpha.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "alpha sense",
+                        "selection_reason": "common learner sense",
+                        "sense_order": 1,
+                        "is_high_polysemy": False,
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "sense_id": "sn_lx_beta_1",
+                        "lexeme_id": "lx_beta",
+                        "wn_synset_id": "beta.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "beta sense",
+                        "selection_reason": "common learner sense",
+                        "sense_order": 1,
+                        "is_high_polysemy": False,
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "sense_id": "sn_lx_gamma_1",
+                        "lexeme_id": "lx_gamma",
+                        "wn_synset_id": "gamma.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "gamma sense",
+                        "selection_reason": "common learner sense",
+                        "sense_order": 1,
+                        "is_high_polysemy": False,
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            seen_lemmas: list[str] = []
+
+            def make_record(lexeme, sense, generated_at, generation_run_id, prompt_version):
+                return EnrichmentRecord(
+                    snapshot_id=sense.snapshot_id,
+                    enrichment_id=f"en_{sense.sense_id}",
+                    sense_id=sense.sense_id,
+                    definition=f"definition for {lexeme.lemma}",
+                    examples=[{"sentence": f"{lexeme.lemma} example", "difficulty": "A1"}],
+                    cefr_level="A1",
+                    primary_domain="general",
+                    secondary_domains=[],
+                    register="neutral",
+                    synonyms=[],
+                    antonyms=[],
+                    collocations=[],
+                    grammar_patterns=[],
+                    usage_note=f"note for {lexeme.lemma}",
+                    forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    confusable_words=[],
+                    model_name="test-provider",
+                    prompt_version=prompt_version,
+                    generation_run_id=generation_run_id,
+                    confidence=0.9,
+                    review_status="draft",
+                    generated_at=generated_at,
+                    translations=_test_translations(f"definition for {lexeme.lemma}", f"note for {lexeme.lemma}", [f"{lexeme.lemma} example"]),
+                )
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                seen_lemmas.append(lexeme.lemma)
+                return [make_record(lexeme, senses[0], generated_at, generation_run_id, prompt_version)]
+
+            records = enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                max_new_completed_lexemes=2,
+            )
+
+            checkpoints = [json.loads(line) for line in (snapshot_dir / "enrich.checkpoint.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+
+            self.assertEqual(seen_lemmas, ["alpha", "beta"])
+            self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_beta"])
+            self.assertEqual(sorted(record.sense_id for record in records), ["sn_lx_alpha_1", "sn_lx_beta_1"])
+
+    def test_enrich_snapshot_per_word_persists_discard_decisions_without_enrichment_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            (snapshot_dir / "lexemes.jsonl").write_text(
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "lexeme_id": "lx_is",
+                    "lemma": "is",
+                    "language": "en",
+                    "wordfreq_rank": 12,
+                    "is_wordnet_backed": True,
+                    "source_refs": ["wordnet", "wordfreq"],
+                    "created_at": "2026-03-07T00:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            (snapshot_dir / "senses.jsonl").write_text(
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "sense_id": "sn_lx_is_1",
+                    "lexeme_id": "lx_is",
+                    "wn_synset_id": "be.v.01",
+                    "part_of_speech": "verb",
+                    "canonical_gloss": "exist or be",
+                    "selection_reason": "common learner sense",
+                    "sense_order": 1,
+                    "is_high_polysemy": False,
+                    "created_at": "2026-03-07T00:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                self.assertEqual(lexeme.lemma, "is")
+                return []
+
+            records = enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+            )
+
+            enrichments = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            checkpoints = [json.loads(line) for line in (snapshot_dir / "enrich.checkpoint.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            decisions = [json.loads(line) for line in (snapshot_dir / "enrich.decisions.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+
+            self.assertEqual(records, [])
+            self.assertEqual(enrichments, [])
+            self.assertEqual(len(checkpoints), 1)
+            self.assertEqual(checkpoints[0]["lexeme_id"], "lx_is")
+            self.assertEqual(len(decisions), 1)
+            self.assertEqual(decisions[0]["lexeme_id"], "lx_is")
+            self.assertEqual(decisions[0]["lemma"], "is")
+            self.assertEqual(decisions[0]["decision"], "discard")
+            self.assertEqual(decisions[0]["accepted_sense_count"], 0)
+
+    def test_enrich_snapshot_per_word_resume_skips_completed_discarded_lexemes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            (snapshot_dir / "lexemes.jsonl").write_text(
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "lexeme_id": "lx_is",
+                    "lemma": "is",
+                    "language": "en",
+                    "wordfreq_rank": 12,
+                    "is_wordnet_backed": True,
+                    "source_refs": ["wordnet", "wordfreq"],
+                    "created_at": "2026-03-07T00:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            (snapshot_dir / "senses.jsonl").write_text(
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "sense_id": "sn_lx_is_1",
+                    "lexeme_id": "lx_is",
+                    "wn_synset_id": "be.v.01",
+                    "part_of_speech": "verb",
+                    "canonical_gloss": "exist or be",
+                    "selection_reason": "common learner sense",
+                    "sense_order": 1,
+                    "is_high_polysemy": False,
+                    "created_at": "2026-03-07T00:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            resumed_lemmas: list[str] = []
+
+            def first_word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                return []
+
+            enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=first_word_provider,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+            )
+
+            def resumed_word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                resumed_lemmas.append(lexeme.lemma)
+                return []
+
+            records = enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=resumed_word_provider,
+                resume=True,
+            )
+
+            decisions = [json.loads(line) for line in (snapshot_dir / "enrich.decisions.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+
+            self.assertEqual(records, [])
+            self.assertEqual(resumed_lemmas, [])
+            self.assertEqual(len(decisions), 1)
+            self.assertEqual(decisions[0]["decision"], "discard")
+
+    def test_enrich_snapshot_per_word_resume_stops_after_max_new_completed_lexemes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            (snapshot_dir / "lexemes.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "lexeme_id": "lx_alpha",
+                        "lemma": "alpha",
+                        "language": "en",
+                        "wordfreq_rank": 10,
+                        "is_wordnet_backed": True,
+                        "source_refs": ["wordnet", "wordfreq"],
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "lexeme_id": "lx_beta",
+                        "lemma": "beta",
+                        "language": "en",
+                        "wordfreq_rank": 20,
+                        "is_wordnet_backed": True,
+                        "source_refs": ["wordnet", "wordfreq"],
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "lexeme_id": "lx_gamma",
+                        "lemma": "gamma",
+                        "language": "en",
+                        "wordfreq_rank": 30,
+                        "is_wordnet_backed": True,
+                        "source_refs": ["wordnet", "wordfreq"],
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            (snapshot_dir / "senses.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "sense_id": "sn_lx_alpha_1",
+                        "lexeme_id": "lx_alpha",
+                        "wn_synset_id": "alpha.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "alpha sense",
+                        "selection_reason": "common learner sense",
+                        "sense_order": 1,
+                        "is_high_polysemy": False,
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "sense_id": "sn_lx_beta_1",
+                        "lexeme_id": "lx_beta",
+                        "wn_synset_id": "beta.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "beta sense",
+                        "selection_reason": "common learner sense",
+                        "sense_order": 1,
+                        "is_high_polysemy": False,
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "sense_id": "sn_lx_gamma_1",
+                        "lexeme_id": "lx_gamma",
+                        "wn_synset_id": "gamma.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "gamma sense",
+                        "selection_reason": "common learner sense",
+                        "sense_order": 1,
+                        "is_high_polysemy": False,
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            failures_path = snapshot_dir / "enrich.failures.jsonl"
+            checkpoint_path.write_text(
+                json.dumps({
+                    "lexeme_id": "lx_alpha",
+                    "lemma": "alpha",
+                    "status": "completed",
+                    "generation_run_id": "old-run",
+                    "completed_at": "2026-03-07T00:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            (snapshot_dir / "enrichments.jsonl").write_text(
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "enrichment_id": "en_sn_lx_alpha_1",
+                    "sense_id": "sn_lx_alpha_1",
+                    "definition": "definition for alpha",
+                    "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                    "cefr_level": "A1",
+                    "primary_domain": "general",
+                    "secondary_domains": [],
+                    "register": "neutral",
+                    "synonyms": [],
+                    "antonyms": [],
+                    "collocations": [],
+                    "grammar_patterns": [],
+                    "usage_note": "note for alpha",
+                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "confusable_words": [],
+                    "model_name": "test-provider",
+                    "prompt_version": "v1",
+                    "generation_run_id": "old-run",
+                    "confidence": 0.9,
+                    "review_status": "draft",
+                    "generated_at": "2026-03-07T00:00:00Z",
+                    "translations": _test_translations("definition for alpha", "note for alpha", ["alpha example"]),
+                }) + "\n",
+                encoding="utf-8",
+            )
+            failures_path.write_text("", encoding="utf-8")
+            seen_lemmas: list[str] = []
+
+            def make_record(lexeme, sense, generated_at, generation_run_id, prompt_version):
+                return EnrichmentRecord(
+                    snapshot_id=sense.snapshot_id,
+                    enrichment_id=f"en_{sense.sense_id}",
+                    sense_id=sense.sense_id,
+                    definition=f"definition for {lexeme.lemma}",
+                    examples=[{"sentence": f"{lexeme.lemma} example", "difficulty": "A1"}],
+                    cefr_level="A1",
+                    primary_domain="general",
+                    secondary_domains=[],
+                    register="neutral",
+                    synonyms=[],
+                    antonyms=[],
+                    collocations=[],
+                    grammar_patterns=[],
+                    usage_note=f"note for {lexeme.lemma}",
+                    forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    confusable_words=[],
+                    model_name="test-provider",
+                    prompt_version=prompt_version,
+                    generation_run_id=generation_run_id,
+                    confidence=0.9,
+                    review_status="draft",
+                    generated_at=generated_at,
+                    translations=_test_translations(f"definition for {lexeme.lemma}", f"note for {lexeme.lemma}", [f"{lexeme.lemma} example"]),
+                )
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                seen_lemmas.append(lexeme.lemma)
+                return [make_record(lexeme, senses[0], generated_at, generation_run_id, prompt_version)]
+
+            records = enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                checkpoint_path=checkpoint_path,
+                failures_output=failures_path,
+                resume=True,
+                max_new_completed_lexemes=1,
+            )
+
+            checkpoints = [json.loads(line) for line in checkpoint_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+            self.assertEqual(seen_lemmas, ["beta"])
+            self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_beta"])
+            self.assertEqual(sorted(record.sense_id for record in records), ["sn_lx_alpha_1", "sn_lx_beta_1"])
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -1141,9 +1707,9 @@ class EnrichPerWordModeTests(unittest.TestCase):
             self.assertIn("sn_lx_run_1", prompt)
             self.assertIn("sn_lx_run_2", prompt)
             self.assertIn("grounding context", prompt.lower())
-            self.assertIn("at most 8 learner-friendly meanings", prompt.lower())
-            self.assertIn("do not invent new sense ids", prompt.lower())
-            self.assertIn("you may omit weak tail senses", prompt.lower())
+            self.assertIn("at most 5 learner-friendly meanings", prompt.lower())
+            self.assertIn("do not return internal meaning ids", prompt.lower())
+            self.assertIn("keep_derived_special", prompt.lower())
 
     def test_build_word_enrichment_prompt_word_only_mode_omits_grounding_block(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1156,14 +1722,13 @@ class EnrichPerWordModeTests(unittest.TestCase):
             prompt = build_word_enrichment_prompt(lexeme=run_lexeme, senses=run_senses, prompt_mode="word_only")
 
             self.assertNotIn("grounding context", prompt.lower())
-            self.assertIn("allowed sense ids for this word are:", prompt.lower())
-            self.assertIn("sn_lx_run_1", prompt.lower())
-            self.assertIn("sn_lx_run_2", prompt.lower())
-            self.assertIn("do not invent new sense ids", prompt.lower())
+            self.assertNotIn("sn_lx_run_1", prompt.lower())
+            self.assertNotIn("sn_lx_run_2", prompt.lower())
+            self.assertIn("do not return internal meaning ids", prompt.lower())
             self.assertIn("english word 'run'", prompt.lower())
             self.assertIn("return only valid content for the required fields", prompt.lower())
-            self.assertIn("at most 8 learner-friendly meanings", prompt.lower())
-            self.assertNotIn("return json only with this schema:", prompt.lower())
+            self.assertIn("at most 5 learner-friendly meanings", prompt.lower())
+            self.assertIn("keep_standard", prompt.lower())
 
     def test_build_word_enrichment_prompt_front_loads_stable_rules_before_word_specific_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1217,10 +1782,10 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             records = enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2, generated_at="2026-03-07T00:00:00Z", generation_run_id="run-123")
 
-            self.assertEqual([record.sense_id for record in records], ["sn_lx_play_1", "sn_lx_run_1", "sn_lx_run_2"])
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1", "sn_lx_run_2", "sn_lx_play_1"])
             payload = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(payload[0]["sense_id"], "sn_lx_play_1")
-            self.assertEqual(payload[-1]["sense_id"], "sn_lx_run_2")
+            self.assertEqual(payload[0]["sense_id"], "sn_lx_run_1")
+            self.assertEqual(payload[-1]["sense_id"], "sn_lx_play_1")
 
     def test_enrich_snapshot_per_word_mode_preserves_output_order_under_parallelism(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1260,7 +1825,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             records = enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2)
 
-            self.assertEqual([record.sense_id for record in records], ["sn_lx_play_1", "sn_lx_run_1", "sn_lx_run_2"])
+            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1", "sn_lx_run_2", "sn_lx_play_1"])
 
     def test_enrich_snapshot_per_word_mode_reports_failed_lexeme(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1324,8 +1889,8 @@ class EnrichPerWordModeTests(unittest.TestCase):
             prompt = build_word_enrichment_prompt(lexeme=run_lexeme, senses=run_senses).lower()
 
             self.assertIn("json object only", prompt)
-            self.assertIn("invalid if the senses array contains more than 8 items", prompt)
-            self.assertIn("if more than 8 candidates seem useful, keep only the strongest 8", prompt)
+            self.assertIn("invalid if the senses array contains more than 5 items", prompt)
+            self.assertIn("if more than 5 candidates seem useful, keep only the strongest 5", prompt)
 
     def test_build_word_enrichment_prompt_adds_variant_specific_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1455,6 +2020,70 @@ class EnrichPerWordModeTests(unittest.TestCase):
             )
 
             self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1"])
+
+    def test_real_word_provider_uses_word_only_prompt_mode_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            run_lexeme = next(item for item in lexemes if item.lexeme_id == "lx_run")
+            run_senses = [sense for sense in senses if sense.lexeme_id == "lx_run"]
+            settings = LexiconSettings.from_env({
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-test",
+                "LEXICON_LLM_API_KEY": "secret-key",
+            })
+
+            prompts: list[str] = []
+
+            def transport(url, payload, headers):
+                prompts.append(str(payload.get("input") or ""))
+                return {
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps({
+                                "decision": "keep_standard",
+                                "discard_reason": None,
+                                "base_word": None,
+                                "senses": [{
+                                    "part_of_speech": "verb",
+                                    "sense_kind": "standard_meaning",
+                                    "definition": "to move quickly on foot",
+                                    "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                    "cefr_level": "A1",
+                                    "primary_domain": "general",
+                                    "secondary_domains": [],
+                                    "register": "neutral",
+                                    "synonyms": ["jog"],
+                                    "antonyms": ["walk"],
+                                    "collocations": ["run fast"],
+                                    "grammar_patterns": ["run + adverb"],
+                                    "usage_note": "Common everyday verb.",
+                                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                                    "confusable_words": [],
+                                    "confidence": 0.91,
+                                    "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."]),
+                                }]
+                            })
+                        }]
+                    }]
+                }
+
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider(
+                lexeme=run_lexeme,
+                senses=run_senses,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(len(prompts), 1)
+            self.assertNotIn("grounding context", prompts[0].lower())
+            self.assertNotIn("sn_lx_run_1", prompts[0].lower())
 
     def test_real_word_provider_rejects_too_many_selected_senses_for_frequency_band(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1899,7 +2528,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 resume=True,
             )
 
-            self.assertEqual(called_lemmas, ["play", "run"])
+            self.assertEqual(called_lemmas, ["run", "play"])
             self.assertEqual(sorted(record.sense_id for record in records), ["sn_lx_play_1", "sn_lx_run_1", "sn_lx_run_2"])
             payload = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(sorted(row["sense_id"] for row in payload), ["sn_lx_play_1", "sn_lx_run_1", "sn_lx_run_2"])
@@ -2030,9 +2659,14 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
 
     def _word_payload(self, sense_id: str) -> dict[str, object]:
         return {
+            "decision": "keep_standard",
+            "discard_reason": None,
+            "base_word": None,
             "senses": [
                 {
                     "sense_id": sense_id,
+                    "part_of_speech": "verb",
+                    "sense_kind": "standard_meaning",
                     "definition": "move quickly on foot",
                     "examples": [{"sentence": "I run every day.", "difficulty": "A1"}],
                     "cefr_level": "A1",
@@ -2088,8 +2722,9 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
             prompt_mode="word_only",
         )
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["sense_id"], sense_id)
+        self.assertEqual(rows["decision"], "keep_standard")
+        self.assertEqual(len(rows["senses"]), 1)
+        self.assertEqual(rows["senses"][0]["sense_id"], sense_id)
         self.assertGreaterEqual(int(stats["repair_count"]), 2)
 
     def test_generate_validated_word_payload_still_fails_after_bounded_validation_retries(self) -> None:
@@ -2133,7 +2768,8 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
             prompt_mode="word_only",
         )
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["sense_id"], sense_id)
+        self.assertEqual(rows["decision"], "keep_standard")
+        self.assertEqual(len(rows["senses"]), 1)
+        self.assertEqual(rows["senses"][0]["sense_id"], sense_id)
         self.assertEqual(client.calls, 2)
         self.assertEqual(int(stats["retry_count"]), 1)

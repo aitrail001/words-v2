@@ -14,8 +14,8 @@ Current scope:
 - `python3 -m tools.lexicon.cli build-base ... --output-dir ...` writes normalized snapshot JSONL files with shared entry metadata (`entry_id`, `entry_type`, `normalized_form`, `source_provenance`) plus canonical registry sidecars (`canonical_entries.jsonl`, `canonical_variants.jsonl`, `generation_status.jsonl`)
 - `build-base` now checks the local word DB when `--database-url` or `DATABASE_URL_SYNC` is configured and skips canonical words that already exist there; pass `--rerun-existing` to force regeneration for already-published words
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ...` generates learner-facing `enrichments.jsonl` for an existing snapshot, including required learner translations for `zh-Hans`, `es`, `ar`, `pt-BR`, and `ja`
-- `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --max-concurrency ...` enriches one lexeme per LLM call, lets the model choose the learner-friendly subset of grounded meanings, repeats the hard meaning cap in the prompt, and performs one repair retry when a word-level payload is invalid
-- `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --resume --checkpoint-path ... --failures-output ...` now writes incremental `enrichments.jsonl`, `enrich.checkpoint.jsonl`, and `enrich.failures.jsonl` artifacts so large 1K -> 5K -> 30K runs can resume safely after partial failure
+- `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --max-concurrency ...` enriches one lexeme per LLM call, lets the model decide `discard` vs `keep_standard` vs `keep_derived_special`, repeats the hard meaning cap in the prompt, and performs repair retries when a word-level payload is invalid
+- `python3 -m tools.lexicon.cli enrich --snapshot-dir ... --mode per_word --resume --checkpoint-path ... --failures-output ...` now writes incremental `enrichments.jsonl`, `enrich.checkpoint.jsonl`, `enrich.decisions.jsonl`, and `enrich.failures.jsonl` artifacts so large 1K -> 5K -> 30K runs can resume safely after partial failure while preserving explicit per-lexeme keep/discard decisions
 - `python3 -m tools.lexicon.cli rerank-senses --snapshot-dir ...` writes grounded LLM rerank decisions for existing snapshots
 - `python3 -m tools.lexicon.cli compare-selection --snapshot-dir ... --rerank-file ...` compares deterministic selection against reranked selection
 - `python3 -m tools.lexicon.cli benchmark-selection --output-dir ...` runs built-in tuning/holdout benchmark snapshots with optional rerank comparisons
@@ -89,11 +89,11 @@ python3 -m tools.lexicon.cli build-base close light play --adjudications data/le
 python3 -m tools.lexicon.cli lookup-entry --snapshot-dir data/lexicon/snapshots/demo things
 python3 -m tools.lexicon.cli status-entry --snapshot-dir data/lexicon/snapshots/demo --check-db thing
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4
-# per_word prompts use WordNet as grounding context, repeat the hard 8/6/4 meaning cap, require a JSON object only, and retry once with a repair prompt if the first payload is invalid
+# per_word prompts on the 30K rollout path are word-only, repeat the hard 8/6/4 meaning cap, require a JSON object only, and preserve explicit per-lexeme keep/discard decisions in enrich.decisions.jsonl
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/words-1000 --provider-mode auto --mode per_word --max-concurrency 4 --request-delay-seconds 1.0 --max-failures 25
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/words-1000 --provider-mode auto --mode per_word --max-concurrency 4 --request-delay-seconds 1.0 --max-failures 25 --resume
-# per_word large runs append completed lexemes directly into enrichments.jsonl and keep sidecar checkpoint/failure ledgers in the snapshot directory by default
+# per_word large runs append completed lexemes directly into enrichments.jsonl and keep checkpoint/decision/failure sidecars in the snapshot directory by default
 python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
 python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
 python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --decision-filter mode_c_safe --output data/lexicon/snapshots/demo/words.mode-c-safe.enriched.jsonl

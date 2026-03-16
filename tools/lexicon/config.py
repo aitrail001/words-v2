@@ -6,7 +6,7 @@ from typing import Mapping
 import os
 
 
-_ALLOWED_REASONING_EFFORTS = {"low", "medium", "high"}
+_ALLOWED_REASONING_EFFORTS = {"none", "low", "medium", "high"}
 _DEFAULT_LLM_TIMEOUT_SECONDS = 60
 
 
@@ -18,7 +18,7 @@ def _normalize_reasoning_effort(value: str | None) -> str | None:
         return None
     if normalized not in _ALLOWED_REASONING_EFFORTS:
         raise ValueError(
-            f"Unsupported LEXICON_LLM_REASONING_EFFORT '{value}'. Expected one of: low, medium, high."
+            f"Unsupported LEXICON_LLM_REASONING_EFFORT '{value}'. Expected one of: none, low, medium, high."
         )
     return normalized
 

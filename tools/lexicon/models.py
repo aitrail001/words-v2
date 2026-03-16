@@ -175,6 +175,12 @@ class EnrichmentRecord(SerializableRecord):
     confidence: float
     review_status: str
     generated_at: str
+    lexeme_id: str | None = None
+    sense_order: int = 1
+    part_of_speech: str | None = None
+    sense_kind: str = "standard_meaning"
+    decision: str = "keep_standard"
+    base_word: str | None = None
     translations: dict[str, dict[str, Any]] | None = None
 
 

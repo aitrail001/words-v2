@@ -80,17 +80,22 @@ def _load_word_inventory_provider():
 
 
 def _build_base_command(args: argparse.Namespace) -> int:
-    try:
-        rank_provider, sense_provider = _load_build_base_providers()
-    except (LexiconDependencyError, RuntimeError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-
     if args.top_words and args.rollout_stage:
         print('build-base accepts only one of --top-words or --rollout-stage', file=sys.stderr)
         return 2
 
     requested_top_words = args.top_words or args.rollout_stage
+    try:
+        rank_provider, sense_provider = _load_build_base_providers()
+    except (LexiconDependencyError, RuntimeError) as exc:
+        if requested_top_words is None:
+            print(str(exc), file=sys.stderr)
+            return 2
+        rank_provider = build_wordfreq_rank_provider()
+        sense_provider = lambda word: []
+    if requested_top_words is not None:
+        sense_provider = lambda word: []
+
     inventory_mode = 'seed_words'
     words = list(args.words)
     if requested_top_words is not None:
@@ -108,7 +113,7 @@ def _build_base_command(args: argparse.Namespace) -> int:
 
     snapshot_id = args.snapshot_id or build_snapshot_id(
         date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
-        source_label='wordnet-wordfreq',
+        source_label='wordfreq-only' if requested_top_words is not None else 'wordnet-wordfreq',
     )
     adjudications_path = getattr(args, 'adjudications', None)
     adjudications = load_adjudications(Path(adjudications_path)) if adjudications_path else None
@@ -180,6 +185,7 @@ def _enrich_command(args: argparse.Namespace) -> int:
             failures_output=Path(args.failures_output) if args.failures_output else None,
             max_failures=args.max_failures,
             request_delay_seconds=args.request_delay_seconds,
+            max_new_completed_lexemes=args.max_new_completed_lexemes,
         )
     except (LexiconDependencyError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
@@ -624,6 +630,7 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument('--failures-output', help='optional override path for the per_word failures JSONL file')
     enrich.add_argument('--max-failures', type=int, help='stop submitting new per_word jobs after this many lexeme failures')
     enrich.add_argument('--request-delay-seconds', type=float, default=1.0, help='delay between per_word request starts in seconds')
+    enrich.add_argument('--max-new-completed-lexemes', type=int, help='stop after this many newly completed per_word lexemes in the current invocation')
     enrich.set_defaults(handler=_enrich_command)
 
     smoke_openai = subparsers.add_parser('smoke-openai-compatible', help='run a tiny real OpenAI-compatible smoke flow locally')

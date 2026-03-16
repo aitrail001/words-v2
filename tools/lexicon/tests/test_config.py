@@ -89,6 +89,18 @@ class LexiconSettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.llm_reasoning_effort, "low")
 
+    def test_settings_reads_reasoning_effort_none(self) -> None:
+        settings = LexiconSettings.from_env(
+            {
+                "LEXICON_LLM_BASE_URL": "https://api.example.test",
+                "LEXICON_LLM_MODEL": "gpt-5.4",
+                "LEXICON_LLM_API_KEY": "secret-key",
+                "LEXICON_LLM_REASONING_EFFORT": "none",
+            }
+        )
+
+        self.assertEqual(settings.llm_reasoning_effort, "none")
+
     def test_settings_rejects_invalid_reasoning_effort(self) -> None:
         with self.assertRaises(ValueError):
             LexiconSettings.from_env({"LEXICON_LLM_REASONING_EFFORT": "turbo"})
