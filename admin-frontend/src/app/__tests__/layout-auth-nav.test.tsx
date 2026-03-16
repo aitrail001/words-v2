@@ -26,11 +26,13 @@ describe("Admin RootLayout auth navigation", () => {
     jest.clearAllMocks();
   });
 
-  it("shows login and lexicon links when unauthenticated", () => {
+  it("shows login and lexicon words/ops links when unauthenticated", () => {
     render(<AuthNavigation />);
 
     expect(screen.getByTestId("nav-login-link")).toBeInTheDocument();
-    expect(screen.getByTestId("nav-lexicon-link")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-lexicon-words-link")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-lexicon-ops-link")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-lexicon-review-link")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /logout/i }),
     ).not.toBeInTheDocument();

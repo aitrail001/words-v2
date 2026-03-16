@@ -18,6 +18,12 @@ export type MeaningExample = {
   enrichment_run_id: string | null;
 };
 
+export type MeaningTranslation = {
+  id: string;
+  language: string;
+  translation: string;
+};
+
 export type WordRelation = {
   id: string;
   relation_type: string;
@@ -58,6 +64,10 @@ export type EnrichedMeaning = {
   grammar_patterns: string[] | null;
   usage_note: string | null;
   learner_generated_at: string | null;
+  source: string | null;
+  source_reference: string | null;
+  created_at: string;
+  translations: MeaningTranslation[];
   examples: MeaningExample[];
   relations: WordRelation[];
 };
@@ -75,6 +85,10 @@ export type WordEnrichmentDetail = {
   part_of_speech: string[] | null;
   confusable_words: Array<Record<string, string>> | null;
   learner_generated_at: string | null;
+  word_forms: Record<string, unknown> | null;
+  source_type: string | null;
+  source_reference: string | null;
+  created_at: string;
   meanings: EnrichedMeaning[];
   enrichment_runs: LexiconEnrichmentRun[];
 };

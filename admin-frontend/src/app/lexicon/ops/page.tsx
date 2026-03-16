@@ -149,7 +149,7 @@ export default function LexiconOpsPage() {
           <div>
             <h3 className="text-2xl font-semibold text-gray-900">Lexicon Operations</h3>
             <p className="mt-1 text-sm text-gray-600">
-              Inspect lexicon snapshot folders, stage artifacts, and rollout progress.
+              Inspect offline lexicon snapshot folders, tracked artifacts, and rollout progress for the active pipeline.
             </p>
           </div>
           <button

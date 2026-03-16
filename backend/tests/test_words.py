@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,6 +13,7 @@ from app.models.user import User
 from app.models.word import Word
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
+from app.models.translation import Translation
 from app.models.word_relation import WordRelation
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 
@@ -117,6 +119,15 @@ def make_enrichment_run() -> LexiconEnrichmentRun:
         token_input=123,
         token_output=45,
         estimated_cost=0.01,
+    )
+
+
+def make_translation(meaning_id: uuid.UUID, language: str = "es", translation: str = "banco") -> Translation:
+    return Translation(
+        id=uuid.uuid4(),
+        meaning_id=meaning_id,
+        language=language,
+        translation=translation,
     )
 
 
@@ -258,6 +269,10 @@ class TestWordEnrichmentDetail:
         word.phonetic_confidence = 0.95
         word.phonetic_enrichment_run_id = run.id
         word.cefr_level = "B1"
+        word.word_forms = {"plural": ["banks"], "verb": ["banked", "banking"]}
+        word.source_type = "lexicon_snapshot"
+        word.source_reference = "snapshot-1"
+        word.created_at = datetime(2026, 3, 9, tzinfo=timezone.utc)
         word.learner_part_of_speech = ["noun"]
         word.confusable_words = [{"word": "bench", "note": "Different object."}]
         word.learner_generated_at = run.created_at
@@ -268,11 +283,15 @@ class TestWordEnrichmentDetail:
         meaning.grammar_patterns = ["bank + on"]
         meaning.usage_note = "Common everyday noun."
         meaning.learner_generated_at = run.created_at
+        meaning.source = "lexicon_snapshot"
+        meaning.source_reference = "snapshot-1:bank.n.09"
+        meaning.created_at = datetime(2026, 3, 9, 3, tzinfo=timezone.utc)
         example = make_meaning_example(meaning.id, "I deposited cash at the bank.")
         example.difficulty = "A2"
         example.enrichment_run_id = run.id
         relation = make_word_relation(word.id, meaning.id, relation_type="synonym", related_word="lender")
         relation.enrichment_run_id = run.id
+        translation = make_translation(meaning.id)
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
@@ -280,13 +299,23 @@ class TestWordEnrichmentDetail:
         word_result.scalar_one_or_none.return_value = word
         meanings_result = MagicMock()
         meanings_result.scalars.return_value.all.return_value = [meaning]
+        translations_result = MagicMock()
+        translations_result.scalars.return_value.all.return_value = [translation]
         examples_result = MagicMock()
         examples_result.scalars.return_value.all.return_value = [example]
         relations_result = MagicMock()
         relations_result.scalars.return_value.all.return_value = [relation]
         runs_result = MagicMock()
         runs_result.scalars.return_value.all.return_value = [run]
-        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result, runs_result]
+        mock_db.execute.side_effect = [
+            user_result,
+            word_result,
+            meanings_result,
+            translations_result,
+            examples_result,
+            relations_result,
+            runs_result,
+        ]
 
         response = await client.get(
             f"/api/words/{word.id}/enrichment",
@@ -300,6 +329,10 @@ class TestWordEnrichmentDetail:
         assert data["phonetic_confidence"] == 0.95
         assert data["phonetic_enrichment_run_id"] == str(run.id)
         assert data["cefr_level"] == "B1"
+        assert data["word_forms"] == {"plural": ["banks"], "verb": ["banked", "banking"]}
+        assert data["source_type"] == "lexicon_snapshot"
+        assert data["source_reference"] == "snapshot-1"
+        assert data["created_at"] == "2026-03-09T00:00:00+00:00"
         assert data["part_of_speech"] == ["noun"]
         assert data["confusable_words"] == [{"word": "bench", "note": "Different object."}]
         assert data["learner_generated_at"] == run.created_at.isoformat()
@@ -312,6 +345,16 @@ class TestWordEnrichmentDetail:
         assert data["meanings"][0]["grammar_patterns"] == ["bank + on"]
         assert data["meanings"][0]["usage_note"] == "Common everyday noun."
         assert data["meanings"][0]["learner_generated_at"] == run.created_at.isoformat()
+        assert data["meanings"][0]["source"] == "lexicon_snapshot"
+        assert data["meanings"][0]["source_reference"] == "snapshot-1:bank.n.09"
+        assert data["meanings"][0]["created_at"] == "2026-03-09T03:00:00+00:00"
+        assert data["meanings"][0]["translations"] == [
+            {
+                "id": str(translation.id),
+                "language": "es",
+                "translation": "banco",
+            }
+        ]
         assert len(data["meanings"][0]["examples"]) == 1
         assert data["meanings"][0]["examples"][0]["sentence"] == "I deposited cash at the bank."
         assert data["meanings"][0]["examples"][0]["difficulty"] == "A2"

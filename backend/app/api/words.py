@@ -12,6 +12,7 @@ from app.core.logging import get_logger
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
+from app.models.translation import Translation
 from app.models.user import User
 from app.models.word import Word
 from app.models.word_relation import WordRelation
@@ -51,6 +52,12 @@ class MeaningExampleResponse(BaseModel):
     enrichment_run_id: str | None
 
 
+class TranslationResponse(BaseModel):
+    id: str
+    language: str
+    translation: str
+
+
 class WordRelationResponse(BaseModel):
     id: str
     relation_type: str
@@ -88,6 +95,10 @@ class EnrichedMeaningResponse(MeaningResponse):
     grammar_patterns: list[str] | None
     usage_note: str | None
     learner_generated_at: str | None
+    source: str | None
+    source_reference: str | None
+    created_at: str
+    translations: list[TranslationResponse]
     examples: list[MeaningExampleResponse]
     relations: list[WordRelationResponse]
 
@@ -100,6 +111,10 @@ class WordEnrichmentDetailResponse(WordResponse):
     part_of_speech: list[str] | None
     confusable_words: list[dict[str, str]] | None
     learner_generated_at: str | None
+    word_forms: dict | None
+    source_type: str | None
+    source_reference: str | None
+    created_at: str
     meanings: list[EnrichedMeaningResponse]
     enrichment_runs: list[LexiconEnrichmentRunResponse]
 
@@ -176,6 +191,17 @@ async def get_word_enrichment(
     meanings = meanings_result.scalars().all()
     meaning_ids = [meaning.id for meaning in meanings]
 
+    translations_by_meaning: dict[uuid.UUID, list[Translation]] = defaultdict(list)
+    if meaning_ids:
+        translations_result = await db.execute(
+            select(Translation)
+            .where(Translation.meaning_id.in_(meaning_ids))
+            .order_by(Translation.meaning_id.asc(), Translation.language.asc())
+        )
+        translations = translations_result.scalars().all()
+        for translation in translations:
+            translations_by_meaning[translation.meaning_id].append(translation)
+
     examples_by_meaning: dict[uuid.UUID, list[MeaningExample]] = defaultdict(list)
     if meaning_ids:
         examples_result = await db.execute(
@@ -227,6 +253,10 @@ async def get_word_enrichment(
         part_of_speech=word.learner_part_of_speech,
         confusable_words=word.confusable_words,
         learner_generated_at=word.learner_generated_at.isoformat() if word.learner_generated_at else None,
+        word_forms=word.word_forms,
+        source_type=word.source_type,
+        source_reference=word.source_reference,
+        created_at=word.created_at.isoformat(),
         meanings=[
             EnrichedMeaningResponse(
                 **_meaning_response(meaning).model_dump(),
@@ -237,6 +267,17 @@ async def get_word_enrichment(
                 grammar_patterns=meaning.grammar_patterns,
                 usage_note=meaning.usage_note,
                 learner_generated_at=meaning.learner_generated_at.isoformat() if meaning.learner_generated_at else None,
+                source=meaning.source,
+                source_reference=meaning.source_reference,
+                created_at=meaning.created_at.isoformat(),
+                translations=[
+                    TranslationResponse(
+                        id=str(translation.id),
+                        language=translation.language,
+                        translation=translation.translation,
+                    )
+                    for translation in translations_by_meaning.get(meaning.id, [])
+                ],
                 examples=[
                     MeaningExampleResponse(
                         id=str(example.id),
