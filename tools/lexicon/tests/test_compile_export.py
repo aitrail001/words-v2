@@ -8,6 +8,90 @@ from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, S
 
 
 class CompileWordsTests(unittest.TestCase):
+    def test_compile_words_uses_word_level_enrichments_without_wordnet_senses(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="lx_meeting",
+            lemma="meeting",
+            language="en",
+            wordfreq_rank=80,
+            is_wordnet_backed=False,
+            source_refs=["wordfreq"],
+            created_at="2026-03-16T00:00:00Z",
+        )
+        enrichments = [
+            EnrichmentRecord(
+                snapshot_id="snap-1",
+                enrichment_id="en_sn_lx_meeting_1_v1",
+                sense_id="sn_lx_meeting_1",
+                lexeme_id="lx_meeting",
+                sense_order=1,
+                part_of_speech="noun",
+                sense_kind="base_form_reference",
+                decision="keep_derived_special",
+                base_word="meet",
+                definition="the noun meeting is also related to the verb meet",
+                examples=[SenseExample(sentence="Our weekly meeting is on Tuesday.", difficulty="A1")],
+                cefr_level="A1",
+                primary_domain="general",
+                secondary_domains=[],
+                register="neutral",
+                synonyms=[],
+                antonyms=[],
+                collocations=["weekly meeting"],
+                grammar_patterns=["a meeting"],
+                usage_note="Keep this brief as a link to the base word.",
+                forms={"plural_forms": ["meetings"], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                confusable_words=[],
+                model_name="gpt-5-nano",
+                prompt_version="v2",
+                generation_run_id="run-1",
+                confidence=0.75,
+                review_status="approved",
+                generated_at="2026-03-16T00:00:00Z",
+            ),
+            EnrichmentRecord(
+                snapshot_id="snap-1",
+                enrichment_id="en_sn_lx_meeting_2_v1",
+                sense_id="sn_lx_meeting_2",
+                lexeme_id="lx_meeting",
+                sense_order=2,
+                part_of_speech="noun",
+                sense_kind="special_meaning",
+                decision="keep_derived_special",
+                base_word="meet",
+                definition="an event where people gather to discuss something",
+                examples=[SenseExample(sentence="The planning meeting lasted an hour.", difficulty="A1")],
+                cefr_level="A1",
+                primary_domain="general",
+                secondary_domains=[],
+                register="neutral",
+                synonyms=["session"],
+                antonyms=[],
+                collocations=["planning meeting"],
+                grammar_patterns=["hold a meeting"],
+                usage_note="Focus on the standalone noun meaning.",
+                forms={"plural_forms": ["meetings"], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                confusable_words=[],
+                model_name="gpt-5-nano",
+                prompt_version="v2",
+                generation_run_id="run-1",
+                confidence=0.92,
+                review_status="approved",
+                generated_at="2026-03-16T00:00:00Z",
+            ),
+        ]
+
+        compiled = compile_words(lexemes=[lexeme], senses=[], enrichments=enrichments)
+
+        self.assertEqual(len(compiled), 1)
+        row = compiled[0].to_dict()
+        self.assertEqual(row["word"], "meeting")
+        self.assertEqual(row["part_of_speech"], ["noun"])
+        self.assertEqual([sense["sense_kind"] for sense in row["senses"]], ["base_form_reference", "special_meaning"])
+        self.assertEqual(row["senses"][0]["base_word"], "meet")
+        self.assertIsNone(row["senses"][0]["wn_synset_id"])
+
     def test_compile_words_groups_normalized_records_into_compiled_rows(self) -> None:
         lexeme = LexemeRecord(
             snapshot_id="snap-1",
