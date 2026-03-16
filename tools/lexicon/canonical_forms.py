@@ -477,7 +477,8 @@ def canonicalize_words(
 
     for surface_form in normalized_words:
         surface_senses = get_senses(surface_form)
-        candidate_forms = _candidate_forms(surface_form, surface_senses)
+        raw_candidate_forms = _candidate_forms(surface_form, surface_senses)
+        candidate_forms = list(raw_candidate_forms)
         plural_suffix_candidates = _plural_suffix_candidates(surface_form)
         if plural_suffix_candidates:
             supported_suffix_candidates = {
@@ -523,7 +524,7 @@ def canonicalize_words(
         )
         anomaly_override = _apply_canonical_anomaly_override(
             surface_form=surface_form,
-            candidate_forms=candidate_forms,
+            candidate_forms=list(dict.fromkeys(candidate_forms + raw_candidate_forms)),
             sense_labels=surface_labels,
             overrides=anomaly_overrides,
         )
