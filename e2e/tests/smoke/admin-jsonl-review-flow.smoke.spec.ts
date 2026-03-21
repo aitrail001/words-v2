@@ -75,6 +75,18 @@ const buildCompiledPhraseRow = (runId: string, phrase: string) => ({
   snapshot_id: `snapshot-${runId}`,
 });
 
+const buildCompiledWarningPhraseRow = (runId: string, phrase: string) => ({
+  ...buildCompiledPhraseRow(runId, phrase),
+  source_provenance: [],
+  senses: [
+    {
+      sense_id: `phrase-sense-${runId}`,
+      definition: `an idiomatic meaning for ${phrase}`,
+      examples: [],
+    },
+  ],
+});
+
 test("@smoke admin can review compiled JSONL directly and materialize sidecar outputs", async ({ page, request }) => {
   const user = await registerAdminViaApi(request, "admin-jsonl-review-smoke");
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
@@ -98,7 +110,7 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
 
   const compiledJsonl = [
     JSON.stringify(buildCompiledWordRow(uniqueSuffix, normalized)),
-    JSON.stringify(buildCompiledPhraseRow(uniqueSuffix, phrase)),
+    JSON.stringify(buildCompiledWarningPhraseRow(uniqueSuffix, phrase)),
   ].join("\n") + "\n";
   await writeFile(compiledHostPath, compiledJsonl, "utf-8");
 
@@ -112,26 +124,34 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   await page.getByRole("button", { name: "Load Artifact" }).click();
 
   await expect(page.getByText(`Loaded ${path.basename(compiledBackendPath)}`)).toBeVisible();
+  await expect(page.getByText("Risk first")).toBeVisible();
   await expect(page.getByRole("button", { name: new RegExp(`^${normalized}\\b`) })).toBeVisible();
   await expect(page.getByRole("button", { name: new RegExp(`^${phrase}\\b`) })).toBeVisible();
+  await expect(page.getByText("missing_source_provenance").first()).toBeVisible();
+  await expect(page.getByText(new RegExp(`an idiomatic meaning for ${phrase}`)).first()).toBeVisible();
 
-  await page.getByPlaceholder("Search entry id or display text").fill(normalized);
+  await page.getByPlaceholder("Search entry id or display text").fill(`word:${normalized}:${uniqueSuffix}`);
   await expect(page.getByRole("button", { name: new RegExp(`^${normalized}\\b`) })).toBeVisible();
 
-  await page.getByTestId("jsonl-review-decision-reason").fill("approved in jsonl smoke");
-  await page.getByTestId("jsonl-review-approve-button").click();
+  await page.getByText("Risk first").click();
+  await page.keyboard.press("a");
   await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as approved\\.`))).toBeVisible();
 
-  await page.getByTestId("jsonl-review-reopen-button").click();
+  await page.keyboard.press("p");
   await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as pending\\.`))).toBeVisible();
 
-  await page.getByTestId("jsonl-review-approve-button").click();
+  await page.getByTestId("jsonl-review-decision-reason").fill("approved in jsonl smoke");
+  await page.getByText("Reviewer summary").click();
+  await page.keyboard.press("a");
   await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as approved\\.`))).toBeVisible();
 
-  await page.getByPlaceholder("Search entry id or display text").fill("break a leg");
-  await page.getByRole("button", { name: new RegExp(`^${phrase}\\b`) }).click();
+  await page.getByPlaceholder("Search entry id or display text").fill("");
+  await page.getByText("Risk first").click();
+  await page.keyboard.press("k");
+  await expect(page.getByRole("heading", { name: phrase })).toBeVisible();
   await page.getByTestId("jsonl-review-decision-reason").fill("regen from smoke");
-  await page.getByTestId("jsonl-review-reject-button").click();
+  await page.getByText("Reviewer summary").click();
+  await page.keyboard.press("r");
   await expect(page.getByText(/Saved phrase:.* as rejected\./)).toBeVisible();
 
   await page.getByRole("button", { name: "Materialize Outputs" }).click();

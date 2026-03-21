@@ -9,6 +9,17 @@ export type LexiconJsonlReviewItem = {
   language?: string;
   frequency_rank?: number | null;
   cefr_level?: string | null;
+  review_priority?: "normal" | "warning";
+  warning_count?: number;
+  warning_labels?: string[];
+  review_summary?: {
+    sense_count: number;
+    form_variant_count: number;
+    confusable_count: number;
+    provenance_sources: string[];
+    primary_definition: string | null;
+    primary_example: string | null;
+  };
   review_status: "pending" | "approved" | "rejected";
   decision_reason: string | null;
   reviewed_by?: string | null;

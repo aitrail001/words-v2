@@ -44,6 +44,17 @@ describe("LexiconJsonlReviewPage", () => {
           entry_type: "word",
           normalized_form: "bank",
           display_text: "bank",
+          review_priority: "normal",
+          warning_count: 0,
+          warning_labels: [],
+          review_summary: {
+            sense_count: 1,
+            form_variant_count: 1,
+            confusable_count: 0,
+            provenance_sources: ["snapshot"],
+            primary_definition: "a financial institution",
+            primary_example: "She went to the bank.",
+          },
           review_status: "approved",
           decision_reason: "ready",
           reviewed_at: "2026-03-21T01:00:00Z",
@@ -54,6 +65,17 @@ describe("LexiconJsonlReviewPage", () => {
           entry_type: "phrase",
           normalized_form: "break a leg",
           display_text: "break a leg",
+          review_priority: "warning",
+          warning_count: 2,
+          warning_labels: ["missing_source_provenance", "missing_examples"],
+          review_summary: {
+            sense_count: 1,
+            form_variant_count: 0,
+            confusable_count: 0,
+            provenance_sources: [],
+            primary_definition: "good luck",
+            primary_example: null,
+          },
           review_status: "pending",
           decision_reason: null,
           reviewed_at: null,
@@ -66,6 +88,17 @@ describe("LexiconJsonlReviewPage", () => {
       entry_type: "phrase",
       normalized_form: "break a leg",
       display_text: "break a leg",
+      review_priority: "warning",
+      warning_count: 2,
+      warning_labels: ["missing_source_provenance", "missing_examples"],
+      review_summary: {
+        sense_count: 1,
+        form_variant_count: 0,
+        confusable_count: 0,
+        provenance_sources: [],
+        primary_definition: "good luck",
+        primary_example: null,
+      },
       review_status: "rejected",
       decision_reason: "regen",
       reviewed_at: "2026-03-21T02:00:00Z",
@@ -100,6 +133,14 @@ describe("LexiconJsonlReviewPage", () => {
         outputDir: "/tmp/materialized",
       }),
     );
+    await waitFor(() => expect(screen.getAllByText("break a leg").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText("missing_source_provenance").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByText("good luck")).toBeInTheDocument());
+    expect(screen.getByText("Risk first")).toBeInTheDocument();
+    expect(screen.getByText(/Shortcuts:/)).toBeInTheDocument();
+
+    await user.click(screen.getByText("Risk first"));
+    await user.keyboard("j");
     await waitFor(() => expect(screen.getByText("break a leg")).toBeInTheDocument());
 
     await user.type(screen.getByPlaceholderText("Search entry id or display text"), "break");
@@ -116,6 +157,19 @@ describe("LexiconJsonlReviewPage", () => {
         decisionsPath: "/tmp/review.decisions.jsonl",
         reviewStatus: "rejected",
         decisionReason: "regen",
+      }),
+    );
+
+    await user.clear(screen.getByPlaceholderText("Search entry id or display text"));
+    await user.click(screen.getByText("Risk first"));
+    await user.keyboard("j");
+    await user.keyboard("a");
+    await waitFor(() =>
+      expect(mockUpdateItem).toHaveBeenCalledWith("word:bank", {
+        artifactPath: "/tmp/words.enriched.jsonl",
+        decisionsPath: "/tmp/review.decisions.jsonl",
+        reviewStatus: "approved",
+        decisionReason: "ready",
       }),
     );
 

@@ -31,6 +31,94 @@ _REQUIRED_COMPILED_FIELDS = {
 }
 
 
+def _warning_labels(row: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    if not row.get("source_provenance"):
+        warnings.append("missing_source_provenance")
+
+    entry_type = str(row.get("entry_type") or "")
+    senses = row.get("senses")
+    if entry_type in {"word", "phrase"} and isinstance(senses, list) and senses:
+        if all(not (sense.get("examples") or []) for sense in senses if isinstance(sense, dict)):
+            warnings.append("missing_examples")
+
+    if entry_type == "reference" and row.get("translation_mode") == "localized":
+        if not row.get("localizations"):
+            warnings.append("missing_localizations")
+    return warnings
+
+
+def _form_variant_count(forms: dict[str, Any]) -> int:
+    count = 0
+    plural_forms = forms.get("plural_forms")
+    if isinstance(plural_forms, list):
+        count += len(plural_forms)
+
+    verb_forms = forms.get("verb_forms")
+    if isinstance(verb_forms, dict):
+        for value in verb_forms.values():
+            if isinstance(value, list):
+                count += len(value)
+            elif value:
+                count += 1
+
+    derivations = forms.get("derivations")
+    if isinstance(derivations, list):
+        count += len(derivations)
+
+    if forms.get("comparative"):
+        count += 1
+    if forms.get("superlative"):
+        count += 1
+    return count
+
+
+def _provenance_sources(row: dict[str, Any]) -> list[str]:
+    sources: list[str] = []
+    for item in row.get("source_provenance") or []:
+        if isinstance(item, dict):
+            value = str(item.get("source") or "").strip()
+        else:
+            value = str(item or "").strip()
+        if value:
+            sources.append(value)
+    return sources
+
+
+def _primary_definition(row: dict[str, Any]) -> str | None:
+    senses = row.get("senses")
+    if not isinstance(senses, list):
+        return None
+    for sense in senses:
+        if not isinstance(sense, dict):
+            continue
+        for key in ("definition", "gloss", "summary"):
+            value = str(sense.get(key) or "").strip()
+            if value:
+                return value
+    return None
+
+
+def _primary_example(row: dict[str, Any]) -> str | None:
+    senses = row.get("senses")
+    if not isinstance(senses, list):
+        return None
+    for sense in senses:
+        if not isinstance(sense, dict):
+            continue
+        examples = sense.get("examples")
+        if not isinstance(examples, list):
+            continue
+        for example in examples:
+            if isinstance(example, dict):
+                value = str(example.get("sentence") or example.get("text") or "").strip()
+            else:
+                value = str(example or "").strip()
+            if value:
+                return value
+    return None
+
+
 def _canonical_json_bytes(payload: Any) -> bytes:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
@@ -201,6 +289,18 @@ def _display_text(row: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _review_summary(row: dict[str, Any]) -> dict[str, Any]:
+    forms = row.get("forms")
+    return {
+        "sense_count": len(row.get("senses") or []) if isinstance(row.get("senses"), list) else 0,
+        "form_variant_count": _form_variant_count(forms) if isinstance(forms, dict) else 0,
+        "confusable_count": len(row.get("confusable_words") or []) if isinstance(row.get("confusable_words"), list) else 0,
+        "provenance_sources": _provenance_sources(row),
+        "primary_definition": _primary_definition(row),
+        "primary_example": _primary_example(row),
+    }
+
+
 def _normalize_decision_rows(
     rows: list[dict[str, Any]],
     *,
@@ -284,6 +384,8 @@ def load_jsonl_review_session(
     for row in compiled_rows:
         entry_id = str(row.get("entry_id") or "")
         decision = decisions_by_id.get(entry_id)
+        warning_labels = _warning_labels(row)
+        review_summary = _review_summary(row)
         review_status = "pending"
         if decision:
             if decision["decision"] == "approved":
@@ -302,6 +404,10 @@ def load_jsonl_review_session(
                 "language": row.get("language") or "en",
                 "frequency_rank": row.get("frequency_rank"),
                 "cefr_level": row.get("cefr_level"),
+                "review_priority": "warning" if warning_labels else "normal",
+                "warning_count": len(warning_labels),
+                "warning_labels": warning_labels,
+                "review_summary": review_summary,
                 "review_status": review_status,
                 "decision_reason": decision.get("decision_reason") if decision else None,
                 "reviewed_by": decision.get("reviewed_by") if decision else None,

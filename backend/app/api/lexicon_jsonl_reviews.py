@@ -49,6 +49,10 @@ class LexiconJsonlReviewItemResponse(BaseModel):
     language: str
     frequency_rank: int | None
     cefr_level: str | None
+    review_priority: str
+    warning_count: int
+    warning_labels: list[str]
+    review_summary: dict[str, Any]
     review_status: str
     decision_reason: str | None
     reviewed_by: str | None
