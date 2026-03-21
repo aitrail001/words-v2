@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
+from typing import Any
+import sys
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -9,7 +12,6 @@ from app.api.auth import get_current_admin_user
 from app.core.config import Settings, get_settings
 from app.models.user import User
 from app.services.lexicon_jsonl_reviews import resolve_repo_local_path
-from tools.lexicon.import_db import load_compiled_rows, run_import_file, summarize_compiled_rows
 
 router = APIRouter()
 
@@ -26,6 +28,18 @@ class LexiconImportResponse(BaseModel):
     input_path: str
     row_summary: dict[str, int]
     import_summary: dict[str, int] | None
+
+
+def _import_db_module() -> Any:
+    try:
+        return import_module("tools.lexicon.import_db")
+    except ModuleNotFoundError as exc:
+        if not exc.name or not exc.name.startswith("tools"):
+            raise
+        repo_root = Path(__file__).resolve().parents[3]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        return import_module("tools.lexicon.import_db")
 
 
 def _resolve_import_input_path(raw_path: str, *, settings: Settings) -> Path:
@@ -47,11 +61,12 @@ async def dry_run_lexicon_import(
     settings: Settings = Depends(get_settings),
 ) -> LexiconImportResponse:
     input_path = _resolve_import_input_path(request.input_path, settings=settings)
-    rows = load_compiled_rows(input_path)
+    import_db = _import_db_module()
+    rows = import_db.load_compiled_rows(input_path)
     return LexiconImportResponse(
         artifact_filename=input_path.name,
         input_path=str(input_path),
-        row_summary=summarize_compiled_rows(rows),
+        row_summary=import_db.summarize_compiled_rows(rows),
         import_summary=None,
     )
 
@@ -63,12 +78,13 @@ async def run_lexicon_import(
     settings: Settings = Depends(get_settings),
 ) -> LexiconImportResponse:
     input_path = _resolve_import_input_path(request.input_path, settings=settings)
-    rows = load_compiled_rows(input_path)
+    import_db = _import_db_module()
+    rows = import_db.load_compiled_rows(input_path)
     return LexiconImportResponse(
         artifact_filename=input_path.name,
         input_path=str(input_path),
-        row_summary=summarize_compiled_rows(rows),
-        import_summary=run_import_file(
+        row_summary=import_db.summarize_compiled_rows(rows),
+        import_summary=import_db.run_import_file(
             input_path,
             source_type=request.source_type,
             source_reference=request.source_reference,

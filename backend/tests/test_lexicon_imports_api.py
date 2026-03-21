@@ -1,6 +1,7 @@
 import json
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -78,10 +79,16 @@ class TestLexiconImportsApi:
 
         compiled_path = tmp_path / "words.enriched.jsonl"
         _write_jsonl(compiled_path, _compiled_rows())
-        monkeypatch.setattr(
-            "app.api.lexicon_imports.run_import_file",
-            lambda *args, **kwargs: {"created_words": 1, "updated_words": 0},
-        )
+        monkeypatch.setattr("app.api.lexicon_imports._import_db_module", lambda: SimpleNamespace(
+            load_compiled_rows=lambda path: _compiled_rows(),
+            summarize_compiled_rows=lambda rows: {
+                "row_count": len(rows),
+                "word_count": len(rows),
+                "phrase_count": 0,
+                "reference_count": 0,
+            },
+            run_import_file=lambda *args, **kwargs: {"created_words": 1, "updated_words": 0},
+        ))
 
         response = await client.post(
             "/api/lexicon-imports/run",

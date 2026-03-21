@@ -32,7 +32,7 @@ test("@smoke admin session reaches lexicon review shell with a real admin accoun
   await expect(page.getByRole("heading", { name: "Admin Dashboard" })).toBeVisible();
 
   await page.getByTestId("admin-home-lexicon-link").click();
-  await expect(page).toHaveURL(`${adminUrl}/lexicon`);
-  await expect(page.getByTestId("lexicon-admin-page")).toBeVisible();
-  await expect(page.getByTestId("lexicon-admin-title")).toContainText("Lexicon Admin Portal");
+  await expect(page).toHaveURL(`${adminUrl}/lexicon/ops`);
+  await expect(page.getByTestId("lexicon-ops-page")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lexicon Operations" })).toBeVisible();
 });
