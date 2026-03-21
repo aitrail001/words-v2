@@ -16,11 +16,17 @@ import subprocess
 import time
 from urllib import error, request
 
+from tools.lexicon.contracts import ALLOWED_CEFR_LEVELS, ALLOWED_REGISTERS, REQUIRED_TRANSLATION_LOCALES
 from tools.lexicon.config import LexiconSettings
 from tools.lexicon.errors import LexiconDependencyError
 from tools.lexicon.ids import make_enrichment_id, make_sense_id
 from tools.lexicon.jsonl_io import append_jsonl, read_jsonl, write_jsonl
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
+from tools.lexicon.schemas.word_enrichment_schema import (
+    build_single_sense_response_schema as _build_single_sense_response_schema,
+    build_word_enrichment_response_schema as _build_word_enrichment_response_schema,
+    normalize_word_enrichment_payload as _normalize_word_enrichment_payload,
+)
 
 EnrichmentProvider = Callable[..., EnrichmentRecord]
 Transport = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
@@ -28,10 +34,10 @@ NodeRunner = Callable[[dict[str, Any]], dict[str, Any]]
 _PROVIDER_MODES = {"auto", "placeholder", "openai_compatible", "openai_compatible_node"}
 _ENRICHMENT_MODES = {"per_sense", "per_word"}
 _WORD_PROMPT_MODES = {"grounded", "word_only"}
-_ALLOWED_CEFR_LEVELS = {'A1', 'A2', 'B1', 'B2', 'C1', 'C2'}
-_ALLOWED_REGISTERS = {'neutral', 'formal', 'informal'}
+_ALLOWED_CEFR_LEVELS = set(ALLOWED_CEFR_LEVELS)
+_ALLOWED_REGISTERS = set(ALLOWED_REGISTERS)
 _STRING_LIST_FIELDS = ('secondary_domains', 'synonyms', 'antonyms', 'collocations', 'grammar_patterns')
-_REQUIRED_TRANSLATION_LOCALES = ('zh-Hans', 'es', 'ar', 'pt-BR', 'ja')
+_REQUIRED_TRANSLATION_LOCALES = tuple(REQUIRED_TRANSLATION_LOCALES)
 _DEFAULT_LLM_TIMEOUT_SECONDS = 60
 _DEFAULT_WORD_TRANSIENT_RETRIES = 5
 _DEFAULT_WORD_REPAIR_ATTEMPTS = 4
@@ -691,21 +697,7 @@ def _validate_translations(value: Any, *, example_count: int) -> dict[str, dict[
 
 
 def _validate_openai_compatible_payload(response: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(response, dict):
-        raise RuntimeError('OpenAI-compatible endpoint returned a non-object enrichment payload')
-
-    normalized = dict(response)
-    normalized['definition'] = _require_non_empty_string(response.get('definition'), field='definition')
-    normalized['examples'] = _validate_examples(response.get('examples'))
-    normalized['confidence'] = _validate_confidence(response.get('confidence'))
-    normalized['cefr_level'] = _validate_optional_enum(response.get('cefr_level'), field='cefr_level', allowed=_ALLOWED_CEFR_LEVELS)
-    normalized['register'] = _validate_optional_enum(response.get('register'), field='register', allowed=_ALLOWED_REGISTERS)
-    for field in _STRING_LIST_FIELDS:
-        normalized[field] = _validate_string_list_field(response.get(field), field=field)
-    normalized['forms'] = _validate_forms(response.get('forms'))
-    normalized['confusable_words'] = _validate_confusable_words(response.get('confusable_words'))
-    normalized['translations'] = _validate_translations(response.get('translations'), example_count=len(normalized['examples']))
-    return normalized
+    return _normalize_word_enrichment_payload(response)
 
 
 def _normalize_examples(value: Any, *, fallback_sentence: str) -> list[SenseExample]:
@@ -932,40 +924,11 @@ def _base_enrichment_item_schema() -> dict[str, Any]:
 
 
 def _single_sense_response_schema() -> dict[str, Any]:
-    return {
-        "name": "lexicon_enrichment_single_sense",
-        "strict": True,
-        "schema": _base_enrichment_item_schema(),
-    }
+    return _build_single_sense_response_schema()
 
 
 def _word_enrichment_response_schema() -> dict[str, Any]:
-    item_schema = dict(_base_enrichment_item_schema())
-    item_properties = dict(item_schema["properties"])
-    item_properties["part_of_speech"] = {"type": "string"}
-    item_properties["sense_kind"] = {"type": "string", "enum": sorted(_WORD_SENSE_KINDS)}
-    item_required = ["part_of_speech", "sense_kind", *list(item_schema["properties"].keys())]
-    item_schema["properties"] = item_properties
-    item_schema["required"] = item_required
-    return {
-        "name": "lexicon_enrichment_word",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {
-                "decision": {"type": "string", "enum": sorted(_WORD_DECISIONS)},
-                "discard_reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-                "base_word": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-                "senses": {
-                    "type": "array",
-                    "minItems": 0,
-                    "items": item_schema,
-                }
-            },
-            "required": ["decision", "discard_reason", "base_word", "senses"],
-            "additionalProperties": False,
-        },
-    }
+    return _build_word_enrichment_response_schema()
 
 
 def _is_repairable_word_payload_error(error: RuntimeError) -> bool:

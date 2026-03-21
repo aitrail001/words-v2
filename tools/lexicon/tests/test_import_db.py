@@ -1,8 +1,11 @@
+import json
+import tempfile
 import unittest
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import MagicMock
+from pathlib import Path
 
 from tools.lexicon.import_db import ImportSummary, import_compiled_rows
 
@@ -91,6 +94,48 @@ class FakeLexiconEnrichmentRun:
     prompt_hash: object = None
     verdict: object = None
     confidence: object = None
+    created_at: object = None
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakePhraseEntry:
+    phrase_text: str
+    normalized_form: str
+    phrase_kind: str
+    language: str = "en"
+    cefr_level: object = None
+    register_label: object = None
+    brief_usage_note: object = None
+    source_type: object = None
+    source_reference: object = None
+    created_at: object = None
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeReferenceEntry:
+    reference_type: str
+    display_form: str
+    normalized_form: str
+    translation_mode: str
+    brief_description: str
+    pronunciation: str
+    learner_tip: object = None
+    language: str = "en"
+    source_type: object = None
+    source_reference: object = None
+    created_at: object = None
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeReferenceLocalization:
+    reference_entry_id: uuid.UUID
+    locale: str
+    display_form: str
+    brief_description: object = None
+    translation_mode: object = None
     created_at: object = None
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
@@ -584,6 +629,156 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(len([item for item in added if isinstance(item, FakeLexiconEnrichmentRun)]), 1)
         self.assertTrue(all(item.enrichment_run_id == imported_run.id for item in imported_examples))
         self.assertTrue(all(item.enrichment_run_id == imported_run.id for item in imported_relations))
+
+    def test_import_compiled_rows_supports_phrase_and_reference_rows(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [
+            _ScalarResult(None),  # phrase lookup
+            _ScalarResult(None),  # reference lookup
+            _ListResult([]),      # reference localizations lookup
+        ]
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_id": "ph_take_off",
+                "entry_type": "phrase",
+                "normalized_form": "take off",
+                "source_provenance": [{"source": "phrase_seed"}],
+                "entity_category": "general",
+                "word": "take off",
+                "part_of_speech": ["phrasal_verb"],
+                "cefr_level": "B1",
+                "frequency_rank": 0,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [],
+                "confusable_words": [],
+                "generated_at": "2026-03-20T00:00:00Z",
+                "phrase_kind": "phrasal_verb",
+                "display_form": "take off",
+            },
+            {
+                "schema_version": "1.1.0",
+                "entry_id": "rf_australia",
+                "entry_type": "reference",
+                "normalized_form": "australia",
+                "source_provenance": [{"source": "reference_seed"}],
+                "entity_category": "general",
+                "word": "Australia",
+                "part_of_speech": [],
+                "cefr_level": "B1",
+                "frequency_rank": 0,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [],
+                "confusable_words": [],
+                "generated_at": "2026-03-20T00:00:00Z",
+                "reference_type": "country",
+                "display_form": "Australia",
+                "translation_mode": "localized",
+                "brief_description": "A country in the Southern Hemisphere.",
+                "pronunciation": "/ɔˈstreɪliə/",
+                "localized_display_form": {"es": "Australia"},
+                "localized_brief_description": {"es": "País del hemisferio sur."},
+                "learner_tip": "Stress is on STRAY.",
+                "localizations": [{"locale": "es", "display_form": "Australia", "translation_mode": "localized"}],
+            },
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260320",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            reference_model=FakeReferenceEntry,
+            reference_localization_model=FakeReferenceLocalization,
+        )
+
+        self.assertEqual(summary.created_phrases, 1)
+        self.assertEqual(summary.created_reference_entries, 1)
+        self.assertEqual(summary.created_reference_localizations, 1)
+        self.assertEqual(any(isinstance(item, FakePhraseEntry) for item in added), True)
+        self.assertEqual(any(isinstance(item, FakeReferenceEntry) for item in added), True)
+        self.assertEqual(any(isinstance(item, FakeReferenceLocalization) for item in added), True)
+
+    def test_load_compiled_rows_reads_family_directory_and_dry_run_counts(self) -> None:
+        from tools.lexicon.import_db import load_compiled_rows, summarize_compiled_rows
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "words.enriched.jsonl").write_text(json.dumps({
+                "schema_version": "1.1.0",
+                "entry_id": "lx_run",
+                "entry_type": "word",
+                "normalized_form": "run",
+                "source_provenance": [{"source": "wordfreq"}],
+                "entity_category": "general",
+                "word": "run",
+                "part_of_speech": ["verb"],
+                "cefr_level": "A1",
+                "frequency_rank": 5,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [],
+                "confusable_words": [],
+                "generated_at": "2026-03-20T00:00:00Z",
+            }) + "\n", encoding="utf-8")
+            (root / "phrases.enriched.jsonl").write_text(json.dumps({
+                "schema_version": "1.1.0",
+                "entry_id": "ph_take_off",
+                "entry_type": "phrase",
+                "normalized_form": "take off",
+                "source_provenance": [{"source": "phrase_seed"}],
+                "entity_category": "general",
+                "word": "take off",
+                "part_of_speech": ["phrasal_verb"],
+                "cefr_level": "B1",
+                "frequency_rank": 0,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [],
+                "confusable_words": [],
+                "generated_at": "2026-03-20T00:00:00Z",
+                "phrase_kind": "phrasal_verb",
+                "display_form": "take off",
+            }) + "\n", encoding="utf-8")
+            (root / "references.enriched.jsonl").write_text(json.dumps({
+                "schema_version": "1.1.0",
+                "entry_id": "rf_australia",
+                "entry_type": "reference",
+                "normalized_form": "australia",
+                "source_provenance": [{"source": "reference_seed"}],
+                "entity_category": "general",
+                "word": "Australia",
+                "part_of_speech": [],
+                "cefr_level": "B1",
+                "frequency_rank": 0,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [],
+                "confusable_words": [],
+                "generated_at": "2026-03-20T00:00:00Z",
+                "reference_type": "country",
+                "display_form": "Australia",
+                "translation_mode": "localized",
+                "brief_description": "A country in the Southern Hemisphere.",
+                "pronunciation": "/ɔˈstreɪliə/",
+                "localized_display_form": {"es": "Australia"},
+                "localized_brief_description": {"es": "País del hemisferio sur."},
+                "learner_tip": "Stress is on STRAY.",
+                "localizations": [{"locale": "es", "display_form": "Australia", "translation_mode": "localized"}],
+            }) + "\n", encoding="utf-8")
+
+            rows = load_compiled_rows(root)
+            counts = summarize_compiled_rows(rows)
+
+            self.assertEqual(counts["row_count"], 3)
+            self.assertEqual(counts["word_count"], 1)
+            self.assertEqual(counts["phrase_count"], 1)
+            self.assertEqual(counts["reference_count"], 1)
 
 
     def test_import_reuses_job_and_run_and_replaces_examples_and_relations(self) -> None:

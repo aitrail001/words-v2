@@ -13,12 +13,27 @@ from tools.lexicon.enrichment_benchmark import run_enrichment_benchmark
 from tools.lexicon.build_base import build_base_records, build_word_inventory, normalize_seed_words, write_base_snapshot
 from tools.lexicon.canonical_registry import lookup_entry, status_entry
 from tools.lexicon.compare_selection import compare_selection_artifacts
+from tools.lexicon.batch_prepare import build_batch_request_rows, build_retry_batch_request_rows, write_batch_request_rows
+from tools.lexicon.batch_ledger import (
+    BatchArtifactPaths,
+    append_jsonl_rows,
+    build_batch_job_rows,
+    load_jsonl_rows,
+    summarize_batch_jobs,
+    write_jsonl_rows,
+)
+from tools.lexicon.batch_ingest import build_batch_output_summary, build_batch_result_rows, ingest_batch_outputs
+from tools.lexicon.batch_client import BatchClient
 from tools.lexicon.form_adjudication import adjudicate_forms, load_adjudications
 from tools.lexicon.compile_export import compile_snapshot
 from tools.lexicon.enrich import run_enrichment
 from tools.lexicon.ids import build_snapshot_id
-from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, run_import_file
+from tools.lexicon.inventory import load_seed_rows
+from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, run_import_file, summarize_compiled_rows
 from tools.lexicon.rerank import RERANK_CANDIDATE_SOURCES, run_rerank
+from tools.lexicon.phrase_pipeline import build_phrase_snapshot_rows, write_phrase_snapshot
+from tools.lexicon.reference_pipeline import build_reference_snapshot_rows, write_reference_snapshot
+from tools.lexicon.qc import run_batch_qc, run_review_apply
 from tools.lexicon.selection_review import prepare_review, score_selection_risk
 from tools.lexicon.validate import validate_compiled_record, validate_snapshot_files
 from tools.lexicon.policy_data import excluded_canonical_forms
@@ -498,6 +513,274 @@ def _compile_export_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _phrase_build_base_command(args: argparse.Namespace) -> int:
+    input_path = Path(args.input)
+    output_dir = Path(args.output_dir)
+    try:
+        rows = build_phrase_snapshot_rows(
+            phrases=load_seed_rows(input_path),
+            snapshot_id=args.snapshot_id or build_snapshot_id(
+                date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
+                source_label='phrase-seeds',
+            ),
+            created_at=_utc_now(),
+        )
+        output_path = write_phrase_snapshot(output_dir, rows)
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    payload = {
+        'command': 'phrase-build-base',
+        'input': str(input_path),
+        'output_dir': str(output_dir),
+        'output': str(output_path),
+        'snapshot_id': args.snapshot_id or None,
+        'phrase_count': len(rows),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def _reference_build_base_command(args: argparse.Namespace) -> int:
+    input_path = Path(args.input)
+    output_dir = Path(args.output_dir)
+    try:
+        rows = build_reference_snapshot_rows(
+            references=load_seed_rows(input_path),
+            snapshot_id=args.snapshot_id or build_snapshot_id(
+                date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
+                source_label='reference-seeds',
+            ),
+            created_at=_utc_now(),
+        )
+        output_path = write_reference_snapshot(output_dir, rows)
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    payload = {
+        'command': 'reference-build-base',
+        'input': str(input_path),
+        'output_dir': str(output_dir),
+        'output': str(output_path),
+        'snapshot_id': args.snapshot_id or None,
+        'reference_count': len(rows),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def _batch_prepare_command(args: argparse.Namespace) -> int:
+    input_path = Path(args.input)
+    output_dir = Path(args.output_dir)
+    try:
+        rows = build_batch_request_rows(
+            snapshot_id=args.snapshot_id or build_snapshot_id(
+                date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
+                source_label='batch-input',
+            ),
+            model=args.model,
+            prompt_version=args.prompt_version,
+            rows=load_seed_rows(input_path),
+        )
+        output_path = write_batch_request_rows(output_dir / "batch_requests.jsonl", rows)
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    payload = {
+        'command': 'batch-prepare',
+        'input': str(input_path),
+        'output_dir': str(output_dir),
+        'output': str(output_path),
+        'snapshot_id': args.snapshot_id or None,
+        'model': args.model,
+        'prompt_version': args.prompt_version,
+        'request_count': len(rows),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def _batch_submit_command(args: argparse.Namespace) -> int:
+    snapshot_dir = Path(args.snapshot_dir)
+    paths = BatchArtifactPaths.from_snapshot_dir(snapshot_dir)
+    request_rows = load_jsonl_rows(paths.batch_requests_path)
+    if not request_rows:
+        print(f'No batch requests found at {paths.batch_requests_path}', file=sys.stderr)
+        return 2
+    batch_id = args.batch_id or f"batch-{snapshot_dir.name}"
+    input_file_id = args.input_file_id or f"input-{snapshot_dir.name}"
+    job_rows = build_batch_job_rows(
+        batch_id=batch_id,
+        input_file_id=input_file_id,
+        request_rows=request_rows,
+        status=args.status,
+        created_at=_utc_now(),
+    )
+    write_jsonl_rows(paths.batch_jobs_path, job_rows)
+    payload = {
+        'command': 'batch-submit',
+        'snapshot_dir': str(snapshot_dir),
+        'batch_id': batch_id,
+        'input_file_id': input_file_id,
+        'request_count': len(request_rows),
+        'job_count': len(job_rows),
+        'status': args.status,
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def _batch_status_command(args: argparse.Namespace) -> int:
+    snapshot_dir = Path(args.snapshot_dir)
+    paths = BatchArtifactPaths.from_snapshot_dir(snapshot_dir)
+    job_rows = load_jsonl_rows(paths.batch_jobs_path)
+    result_rows = load_jsonl_rows(paths.snapshot_dir / 'batch_results.jsonl')
+    qc_rows = load_jsonl_rows(paths.snapshot_dir / 'batch_qc.jsonl')
+    payload = {
+        'command': 'batch-status',
+        'snapshot_dir': str(snapshot_dir),
+        'jobs': summarize_batch_jobs(job_rows),
+        'results': build_batch_output_summary(result_rows),
+        'qc_count': len(qc_rows),
+    }
+    if args.batch_id:
+        payload['batch_id'] = args.batch_id
+    print(json.dumps(payload))
+    return 0
+
+
+def _batch_ingest_command(args: argparse.Namespace) -> int:
+    snapshot_dir = Path(args.snapshot_dir)
+    paths = BatchArtifactPaths.from_snapshot_dir(snapshot_dir)
+    output_path = Path(args.input)
+    results_path = Path(args.output) if args.output else (snapshot_dir / 'batch_results.jsonl')
+    failure_path = snapshot_dir / 'enrich.failures.jsonl'
+    result_rows = ingest_batch_outputs(
+        snapshot_dir=snapshot_dir,
+        output_path=results_path,
+        request_path=paths.batch_requests_path,
+        batch_output_path=output_path,
+        ingested_at=_utc_now(),
+        failure_output_path=failure_path,
+    )
+    if args.update_jobs:
+        job_rows = load_jsonl_rows(paths.batch_jobs_path)
+        updated_jobs = []
+        status_by_custom_id = {row['custom_id']: row['status'] for row in result_rows if row.get('custom_id')}
+        for job_row in job_rows:
+            custom_id = str(job_row.get('custom_id') or '').strip()
+            if custom_id in status_by_custom_id:
+                job_row = dict(job_row)
+                job_row['status'] = 'completed' if status_by_custom_id[custom_id] == 'accepted' else 'failed'
+                job_row['updated_at'] = _utc_now()
+            updated_jobs.append(job_row)
+        write_jsonl_rows(paths.batch_jobs_path, updated_jobs)
+    payload = {
+        'command': 'batch-ingest',
+        'snapshot_dir': str(snapshot_dir),
+        'input': str(output_path),
+        'output': str(results_path),
+        'failures_output': str(failure_path),
+        'result_count': len(result_rows),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def _batch_retry_command(args: argparse.Namespace) -> int:
+    snapshot_dir = Path(args.snapshot_dir)
+    paths = BatchArtifactPaths.from_snapshot_dir(snapshot_dir)
+    request_rows = load_jsonl_rows(paths.batch_requests_path)
+    result_rows = load_jsonl_rows(Path(args.results) if args.results else (snapshot_dir / 'batch_results.jsonl'))
+    failed_custom_ids = set()
+    if args.failed_custom_ids:
+        failed_custom_ids = {
+            line.strip()
+            for line in Path(args.failed_custom_ids).read_text(encoding='utf-8').splitlines()
+            if line.strip()
+        }
+    for row in result_rows:
+        if str(row.get('status') or '').strip().lower() != 'accepted':
+            custom_id = str(row.get('custom_id') or '').strip()
+            if custom_id:
+                failed_custom_ids.add(custom_id)
+    retry_rows = build_retry_batch_request_rows(
+        snapshot_id=args.snapshot_id or build_snapshot_id(
+            date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
+            source_label='batch-retry',
+        ),
+        model=args.model,
+        prompt_version=args.prompt_version,
+        request_rows=request_rows,
+        failed_custom_ids=failed_custom_ids or None,
+    )
+    if args.mode == 'escalate-model' and args.model == 'gpt-5-mini':
+        for row in retry_rows:
+            row['body']['model'] = 'gpt-5.4'
+    retry_requests_path = paths.snapshot_dir / 'batch_requests.retry.jsonl'
+    write_jsonl_rows(retry_requests_path, retry_rows)
+    if retry_rows:
+        append_jsonl_rows(paths.batch_requests_path, retry_rows)
+    payload = {
+        'command': 'batch-retry',
+        'snapshot_dir': str(snapshot_dir),
+        'mode': args.mode,
+        'retry_count': len(retry_rows),
+        'output': str(retry_requests_path),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def _batch_qc_command(args: argparse.Namespace) -> int:
+    snapshot_dir = Path(args.snapshot_dir)
+    qc_output_path = Path(args.output) if args.output else (snapshot_dir / 'batch_qc.jsonl')
+    review_queue_output_path = Path(args.review_queue_output) if args.review_queue_output else (snapshot_dir / 'enrichment_review_queue.jsonl')
+    verdict_rows, review_queue_rows = run_batch_qc(
+        snapshot_dir=snapshot_dir,
+        results_path=Path(args.results) if args.results else None,
+        qc_output_path=qc_output_path,
+        review_queue_output_path=review_queue_output_path,
+        overrides_path=Path(args.overrides) if args.overrides else None,
+        reviewed_at=_utc_now(),
+        judge_model=args.judge_model,
+        prompt_version=args.prompt_version,
+    )
+    payload = {
+        'command': 'batch-qc',
+        'snapshot_dir': str(snapshot_dir),
+        'output': str(qc_output_path),
+        'review_queue_output': str(review_queue_output_path),
+        'verdict_count': len(verdict_rows),
+        'review_queue_count': len(review_queue_rows),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def _review_apply_command(args: argparse.Namespace) -> int:
+    snapshot_dir = Path(args.snapshot_dir)
+    qc_output_path = Path(args.output) if args.output else (snapshot_dir / 'batch_qc.jsonl')
+    review_queue_output_path = Path(args.review_queue_output) if args.review_queue_output else (snapshot_dir / 'enrichment_review_queue.jsonl')
+    verdict_rows, review_queue_rows = run_review_apply(
+        snapshot_dir=snapshot_dir,
+        qc_input_path=Path(args.input) if args.input else None,
+        qc_output_path=qc_output_path,
+        review_queue_output_path=review_queue_output_path,
+        overrides_path=Path(args.overrides) if args.overrides else None,
+    )
+    payload = {
+        'command': 'review-apply',
+        'snapshot_dir': str(snapshot_dir),
+        'output': str(qc_output_path),
+        'review_queue_output': str(review_queue_output_path),
+        'verdict_count': len(verdict_rows),
+        'review_queue_count': len(review_queue_rows),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
 def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
     try:
         rank_provider, sense_provider = _load_build_base_providers()
@@ -563,21 +846,24 @@ def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
 def _import_db_command(args: argparse.Namespace) -> int:
     rows = load_compiled_rows(Path(args.input))
     if args.dry_run:
-        sense_count = sum(len(row.get('senses') or []) for row in rows)
+        counts = summarize_compiled_rows(rows)
+        sense_count = sum(len(row.get('senses') or []) for row in rows if str(row.get('entry_type') or 'word') == 'word')
         example_count = sum(
             len(sense.get('examples') or [])
             for row in rows
+            if str(row.get('entry_type') or 'word') == 'word'
             for sense in (row.get('senses') or [])
         )
         relation_count = sum(
             len(sense.get('synonyms') or []) + len(sense.get('antonyms') or []) + len(sense.get('collocations') or [])
             for row in rows
+            if str(row.get('entry_type') or 'word') == 'word'
             for sense in (row.get('senses') or [])
         )
         payload = {
             'command': 'import-db',
             'dry_run': True,
-            'row_count': len(rows),
+            **counts,
             'sense_count': sense_count,
             'example_count': example_count,
             'relation_count': relation_count,
@@ -682,6 +968,73 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_enrichment.add_argument('--provider-mode', choices=['openai_compatible', 'openai_compatible_node'], default='openai_compatible_node', help='enrichment provider mode for benchmark runs')
     benchmark_enrichment.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for models that support it')
     benchmark_enrichment.set_defaults(handler=_benchmark_enrichment_command)
+
+    phrase_build_base = subparsers.add_parser('phrase-build-base', help='build normalized phrase snapshot rows from a JSONL seed file')
+    phrase_build_base.add_argument('--input', required=True, help='JSONL seed file containing phrase rows')
+    phrase_build_base.add_argument('--output-dir', required=True, help='directory to write phrase snapshot JSONL output')
+    phrase_build_base.add_argument('--snapshot-id', help='optional snapshot identifier override')
+    phrase_build_base.set_defaults(handler=_phrase_build_base_command)
+
+    reference_build_base = subparsers.add_parser('reference-build-base', help='build normalized reference snapshot rows from a JSONL seed file')
+    reference_build_base.add_argument('--input', required=True, help='JSONL seed file containing reference rows')
+    reference_build_base.add_argument('--output-dir', required=True, help='directory to write reference snapshot JSONL output')
+    reference_build_base.add_argument('--snapshot-id', help='optional snapshot identifier override')
+    reference_build_base.set_defaults(handler=_reference_build_base_command)
+
+    batch_prepare = subparsers.add_parser('batch-prepare', help='build deterministic batch request rows from a JSONL seed file')
+    batch_prepare.add_argument('--input', required=True, help='JSONL seed file containing normalized entry rows')
+    batch_prepare.add_argument('--output-dir', required=True, help='directory to write batch request JSONL output')
+    batch_prepare.add_argument('--snapshot-id', help='optional snapshot identifier override')
+    batch_prepare.add_argument('--model', default='gpt-5-mini', help='batch generation model to record in request bodies')
+    batch_prepare.add_argument('--prompt-version', default='v1', help='prompt version tag to record in request bodies')
+    batch_prepare.set_defaults(handler=_batch_prepare_command)
+
+    batch_submit = subparsers.add_parser('batch-submit', help='submit prepared batch requests')
+    batch_submit.add_argument('--snapshot-dir', required=True, help='snapshot directory containing batch_requests.jsonl')
+    batch_submit.add_argument('--batch-id', help='optional batch job identifier override')
+    batch_submit.add_argument('--input-file-id', help='optional input file identifier override')
+    batch_submit.add_argument('--status', default='submitted', choices=['submitted', 'completed', 'failed', 'pending'], help='initial batch status to record')
+    batch_submit.set_defaults(handler=_batch_submit_command)
+
+    batch_status = subparsers.add_parser('batch-status', help='check prepared or submitted batch status')
+    batch_status.add_argument('--snapshot-dir', required=True, help='snapshot directory containing batch ledgers')
+    batch_status.add_argument('--batch-id', help='optional batch job identifier filter')
+    batch_status.set_defaults(handler=_batch_status_command)
+
+    batch_ingest = subparsers.add_parser('batch-ingest', help='ingest completed batch outputs')
+    batch_ingest.add_argument('--snapshot-dir', required=True, help='snapshot directory containing batch_requests.jsonl')
+    batch_ingest.add_argument('--input', required=True, help='batch output JSONL file to ingest')
+    batch_ingest.add_argument('--output', help='optional override path for batch_results.jsonl')
+    batch_ingest.add_argument('--update-jobs', action='store_true', default=True, help='update batch_jobs.jsonl statuses after ingest')
+    batch_ingest.set_defaults(handler=_batch_ingest_command)
+
+    batch_retry = subparsers.add_parser('batch-retry', help='prepare retry requests for failed batch items')
+    batch_retry.add_argument('--snapshot-dir', required=True, help='snapshot directory containing batch ledgers')
+    batch_retry.add_argument('--results', help='optional override path for batch_results.jsonl')
+    batch_retry.add_argument('--failed-custom-ids', help='optional newline-delimited list of failed custom_ids to retry')
+    batch_retry.add_argument('--snapshot-id', help='optional snapshot identifier override for retry lineage')
+    batch_retry.add_argument('--model', default='gpt-5-mini', help='model to record in retry requests')
+    batch_retry.add_argument('--prompt-version', default='v1', help='prompt version to record in retry requests')
+    batch_retry.add_argument('--mode', choices=['repair', 'regenerate', 'escalate-model'], default='repair', help='retry mode to use when preparing requests')
+    batch_retry.set_defaults(handler=_batch_retry_command)
+
+    batch_qc = subparsers.add_parser('batch-qc', help='run QC over ingested batch outputs')
+    batch_qc.add_argument('--snapshot-dir', required=True, help='snapshot directory containing batch_results.jsonl')
+    batch_qc.add_argument('--results', help='optional override path for batch_results.jsonl')
+    batch_qc.add_argument('--output', help='optional override path for batch_qc.jsonl')
+    batch_qc.add_argument('--review-queue-output', help='optional override path for enrichment_review_queue.jsonl')
+    batch_qc.add_argument('--overrides', help='optional manual overrides JSONL path')
+    batch_qc.add_argument('--judge-model', default='gpt-5-mini', help='model name to record in QC rows')
+    batch_qc.add_argument('--prompt-version', default='v1', help='prompt version to record in QC rows')
+    batch_qc.set_defaults(handler=_batch_qc_command)
+
+    review_apply = subparsers.add_parser('review-apply', help='apply manual overrides to an existing QC verdict file')
+    review_apply.add_argument('--snapshot-dir', required=True, help='snapshot directory containing batch_qc.jsonl')
+    review_apply.add_argument('--input', help='optional override path for batch_qc.jsonl')
+    review_apply.add_argument('--output', help='optional override path for batch_qc.jsonl after overrides are applied')
+    review_apply.add_argument('--review-queue-output', help='optional override path for enrichment_review_queue.jsonl')
+    review_apply.add_argument('--overrides', help='optional manual overrides JSONL path')
+    review_apply.set_defaults(handler=_review_apply_command)
 
     score_selection = subparsers.add_parser('score-selection-risk', help='score deterministic selections and write selection_decisions.jsonl for a snapshot')
     score_selection.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')

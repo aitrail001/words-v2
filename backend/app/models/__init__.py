@@ -5,8 +5,11 @@ from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 from app.models.lexicon_review_batch import LexiconReviewBatch
 from app.models.lexicon_review_item import LexiconReviewItem
+from app.models.phrase_entry import PhraseEntry
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
+from app.models.reference_entry import ReferenceEntry
+from app.models.reference_localization import ReferenceLocalization
 from app.models.review import LearningQueueItem, ReviewCard, ReviewHistory, ReviewSession
 from app.models.translation import Translation
 from app.models.user import User
@@ -33,6 +36,9 @@ __all__ = [
     "ReviewHistory",
     "LexiconReviewBatch",
     "LexiconReviewItem",
+    "PhraseEntry",
+    "ReferenceEntry",
+    "ReferenceLocalization",
     "LexiconEnrichmentJob",
     "LexiconEnrichmentRun",
 ]

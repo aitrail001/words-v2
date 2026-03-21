@@ -41,3 +41,14 @@ def make_concept_id(wn_synset_id: str) -> str:
 
 def make_enrichment_id(sense_id: str, version: str) -> str:
     return f"en_{_slugify(sense_id)}_{_slugify(version)}"
+
+
+def make_entry_id(entry_kind: str, value: str) -> str:
+    kind = _slugify(entry_kind)
+    prefix_map = {
+        "phrase": "ph",
+        "reference": "rf",
+        "word": "lx",
+    }
+    prefix = prefix_map.get(kind, kind[:2] or "en")
+    return f"{prefix}_{_slug_with_suffix(value)}"

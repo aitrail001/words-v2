@@ -156,6 +156,39 @@ class CanonicalFormsTests(unittest.TestCase):
         self.assertEqual(result.canonical_variants[0].canonical_form, "rupee")
         self.assertEqual(result.ambiguous_forms, [])
 
+    def test_build_base_records_applies_force_collapse_anomaly_override_after_plural_candidate_pruning(self) -> None:
+        def rank_provider(word: str) -> int:
+            return {
+                "perks": 220,
+                "perk": 240,
+            }.get(word, 999_999)
+
+        def sense_provider(word: str):
+            return []
+
+        with patch(
+            "tools.lexicon.canonical_forms._load_canonical_anomaly_overrides",
+            return_value={
+                "force_keep_separate": {},
+                "force_collapse_to_canonical": {
+                    "perks": {"canonical_form": "perk", "reason": "regular_plural_exception"}
+                },
+            },
+            create=True,
+        ):
+            result = build_base_records(
+                words=["perks"],
+                snapshot_id="lexicon-20260316-perks-anomaly-regression",
+                created_at="2026-03-16T00:00:00Z",
+                rank_provider=rank_provider,
+                sense_provider=sense_provider,
+            )
+
+        self.assertEqual([record.lemma for record in result.lexemes], ["perk"])
+        self.assertEqual(result.canonical_variants[0].decision, "collapse_to_canonical")
+        self.assertEqual(result.canonical_variants[0].canonical_form, "perk")
+        self.assertEqual(result.ambiguous_forms, [])
+
     def test_build_base_records_keeps_lexicalized_irregular_surface_form(self) -> None:
         def rank_provider(word: str) -> int:
             return {

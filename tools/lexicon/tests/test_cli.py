@@ -34,6 +34,14 @@ class CliTests(unittest.TestCase):
         self.assertIn("compare-selection", stdout)
         self.assertIn("benchmark-selection", stdout)
         self.assertIn("benchmark-enrichment", stdout)
+        self.assertIn("phrase-build-base", stdout)
+        self.assertIn("reference-build-base", stdout)
+        self.assertIn("batch-prepare", stdout)
+        self.assertIn("batch-submit", stdout)
+        self.assertIn("batch-status", stdout)
+        self.assertIn("batch-ingest", stdout)
+        self.assertIn("batch-retry", stdout)
+        self.assertIn("batch-qc", stdout)
         self.assertIn("validate", stdout)
         self.assertIn("compile-export", stdout)
         self.assertIn("import-db", stdout)
@@ -252,8 +260,108 @@ class CliTests(unittest.TestCase):
             with patch("tools.lexicon.cli.run_enrichment", side_effect=LexiconDependencyError("LEXICON_LLM_BASE_URL is required")):
                 code, _, stderr = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir), "--provider-mode", "openai_compatible"])
 
-            self.assertEqual(code, 2)
-            self.assertIn("LEXICON_LLM_BASE_URL is required", stderr)
+        self.assertEqual(code, 2)
+        self.assertIn("LEXICON_LLM_BASE_URL is required", stderr)
+
+    def test_phrase_build_base_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            input_path = root / "phrases.jsonl"
+            input_path.write_text(
+                "\n".join([
+                    json.dumps({"phrase": "Take off", "phrase_kind": "phrasal_verb"}),
+                    json.dumps({"phrase": "take off", "phrase_kind": "phrasal_verb"}),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            output_dir = root / "phrase-snapshot"
+
+            code, stdout, stderr = self.run_cli([
+                "phrase-build-base",
+                "--input",
+                str(input_path),
+                "--output-dir",
+                str(output_dir),
+            ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stderr, "")
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "phrase-build-base")
+            self.assertEqual(payload["phrase_count"], 1)
+            self.assertTrue((output_dir / "phrases.jsonl").exists())
+
+    def test_reference_build_base_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            input_path = root / "references.jsonl"
+            input_path.write_text(
+                "\n".join([
+                    json.dumps({
+                        "display_form": "Melbourne",
+                        "reference_type": "place",
+                        "translation_mode": "localized_display",
+                        "brief_description": "A major city in Australia.",
+                        "pronunciation": "MEL-burn",
+                    }),
+                    json.dumps({
+                        "display_form": "Melbourne",
+                        "reference_type": "place",
+                        "translation_mode": "localized_display",
+                        "brief_description": "Duplicate row",
+                        "pronunciation": "MEL-burn",
+                    }),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            output_dir = root / "reference-snapshot"
+
+            code, stdout, stderr = self.run_cli([
+                "reference-build-base",
+                "--input",
+                str(input_path),
+                "--output-dir",
+                str(output_dir),
+            ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stderr, "")
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "reference-build-base")
+            self.assertEqual(payload["reference_count"], 1)
+            self.assertTrue((output_dir / "references.jsonl").exists())
+
+    def test_batch_prepare_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            input_path = root / "entries.jsonl"
+            input_path.write_text(
+                "\n".join([
+                    json.dumps({"entry_kind": "reference", "entry_id": "rf_melbourne", "display_form": "Melbourne"}),
+                    json.dumps({"entry_kind": "phrase", "entry_id": "ph_take_off", "display_form": "take off"}),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            output_dir = root / "batch"
+
+            code, stdout, stderr = self.run_cli([
+                "batch-prepare",
+                "--input",
+                str(input_path),
+                "--output-dir",
+                str(output_dir),
+                "--model",
+                "gpt-5-mini",
+                "--prompt-version",
+                "v1",
+            ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stderr, "")
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "batch-prepare")
+            self.assertEqual(payload["request_count"], 2)
+            self.assertTrue((output_dir / "batch_requests.jsonl").exists())
 
 
     def test_enrich_command_passes_node_provider_mode(self) -> None:

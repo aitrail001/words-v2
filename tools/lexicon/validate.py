@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from tools.lexicon.contracts import REQUIRED_TRANSLATION_LOCALES as _CONTRACT_REQUIRED_TRANSLATION_LOCALES
 from tools.lexicon.jsonl_io import read_jsonl
 from tools.lexicon.models import AmbiguousFormRecord, CanonicalVariantRecord, CompiledWordRecord, EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 from tools.lexicon.policy_data import ALLOWED_ENTITY_CATEGORIES
 
-REQUIRED_TRANSLATION_LOCALES = ['zh-Hans', 'es', 'ar', 'pt-BR', 'ja']
+REQUIRED_TRANSLATION_LOCALES = list(_CONTRACT_REQUIRED_TRANSLATION_LOCALES)
 
 REQUIRED_COMPILED_FIELDS = [
     "schema_version",
@@ -119,7 +120,8 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
         if field not in payload:
             errors.append(f"missing required field: {field}")
 
-    if payload.get("entry_type") not in {None, "word"}:
+    entry_type = payload.get("entry_type")
+    if entry_type not in {None, "word", "phrase", "reference"}:
         errors.append(f"unsupported entry_type: {payload.get('entry_type')}")
 
     source_provenance = payload.get("source_provenance")
@@ -130,7 +132,7 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
         errors.append(f"unsupported entity_category: {entity_category}")
 
     senses = payload.get("senses", [])
-    if isinstance(senses, list):
+    if isinstance(senses, list) and (entry_type in {None, "word"}):
         max_senses = compiled_meaning_limit(payload.get("frequency_rank"))
         if len(senses) > max_senses:
             errors.append(f"senses exceeds allowed limit {max_senses} for frequency_rank {payload.get('frequency_rank')}")
@@ -140,6 +142,21 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
                 errors.append(f"sense {index} must include at least one example")
             if isinstance(sense, dict):
                 errors.extend(_validate_compiled_sense_translations(sense.get('translations'), sense_index=index, example_count=len(examples)))
+
+    if entry_type == "phrase":
+        for field in ("phrase_kind", "display_form", "normalized_form", "generated_at"):
+            if field not in payload or payload.get(field) in (None, ""):
+                errors.append(f"missing required phrase field: {field}")
+        if not isinstance(payload.get("part_of_speech"), list):
+            errors.append("phrase part_of_speech must be a list")
+
+    if entry_type == "reference":
+        for field in ("reference_type", "display_form", "normalized_form", "translation_mode", "brief_description", "pronunciation", "generated_at"):
+            if field not in payload or payload.get(field) in (None, ""):
+                errors.append(f"missing required reference field: {field}")
+        for field in ("localized_display_form", "localized_brief_description", "localizations"):
+            if field in payload and payload.get(field) is not None and not isinstance(payload.get(field), (dict, list)):
+                errors.append(f"{field} must be an object or list")
 
     return errors
 

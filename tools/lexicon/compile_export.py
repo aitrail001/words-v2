@@ -114,6 +114,92 @@ def compile_words(
     return compiled
 
 
+def compile_phrase_rows(snapshot_dir: Path) -> list[dict[str, object]]:
+    phrases_path = snapshot_dir / "phrases.jsonl"
+    if not phrases_path.exists():
+        return []
+    compiled_rows: list[dict[str, object]] = []
+    for row in read_jsonl(phrases_path):
+        compiled_rows.append(
+            {
+                "schema_version": COMPILED_SCHEMA_VERSION,
+                "entry_id": row.get("entry_id"),
+                "entry_type": "phrase",
+                "normalized_form": row.get("normalized_form"),
+                "source_provenance": row.get("source_provenance") or [],
+                "entity_category": row.get("entity_category", "general"),
+                "word": row.get("display_form") or row.get("normalized_form"),
+                "part_of_speech": [row.get("phrase_kind")] if row.get("phrase_kind") else [],
+                "cefr_level": row.get("cefr_level", "B1"),
+                "frequency_rank": row.get("frequency_rank", 0),
+                "forms": row.get("forms") or {
+                    "plural_forms": [],
+                    "verb_forms": {},
+                    "comparative": None,
+                    "superlative": None,
+                    "derivations": [],
+                },
+                "senses": row.get("senses") or [],
+                "confusable_words": row.get("confusable_words") or [],
+                "generated_at": row.get("generated_at") or row.get("created_at"),
+                "phrase_kind": row.get("phrase_kind"),
+                "display_form": row.get("display_form"),
+            }
+        )
+    return compiled_rows
+
+
+def compile_reference_rows(snapshot_dir: Path) -> list[dict[str, object]]:
+    references_path = snapshot_dir / "references.jsonl"
+    if not references_path.exists():
+        return []
+    compiled_rows: list[dict[str, object]] = []
+    for row in read_jsonl(references_path):
+        localization_entries = []
+        for locale, payload in dict(row.get("localized_display_form") or {}).items():
+            localization_entries.append(
+                {
+                    "locale": locale,
+                    "display_form": payload,
+                    "translation_mode": row.get("translation_mode"),
+                }
+            )
+        compiled_rows.append(
+            {
+                "schema_version": COMPILED_SCHEMA_VERSION,
+                "entry_id": row.get("entry_id"),
+                "entry_type": "reference",
+                "normalized_form": row.get("normalized_form"),
+                "source_provenance": row.get("source_provenance") or [],
+                "entity_category": row.get("entity_category", "general"),
+                "word": row.get("display_form") or row.get("normalized_form"),
+                "part_of_speech": [],
+                "cefr_level": row.get("cefr_level", "B1"),
+                "frequency_rank": row.get("frequency_rank", 0),
+                "forms": row.get("forms") or {
+                    "plural_forms": [],
+                    "verb_forms": {},
+                    "comparative": None,
+                    "superlative": None,
+                    "derivations": [],
+                },
+                "senses": row.get("senses") or [],
+                "confusable_words": row.get("confusable_words") or [],
+                "generated_at": row.get("generated_at") or row.get("created_at"),
+                "reference_type": row.get("reference_type"),
+                "display_form": row.get("display_form"),
+                "translation_mode": row.get("translation_mode"),
+                "brief_description": row.get("brief_description"),
+                "pronunciation": row.get("pronunciation"),
+                "localized_display_form": row.get("localized_display_form"),
+                "localized_brief_description": row.get("localized_brief_description"),
+                "learner_tip": row.get("learner_tip"),
+                "localizations": localization_entries,
+            }
+        )
+    return compiled_rows
+
+
 def _load_lexemes(path: Path) -> list[LexemeRecord]:
     return [LexemeRecord(**row) for row in read_jsonl(path)]
 
@@ -216,4 +302,13 @@ def compile_snapshot(
 
     compiled = compile_words(lexemes, senses, enrichments)
     write_jsonl(output_path, [record.to_dict() for record in compiled])
+
+    phrase_rows = compile_phrase_rows(snapshot_dir)
+    if phrase_rows:
+        write_jsonl(snapshot_dir / "phrases.enriched.jsonl", phrase_rows)
+
+    reference_rows = compile_reference_rows(snapshot_dir)
+    if reference_rows:
+        write_jsonl(snapshot_dir / "references.enriched.jsonl", reference_rows)
+
     return compiled

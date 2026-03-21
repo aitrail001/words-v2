@@ -228,7 +228,7 @@ def _default_case_runner(
         ordered_senses = sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
         started_at = perf_counter()
         try:
-            response_rows, stats = _generate_validated_word_payload_with_stats(
+            response_payload, stats = _generate_validated_word_payload_with_stats(
                 client=client,
                 lexeme=lexeme,
                 senses=ordered_senses,
@@ -265,6 +265,10 @@ def _default_case_runner(
                 },
             )
             continue
+        if isinstance(response_payload, list):
+            response_rows = list(response_payload)
+        else:
+            response_rows = list(response_payload.get("senses") or [])
         elapsed = perf_counter() - started_at
         latencies.append(elapsed)
         repair_count += int(stats.get("repair_count") or 0)
@@ -273,7 +277,10 @@ def _default_case_runner(
         sense_by_id = {sense.sense_id: sense for sense in ordered_senses}
         new_rows: list[dict[str, Any]] = []
         for response_row in response_rows:
-            sense = sense_by_id[response_row["sense_id"]]
+            sense_id = str(response_row.get("sense_id") or "").strip()
+            sense = sense_by_id.get(sense_id)
+            if sense is None and ordered_senses:
+                sense = ordered_senses[0]
             record = _build_enrichment_record(
                 lexeme=lexeme,
                 sense=sense,

@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-from tools.lexicon.compile_export import compile_snapshot, compile_words
+from tools.lexicon.compile_export import compile_phrase_rows, compile_reference_rows, compile_snapshot, compile_words
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 
 
@@ -323,6 +323,57 @@ class CompileWordsTests(unittest.TestCase):
             payload = json.loads(out_path.read_text(encoding="utf-8").strip())
             self.assertEqual(payload["word"], "run")
             self.assertEqual(payload["senses"][0]["definition"], "to move quickly on foot")
+
+    def test_compile_snapshot_writes_phrase_and_reference_outputs_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "lexemes.jsonl").write_text("", encoding="utf-8")
+            (root / "senses.jsonl").write_text("", encoding="utf-8")
+            (root / "enrichments.jsonl").write_text("", encoding="utf-8")
+            (root / "phrases.jsonl").write_text("\n".join([
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "entry_kind": "phrase",
+                    "entry_type": "phrase",
+                    "entry_id": "ph_take_off",
+                    "normalized_form": "take off",
+                    "display_form": "take off",
+                    "phrase_kind": "phrasal_verb",
+                    "language": "en",
+                    "source_provenance": [{"source": "phrase_seed"}],
+                    "created_at": "2026-03-20T00:00:00Z",
+                })
+            ]) + "\n", encoding="utf-8")
+            (root / "references.jsonl").write_text("\n".join([
+                json.dumps({
+                    "snapshot_id": "snap-1",
+                    "entry_kind": "reference",
+                    "entry_type": "reference",
+                    "entry_id": "rf_australia",
+                    "normalized_form": "australia",
+                    "display_form": "Australia",
+                    "reference_type": "country",
+                    "translation_mode": "localized",
+                    "brief_description": "A country in the Southern Hemisphere.",
+                    "pronunciation": "/ɔˈstreɪliə/",
+                    "localized_display_form": {"es": "Australia"},
+                    "localized_brief_description": {"es": "País del hemisferio sur."},
+                    "learner_tip": "Stress is on STRAY.",
+                    "language": "en",
+                    "source_provenance": [{"source": "reference_seed"}],
+                    "created_at": "2026-03-20T00:00:00Z",
+                })
+            ]) + "\n", encoding="utf-8")
+
+            compiled_words = compile_snapshot(root, root / "words.enriched.jsonl")
+
+            self.assertEqual(compiled_words, [])
+            self.assertTrue((root / "phrases.enriched.jsonl").exists())
+            self.assertTrue((root / "references.enriched.jsonl").exists())
+            phrase_rows = [json.loads(line) for line in (root / "phrases.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            reference_rows = [json.loads(line) for line in (root / "references.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(phrase_rows[0]["entry_type"], "phrase")
+            self.assertEqual(reference_rows[0]["entry_type"], "reference")
 
 
 if __name__ == "__main__":
