@@ -1,12 +1,17 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LexiconOpsPage from "@/app/lexicon/ops/page";
+import { useRouter } from "next/navigation";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
   getLexiconOpsSnapshot,
   listLexiconOpsSnapshots,
 } from "@/lib/lexicon-ops-client";
+
+jest.mock("next/navigation", () => ({
+  useRouter: jest.fn(),
+}));
 
 jest.mock("@/lib/lexicon-ops-client", () => ({
   listLexiconOpsSnapshots: jest.fn(),
@@ -15,6 +20,9 @@ jest.mock("@/lib/lexicon-ops-client", () => ({
 
 jest.mock("@/lib/auth-session", () => ({
   readAccessToken: jest.fn(() => "active-token"),
+  readRefreshToken: jest.fn(() => null),
+  storeTokens: jest.fn(),
+  clearTokens: jest.fn(),
 }));
 
 jest.mock("@/lib/auth-redirect", () => ({
@@ -26,6 +34,8 @@ describe("LexiconOpsPage", () => {
   const mockGetLexiconOpsSnapshot = getLexiconOpsSnapshot as jest.Mock;
   const mockReadAccessToken = readAccessToken as jest.Mock;
   const mockRedirectToLogin = redirectToLogin as jest.Mock;
+  const mockUseRouter = useRouter as jest.Mock;
+  const push = jest.fn();
 
   const snapshots = [
     {
@@ -116,6 +126,7 @@ describe("LexiconOpsPage", () => {
     mockReadAccessToken.mockReturnValue("active-token");
     mockListLexiconOpsSnapshots.mockResolvedValue(snapshots);
     mockGetLexiconOpsSnapshot.mockResolvedValue(detail);
+    mockUseRouter.mockReturnValue({ push });
   });
 
   it("loads snapshot list and selected snapshot detail using backend contract fields", async () => {
@@ -219,5 +230,31 @@ describe("LexiconOpsPage", () => {
     await waitFor(() => {
       expect(mockRedirectToLogin).toHaveBeenCalledWith("/lexicon/ops");
     });
+  });
+
+  it("offers snapshot launch actions into review, import, and db inspector flows", async () => {
+    const user = userEvent.setup();
+    render(<LexiconOpsPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-ops-open-jsonl-review")).toBeInTheDocument());
+
+    await user.click(screen.getByTestId("lexicon-ops-open-jsonl-review"));
+    await user.click(screen.getByTestId("lexicon-ops-open-compiled-review"));
+    await user.click(screen.getByTestId("lexicon-ops-open-import-db"));
+    await user.click(screen.getByTestId("lexicon-ops-open-db-inspector"));
+
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/jsonl-review"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/compiled-review"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/import-db"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/db-inspector"));
+  });
+
+  it("shows a final-import panel for the selected snapshot", async () => {
+    render(<LexiconOpsPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-ops-import-panel")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-ops-import-input-path")).toBeInTheDocument();
+    expect(screen.getByTestId("lexicon-ops-import-dry-run-button")).toBeInTheDocument();
+    expect(screen.getByTestId("lexicon-ops-import-run-button")).toBeInTheDocument();
   });
 });

@@ -52,6 +52,7 @@ services:
       - DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED:-true}
     volumes:
       - ./backend:/app
+      - ./tools:/app/tools:ro
       - ./data:/app/data:ro
       - backend_uploads:/app/uploads
     ports:
@@ -79,6 +80,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./backend:/app
+      - ./tools:/app/tools:ro
       - ./data:/app/data:ro
       - backend_uploads:/app/uploads
     depends_on:

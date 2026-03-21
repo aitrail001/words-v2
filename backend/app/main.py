@@ -14,6 +14,7 @@ from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.api.import_jobs import router as import_jobs_router
 from app.api.lexicon_compiled_reviews import router as lexicon_compiled_reviews_router
+from app.api.lexicon_imports import router as lexicon_imports_router
 from app.api.lexicon_jsonl_reviews import router as lexicon_jsonl_reviews_router
 from app.api.lexicon_reviews import router as lexicon_reviews_router
 from app.api.lexicon_ops import router as lexicon_ops_router
@@ -108,3 +109,4 @@ app.include_router(lexicon_compiled_reviews_router, prefix="/api/lexicon-compile
 app.include_router(lexicon_jsonl_reviews_router, prefix="/api/lexicon-jsonl-reviews", tags=["lexicon-jsonl-reviews"])
 app.include_router(lexicon_reviews_router, prefix="/api/lexicon-reviews", tags=["lexicon-reviews"])
 app.include_router(lexicon_ops_router, prefix="/api/lexicon-ops", tags=["lexicon-ops"])
+app.include_router(lexicon_imports_router, prefix="/api/lexicon-imports", tags=["lexicon-imports"])

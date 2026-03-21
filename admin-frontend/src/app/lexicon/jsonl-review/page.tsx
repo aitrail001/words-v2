@@ -13,6 +13,11 @@ import {
   updateLexiconJsonlReviewItem,
 } from "@/lib/lexicon-jsonl-reviews-client";
 
+function searchParam(name: string): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(name) ?? "";
+}
+
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
@@ -58,6 +63,44 @@ export default function LexiconJsonlReviewPage() {
     }
   }, []);
 
+  const loadSessionForPaths = useCallback(async (
+    nextArtifactPath: string,
+    nextDecisionsPath?: string,
+    nextOutputDir?: string,
+  ) => {
+    setLoading(true);
+    setMessage(null);
+    setMaterializeResult(null);
+    try {
+      const nextSession = await loadLexiconJsonlReviewSession({
+        artifactPath: nextArtifactPath,
+        decisionsPath: nextDecisionsPath || undefined,
+        outputDir: nextOutputDir || undefined,
+      });
+      setSession(nextSession);
+      setArtifactPath(nextSession.artifact_path);
+      setDecisionsPath(nextSession.decisions_path);
+      setOutputDir(nextSession.output_dir ?? nextOutputDir ?? "");
+      setMessage(`Loaded ${nextSession.artifact_filename}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to load artifact.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const nextArtifactPath = searchParam("artifactPath");
+    const nextDecisionsPath = searchParam("decisionsPath");
+    const nextOutputDir = searchParam("outputDir");
+    if (nextArtifactPath) {
+      setArtifactPath(nextArtifactPath);
+      setDecisionsPath(nextDecisionsPath);
+      setOutputDir(nextOutputDir);
+      void loadSessionForPaths(nextArtifactPath, nextDecisionsPath, nextOutputDir);
+    }
+  }, [loadSessionForPaths]);
+
   const filteredItems = useMemo(() => {
     const items = session?.items ?? [];
     const normalizedSearch = search.trim().toLowerCase();
@@ -91,24 +134,7 @@ export default function LexiconJsonlReviewPage() {
 
   const loadSession = async (event: FormEvent) => {
     event.preventDefault();
-    setLoading(true);
-    setMessage(null);
-    setMaterializeResult(null);
-    try {
-      const nextSession = await loadLexiconJsonlReviewSession({
-        artifactPath,
-        decisionsPath: decisionsPath || undefined,
-        outputDir: outputDir || undefined,
-      });
-      setSession(nextSession);
-      setDecisionsPath(nextSession.decisions_path);
-      setOutputDir(nextSession.output_dir ?? outputDir);
-      setMessage(`Loaded ${nextSession.artifact_filename}`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load artifact.");
-    } finally {
-      setLoading(false);
-    }
+    await loadSessionForPaths(artifactPath, decisionsPath, outputDir);
   };
 
   const replaceItem = (updated: LexiconJsonlReviewItem) => {
