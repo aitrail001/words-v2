@@ -1,8 +1,12 @@
 from app.models.book import Book
 from app.models.epub_import import EpubImport
 from app.models.import_job import ImportJob
+from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
+from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
+from app.models.lexicon_artifact_review_item_event import LexiconArtifactReviewItemEvent
 from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
 from app.models.lexicon_review_batch import LexiconReviewBatch
 from app.models.lexicon_review_item import LexiconReviewItem
 from app.models.phrase_entry import PhraseEntry
@@ -30,10 +34,14 @@ __all__ = [
     "WordList",
     "WordListItem",
     "ImportJob",
+    "LexiconArtifactReviewBatch",
+    "LexiconArtifactReviewItem",
+    "LexiconArtifactReviewItemEvent",
     "ReviewSession",
     "ReviewCard",
     "LearningQueueItem",
     "ReviewHistory",
+    "LexiconRegenerationRequest",
     "LexiconReviewBatch",
     "LexiconReviewItem",
     "PhraseEntry",

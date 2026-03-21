@@ -42,6 +42,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("batch-ingest", stdout)
         self.assertIn("batch-retry", stdout)
         self.assertIn("batch-qc", stdout)
+        self.assertIn("review-materialize", stdout)
         self.assertIn("validate", stdout)
         self.assertIn("compile-export", stdout)
         self.assertIn("import-db", stdout)
@@ -1313,3 +1314,43 @@ if __name__ == "__main__":
 
             self.assertEqual(code, 2)
             self.assertIn("requires --decision-filter", stderr)
+
+    def test_review_materialize_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compiled_path = Path(tmpdir) / "compiled.jsonl"
+            decisions_path = Path(tmpdir) / "review.decisions.jsonl"
+            approved_path = Path(tmpdir) / "approved.jsonl"
+            rejected_path = Path(tmpdir) / "rejected.jsonl"
+            regenerate_path = Path(tmpdir) / "regenerate.jsonl"
+
+            with patch(
+                "tools.lexicon.cli.materialize_review_outputs",
+                return_value={
+                    "artifact_sha256": "a" * 64,
+                    "decision_count": 2,
+                    "approved_count": 1,
+                    "rejected_count": 1,
+                    "regenerate_count": 1,
+                },
+            ) as mocked_materialize:
+                code, stdout, _ = self.run_cli([
+                    "review-materialize",
+                    "--compiled-input", str(compiled_path),
+                    "--decisions-input", str(decisions_path),
+                    "--approved-output", str(approved_path),
+                    "--rejected-output", str(rejected_path),
+                    "--regenerate-output", str(regenerate_path),
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "review-materialize")
+            self.assertEqual(payload["decision_count"], 2)
+            self.assertEqual(payload["approved_count"], 1)
+            self.assertEqual(payload["rejected_count"], 1)
+            self.assertEqual(payload["regenerate_count"], 1)
+            self.assertEqual(mocked_materialize.call_args.kwargs["compiled_path"], compiled_path)
+            self.assertEqual(mocked_materialize.call_args.kwargs["decisions_input_path"], decisions_path)
+            self.assertEqual(mocked_materialize.call_args.kwargs["approved_output_path"], approved_path)
+            self.assertEqual(mocked_materialize.call_args.kwargs["rejected_output_path"], rejected_path)
+            self.assertEqual(mocked_materialize.call_args.kwargs["regenerate_output_path"], regenerate_path)

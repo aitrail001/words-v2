@@ -117,6 +117,32 @@ python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshot
 python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --decision-filter mode_c_safe --output data/lexicon/snapshots/demo/words.mode-c-safe.enriched.jsonl
 ```
 
+### 4.2 Compiled-review staging before final import
+
+For learner-facing compiled artifacts, there is now a separate admin review stage before `import-db`.
+
+Use it when you want to inspect compiled JSONL rows in the admin app instead of importing them directly into final lexicon tables.
+
+Flow:
+
+1. Produce `words.enriched.jsonl`, `phrases.enriched.jsonl`, or `references.enriched.jsonl`
+2. Open the admin app at `/lexicon/compiled-review`
+3. Import the compiled artifact into the compiled-review staging surface
+4. Approve/reject/reopen rows in the UI
+5. Export:
+   - approved rows
+   - rejected overlays
+   - regenerate rows
+   - canonical decisions
+6. Optionally run `review-materialize` to re-materialize file outputs from canonical decisions
+7. Run `import-db` only on approved compiled rows
+
+Important:
+
+- This import is review staging only.
+- It writes to dedicated `lexicon_artifact_review_*` tables, not to the final lexicon `word` / `meaning` / `phrase_entries` / `reference_entries` tables.
+- The final learner-facing DB write path remains `compile-export -> import-db`.
+
 Run an import dry-run summary:
 
 ```bash

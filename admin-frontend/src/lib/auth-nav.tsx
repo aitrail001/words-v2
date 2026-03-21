@@ -43,6 +43,20 @@ export function AuthNavigation() {
       >
         Lexicon Ops
       </Link>
+      <Link
+        href="/lexicon/compiled-review"
+        className="hover:text-gray-900"
+        data-testid="nav-lexicon-compiled-review-link"
+      >
+        Compiled Review
+      </Link>
+      <Link
+        href="/lexicon/jsonl-review"
+        className="hover:text-gray-900"
+        data-testid="nav-lexicon-jsonl-review-link"
+      >
+        JSONL Review
+      </Link>
       {isAuthenticated ? (
         <button
           type="button"
