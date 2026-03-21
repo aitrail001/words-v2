@@ -1,0 +1,185 @@
+import { expect, test } from "@playwright/test";
+import {
+  apiUrl,
+  authHeaders,
+  registerAdminViaApi,
+} from "../helpers/auth";
+
+type CompiledReviewBatch = {
+  id: string;
+  artifact_filename: string;
+  source_reference: string | null;
+};
+
+type CompiledReviewItem = {
+  id: string;
+  entry_id: string;
+  review_status: string;
+  decision_reason: string | null;
+  import_eligible: boolean;
+  regen_requested: boolean;
+};
+
+const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
+
+const buildCompiledWordRow = (runId: string, word: string) => ({
+  schema_version: "1.1.0",
+  entry_id: `word:${word}:${runId}`,
+  entry_type: "word",
+  normalized_form: word,
+  source_provenance: [{ source: "e2e-smoke", run_id: runId }],
+  entity_category: "general",
+  word,
+  part_of_speech: ["noun"],
+  cefr_level: "B1",
+  frequency_rank: 100,
+  forms: {
+    plural_forms: [`${word}s`],
+    verb_forms: {},
+    comparative: null,
+    superlative: null,
+    derivations: [],
+  },
+  senses: [
+    {
+      sense_id: `sense-${runId}-1`,
+      definition: `a learner-facing definition for ${word}`,
+      examples: [{ sentence: `The ${word} is visible.`, difficulty: "easy" }],
+      translations: {
+        "zh-Hans": {
+          definition: `${word} 的定义`,
+          usage_note: "常见义项",
+          examples: [`这个${word}很明显。`],
+        },
+        es: {
+          definition: `definicion de ${word}`,
+          usage_note: "uso comun",
+          examples: [`El ${word} es visible.`],
+        },
+        ar: {
+          definition: `تعريف ${word}`,
+          usage_note: "معنى شائع",
+          examples: [`هذا ${word} واضح.`],
+        },
+        "pt-BR": {
+          definition: `definicao de ${word}`,
+          usage_note: "uso comum",
+          examples: [`O ${word} esta visivel.`],
+        },
+        ja: {
+          definition: `${word} の定義`,
+          usage_note: "よくある意味",
+          examples: [`その${word}が見える。`],
+        },
+      },
+    },
+  ],
+  confusable_words: [],
+  generated_at: "2026-03-21T00:00:00Z",
+});
+
+test("@smoke admin can review and export a compiled lexicon batch", async ({ page, request }) => {
+  const user = await registerAdminViaApi(request, "admin-compiled-review-smoke");
+  const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
+  const normalized = `artifact${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
+  const sourceReference = `compiled-review-${uniqueSuffix}`;
+  const compiledRow = buildCompiledWordRow(uniqueSuffix, normalized);
+  const jsonl = `${JSON.stringify(compiledRow)}\n`;
+
+  const importResponse = await request.post(`${apiUrl}/lexicon-compiled-reviews/batches/import`, {
+    headers: { Authorization: `Bearer ${user.token}` },
+    multipart: {
+      file: {
+        name: "words.enriched.jsonl",
+        mimeType: "application/x-ndjson",
+        buffer: Buffer.from(jsonl, "utf-8"),
+      },
+      source_reference: sourceReference,
+    },
+  });
+  expect(importResponse.status()).toBe(201);
+
+  const batchesResponse = await request.get(`${apiUrl}/lexicon-compiled-reviews/batches`, {
+    headers: authHeaders(user.token),
+  });
+  expect(batchesResponse.status()).toBe(200);
+  const batches = (await batchesResponse.json()) as CompiledReviewBatch[];
+  const batch = batches.find((entry) => entry.source_reference === sourceReference);
+  expect(batch).toBeTruthy();
+
+  const patchResponse = await request.patch(
+    `${apiUrl}/lexicon-compiled-reviews/items/${(await (async () => {
+      const response = await request.get(`${apiUrl}/lexicon-compiled-reviews/batches/${batch!.id}/items`, {
+        headers: authHeaders(user.token),
+      });
+      const payload = (await response.json()) as CompiledReviewItem[];
+      return payload[0]!.id;
+    })())}`,
+    {
+      headers: authHeaders(user.token),
+      data: { review_status: "approved", decision_reason: "approved in compiled review smoke" },
+    },
+  );
+  expect(patchResponse.status()).toBe(200);
+
+  await page.goto(`${adminUrl}/login`);
+  await page.getByTestId("login-email-input").fill(user.email);
+  await page.getByTestId("login-password-input").fill(user.password);
+  await page.getByTestId("login-submit-button").click();
+  await expect(page).toHaveURL(`${adminUrl}/`);
+
+  await page.goto(`${adminUrl}/lexicon/compiled-review`);
+  await expect(page.getByTestId("lexicon-compiled-review-page")).toBeVisible();
+  await expect(page.getByTestId("compiled-review-batches-list")).toContainText("words.enriched.jsonl");
+  await expect(page.getByTestId("compiled-review-item-title")).toContainText(normalized);
+  await expect(page.getByTestId("compiled-review-items-list")).toContainText("approved");
+  await expect(page.getByTestId("compiled-review-decision-reason")).toHaveValue("approved in compiled review smoke");
+
+  const itemsResponse = await request.get(`${apiUrl}/lexicon-compiled-reviews/batches/${batch!.id}/items`, {
+    headers: authHeaders(user.token),
+  });
+  expect(itemsResponse.status()).toBe(200);
+  const items = (await itemsResponse.json()) as CompiledReviewItem[];
+  expect(items).toHaveLength(1);
+  expect(items[0].review_status).toBe("approved");
+  expect(items[0].decision_reason).toBe("approved in compiled review smoke");
+  expect(items[0].import_eligible).toBe(true);
+  expect(items[0].regen_requested).toBe(false);
+
+  const decisionDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Decisions" }).click();
+  const downloaded = await decisionDownload;
+  expect(downloaded.suggestedFilename()).toContain("compiled_words.decisions.jsonl");
+
+  const decisionExportResponse = await request.get(
+    `${apiUrl}/lexicon-compiled-reviews/batches/${batch!.id}/export/decisions`,
+    { headers: authHeaders(user.token) },
+  );
+  expect(decisionExportResponse.status()).toBe(200);
+  const decisionLines = (await decisionExportResponse.text()).split("\n").filter(Boolean).map((line) => JSON.parse(line) as {
+    entry_id: string;
+    decision: string;
+    decision_reason: string | null;
+  });
+  expect(decisionLines).toEqual([
+    expect.objectContaining({
+      entry_id: `word:${normalized}:${uniqueSuffix}`,
+      decision: "approved",
+      decision_reason: "approved in compiled review smoke",
+    }),
+  ]);
+
+  const approvedExportResponse = await request.get(
+    `${apiUrl}/lexicon-compiled-reviews/batches/${batch!.id}/export/approved`,
+    { headers: authHeaders(user.token) },
+  );
+  expect(approvedExportResponse.status()).toBe(200);
+  const approvedLines = (await approvedExportResponse.text()).split("\n").filter(Boolean).map((line) => JSON.parse(line) as {
+    entry_id: string;
+  });
+  expect(approvedLines).toEqual([
+    expect.objectContaining({
+      entry_id: `word:${normalized}:${uniqueSuffix}`,
+    }),
+  ]);
+});

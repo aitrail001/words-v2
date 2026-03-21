@@ -11,6 +11,7 @@ Chosen implementation note:
 
 - This branch ships the DB-backed staged-review path.
 - The lighter file-backed alternative is documented in `docs/plans/2026-03-21-lexicon-review-admin-tool-jsonl-only-design.md`.
+- Follow-up approved for this task: implement that JSONL-only mode later as a separate route and separate backend API without changing the DB-backed compiled-review implementation.
 
 ## Delivered
 
@@ -39,15 +40,23 @@ Chosen implementation note:
    - Added admin frontend tests
    - Verified backend/frontend compile/lint/build for changed scope
 
+5. JSONL-only follow-up
+   - Added separate admin API router at `/api/lexicon-jsonl-reviews`
+   - Keeps review state in `review.decisions.jsonl` sidecars instead of review DB tables
+   - Reuses `review-materialize` for approved/rejected/regenerate outputs
+   - Added separate admin route at `/lexicon/jsonl-review`
+   - Added focused backend/frontend tests plus Playwright smoke for the file-backed flow
+   - Re-verified the DB-backed compiled-review smoke beside the new JSONL-only smoke
+
 ## Intentional Boundaries
 
 1. This does not replace the older selection-review flow.
 2. Review decisions remain an overlay on immutable compiled artifacts.
-3. This slice does not add compiled-review Playwright smoke yet.
+3. This slice does not replace the DB-backed compiled-review path.
 4. This slice does not add final operator-runbook coverage beyond status/docs updates.
 
 ## Follow-ups
 
-1. Add end-to-end smoke for import -> review -> export.
-2. Expand operator docs around the compiled-review workflow.
-3. Decide whether to add richer server-side pagination/filtering if artifact sizes grow beyond current admin-page expectations.
+1. Expand operator docs around when to use DB-backed compiled review versus JSONL-only review.
+2. Decide whether JSONL-only review needs snapshot browsing or stronger server-side pagination for larger artifacts.
+3. Add broader mixed-surface admin smoke only if the current focused smoke pair stops being sufficient.

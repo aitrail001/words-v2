@@ -18,9 +18,26 @@ from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.lexicon_artifact_review_item_event import LexiconArtifactReviewItemEvent
 from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
 from app.models.user import User
-from tools.lexicon.validate import validate_compiled_record
 
 router = APIRouter()
+
+REQUIRED_TRANSLATION_LOCALES = ["zh-Hans", "es", "ar", "pt-BR", "ja"]
+ALLOWED_ENTITY_CATEGORIES = {"general", "name", "place", "brand", "entity_other"}
+REQUIRED_COMPILED_FIELDS = [
+    "schema_version",
+    "entry_id",
+    "entry_type",
+    "normalized_form",
+    "source_provenance",
+    "word",
+    "part_of_speech",
+    "cefr_level",
+    "frequency_rank",
+    "forms",
+    "senses",
+    "confusable_words",
+    "generated_at",
+]
 
 
 class LexiconCompiledReviewBatchResponse(BaseModel):
@@ -88,6 +105,96 @@ class LexiconCompiledReviewDecisionResponse(BaseModel):
     compiled_payload_sha256: str
     reviewed_by: str | None
     reviewed_at: datetime | None
+
+
+def _compiled_meaning_limit(frequency_rank: Any) -> int:
+    try:
+        rank = int(frequency_rank)
+    except (TypeError, ValueError):
+        return 4
+    if rank <= 0:
+        return 4
+    if rank <= 5000:
+        return 8
+    if rank <= 10000:
+        return 6
+    return 4
+
+
+def _validate_compiled_sense_translations(value: Any, *, sense_index: int, example_count: int) -> list[str]:
+    errors: list[str] = []
+    if value in (None, {}):
+        return errors
+    if not isinstance(value, dict):
+        return [f"sense {sense_index} translations must be an object keyed by locale"]
+    for locale in REQUIRED_TRANSLATION_LOCALES:
+        locale_payload = value.get(locale)
+        if not isinstance(locale_payload, dict):
+            errors.append(f"sense {sense_index} translations must include locale {locale}")
+            continue
+        if not isinstance(locale_payload.get("definition"), str) or not locale_payload.get("definition", "").strip():
+            errors.append(f"sense {sense_index} translations.{locale}.definition must be a non-empty string")
+        if not isinstance(locale_payload.get("usage_note"), str) or not locale_payload.get("usage_note", "").strip():
+            errors.append(f"sense {sense_index} translations.{locale}.usage_note must be a non-empty string")
+        examples = locale_payload.get("examples")
+        if not isinstance(examples, list) or not examples:
+            errors.append(f"sense {sense_index} translations.{locale}.examples must be a non-empty list")
+            continue
+        if len(examples) != example_count:
+            errors.append(f"sense {sense_index} translations.{locale}.examples must align with English example count {example_count}")
+            continue
+        for example_index, example in enumerate(examples, start=1):
+            if not isinstance(example, str) or not example.strip():
+                errors.append(f"sense {sense_index} translations.{locale}.examples[{example_index}] must be a non-empty string")
+    return errors
+
+
+def _validate_compiled_record(payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    for field in REQUIRED_COMPILED_FIELDS:
+        if field not in payload:
+            errors.append(f"missing required field: {field}")
+
+    entry_type = payload.get("entry_type")
+    if entry_type not in {None, "word", "phrase", "reference"}:
+        errors.append(f"unsupported entry_type: {payload.get('entry_type')}")
+
+    source_provenance = payload.get("source_provenance")
+    if source_provenance is not None and not isinstance(source_provenance, list):
+        errors.append("source_provenance must be a list")
+
+    entity_category = payload.get("entity_category", "general")
+    if entity_category not in ALLOWED_ENTITY_CATEGORIES:
+        errors.append(f"unsupported entity_category: {entity_category}")
+
+    senses = payload.get("senses", [])
+    if isinstance(senses, list) and entry_type in {None, "word"}:
+        max_senses = _compiled_meaning_limit(payload.get("frequency_rank"))
+        if len(senses) > max_senses:
+            errors.append(f"senses exceeds allowed limit {max_senses} for frequency_rank {payload.get('frequency_rank')}")
+        for index, sense in enumerate(senses, start=1):
+            examples = sense.get("examples", []) if isinstance(sense, dict) else []
+            if not examples:
+                errors.append(f"sense {index} must include at least one example")
+            if isinstance(sense, dict):
+                errors.extend(_validate_compiled_sense_translations(sense.get("translations"), sense_index=index, example_count=len(examples)))
+
+    if entry_type == "phrase":
+        for field in ("phrase_kind", "display_form", "normalized_form", "generated_at"):
+            if field not in payload or payload.get(field) in (None, ""):
+                errors.append(f"missing required phrase field: {field}")
+        if not isinstance(payload.get("part_of_speech"), list):
+            errors.append("phrase part_of_speech must be a list")
+
+    if entry_type == "reference":
+        for field in ("reference_type", "display_form", "normalized_form", "translation_mode", "brief_description", "pronunciation", "generated_at"):
+            if field not in payload or payload.get(field) in (None, ""):
+                errors.append(f"missing required reference field: {field}")
+        for field in ("localized_display_form", "localized_brief_description", "localizations"):
+            if field in payload and payload.get(field) is not None and not isinstance(payload.get(field), (dict, list)):
+                errors.append(f"{field} must be an object or list")
+
+    return errors
 
 
 def _canonical_json_bytes(payload: Any) -> bytes:
@@ -228,9 +335,14 @@ async def _upsert_regeneration_request(
     current_user: User,
     db: AsyncSession,
 ) -> None:
+    existing_result = await db.execute(
+        select(LexiconRegenerationRequest).where(LexiconRegenerationRequest.item_id == item.id)
+    )
+    existing_request = existing_result.scalar_one_or_none()
+
     if item.review_status != "rejected":
-        if item.regeneration_request is not None:
-            await db.delete(item.regeneration_request)
+        if existing_request is not None:
+            await db.delete(existing_request)
         return
 
     request_payload = {
@@ -242,7 +354,7 @@ async def _upsert_regeneration_request(
         "compiled_payload_sha256": item.compiled_payload_sha256,
         "decision_reason": item.decision_reason,
     }
-    if item.regeneration_request is None:
+    if existing_request is None:
         db.add(
             LexiconRegenerationRequest(
                 batch_id=batch.id,
@@ -257,9 +369,9 @@ async def _upsert_regeneration_request(
         )
         return
 
-    item.regeneration_request.request_status = "pending"
-    item.regeneration_request.request_reason = item.decision_reason
-    item.regeneration_request.request_payload = request_payload
+    existing_request.request_status = "pending"
+    existing_request.request_reason = item.decision_reason
+    existing_request.request_payload = request_payload
 
 
 @router.post("/batches/import", response_model=LexiconCompiledReviewBatchResponse, status_code=status.HTTP_201_CREATED)
@@ -280,7 +392,7 @@ async def import_compiled_review_batch(
             row = json.loads(line)
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=400, detail=f"Compiled review import line {line_number} is not valid JSON: {exc.msg}") from exc
-        errors = validate_compiled_record(row)
+        errors = _validate_compiled_record(row)
         if errors:
             raise HTTPException(status_code=400, detail=f"Compiled review import validation failed: {'; '.join(errors)}")
         rows.append(row)

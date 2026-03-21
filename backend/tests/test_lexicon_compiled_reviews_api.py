@@ -186,9 +186,11 @@ class TestLexiconCompiledReviewApi:
         item_result.scalar_one_or_none.return_value = item
         batch_result = MagicMock()
         batch_result.scalar_one_or_none.return_value = batch
+        regen_request_result = MagicMock()
+        regen_request_result.scalar_one_or_none.return_value = None
         all_items_result = MagicMock()
         all_items_result.scalars.return_value.all.return_value = [item]
-        mock_db.execute.side_effect = [user_result, item_result, batch_result, all_items_result]
+        mock_db.execute.side_effect = [user_result, item_result, batch_result, regen_request_result, all_items_result]
 
         response = await client.patch(
             f"/api/lexicon-compiled-reviews/items/{item.id}",
@@ -272,9 +274,11 @@ class TestLexiconCompiledReviewApi:
         item_result.scalar_one_or_none.return_value = item
         batch_result = MagicMock()
         batch_result.scalar_one_or_none.return_value = batch
+        regen_request_result = MagicMock()
+        regen_request_result.scalar_one_or_none.return_value = None
         all_items_result = MagicMock()
         all_items_result.scalars.return_value.all.return_value = [item]
-        mock_db.execute.side_effect = [user_result, item_result, batch_result, all_items_result]
+        mock_db.execute.side_effect = [user_result, item_result, batch_result, regen_request_result, all_items_result]
 
         patch_response = await client.patch(
             f"/api/lexicon-compiled-reviews/items/{item.id}",

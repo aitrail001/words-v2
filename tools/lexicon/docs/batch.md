@@ -62,3 +62,26 @@ Reference, phrase, and word families remain separate input sources. All joins ac
 `compile-export` now writes family-aware compiled outputs when the corresponding snapshot source files exist. `import-db` can dry-run those directory layouts and count the families, and the backend schema now supports phrase and reference writes as well.
 
 `batch-qc` produces the initial flagged review queue, and `review-apply` replays approved overrides onto the persisted QC verdict rows before the next compile/import pass.
+
+## Compiled Review Staging
+
+The shipped admin review path for compiled learner-facing artifacts is DB-backed staging, not final publish.
+
+Flow:
+
+1. Compile a learner-facing JSONL artifact such as `words.enriched.jsonl`
+2. Import that artifact into the admin compiled-review surface at `/lexicon/compiled-review`
+3. Review rows in the admin UI
+4. Export one or more JSONL outputs:
+   - approved compiled rows
+   - rejected overlays
+   - regenerate rows
+   - canonical review decisions
+5. Run `review-materialize` if you want a purely file-based materialization step from canonical decisions
+6. Feed approved rows into `import-db`
+
+Important:
+
+- The compiled-review import writes to dedicated review-staging tables, not to final word/meaning/reference tables.
+- Final lexicon data is still written only by `import-db`.
+- Review decisions remain an overlay on immutable compiled artifacts.
