@@ -13,6 +13,7 @@ from app.core.config import Settings
 DECISION_SCHEMA_VERSION = "lexicon_review_decision.v1"
 ALLOWED_DECISIONS = {"approved", "rejected", "reopened"}
 DECISIONS_FILENAME = "review.decisions.jsonl"
+ALLOWED_ENTITY_CATEGORIES = {"general", "name", "place", "brand", "entity_other"}
 _REQUIRED_COMPILED_FIELDS = {
     "schema_version",
     "entry_id",
@@ -76,14 +77,38 @@ def _validate_compiled_record(row: dict[str, Any]) -> list[str]:
     entry_type = str(row.get("entry_type") or "")
     if entry_type not in {"word", "phrase", "reference"}:
         errors.append("entry_type must be word, phrase, or reference")
-    if not isinstance(row.get("senses"), list) or not row.get("senses"):
-        errors.append("senses must be a non-empty list")
-    if not isinstance(row.get("forms"), dict):
-        errors.append("forms must be an object")
+    if row.get("entity_category", "general") not in ALLOWED_ENTITY_CATEGORIES:
+        errors.append("entity_category must be a supported value")
     if not isinstance(row.get("source_provenance"), list):
         errors.append("source_provenance must be a list")
     if not isinstance(row.get("part_of_speech"), list):
         errors.append("part_of_speech must be a list")
+
+    if not isinstance(row.get("forms"), dict):
+        errors.append("forms must be an object")
+
+    senses = row.get("senses")
+    if not isinstance(senses, list):
+        errors.append("senses must be a list")
+    elif entry_type in {"word", "phrase"} and not senses:
+        errors.append("senses must be a non-empty list")
+
+    if entry_type == "phrase":
+        for field in ("phrase_kind", "display_form", "normalized_form", "generated_at"):
+            if row.get(field) in (None, ""):
+                errors.append(f"missing required phrase field: {field}")
+
+    if entry_type == "reference":
+        for field in ("reference_type", "display_form", "normalized_form", "translation_mode", "brief_description", "pronunciation", "generated_at"):
+            if row.get(field) in (None, ""):
+                errors.append(f"missing required reference field: {field}")
+        for field in ("localized_display_form", "localized_brief_description"):
+            value = row.get(field)
+            if value is not None and not isinstance(value, dict):
+                errors.append(f"{field} must be an object")
+        localizations = row.get("localizations")
+        if localizations is not None and not isinstance(localizations, list):
+            errors.append("localizations must be a list")
     return errors
 
 

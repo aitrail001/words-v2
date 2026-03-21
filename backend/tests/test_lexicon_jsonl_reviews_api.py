@@ -72,6 +72,34 @@ def _compiled_rows() -> list[dict]:
     ]
 
 
+def _compiled_reference_row() -> dict:
+    return {
+        "schema_version": "1.1.0",
+        "entry_id": "rf_australia",
+        "entry_type": "reference",
+        "normalized_form": "australia",
+        "source_provenance": [{"source": "reference_seed"}],
+        "entity_category": "general",
+        "word": "Australia",
+        "part_of_speech": [],
+        "cefr_level": "B1",
+        "frequency_rank": 0,
+        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+        "senses": [],
+        "confusable_words": [],
+        "generated_at": "2026-03-20T00:00:00Z",
+        "reference_type": "country",
+        "display_form": "Australia",
+        "translation_mode": "localized",
+        "brief_description": "A country in the Southern Hemisphere.",
+        "pronunciation": "/ɔˈstreɪliə/",
+        "localized_display_form": {"es": "Australia"},
+        "localized_brief_description": {"es": "País del hemisferio sur."},
+        "learner_tip": "Stress is on STRAY.",
+        "localizations": [{"locale": "es", "display_form": "Australia", "translation_mode": "localized"}],
+    }
+
+
 class TestLexiconJsonlReviewsApi:
     @pytest.mark.asyncio
     async def test_load_reads_compiled_rows_and_existing_decisions(self, client, mock_db, tmp_path: Path):
@@ -115,6 +143,31 @@ class TestLexiconJsonlReviewsApi:
         assert data["items"][0]["decision_reason"] == "ready"
         assert data["items"][1]["entry_id"] == "phrase:break-a-leg"
         assert data["items"][1]["review_status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_load_accepts_valid_reference_compiled_row(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        compiled_path = tmp_path / "references.enriched.jsonl"
+        _write_jsonl(compiled_path, [_compiled_reference_row()])
+
+        response = await client.post(
+            "/api/lexicon-jsonl-reviews/load",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"artifact_path": str(compiled_path)},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["artifact_filename"] == "references.enriched.jsonl"
+        assert data["total_items"] == 1
+        assert data["pending_count"] == 1
+        assert data["items"][0]["entry_id"] == "rf_australia"
+        assert data["items"][0]["entry_type"] == "reference"
+        assert data["items"][0]["review_status"] == "pending"
 
     @pytest.mark.asyncio
     async def test_patch_item_writes_sidecar_decision_row(self, client, mock_db, tmp_path: Path):
