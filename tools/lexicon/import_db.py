@@ -7,6 +7,7 @@ from typing import Any, Iterable, Optional, Type
 import hashlib
 import json
 import sys
+from collections import Counter
 
 
 SUPPORTED_RELATION_FIELDS = (
@@ -36,6 +37,21 @@ def _default_models() -> tuple[type, type, type, type, type, type, type]:
     return Word, Meaning, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun, Translation
 
 
+def _default_phrase_models() -> type:
+    _ensure_backend_path()
+    from app.models.phrase_entry import PhraseEntry
+
+    return PhraseEntry
+
+
+def _default_reference_models() -> tuple[type, type]:
+    _ensure_backend_path()
+    from app.models.reference_entry import ReferenceEntry
+    from app.models.reference_localization import ReferenceLocalization
+
+    return ReferenceEntry, ReferenceLocalization
+
+
 @dataclass(frozen=True)
 class ImportSummary:
     created_words: int = 0
@@ -52,6 +68,12 @@ class ImportSummary:
     reused_enrichment_jobs: int = 0
     created_enrichment_runs: int = 0
     reused_enrichment_runs: int = 0
+    created_phrases: int = 0
+    updated_phrases: int = 0
+    created_reference_entries: int = 0
+    updated_reference_entries: int = 0
+    created_reference_localizations: int = 0
+    updated_reference_localizations: int = 0
 
 
 def _increment(summary: ImportSummary, **changes: int) -> ImportSummary:
@@ -103,6 +125,22 @@ def _find_existing_word(session: Any, word_model: Type[Any], lemma: str, languag
             select(word_model).where(
                 word_model.word == lemma,
                 word_model.language == language,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    result = session.execute(object())
+    return result.scalar_one_or_none()
+
+
+def _find_existing_by_normalized_form(session: Any, model: Type[Any], normalized_form: str, language: str) -> Any | None:
+    if _is_sqlalchemy_model(model):
+        from sqlalchemy import select
+
+        result = session.execute(
+            select(model).where(
+                model.normalized_form == normalized_form,
+                model.language == language,
             )
         )
         return result.scalar_one_or_none()
@@ -218,6 +256,21 @@ def _load_existing_relations(session: Any, relation_model: Type[Any], meaning_id
     return list(result.scalars().all())
 
 
+def _load_existing_reference_localizations(session: Any, localization_model: Type[Any], reference_entry_id: Any) -> list[Any]:
+    if _is_sqlalchemy_model(localization_model):
+        from sqlalchemy import select
+
+        result = session.execute(
+            select(localization_model)
+            .where(localization_model.reference_entry_id == reference_entry_id)
+            .order_by(localization_model.locale.asc())
+        )
+        return list(result.scalars().all())
+
+    result = session.execute(object())
+    return list(result.scalars().all())
+
+
 def _make_word_prompt_hash(
     source_type: str,
     source_reference: str,
@@ -306,6 +359,9 @@ def import_compiled_rows(
     lexicon_enrichment_job_model: Optional[Type[Any]] = None,
     lexicon_enrichment_run_model: Optional[Type[Any]] = None,
     translation_model: Optional[Type[Any]] = None,
+    phrase_model: Optional[Type[Any]] = None,
+    reference_model: Optional[Type[Any]] = None,
+    reference_localization_model: Optional[Type[Any]] = None,
 ) -> ImportSummary:
     if word_model is None or meaning_model is None:
         (
@@ -327,10 +383,108 @@ def import_compiled_rows(
             lexicon_enrichment_run_model = default_run_model
         if translation_model is None:
             translation_model = default_translation_model
+    if phrase_model is None:
+        phrase_model = _default_phrase_models()
+    if reference_model is None or reference_localization_model is None:
+        default_reference_model, default_reference_localization_model = _default_reference_models()
+        if reference_model is None:
+            reference_model = default_reference_model
+        if reference_localization_model is None:
+            reference_localization_model = default_reference_localization_model
 
     summary = ImportSummary()
 
     for row in rows:
+        entry_type = str(row.get("entry_type") or "word").strip().lower() or "word"
+        if entry_type == "phrase":
+            existing_phrase = _find_existing_by_normalized_form(session, phrase_model, str(row.get("normalized_form") or "").strip(), str(row.get("language") or language))
+            if existing_phrase is None:
+                phrase = phrase_model(
+                    phrase_text=row.get("display_form") or row.get("word"),
+                    normalized_form=row.get("normalized_form") or str(row.get("word") or "").strip().lower(),
+                    phrase_kind=row.get("phrase_kind") or "multiword_expression",
+                    language=row.get("language") or language,
+                    cefr_level=row.get("cefr_level"),
+                    register_label=row.get("register") or row.get("register_label"),
+                    brief_usage_note=row.get("brief_usage_note") or row.get("usage_note"),
+                    source_type=source_type,
+                    source_reference=source_reference,
+                )
+                session.add(phrase)
+                summary = _increment(summary, created_phrases=1)
+            else:
+                existing_phrase.phrase_text = row.get("display_form") or row.get("word")
+                existing_phrase.normalized_form = row.get("normalized_form") or existing_phrase.normalized_form
+                existing_phrase.phrase_kind = row.get("phrase_kind") or existing_phrase.phrase_kind
+                existing_phrase.cefr_level = row.get("cefr_level")
+                existing_phrase.register_label = row.get("register") or row.get("register_label")
+                existing_phrase.brief_usage_note = row.get("brief_usage_note") or row.get("usage_note")
+                if hasattr(existing_phrase, "source_type"):
+                    existing_phrase.source_type = source_type
+                if hasattr(existing_phrase, "source_reference"):
+                    existing_phrase.source_reference = source_reference
+                summary = _increment(summary, updated_phrases=1)
+            continue
+        if entry_type == "reference":
+            existing_reference = _find_existing_by_normalized_form(session, reference_model, str(row.get("normalized_form") or "").strip(), str(row.get("language") or language))
+            if existing_reference is None:
+                reference_entry = reference_model(
+                    reference_type=row.get("reference_type") or "name",
+                    display_form=row.get("display_form") or row.get("word"),
+                    normalized_form=row.get("normalized_form") or str(row.get("word") or "").strip().lower(),
+                    translation_mode=row.get("translation_mode") or "unchanged",
+                    brief_description=row.get("brief_description") or "",
+                    pronunciation=row.get("pronunciation") or "",
+                    learner_tip=row.get("learner_tip"),
+                    language=row.get("language") or language,
+                    source_type=source_type,
+                    source_reference=source_reference,
+                )
+                session.add(reference_entry)
+                session.flush()
+                current_reference = reference_entry
+                summary = _increment(summary, created_reference_entries=1)
+            else:
+                current_reference = existing_reference
+                current_reference.reference_type = row.get("reference_type") or current_reference.reference_type
+                current_reference.display_form = row.get("display_form") or current_reference.display_form
+                current_reference.normalized_form = row.get("normalized_form") or current_reference.normalized_form
+                current_reference.translation_mode = row.get("translation_mode") or current_reference.translation_mode
+                current_reference.brief_description = row.get("brief_description") or current_reference.brief_description
+                current_reference.pronunciation = row.get("pronunciation") or current_reference.pronunciation
+                current_reference.learner_tip = row.get("learner_tip")
+                if hasattr(current_reference, "source_type"):
+                    current_reference.source_type = source_type
+                if hasattr(current_reference, "source_reference"):
+                    current_reference.source_reference = source_reference
+                summary = _increment(summary, updated_reference_entries=1)
+            localization_rows = list(row.get("localizations") or [])
+            if localization_rows:
+                existing_localizations = _load_existing_reference_localizations(session, reference_localization_model, current_reference.id)
+                existing_by_locale = {getattr(item, "locale", None): item for item in existing_localizations}
+                for localization in localization_rows:
+                    locale = str((localization or {}).get("locale") or "").strip()
+                    display_form = str((localization or {}).get("display_form") or "").strip()
+                    if not locale or not display_form:
+                        continue
+                    locale_row = existing_by_locale.get(locale)
+                    if locale_row is None:
+                        locale_row = reference_localization_model(
+                            reference_entry_id=current_reference.id,
+                            locale=locale,
+                            display_form=display_form,
+                            brief_description=(localization or {}).get("brief_description"),
+                            translation_mode=(localization or {}).get("translation_mode"),
+                        )
+                        session.add(locale_row)
+                        summary = _increment(summary, created_reference_localizations=1)
+                    else:
+                        locale_row.display_form = display_form
+                        locale_row.brief_description = (localization or {}).get("brief_description")
+                        locale_row.translation_mode = (localization or {}).get("translation_mode")
+                        summary = _increment(summary, updated_reference_localizations=1)
+            continue
+
         word = _find_existing_word(session, word_model, row["word"], language)
         if word is None:
             word = word_model(
@@ -570,6 +724,13 @@ def import_compiled_rows(
 def load_compiled_rows(path: str | Path) -> list[dict[str, Any]]:
     source_path = Path(path)
     rows: list[dict[str, Any]] = []
+    if source_path.is_dir():
+        compiled_paths = sorted(source_path.glob("*.enriched.jsonl"))
+        if not compiled_paths:
+            compiled_paths = sorted(source_path.glob("*.jsonl"))
+        for compiled_path in compiled_paths:
+            rows.extend(load_compiled_rows(compiled_path))
+        return rows
     with source_path.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -624,4 +785,20 @@ def run_import_file(
         "reused_enrichment_jobs": summary.reused_enrichment_jobs,
         "created_enrichment_runs": summary.created_enrichment_runs,
         "reused_enrichment_runs": summary.reused_enrichment_runs,
+        "created_phrases": summary.created_phrases,
+        "updated_phrases": summary.updated_phrases,
+        "created_reference_entries": summary.created_reference_entries,
+        "updated_reference_entries": summary.updated_reference_entries,
+        "created_reference_localizations": summary.created_reference_localizations,
+        "updated_reference_localizations": summary.updated_reference_localizations,
+    }
+
+
+def summarize_compiled_rows(rows: Iterable[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(str(row.get("entry_type") or "word").strip() or "word" for row in rows)
+    return {
+        "row_count": sum(counts.values()),
+        "word_count": counts.get("word", 0),
+        "phrase_count": counts.get("phrase", 0),
+        "reference_count": counts.get("reference", 0),
     }
