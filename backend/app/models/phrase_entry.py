@@ -1,16 +1,11 @@
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
 from sqlalchemy import DateTime, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.models.schema_names import lexicon_table_args
-
-if TYPE_CHECKING:
-    from app.models.reference_entry import ReferenceEntry
 
 
 class PhraseEntry(Base):
