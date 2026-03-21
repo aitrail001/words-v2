@@ -34,6 +34,7 @@ from tools.lexicon.rerank import RERANK_CANDIDATE_SOURCES, run_rerank
 from tools.lexicon.phrase_pipeline import build_phrase_snapshot_rows, write_phrase_snapshot
 from tools.lexicon.reference_pipeline import build_reference_snapshot_rows, write_reference_snapshot
 from tools.lexicon.qc import run_batch_qc, run_review_apply
+from tools.lexicon.review_materialize import materialize_review_outputs
 from tools.lexicon.selection_review import prepare_review, score_selection_risk
 from tools.lexicon.validate import validate_compiled_record, validate_snapshot_files
 from tools.lexicon.policy_data import excluded_canonical_forms
@@ -781,6 +782,32 @@ def _review_apply_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _review_materialize_command(args: argparse.Namespace) -> int:
+    try:
+        payload = materialize_review_outputs(
+            compiled_path=Path(args.compiled_input),
+            decisions_input_path=Path(args.decisions_input),
+            approved_output_path=Path(args.approved_output),
+            rejected_output_path=Path(args.rejected_output),
+            regenerate_output_path=Path(args.regenerate_output),
+        )
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    result = {
+        'command': 'review-materialize',
+        'compiled_input': str(Path(args.compiled_input)),
+        'decisions_input': str(Path(args.decisions_input)),
+        'approved_output': str(Path(args.approved_output)),
+        'rejected_output': str(Path(args.rejected_output)),
+        'regenerate_output': str(Path(args.regenerate_output)),
+    }
+    result.update(payload)
+    print(json.dumps(result))
+    return 0
+
+
 def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
     try:
         rank_provider, sense_provider = _load_build_base_providers()
@@ -1035,6 +1062,14 @@ def build_parser() -> argparse.ArgumentParser:
     review_apply.add_argument('--review-queue-output', help='optional override path for enrichment_review_queue.jsonl')
     review_apply.add_argument('--overrides', help='optional manual overrides JSONL path')
     review_apply.set_defaults(handler=_review_apply_command)
+
+    review_materialize = subparsers.add_parser('review-materialize', help='materialize approved/rejected/regenerate artifacts from compiled learner JSONL and review decisions')
+    review_materialize.add_argument('--compiled-input', required=True, help='compiled learner JSONL input path')
+    review_materialize.add_argument('--decisions-input', required=True, help='review decisions JSONL input path')
+    review_materialize.add_argument('--approved-output', required=True, help='path to write approved compiled rows')
+    review_materialize.add_argument('--rejected-output', required=True, help='path to write rejected overlay rows')
+    review_materialize.add_argument('--regenerate-output', required=True, help='path to write regeneration request rows')
+    review_materialize.set_defaults(handler=_review_materialize_command)
 
     score_selection = subparsers.add_parser('score-selection-risk', help='score deterministic selections and write selection_decisions.jsonl for a snapshot')
     score_selection.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')
