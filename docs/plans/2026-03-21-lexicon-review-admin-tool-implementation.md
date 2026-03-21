@@ -7,6 +7,11 @@ Status: Implemented in feature worktree
 
 Add a separate admin review tool for compiled lexicon JSONL artifacts so review can happen before DB import without reusing the older selection-review domain.
 
+Chosen implementation note:
+
+- This branch ships the DB-backed staged-review path.
+- The lighter file-backed alternative is documented in `docs/plans/2026-03-21-lexicon-review-admin-tool-jsonl-only-design.md`.
+
 ## Delivered
 
 1. Backend persistence and API
