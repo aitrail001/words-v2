@@ -48,12 +48,15 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
   const normalized = `opsimport${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const snapshotName = `ops-import-${normalized}`;
-  const hostSnapshotDir = path.join(process.cwd(), "data", "lexicon", "snapshots", snapshotName);
+  const hostSnapshotDir = path.join(process.cwd(), "..", "data", "lexicon", "snapshots", snapshotName);
   const compiledHostPath = path.join(hostSnapshotDir, "words.enriched.jsonl");
+  const approvedHostPath = path.join(hostSnapshotDir, "approved.jsonl");
 
   await rm(hostSnapshotDir, { recursive: true, force: true });
   await mkdir(hostSnapshotDir, { recursive: true });
-  await writeFile(compiledHostPath, `${JSON.stringify(buildCompiledWordRow(uniqueSuffix, normalized))}\n`, "utf-8");
+  const row = `${JSON.stringify(buildCompiledWordRow(uniqueSuffix, normalized))}\n`;
+  await writeFile(compiledHostPath, row, "utf-8");
+  await writeFile(approvedHostPath, row, "utf-8");
 
   await injectAdminToken(page, user.token, adminUrl);
   await page.goto(`${adminUrl}/lexicon/ops`);
@@ -64,12 +67,12 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   await page.getByTestId("lexicon-ops-open-import-db").click();
 
   await expect(page).toHaveURL(/\/lexicon\/import-db/);
-  await expect(page.getByTestId("lexicon-import-db-input-path")).toHaveValue(new RegExp(`${snapshotName}/words\\.enriched\\.jsonl$`));
+  await expect(page.getByTestId("lexicon-import-db-input-path")).toHaveValue(new RegExp(`${snapshotName}/approved\\.jsonl$`));
 
   await page.getByTestId("lexicon-import-db-dry-run-button").click();
   await expect(page.getByText("Import dry-run complete.")).toBeVisible();
-  await expect(page.getByText("Rows")).toBeVisible();
-  await expect(page.getByText("1")).toBeVisible();
+  await expect(page.getByTestId("lexicon-import-db-summary-rows")).toContainText("Rows");
+  await expect(page.getByTestId("lexicon-import-db-summary-rows")).toContainText("1");
 
   await page.getByTestId("lexicon-import-db-run-button").click();
   await expect(page.getByText("Import completed.")).toBeVisible();

@@ -152,9 +152,13 @@ export default function LexiconOpsPage() {
 
   useEffect(() => {
     if (!selectedSnapshot) return;
-    setImportPath(`${selectedSnapshot.snapshot_path}/words.enriched.jsonl`);
+    const approvedArtifact = detail?.snapshot === selectedSnapshot.snapshot
+      && detail.artifacts.some((artifact) => artifact.file_name === "approved.jsonl" && artifact.exists)
+      ? `${selectedSnapshot.snapshot_path}/approved.jsonl`
+      : "";
+    setImportPath(approvedArtifact);
     setImportSourceReference(selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot);
-  }, [selectedSnapshot]);
+  }, [detail, selectedSnapshot]);
 
   const reviewArtifactPath = useMemo(
     () => (selectedSnapshot ? `${selectedSnapshot.snapshot_path}/words.enriched.jsonl` : ""),
@@ -288,7 +292,7 @@ export default function LexiconOpsPage() {
                     data-testid="lexicon-ops-open-import-db"
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
                     onClick={() => openWorkflow("/lexicon/import-db", {
-                      inputPath: reviewArtifactPath,
+                      inputPath: importPath,
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
                     })}
                   >
@@ -366,7 +370,12 @@ export default function LexiconOpsPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h5 className="text-base font-semibold text-gray-900">Import to Final DB</h5>
-                      <p className="text-sm text-gray-500">Dry-run or execute the final import using the selected snapshot artifact.</p>
+                      <p className="text-sm text-gray-500">Dry-run or execute the final import using an approved artifact for this snapshot.</p>
+                      {!importPath ? (
+                        <p className="mt-2 text-xs text-amber-700">
+                          No `approved.jsonl` artifact is present in this snapshot yet. Materialize or export approved rows first, or enter the final import path manually.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]">
@@ -377,7 +386,7 @@ export default function LexiconOpsPage() {
                         value={importPath}
                         onChange={(event) => setImportPath(event.target.value)}
                         className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"
-                        placeholder="data/lexicon/snapshots/.../words.enriched.jsonl"
+                        placeholder="data/lexicon/snapshots/.../approved.jsonl"
                       />
                     </label>
                     <label className="grid gap-1 text-sm text-gray-700">

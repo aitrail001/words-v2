@@ -131,19 +131,19 @@ export default function LexiconImportDbPage() {
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Result</h4>
           <div className="mt-4 grid gap-3 md:grid-cols-4">
-            <div className="rounded border border-gray-200 p-3">
+            <div className="rounded border border-gray-200 p-3" data-testid="lexicon-import-db-summary-rows">
               <p className="text-gray-500">Rows</p>
               <p className="font-medium">{result.row_summary.row_count}</p>
             </div>
-            <div className="rounded border border-gray-200 p-3">
+            <div className="rounded border border-gray-200 p-3" data-testid="lexicon-import-db-summary-words">
               <p className="text-gray-500">Words</p>
               <p className="font-medium">{result.row_summary.word_count}</p>
             </div>
-            <div className="rounded border border-gray-200 p-3">
+            <div className="rounded border border-gray-200 p-3" data-testid="lexicon-import-db-summary-phrases">
               <p className="text-gray-500">Phrases</p>
               <p className="font-medium">{result.row_summary.phrase_count}</p>
             </div>
-            <div className="rounded border border-gray-200 p-3">
+            <div className="rounded border border-gray-200 p-3" data-testid="lexicon-import-db-summary-references">
               <p className="text-gray-500">References</p>
               <p className="font-medium">{result.row_summary.reference_count}</p>
             </div>

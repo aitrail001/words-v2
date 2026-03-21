@@ -111,6 +111,14 @@ describe("LexiconOpsPage", () => {
         read_error: null,
       },
       {
+        file_name: "approved.jsonl",
+        exists: true,
+        row_count: 12,
+        size_bytes: 3200,
+        modified_at: "2026-03-12T07:41:00Z",
+        read_error: null,
+      },
+      {
         file_name: "notes.json",
         exists: true,
         row_count: null,
@@ -237,6 +245,11 @@ describe("LexiconOpsPage", () => {
     render(<LexiconOpsPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-ops-open-jsonl-review")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-import-input-path")).toHaveValue(
+        "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+      ),
+    );
 
     await user.click(screen.getByTestId("lexicon-ops-open-jsonl-review"));
     await user.click(screen.getByTestId("lexicon-ops-open-compiled-review"));
@@ -254,6 +267,11 @@ describe("LexiconOpsPage", () => {
 
     await waitFor(() => expect(screen.getByTestId("lexicon-ops-import-panel")).toBeInTheDocument());
     expect(screen.getByTestId("lexicon-ops-import-input-path")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-import-input-path")).toHaveValue(
+        "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+      ),
+    );
     expect(screen.getByTestId("lexicon-ops-import-dry-run-button")).toBeInTheDocument();
     expect(screen.getByTestId("lexicon-ops-import-run-button")).toBeInTheDocument();
   });
