@@ -83,13 +83,6 @@ const buildCompiledPhraseRow = (runId: string, phrase: string) => ({
 const buildCompiledWarningPhraseRow = (runId: string, phrase: string) => ({
   ...buildCompiledPhraseRow(runId, phrase),
   source_provenance: [],
-  senses: [
-    {
-      sense_id: `phrase-sense-${runId}`,
-      definition: `an idiomatic meaning for ${phrase}`,
-      examples: [],
-    },
-  ],
 });
 
 test("@smoke admin can review compiled JSONL directly and materialize sidecar outputs", async ({ page, request }) => {
