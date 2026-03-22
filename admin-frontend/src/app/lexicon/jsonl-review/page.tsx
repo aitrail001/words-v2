@@ -392,46 +392,61 @@ export default function LexiconJsonlReviewPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_20rem]">
-          <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Artifact path</p>
-                <p className="mt-2 break-all font-mono text-sm text-slate-800">{artifactPath || "Not loaded yet"}</p>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Items</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-950">{selectedCount}</p>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Decision ledger file</p>
-                <p className="mt-2 break-all font-mono text-sm text-slate-800">{decisionsPath || "reviewed/review.decisions.jsonl"}</p>
-              </div>
-            </div>
-
-            <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Approve</p>
-                <p className="mt-2">Approve keeps the compiled row eligible for reviewed/approved.jsonl, the reviewed file you should import into the final DB.</p>
-              </div>
-              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Reject</p>
-                <p className="mt-2">Reject records the row in reviewed/review.decisions.jsonl, writes the rejected overlay, and adds a regeneration request row.</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reopen</p>
-                <p className="mt-2">Reopen removes the final decision so the row stays pending until you decide again.</p>
-              </div>
-            </div>
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Artifact path</p>
+            <p className="mt-2 break-all font-mono text-sm text-slate-800">{artifactPath || "Not loaded yet"}</p>
           </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Items</p>
+            <p className="mt-2 text-2xl font-semibold text-slate-950">{selectedCount}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Decision ledger file</p>
+            <p className="mt-2 break-all font-mono text-sm text-slate-800">{decisionsPath || "reviewed/review.decisions.jsonl"}</p>
+          </div>
+        </div>
 
-          <aside className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Path format</p>
-            <p className="mt-2 leading-6">{artifactPathHint}</p>
-            <p className="mt-4 text-xs leading-5 text-amber-800">
-              Use the repo-relative `data/...` path in Docker, or the `/app/data/...` form if you prefer to be explicit.
-            </p>
-          </aside>
+        <aside className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Path format</p>
+          <p className="mt-2 leading-6">{artifactPathHint}</p>
+          <p className="mt-4 text-xs leading-5 text-amber-800">
+            Use the repo-relative `data/...` path in Docker, or the `/app/data/...` form if you prefer to be explicit.
+          </p>
+        </aside>
+
+        <div className="mt-3 grid gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 md:grid-cols-4">
+          <div className="text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Approved rows</p>
+            <p className="mt-1">Reviewed compiled rows for final Import DB. Equivalent to <span className="font-mono text-xs">reviewed/approved.jsonl</span>.</p>
+          </div>
+          <div className="text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Decision ledger</p>
+            <p className="mt-1">Final approve/reject overlay stored in the decision ledger file. Equivalent to <span className="font-mono text-xs">reviewed/review.decisions.jsonl</span>.</p>
+          </div>
+          <div className="text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Rejected overlay</p>
+            <p className="mt-1">Rejected rows plus the decision metadata preserved for audit and analysis.</p>
+          </div>
+          <div className="text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Regeneration requests</p>
+            <p className="mt-1">Subset of rejected rows exported as requests for a new generation pass. There is no separate regenerate status.</p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Approve</p>
+            <p className="mt-2">Approve keeps the compiled row eligible for reviewed/approved.jsonl, the reviewed file you should import into the final DB.</p>
+          </div>
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Reject</p>
+            <p className="mt-2">Reject records the row in reviewed/review.decisions.jsonl, writes the rejected overlay, and adds a regeneration request row.</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reopen</p>
+            <p className="mt-2">Reopen removes the final decision so the row stays pending until you decide again.</p>
+          </div>
         </div>
 
         <form id="jsonl-review-load-form" onSubmit={loadSession} className="mt-6 grid gap-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] xl:items-end">
