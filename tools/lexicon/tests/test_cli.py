@@ -1159,8 +1159,8 @@ class CliTests(unittest.TestCase):
             payload = json.loads(stdout)
             self.assertEqual(payload["command"], "compile-export")
             self.assertEqual(payload["compiled_count"], 1)
-            self.assertEqual(payload["review_qc_output"], str(snapshot_dir / "compiled_review_qc.jsonl"))
-            self.assertEqual(payload["review_queue_output"], str(snapshot_dir / "compiled_review_queue.jsonl"))
+            self.assertEqual(payload["review_qc_output"], str(output_path.with_name("words.enriched.review_qc.jsonl")))
+            self.assertEqual(payload["review_queue_output"], str(output_path.with_name("words.enriched.review_queue.jsonl")))
             self.assertTrue(output_path.exists())
             compiled_rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(compiled_rows[0]["word"], "run")
@@ -1296,8 +1296,8 @@ if __name__ == "__main__":
             payload = json.loads(stdout)
             self.assertEqual(payload["decision_filter"], "mode_c_safe")
             self.assertEqual(payload["decisions"], str(decisions_path))
-            self.assertEqual(payload["review_qc_output"], str(snapshot_dir / "compiled_review_qc.jsonl"))
-            self.assertEqual(payload["review_queue_output"], str(snapshot_dir / "compiled_review_queue.jsonl"))
+            self.assertEqual(payload["review_qc_output"], str(output_path.with_name("words.mode-c-safe.enriched.review_qc.jsonl")))
+            self.assertEqual(payload["review_queue_output"], str(output_path.with_name("words.mode-c-safe.enriched.review_queue.jsonl")))
             self.assertEqual(mocked_compile.call_args.kwargs["decision_filter"], "mode_c_safe")
             self.assertEqual(mocked_compile.call_args.kwargs["decisions_path"], decisions_path)
 

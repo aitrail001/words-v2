@@ -117,10 +117,10 @@ python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshot
 python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --decision-filter mode_c_safe --output data/lexicon/snapshots/demo/words.mode-c-safe.enriched.jsonl
 ```
 
-`compile-export` now also writes shared review-prep sidecars beside the compiled outputs:
+`compile-export` now also writes shared review-prep sidecars beside each compiled output:
 
-- `compiled_review_qc.jsonl`
-- `compiled_review_queue.jsonl`
+- `<compiled-output>.review_qc.jsonl`
+- `<compiled-output>.review_queue.jsonl`
 
 Those sidecars are generated from the same normalized `word`, `phrase`, and `reference` rows that feed admin review. Realtime exports now pass through the same post-normalization QC/label/review-queue preparation path that batch uses, while still keeping the immediate realtime schema validation in place.
 

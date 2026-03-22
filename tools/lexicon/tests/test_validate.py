@@ -302,7 +302,7 @@ class ValidateCompiledRecordTests(unittest.TestCase):
                 "cefr_level": "B1",
                 "frequency_rank": 0,
                 "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
-                "senses": [],
+                "senses": [{"sense_id": "phrase-1", "definition": "depart", "examples": [{"sentence": "The plane took off.", "difficulty": "A1"}]}],
                 "confusable_words": [],
                 "generated_at": "2026-03-20T00:00:00Z",
                 "phrase_kind": "phrasal_verb",

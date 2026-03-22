@@ -12,6 +12,14 @@ COMPILED_SCHEMA_VERSION = "1.1.0"
 _ALLOWED_DECISION_FILTERS = {"mode_c_safe"}
 
 
+def review_qc_output_path(output_path: Path) -> Path:
+    return output_path.with_name(f"{output_path.stem}.review_qc.jsonl")
+
+
+def review_queue_output_path(output_path: Path) -> Path:
+    return output_path.with_name(f"{output_path.stem}.review_queue.jsonl")
+
+
 def compile_words(
     lexemes: list[LexemeRecord],
     senses: list[SenseRecord],
@@ -316,7 +324,7 @@ def compile_snapshot(
     compiled_review_rows = [*compiled_word_rows, *phrase_rows, *reference_rows]
     review_qc_rows = build_review_prep_rows(compiled_review_rows, origin="realtime")
     review_queue_rows = build_review_queue_rows(review_qc_rows)
-    write_jsonl(snapshot_dir / "compiled_review_qc.jsonl", review_qc_rows)
-    write_jsonl(snapshot_dir / "compiled_review_queue.jsonl", review_queue_rows)
+    write_jsonl(review_qc_output_path(output_path), review_qc_rows)
+    write_jsonl(review_queue_output_path(output_path), review_queue_rows)
 
     return compiled

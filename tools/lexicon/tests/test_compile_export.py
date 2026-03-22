@@ -323,8 +323,8 @@ class CompileWordsTests(unittest.TestCase):
             payload = json.loads(out_path.read_text(encoding="utf-8").strip())
             self.assertEqual(payload["word"], "run")
             self.assertEqual(payload["senses"][0]["definition"], "to move quickly on foot")
-            qc_rows = [json.loads(line) for line in (root / "compiled_review_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-            queue_rows = [json.loads(line) for line in (root / "compiled_review_queue.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            qc_rows = [json.loads(line) for line in (root / "words.enriched.review_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            queue_rows = [json.loads(line) for line in (root / "words.enriched.review_queue.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(qc_rows), 1)
             self.assertEqual(qc_rows[0]["entry_id"], "lx_run")
             self.assertEqual(qc_rows[0]["verdict"], "pass")
@@ -379,8 +379,8 @@ class CompileWordsTests(unittest.TestCase):
             reference_rows = [json.loads(line) for line in (root / "references.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(phrase_rows[0]["entry_type"], "phrase")
             self.assertEqual(reference_rows[0]["entry_type"], "reference")
-            qc_rows = [json.loads(line) for line in (root / "compiled_review_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-            queue_rows = [json.loads(line) for line in (root / "compiled_review_queue.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            qc_rows = [json.loads(line) for line in (root / "words.enriched.review_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            queue_rows = [json.loads(line) for line in (root / "words.enriched.review_queue.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(qc_rows), 2)
             self.assertEqual(qc_rows[0]["entry_id"], "ph_take_off")
             self.assertEqual(qc_rows[0]["verdict"], "fail")
@@ -530,12 +530,14 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
                     "review_required": True,
                 }),
             ]) + "\n", encoding="utf-8")
-            output_path = root / "words.enriched.jsonl"
+            output_path = root / "words.mode-c-safe.enriched.jsonl"
 
             compiled = compile_snapshot(root, output_path, decisions_path=decisions_path, decision_filter="mode_c_safe")
 
             self.assertEqual(len(compiled), 1)
             self.assertEqual(compiled[0].word, "run")
+            self.assertTrue((root / "words.mode-c-safe.enriched.review_qc.jsonl").exists())
+            self.assertTrue((root / "words.mode-c-safe.enriched.review_queue.jsonl").exists())
 
     def test_compile_snapshot_mode_c_safe_requires_decisions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
