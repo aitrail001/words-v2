@@ -251,7 +251,7 @@ describe("LexiconJsonlReviewPage", () => {
     expect(screen.getByText(/Reject records the row in reviewed\/review\.decisions\.jsonl, writes the rejected overlay, and adds a regeneration request row\./)).toBeInTheDocument();
     expect(screen.getByText(/Reopen removes the final decision so the row stays pending until you decide again\./)).toBeInTheDocument();
     expect(screen.getByLabelText("Artifact path")).toHaveValue("/tmp/words.enriched.jsonl");
-    expect(screen.getByLabelText("Decisions path")).toHaveValue("/tmp/reviewed/review.decisions.jsonl");
+    expect(screen.getByLabelText("Decision ledger path")).toHaveValue("/tmp/reviewed/review.decisions.jsonl");
     expect(screen.getByLabelText("Output directory")).toHaveValue("/tmp/reviewed");
     expect(screen.getAllByLabelText("Output directory")).toHaveLength(1);
 
