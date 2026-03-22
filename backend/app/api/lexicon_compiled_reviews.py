@@ -3,7 +3,6 @@ import json
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status

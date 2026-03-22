@@ -47,6 +47,11 @@ type WorkflowShellData = {
   outsidePortal: string[];
 };
 
+type WorkflowActionState = {
+  enabled: boolean;
+  reason: string | null;
+};
+
 function workflowStage(snapshot: LexiconOpsSnapshotSummary | null | undefined): WorkflowShellData {
   if (!snapshot) {
     return {
@@ -136,6 +141,26 @@ function inferArtifactPathFromSummary(
     return `${snapshot.snapshot_path}/approved.jsonl`;
   }
   return "";
+}
+
+function actionStateForReview(reviewArtifactPath: string): WorkflowActionState {
+  if (reviewArtifactPath) {
+    return { enabled: true, reason: null };
+  }
+  return {
+    enabled: false,
+    reason: "Run compile-export first. No compiled artifact is present for this snapshot yet.",
+  };
+}
+
+function actionStateForImport(importArtifactPath: string): WorkflowActionState {
+  if (importArtifactPath) {
+    return { enabled: true, reason: null };
+  }
+  return {
+    enabled: false,
+    reason: "No approved.jsonl is present yet. Finish review/export or materialize approved rows first.",
+  };
 }
 
 export default function LexiconOpsPage() {
@@ -241,6 +266,18 @@ export default function LexiconOpsPage() {
   const reviewDecisionsPath = useMemo(
     () => (selectedSnapshot ? `${selectedSnapshot.snapshot_path}/review.decisions.jsonl` : ""),
     [selectedSnapshot],
+  );
+  const compiledReviewAction = useMemo(
+    () => actionStateForReview(reviewArtifactPath),
+    [reviewArtifactPath],
+  );
+  const jsonlReviewAction = useMemo(
+    () => actionStateForReview(reviewArtifactPath),
+    [reviewArtifactPath],
+  );
+  const importDbAction = useMemo(
+    () => actionStateForImport(importArtifactPath || importPath),
+    [importArtifactPath, importPath],
   );
 
   useEffect(() => {
@@ -387,6 +424,7 @@ export default function LexiconOpsPage() {
                     type="button"
                     data-testid="lexicon-ops-open-jsonl-review"
                     className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800"
+                    disabled={!jsonlReviewAction.enabled}
                     onClick={() => openWorkflow("/lexicon/jsonl-review", {
                       artifactPath: reviewArtifactPath,
                       decisionsPath: reviewDecisionsPath,
@@ -401,6 +439,7 @@ export default function LexiconOpsPage() {
                     type="button"
                     data-testid="lexicon-ops-open-compiled-review"
                     className="rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-sm text-violet-800"
+                    disabled={!compiledReviewAction.enabled}
                     onClick={() => openWorkflow("/lexicon/compiled-review", {
                       snapshot: selectedSnapshot.snapshot,
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
@@ -414,6 +453,7 @@ export default function LexiconOpsPage() {
                     type="button"
                     data-testid="lexicon-ops-open-import-db"
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+                    disabled={!importDbAction.enabled}
                     onClick={() => openWorkflow("/lexicon/import-db", {
                       inputPath: importArtifactPath || importPath,
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
@@ -432,6 +472,11 @@ export default function LexiconOpsPage() {
                   >
                     Open DB Inspector
                   </button>
+                </div>
+                <div className="space-y-1 text-xs text-gray-500" data-testid="lexicon-ops-action-reasons">
+                  {!jsonlReviewAction.enabled ? <p>JSONL Review: {jsonlReviewAction.reason}</p> : null}
+                  {!compiledReviewAction.enabled ? <p>Compiled Review: {compiledReviewAction.reason}</p> : null}
+                  {!importDbAction.enabled ? <p>Import DB: {importDbAction.reason}</p> : null}
                 </div>
 
                 <div className="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">

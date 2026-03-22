@@ -159,6 +159,7 @@ The admin portal now exposes the current lexicon workflow as separate tools inst
   - inspects `data/lexicon/snapshots/*`
   - derives the current workflow stage, preferred review artifact, preferred import artifact, and next recommended action from snapshot artifacts
   - shows which steps still happen outside the admin portal
+  - disables review/import actions when the required compiled or approved artifacts do not exist yet, instead of sending operators into empty downstream pages
   - deep-links into review/import/inspection flows with the selected snapshot prefilled
 - `/lexicon/compiled-review`
   - DB-backed review staging for immutable compiled artifacts
