@@ -1,4 +1,5 @@
 import io
+import csv
 import json
 import os
 import tempfile
@@ -32,6 +33,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("enrich", stdout)
         self.assertIn("benchmark-selection", stdout)
         self.assertIn("benchmark-enrichment", stdout)
+        self.assertIn("build-phrases", stdout)
         self.assertIn("phrase-build-base", stdout)
         self.assertIn("reference-build-base", stdout)
         self.assertIn("batch-prepare", stdout)
@@ -285,6 +287,84 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["command"], "phrase-build-base")
             self.assertEqual(payload["phrase_count"], 1)
             self.assertTrue((output_dir / "phrases.jsonl").exists())
+
+    def test_build_phrases_command_accepts_multiple_csv_sources_and_merges_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_a = root / "reviewed_phrasals.csv"
+            source_b = root / "reviewed_idioms.csv"
+            fieldnames = [
+                "expression",
+                "original_order",
+                "source",
+                "reviewed_as",
+                "difficulty",
+                "commonality",
+                "added",
+                "confidence",
+            ]
+            with source_a.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerow({
+                    "expression": "Take off",
+                    "original_order": "1",
+                    "source": "phrasals",
+                    "reviewed_as": "phrasal verb",
+                    "difficulty": "B1",
+                    "commonality": "high",
+                    "added": "yes",
+                    "confidence": "0.92",
+                })
+            with source_b.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerow({
+                    "expression": "take off",
+                    "original_order": "4",
+                    "source": "idioms",
+                    "reviewed_as": "multi-word verb",
+                    "difficulty": "B2",
+                    "commonality": "medium",
+                    "added": "no",
+                    "confidence": "0.71",
+                })
+                writer.writerow({
+                    "expression": "Break a leg",
+                    "original_order": "5",
+                    "source": "idioms",
+                    "reviewed_as": "idiom",
+                    "difficulty": "B2",
+                    "commonality": "medium",
+                    "added": "yes",
+                    "confidence": "0.85",
+                })
+            output_dir = root / "phrase-snapshot"
+
+            code, stdout, stderr = self.run_cli([
+                "build-phrases",
+                "--output-dir",
+                str(output_dir),
+                str(source_a),
+                str(source_b),
+            ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stderr, "")
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "build-phrases")
+            self.assertEqual(payload["source_count"], 2)
+            self.assertEqual(payload["input_count"], 3)
+            self.assertEqual(payload["phrase_count"], 2)
+            self.assertEqual(payload["deduped_count"], 1)
+            rows = [
+                json.loads(line)
+                for line in (output_dir / "phrases.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["normalized_form"], "take off")
+            self.assertEqual(len(rows[0]["source_provenance"]), 2)
 
     def test_reference_build_base_command_writes_json_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

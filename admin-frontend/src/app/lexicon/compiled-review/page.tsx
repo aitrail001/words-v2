@@ -24,6 +24,43 @@ import {
 
 type ReviewDecisionStatus = "pending" | "approved" | "rejected";
 
+type JsonRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function firstString(values: unknown): string | null {
+  return Array.isArray(values) ? values.map(asString).find((value) => value !== null) ?? null : null;
+}
+
+function readPhraseDetails(entryType: string, payload: Record<string, unknown>): {
+  phraseKind: string | null;
+  definition: string | null;
+  example: string | null;
+  spanishDefinition: string | null;
+} | null {
+  if (entryType !== "phrase") return null;
+  const record = asRecord(payload);
+  const senses = Array.isArray(record?.senses) ? record.senses : [];
+  const firstSense = asRecord(senses[0]);
+  if (!firstSense) return null;
+
+  const translations = asRecord(firstSense.translations);
+  const spanish = asRecord(translations?.es);
+
+  return {
+    phraseKind: asString(record?.phrase_kind),
+    definition: asString(firstSense.definition),
+    example: firstString(firstSense.examples),
+    spanishDefinition: asString(spanish?.definition),
+  };
+}
+
 function searchParam(name: string): string {
   if (typeof window === "undefined") return "";
   return new URLSearchParams(window.location.search).get(name) ?? "";
@@ -124,6 +161,10 @@ export default function LexiconCompiledReviewPage() {
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) ?? null,
     [items, selectedItemId],
+  );
+  const selectedPhraseDetails = useMemo(
+    () => (selectedItem ? readPhraseDetails(selectedItem.entry_type, selectedItem.compiled_payload) : null),
+    [selectedItem],
   );
   const filteredItems = useMemo(() => {
     const search = itemSearch.trim().toLowerCase();
@@ -711,6 +752,30 @@ export default function LexiconCompiledReviewPage() {
                           <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-violet-900">{JSON.stringify(selectedItem.qc_issues ?? [], null, 2)}</pre>
                         </div>
                       </div>
+
+                      {selectedPhraseDetails ? (
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 p-4" data-testid="compiled-review-phrase-details">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Phrase details</p>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Kind</p>
+                              <p className="mt-1 text-sm text-slate-900">{selectedPhraseDetails.phraseKind ?? "—"}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Spanish definition</p>
+                              <p className="mt-1 text-sm text-slate-900">{selectedPhraseDetails.spanishDefinition ?? "—"}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Definition</p>
+                              <p className="mt-1 text-sm text-slate-900">{selectedPhraseDetails.definition ?? "—"}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Example</p>
+                              <p className="mt-1 text-sm text-slate-900">{selectedPhraseDetails.example ?? "—"}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
 
                       <label className="block text-sm font-medium text-gray-700">
                         Decision reason

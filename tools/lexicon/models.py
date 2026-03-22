@@ -40,6 +40,9 @@ class LexemeRecord(SerializableRecord):
     variant_prompt_note: str | None = None
     variant_source: str | None = None
     entity_category: str = "general"
+    display_form: str | None = None
+    phrase_kind: str | None = None
+    seed_metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.entry_id is None:
@@ -48,6 +51,10 @@ class LexemeRecord(SerializableRecord):
             object.__setattr__(self, "normalized_form", self.lemma.strip().lower())
         if self.source_provenance is None:
             object.__setattr__(self, "source_provenance", _default_source_provenance(self.source_refs))
+        if self.display_form is None:
+            object.__setattr__(self, "display_form", self.lemma)
+        if self.seed_metadata is None:
+            object.__setattr__(self, "seed_metadata", {})
 
 
 @dataclass(frozen=True)
@@ -216,6 +223,9 @@ class CompiledWordRecord(SerializableRecord):
     normalized_form: str | None = None
     source_provenance: list[dict[str, Any]] | None = None
     entity_category: str = "general"
+    display_form: str | None = None
+    phrase_kind: str | None = None
+    seed_metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.entry_id is None:
@@ -224,9 +234,11 @@ class CompiledWordRecord(SerializableRecord):
             object.__setattr__(self, "normalized_form", self.word.strip().lower())
         if self.source_provenance is None:
             object.__setattr__(self, "source_provenance", [])
+        if self.seed_metadata is None:
+            object.__setattr__(self, "seed_metadata", {})
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "entry_id": self.entry_id,
             "entry_type": self.entry_type,
@@ -243,3 +255,10 @@ class CompiledWordRecord(SerializableRecord):
             "generated_at": self.generated_at,
             "phonetics": self.phonetics,
         }
+        if self.display_form is not None:
+            payload["display_form"] = self.display_form
+        if self.phrase_kind is not None:
+            payload["phrase_kind"] = self.phrase_kind
+        if self.seed_metadata is not None:
+            payload["seed_metadata"] = self.seed_metadata
+        return payload

@@ -1,6 +1,6 @@
 # Lexicon Operator Guide
 
-This runbook covers the active lexicon workflow only: lexeme snapshot generation, word-level enrichment, review, and DB import.
+This runbook covers the active lexicon workflow only: word snapshot generation, curated phrase inventory build, shared enrichment, review, and DB import.
 
 ## 1. Setup
 
@@ -26,14 +26,15 @@ Important:
 ## 2. Canonical workflow
 
 1. `build-base`
-2. optional ambiguous-form adjudication
+2. optional `build-phrases`
+3. optional ambiguous-form adjudication
 3. `enrich`
 4. `validate`
 5. review `words.enriched.jsonl`
 6. `import-db` from `reviewed/approved.jsonl`
 
-Realtime writes final accepted word rows directly to `words.enriched.jsonl`.
-Batch materializes accepted rows into that same file later via `batch-ingest`.
+Realtime writes final accepted word and phrase rows directly to `words.enriched.jsonl`.
+Batch materializes accepted word and phrase rows into that same file later via `batch-ingest`.
 
 ## 3. Build a snapshot
 
@@ -54,7 +55,23 @@ Current base artifacts:
 
 The active snapshot contract no longer uses `senses.jsonl` or `concepts.jsonl`.
 
-## 4. Optional ambiguous-form adjudication
+## 4. Build curated phrase inventory
+
+Use this when you want phrasal verbs, idioms, or other reviewed phrase CSV rows to flow through the same enrichment and review path as words.
+
+```bash
+python3 -m tools.lexicon.cli build-phrases --input data/lexicon/phrasals/reviewed_phrasal_verbs.csv --input data/lexicon/idioms/reviewed_idioms.csv --output-dir data/lexicon/snapshots/phrases-demo
+```
+
+Behavior:
+
+- reads one or more reviewed CSV inventories
+- maps reviewed labels into the bounded phrase taxonomy
+- dedupes by normalized phrase form
+- writes `phrases.jsonl`
+- preserves raw reviewed labels and source metadata in `source_provenance` and `seed_metadata`
+
+## 5. Optional ambiguous-form adjudication
 
 Use this only for bounded canonicalization tails.
 
@@ -64,7 +81,7 @@ python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/dem
 python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
 ```
 
-## 5. Realtime enrichment
+## 6. Realtime enrichment
 
 ```bash
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --resume
@@ -72,8 +89,8 @@ python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo -
 
 Behavior:
 
-- reads `lexemes.jsonl`
-- generates one word payload per LLM call
+- reads `lexemes.jsonl` and optional `phrases.jsonl`
+- generates one strict payload per word or phrase entry
 - validates/QCs immediately
 - retries repairable failures
 - writes accepted rows directly to `words.enriched.jsonl`
@@ -82,7 +99,7 @@ Behavior:
   - `enrich.decisions.jsonl`
   - `enrich.failures.jsonl`
 
-## 6. Batch enrichment
+## 7. Batch enrichment
 
 Use batch when you want deferred file-based generation rather than inline calls.
 
@@ -95,18 +112,19 @@ python3 -m tools.lexicon.cli batch-ingest --snapshot-dir data/lexicon/snapshots/
 Behavior:
 
 - `batch-prepare` writes request ledgers
-- `batch-ingest` applies the same word-level validation/materialization used by realtime
+- phrase request rows use the strict phrase schema/prompt contract
+- `batch-ingest` applies the same word-level and phrase-level validation/materialization used by realtime
 - accepted rows append to `words.enriched.jsonl`
 - failed rows go to `words.regenerate.jsonl`
 
-## 7. Validate
+## 8. Validate
 
 ```bash
 python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
 python3 -m tools.lexicon.cli validate --compiled-input data/lexicon/snapshots/demo/words.enriched.jsonl
 ```
 
-## 8. Review in admin
+## 9. Review in admin
 
 Current admin tools:
 
@@ -132,18 +150,20 @@ Reviewed artifact contract:
 - `reviewed/regenerate.jsonl` = rerun request set
 - `reviewed/review.decisions.jsonl` = canonical decision ledger
 
+Phrase rows stay inside this same workflow. Both review pages now surface phrase kind, first-sense definition, example, and translations without requiring raw JSON inspection.
+
 The admin portal no longer supports the old staged-selection review flow.
 
-## 9. Import to DB
+## 10. Import to DB
 
 ```bash
 python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --dry-run
 python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --source-type lexicon_snapshot --source-reference demo
 ```
 
-`import-db` is the only final write path into lexicon DB tables.
+`import-db` is the only final write path into lexicon DB tables, including approved phrase rows.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 - Ops page shows `Failed to fetch`
   - ensure admin/frontend browser API base is `/api`

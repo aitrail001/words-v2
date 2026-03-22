@@ -391,4 +391,59 @@ describe("LexiconCompiledReviewPage", () => {
     );
     await waitFor(() => expect(screen.getByText(/Updated 2 rows to approved\./i)).toBeInTheDocument());
   });
+
+  it("renders structured phrase details from compiled phrase rows", async () => {
+    mockListItems.mockResolvedValueOnce([
+      {
+        id: "item-phrase-1",
+        batch_id: "batch-1",
+        entry_id: "phrase:break-a-leg",
+        entry_type: "phrase",
+        normalized_form: "break a leg",
+        display_text: "Break a leg",
+        entity_category: "general",
+        language: "en",
+        frequency_rank: 250,
+        cefr_level: "B1",
+        review_status: "pending",
+        review_priority: 95,
+        validator_status: "pass",
+        validator_issues: [],
+        qc_status: "pass",
+        qc_score: 0.91,
+        qc_issues: [],
+        regen_requested: false,
+        import_eligible: false,
+        decision_reason: null,
+        reviewed_by: null,
+        reviewed_at: null,
+        compiled_payload: {
+          entry_id: "phrase:break-a-leg",
+          phrase_kind: "idiom",
+          senses: [
+            {
+              definition: "good luck",
+              examples: ["Break a leg tonight."],
+              translations: {
+                es: {
+                  definition: "buena suerte",
+                },
+              },
+            },
+          ],
+        },
+        compiled_payload_sha256: "d".repeat(64),
+        created_at: "2026-03-21T00:00:00Z",
+        updated_at: "2026-03-21T00:00:00Z",
+      },
+    ]);
+    render(<LexiconCompiledReviewPage />);
+
+    await waitFor(() => expect(screen.getByTestId("compiled-review-phrase-details")).toBeInTheDocument());
+    expect(screen.getByText("Phrase details")).toBeInTheDocument();
+    expect(screen.getByText("idiom")).toBeInTheDocument();
+    expect(screen.getByText("good luck")).toBeInTheDocument();
+    expect(screen.getByText("Break a leg tonight.")).toBeInTheDocument();
+    expect(screen.getByText("buena suerte")).toBeInTheDocument();
+  });
 });

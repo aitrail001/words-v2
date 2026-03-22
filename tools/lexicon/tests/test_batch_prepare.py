@@ -24,6 +24,8 @@ class BatchPrepareTests(unittest.TestCase):
         self.assertEqual(rows[1]["custom_id"], "phrase:lexicon-20260320-seeds:ph_take_off:attempt1")
         self.assertEqual(rows[0]["body"]["entry_kind"], "reference")
         self.assertEqual(rows[1]["body"]["entry_kind"], "phrase")
+        self.assertEqual(rows[1]["body"]["text"]["format"]["name"], "lexicon_enrichment_phrase")
+        self.assertIn("take off", rows[1]["body"]["input"].lower())
 
     def test_write_batch_request_rows_writes_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -43,4 +45,3 @@ class BatchPrepareTests(unittest.TestCase):
             payload = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(payload), 1)
             self.assertEqual(payload[0]["custom_id"], "reference:lexicon-20260320-seeds:rf_melbourne:attempt1")
-

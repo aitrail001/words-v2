@@ -12,11 +12,13 @@ from tools.lexicon.enrich import (
     OpenAICompatibleResponsesClient,
     _generate_validated_word_payload_with_stats,
     _single_sense_response_schema,
+    build_openai_compatible_phrase_enrichment_provider,
     _validate_openai_compatible_word_payload,
     _validate_string_list_field,
     _word_enrichment_response_schema,
     learner_meaning_cap,
     build_enrichment_prompt,
+    build_phrase_enrichment_prompt,
     build_word_enrichment_prompt,
     build_enrichment_provider,
     build_openai_compatible_enrichment_provider,
@@ -116,6 +118,140 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(len(senses), 1)
             self.assertEqual(lexemes[0].lemma, "run")
             self.assertEqual(senses[0].sense_id, "sn_lx_run_1")
+
+    def test_read_snapshot_inputs_loads_phrase_rows_from_phrases_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            (snapshot_dir / "lexemes.jsonl").write_text("", encoding="utf-8")
+            (snapshot_dir / "phrases.jsonl").write_text(
+                json.dumps(
+                    {
+                        "snapshot_id": "snap-1",
+                        "entry_id": "ph_take_off",
+                        "entry_type": "phrase",
+                        "normalized_form": "take off",
+                        "display_form": "Take off",
+                        "phrase_kind": "phrasal_verb",
+                        "language": "en",
+                        "source_provenance": [{"source": "phrase_seed"}],
+                        "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+                        "created_at": "2026-03-23T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+
+            self.assertEqual(len(lexemes), 1)
+            self.assertEqual(senses, [])
+            self.assertEqual(lexemes[0].entry_type, "phrase")
+            self.assertEqual(lexemes[0].phrase_kind, "phrasal_verb")
+            self.assertEqual(lexemes[0].display_form, "Take off")
+
+    def test_build_phrase_enrichment_prompt_mentions_phrase_context(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_take_off",
+            lemma="take off",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_take_off",
+            entry_type="phrase",
+            normalized_form="take off",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="phrasal_verb",
+            display_form="Take off",
+            seed_metadata={"raw_reviewed_as": "phrasal verb"},
+        )
+
+        prompt = build_phrase_enrichment_prompt(lexeme=lexeme)
+
+        self.assertIn("Take off", prompt)
+        self.assertIn("phrasal_verb", prompt)
+        self.assertIn("phrase", prompt.lower())
+
+    def test_openai_compatible_phrase_provider_uses_phrase_schema(self) -> None:
+        settings = LexiconSettings.from_env(
+            {
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-5.4-mini",
+                "LEXICON_LLM_API_KEY": "secret",
+            }
+        )
+        captured: dict[str, object] = {}
+
+        def handler(payload):
+            captured["input"] = payload["input"]
+            captured["schema"] = payload["text"]["format"]["name"]
+            return {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "phrase_kind": "idiom",
+                                        "confidence": 0.87,
+                                        "senses": [
+                                            {
+                                                "definition": "to wish someone good luck",
+                                                "part_of_speech": "phrase",
+                                                "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                                                "grammar_patterns": ["say + phrase"],
+                                                "usage_note": "Used before a performance.",
+                                                "translations": _test_translations("They told me to break a leg."),
+                                            }
+                                        ],
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        provider = build_openai_compatible_phrase_enrichment_provider(
+            settings=settings,
+            client=_FakeOpenAIClient(handler),
+        )
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_break_a_leg",
+            lemma="break a leg",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_break_a_leg",
+            entry_type="phrase",
+            normalized_form="break a leg",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="idiom",
+            display_form="Break a leg",
+            seed_metadata={"raw_reviewed_as": "idiom"},
+        )
+
+        outcome = provider(
+            lexeme=lexeme,
+            senses=[],
+            settings=settings,
+            generated_at="2026-03-23T00:00:00Z",
+            generation_run_id="run-1",
+            prompt_version="v1",
+        )
+
+        self.assertEqual(captured["schema"], "lexicon_enrichment_phrase")
+        self.assertIn("Break a leg", str(captured["input"]))
+        self.assertEqual(outcome.records[0].definition, "to wish someone good luck")
+        self.assertEqual(outcome.records[0].part_of_speech, "phrase")
 
     def test_placeholder_word_provider_emits_grouped_phonetics(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -33,7 +33,7 @@ const buildCompiledWordRow = (runId: string, word: string) => ({
     {
       sense_id: `sense-${runId}-1`,
       definition: `a learner-facing definition for ${word}`,
-      examples: [{ sentence: `The ${word} is visible.`, difficulty: "easy" }],
+      examples: [{ sentence: `The ${word} is visible.`, difficulty: "A1" }],
       translations: {
         "zh-Hans": { definition: `${word} 的定义`, usage_note: "常见义项", examples: [`这个${word}很明显。`] },
         es: { definition: `definicion de ${word}`, usage_note: "uso comun", examples: [`El ${word} es visible.`] },
@@ -70,7 +70,7 @@ const buildCompiledPhraseRow = (runId: string, phrase: string) => ({
     {
       sense_id: `phrase-sense-${runId}`,
       definition: `an idiomatic meaning for ${phrase}`,
-      examples: [{ sentence: `${phrase}!`, difficulty: "easy" }],
+      examples: [{ sentence: `${phrase}!`, difficulty: "A1" }],
     },
   ],
   confusable_words: [],
@@ -83,13 +83,6 @@ const buildCompiledPhraseRow = (runId: string, phrase: string) => ({
 const buildCompiledWarningPhraseRow = (runId: string, phrase: string) => ({
   ...buildCompiledPhraseRow(runId, phrase),
   source_provenance: [],
-  senses: [
-    {
-      sense_id: `phrase-sense-${runId}`,
-      definition: `an idiomatic meaning for ${phrase}`,
-      examples: [],
-    },
-  ],
 });
 
 test("@smoke admin can review compiled JSONL directly and materialize sidecar outputs", async ({ page, request }) => {

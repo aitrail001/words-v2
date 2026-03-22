@@ -14,10 +14,16 @@ class TestPhraseEntryModel:
             phrase_text="take off",
             normalized_form="take off",
             phrase_kind="phrasal_verb",
+            compiled_payload={"entry_type": "phrase", "entry_id": "ph_take_off"},
+            seed_metadata={"raw_reviewed_as": "phrasal verb"},
+            confidence_score=0.91,
         )
         assert entry.phrase_text == "take off"
         assert entry.normalized_form == "take off"
         assert entry.phrase_kind == "phrasal_verb"
+        assert entry.compiled_payload["entry_id"] == "ph_take_off"
+        assert entry.seed_metadata["raw_reviewed_as"] == "phrasal verb"
+        assert entry.confidence_score == 0.91
         assert entry.language == "en"
         assert entry.created_at is not None
 

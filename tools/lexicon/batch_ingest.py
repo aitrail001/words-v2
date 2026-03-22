@@ -10,9 +10,11 @@ from typing import Any, Iterable
 from tools.lexicon.batch_ledger import append_jsonl_rows, load_jsonl_rows
 from tools.lexicon.compile_export import compile_word_result
 from tools.lexicon.enrich import (
+    _build_phrase_job_outcome,
     _build_word_job_outcome,
     _extract_output_text,
     _parse_json_payload_text,
+    _validate_openai_compatible_phrase_payload,
     _validate_openai_compatible_word_payload,
 )
 from tools.lexicon.models import LexemeRecord
@@ -128,6 +130,60 @@ def _materialize_batch_word_row(row: dict[str, Any]) -> dict[str, Any] | None:
     return compiled_row
 
 
+def _materialize_batch_phrase_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    request_body = dict(row.get("request_body") or {})
+    source_row = dict(request_body.get("source_row") or {})
+    if not source_row:
+        raise RuntimeError("batch result row is missing request_body.source_row")
+    source_row.pop("entry_kind", None)
+    display_form = str(
+        source_row.get("display_form")
+        or source_row.get("lemma")
+        or source_row.get("normalized_form")
+        or source_row.get("entry_id")
+        or request_body.get("entry_id")
+        or "phrase"
+    ).strip()
+    normalized_form = str(source_row.get("normalized_form") or display_form.lower()).strip().lower()
+    source_row.setdefault("snapshot_id", str(source_row.get("snapshot_id") or request_body.get("snapshot_id") or ""))
+    source_row.setdefault("lexeme_id", str(source_row.get("lexeme_id") or source_row.get("entry_id") or request_body.get("entry_id") or normalized_form))
+    source_row.setdefault("lemma", display_form.lower())
+    source_row.setdefault("language", "en")
+    source_row.setdefault("wordfreq_rank", 0)
+    source_row.setdefault("is_wordnet_backed", False)
+    source_row.setdefault("source_refs", ["batch_prepare"])
+    source_row.setdefault("created_at", str(source_row.get("created_at") or row.get("ingested_at") or ""))
+    source_row.setdefault("entry_type", "phrase")
+    source_row.setdefault("normalized_form", normalized_form)
+    source_row.setdefault("display_form", display_form)
+    source_row.setdefault("phrase_kind", str(source_row.get("phrase_kind") or "multiword_expression"))
+    lexeme = LexemeRecord(**source_row)
+    response_body = _extract_batch_response_body(row)
+    payload = _parse_json_payload_text(_extract_output_text(response_body))
+    validated_payload = _validate_openai_compatible_phrase_payload(payload)
+    outcome = _build_phrase_job_outcome(
+        lexeme=lexeme,
+        response=validated_payload,
+        model_name=str(row.get("model") or request_body.get("model") or ""),
+        prompt_version=str(request_body.get("prompt_version") or ""),
+        generation_run_id=str(row.get("custom_id") or ""),
+        review_status="draft",
+        generated_at=str(row.get("ingested_at") or ""),
+    )
+    compiled = compile_word_result(lexeme=lexeme, enrichments=outcome.records)
+    if compiled is None:
+        return None
+    compiled_row = compiled.to_dict()
+    review_row = build_review_prep_rows([compiled_row], origin="batch")[0]
+    if str(review_row.get("verdict") or "").strip().lower() != "pass":
+        messages = [
+            *(str(item) for item in (review_row.get("reasons") or []) if str(item).strip()),
+            *(str(item) for item in (review_row.get("warning_labels") or []) if str(item).strip()),
+        ]
+        raise RuntimeError("; ".join(messages or ["compiled QC failed"]))
+    return compiled_row
+
+
 def ingest_batch_outputs(
     snapshot_dir: Path,
     output_path: Path,
@@ -150,7 +206,8 @@ def ingest_batch_outputs(
     failure_rows: list[dict[str, Any]] = []
     regenerate_rows: list[dict[str, Any]] = []
     for row in result_rows:
-        if str(row.get("entry_kind") or "word").strip().lower() != "word":
+        entry_kind = str(row.get("entry_kind") or "word").strip().lower()
+        if entry_kind not in {"word", "phrase"}:
             finalized_result_rows.append(dict(row))
             if str(row.get("status") or "").strip().lower() != "accepted":
                 failure_rows.append(dict(row))
@@ -160,7 +217,11 @@ def ingest_batch_outputs(
             failure_rows.append(dict(row))
             continue
         try:
-            compiled_row = _materialize_batch_word_row(row)
+            compiled_row = (
+                _materialize_batch_phrase_row(row)
+                if entry_kind == "phrase"
+                else _materialize_batch_word_row(row)
+            )
         except RuntimeError as exc:
             failed_row = dict(row)
             failed_row["status"] = "failed"

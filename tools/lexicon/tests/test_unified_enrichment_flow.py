@@ -114,6 +114,118 @@ class RealtimeUnifiedFlowTests(unittest.TestCase):
             self.assertEqual(payload[0]["word"], "run")
             self.assertEqual(payload[0]["senses"][0]["definition"], "to move quickly on foot")
 
+    def test_per_word_realtime_writes_phrase_rows_from_phrases_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            write_jsonl(
+                snapshot_dir / "phrases.jsonl",
+                [
+                    {
+                        "snapshot_id": "snap-1",
+                        "entry_kind": "phrase",
+                        "entry_type": "phrase",
+                        "entry_id": "ph_take_off",
+                        "normalized_form": "take off",
+                        "display_form": "Take off",
+                        "phrase_kind": "phrasal_verb",
+                        "language": "en",
+                        "source_provenance": [{"source": "phrase_seed"}],
+                        "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+                        "created_at": "2026-03-23T00:00:00Z",
+                    }
+                ],
+            )
+
+            def provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                self.assertEqual(lexeme.entry_type, "phrase")
+                self.assertEqual(lexeme.phrase_kind, "phrasal_verb")
+                return WordJobOutcome(
+                    records=[
+                        _compiled_like_record(lexeme=lexeme, definition="to leave the ground")
+                        .__class__(
+                            **{
+                                **_compiled_like_record(lexeme=lexeme, definition="to leave the ground").to_dict(),
+                                "part_of_speech": "verb",
+                                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                                "sense_id": "sn_ph_take_off_1",
+                                "lexeme_id": "ph_take_off",
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": ["subject + take off"],
+                                "usage_note": "Common for planes.",
+                                "translations": {
+                                    "zh-Hans": {"definition": "zh:def", "usage_note": "zh:note", "examples": ["zh:example"]},
+                                    "es": {"definition": "es:def", "usage_note": "es:note", "examples": ["es:example"]},
+                                    "ar": {"definition": "ar:def", "usage_note": "ar:note", "examples": ["ar:example"]},
+                                    "pt-BR": {"definition": "pt:def", "usage_note": "pt:note", "examples": ["pt:example"]},
+                                    "ja": {"definition": "ja:def", "usage_note": "ja:note", "examples": ["ja:example"]},
+                                },
+                            }
+                        )
+                    ],
+                    decision="keep_standard",
+                    base_word=None,
+                    discard_reason=None,
+                )
+
+            result = enrich_snapshot(
+                snapshot_dir,
+                word_provider=provider,
+                mode="per_word",
+                generated_at="2026-03-23T00:00:00Z",
+                generation_run_id="run-phrase-1",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(len(result), 1)
+            payload = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(payload[0]["entry_type"], "phrase")
+            self.assertEqual(payload[0]["phrase_kind"], "phrasal_verb")
+            self.assertEqual(payload[0]["display_form"], "Take off")
+            self.assertEqual(payload[0]["seed_metadata"]["raw_reviewed_as"], "phrasal verb")
+            self.assertEqual(payload[0]["senses"][0]["definition"], "to leave the ground")
+
+    def test_per_word_realtime_writes_phrase_failures_for_invalid_phrase_payloads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            write_jsonl(
+                snapshot_dir / "phrases.jsonl",
+                [
+                    {
+                        "snapshot_id": "snap-1",
+                        "entry_kind": "phrase",
+                        "entry_type": "phrase",
+                        "entry_id": "ph_break_a_leg",
+                        "normalized_form": "break a leg",
+                        "display_form": "Break a leg",
+                        "phrase_kind": "idiom",
+                        "language": "en",
+                        "source_provenance": [{"source": "phrase_seed"}],
+                        "seed_metadata": {"raw_reviewed_as": "idiom"},
+                        "created_at": "2026-03-23T00:00:00Z",
+                    }
+                ],
+            )
+
+            def provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                raise RuntimeError("compiled QC failed: examples")
+
+            with self.assertRaisesRegex(RuntimeError, "Break a leg"):
+                enrich_snapshot(
+                    snapshot_dir,
+                    word_provider=provider,
+                    mode="per_word",
+                    generated_at="2026-03-23T00:00:00Z",
+                    generation_run_id="run-phrase-2",
+                    prompt_version="v1",
+                )
+
+            failure_rows = [json.loads(line) for line in (snapshot_dir / "enrich.failures.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(failure_rows[0]["entry_type"], "phrase")
+            self.assertEqual(failure_rows[0]["entry_id"], "ph_break_a_leg")
+            self.assertEqual(failure_rows[0]["display_form"], "Break a leg")
+
 
 class BatchUnifiedFlowTests(unittest.TestCase):
     def test_batch_ingest_materializes_words_and_regenerate_queue_from_shared_word_contract(self) -> None:

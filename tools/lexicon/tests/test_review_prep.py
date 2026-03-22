@@ -52,18 +52,33 @@ def _compiled_phrase_row_with_warning() -> dict[str, object]:
         "entry_id": "phrase:break-a-leg",
         "entry_type": "phrase",
         "normalized_form": "break a leg",
-        "source_provenance": [],
+        "source_provenance": [{"source": "phrase_seed"}],
         "entity_category": "general",
         "word": "break a leg",
         "part_of_speech": ["idiom"],
         "cefr_level": "B1",
         "frequency_rank": 5000,
         "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
-        "senses": [{"sense_id": "phrase-1", "definition": "good luck", "examples": []}],
+        "senses": [{
+            "sense_id": "phrase-1",
+            "definition": "good luck",
+            "part_of_speech": "phrase",
+            "examples": [{"sentence": "Break a leg tonight.", "difficulty": "A1"}],
+            "grammar_patterns": ["say + phrase"],
+            "usage_note": "Used before a performance.",
+            "translations": {
+                "zh-Hans": {"definition": "祝你好运", "usage_note": "演出前常说", "examples": ["今晚祝你好运。"]},
+                "es": {"definition": "buena suerte", "usage_note": "se dice antes de actuar", "examples": ["Buena suerte esta noche."]},
+                "ar": {"definition": "حظا سعيدا", "usage_note": "تقال قبل العرض", "examples": ["حظا سعيدا الليلة."]},
+                "pt-BR": {"definition": "boa sorte", "usage_note": "dito antes de se apresentar", "examples": ["Boa sorte esta noite."]},
+                "ja": {"definition": "頑張って", "usage_note": "公演前によく言う", "examples": ["今夜頑張って。"]},
+            },
+        }],
         "confusable_words": [],
         "generated_at": "2026-03-22T00:00:00Z",
         "display_form": "break a leg",
         "phrase_kind": "idiom",
+        "seed_metadata": {"raw_reviewed_as": "idiom"},
     }
 
 
@@ -110,9 +125,10 @@ class ReviewPrepTests(unittest.TestCase):
         self.assertEqual(rows[0]["review_priority"], 100)
         self.assertEqual(rows[0]["warning_labels"], [])
 
-        self.assertEqual(rows[1]["verdict"], "fail")
-        self.assertEqual(rows[1]["review_priority"], 200)
-        self.assertEqual(rows[1]["warning_labels"], ["missing_source_provenance", "missing_examples"])
+        self.assertEqual(rows[1]["verdict"], "pass")
+        self.assertEqual(rows[1]["review_priority"], 100)
+        self.assertEqual(rows[1]["warning_labels"], [])
+        self.assertEqual(rows[1]["review_summary"]["primary_example"], "Break a leg tonight.")
 
         self.assertEqual(rows[2]["verdict"], "fail")
         self.assertEqual(rows[2]["warning_labels"], ["missing_localizations"])
@@ -156,6 +172,4 @@ class ReviewPrepTests(unittest.TestCase):
 
         queue_rows = build_review_queue_rows(verdict_rows)
 
-        self.assertEqual(len(queue_rows), 1)
-        self.assertEqual(queue_rows[0]["entry_id"], "phrase:break-a-leg")
-        self.assertEqual(queue_rows[0]["review_status"], "needs_review")
+        self.assertEqual(queue_rows, [])
