@@ -120,7 +120,6 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   await expect(page.getByTestId("compiled-review-items-list")).toContainText("pending");
   await page.getByTestId("compiled-review-decision-reason").fill("approved in compiled review smoke");
   await page.getByTestId("compiled-review-approve-button").click();
-  await page.getByTestId("compiled-review-confirm-approved-button").click();
   await expect(page.getByText(new RegExp(`Updated word:${normalized}:${uniqueSuffix} to approved\\.`))).toBeVisible();
   await expect(page.getByTestId("compiled-review-item-title")).toContainText(secondary);
 

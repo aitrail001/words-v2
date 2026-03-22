@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 
 import LexiconCompiledReviewPage from "@/app/lexicon/compiled-review/page";
 import {
+  bulkUpdateLexiconCompiledReviewBatch,
   downloadCompiledReviewDecisionsExport,
   downloadApprovedCompiledReviewExport,
   importLexiconCompiledReviewBatch,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/lexicon-compiled-reviews-client";
 
 jest.mock("@/lib/lexicon-compiled-reviews-client", () => ({
+  bulkUpdateLexiconCompiledReviewBatch: jest.fn(),
   downloadCompiledReviewDecisionsExport: jest.fn(),
   downloadApprovedCompiledReviewExport: jest.fn(),
   downloadRegenerateCompiledReviewExport: jest.fn(),
@@ -39,6 +41,7 @@ describe("LexiconCompiledReviewPage", () => {
   const mockListBatches = listLexiconCompiledReviewBatches as jest.Mock;
   const mockListItems = listLexiconCompiledReviewItems as jest.Mock;
   const mockUpdateItem = updateLexiconCompiledReviewItem as jest.Mock;
+  const mockBulkUpdateBatch = bulkUpdateLexiconCompiledReviewBatch as jest.Mock;
   const mockDownloadDecisions = downloadCompiledReviewDecisionsExport as jest.Mock;
   const mockDownloadApproved = downloadApprovedCompiledReviewExport as jest.Mock;
   const mockImportBatch = importLexiconCompiledReviewBatch as jest.Mock;
@@ -212,9 +215,89 @@ describe("LexiconCompiledReviewPage", () => {
       regenerate_count: 0,
       decision_count: 1,
     });
+    mockBulkUpdateBatch.mockResolvedValue({
+      batch: {
+        id: "batch-1",
+        artifact_family: "compiled_words",
+        artifact_filename: "words.enriched.jsonl",
+        artifact_sha256: "a".repeat(64),
+        artifact_row_count: 2,
+        compiled_schema_version: "1.1.0",
+        snapshot_id: "snapshot-001",
+        source_type: "lexicon_compiled_export",
+        source_reference: "snapshot-001",
+        status: "completed",
+        total_items: 2,
+        pending_count: 0,
+        approved_count: 2,
+        rejected_count: 0,
+        created_by: "user-1",
+        created_at: "2026-03-21T00:00:00Z",
+        updated_at: "2026-03-21T02:00:00Z",
+        completed_at: "2026-03-21T02:00:00Z",
+      },
+      items: [
+        {
+          id: "item-1",
+          batch_id: "batch-1",
+          entry_id: "word:bank",
+          entry_type: "word",
+          normalized_form: "bank",
+          display_text: "bank",
+          entity_category: "general",
+          language: "en",
+          frequency_rank: 100,
+          cefr_level: "B1",
+          review_status: "approved",
+          review_priority: 100,
+          validator_status: "warn",
+          validator_issues: [{ code: "missing_usage_note" }],
+          qc_status: "fail",
+          qc_score: 0.4,
+          qc_issues: [{ code: "example_too_literal" }],
+          regen_requested: false,
+          import_eligible: true,
+          decision_reason: "bulk ready",
+          reviewed_by: "user-1",
+          reviewed_at: "2026-03-21T02:00:00Z",
+          compiled_payload: { entry_id: "word:bank", word: "bank" },
+          compiled_payload_sha256: "b".repeat(64),
+          created_at: "2026-03-21T00:00:00Z",
+          updated_at: "2026-03-21T02:00:00Z",
+        },
+        {
+          id: "item-2",
+          batch_id: "batch-1",
+          entry_id: "word:harbor",
+          entry_type: "word",
+          normalized_form: "harbor",
+          display_text: "harbor",
+          entity_category: "general",
+          language: "en",
+          frequency_rank: 120,
+          cefr_level: "B1",
+          review_status: "approved",
+          review_priority: 90,
+          validator_status: "pass",
+          validator_issues: [],
+          qc_status: "pass",
+          qc_score: 0.9,
+          qc_issues: [],
+          regen_requested: false,
+          import_eligible: true,
+          decision_reason: "bulk ready",
+          reviewed_by: "user-1",
+          reviewed_at: "2026-03-21T02:00:00Z",
+          compiled_payload: { entry_id: "word:harbor", word: "harbor" },
+          compiled_payload_sha256: "c".repeat(64),
+          created_at: "2026-03-21T00:00:00Z",
+          updated_at: "2026-03-21T02:00:00Z",
+        },
+      ],
+    });
   });
 
-  it("renders batches, confirms decisions, advances to the next pending row, and downloads approved export", async () => {
+  it("renders batches, applies immediate decisions, advances to the next pending row, and downloads approved export", async () => {
     const user = userEvent.setup();
     window.history.pushState(
       {},
@@ -247,9 +330,6 @@ describe("LexiconCompiledReviewPage", () => {
 
     await user.type(screen.getByTestId("compiled-review-decision-reason"), "ready");
     await user.click(screen.getByTestId("compiled-review-approve-button"));
-    expect(mockUpdateItem).not.toHaveBeenCalled();
-    expect(screen.getByTestId("compiled-review-confirm-approved-button")).toBeInTheDocument();
-    await user.click(screen.getByTestId("compiled-review-confirm-approved-button"));
 
     await waitFor(() =>
       expect(mockUpdateItem).toHaveBeenCalledWith("item-1", { review_status: "approved", decision_reason: "ready" }),
@@ -270,5 +350,33 @@ describe("LexiconCompiledReviewPage", () => {
         outputDir: "/app/data/lexicon/snapshots/words-100-20260312/reviewed",
       }),
     );
+  });
+
+  it("confirms bulk approve all and updates batch counts", async () => {
+    const user = userEvent.setup();
+    window.history.pushState(
+      {},
+      "",
+      "/lexicon/compiled-review?snapshot=words-100-20260312&sourceReference=lexicon-20260312-wordnet-wordfreq&artifactPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Fwords.enriched.jsonl&autostart=1",
+    );
+    render(<LexiconCompiledReviewPage />);
+
+    await waitFor(() => expect(screen.getByTestId("compiled-review-batches-list")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("compiled-review-item-title")).toHaveTextContent("bank"));
+
+    await user.type(screen.getByTestId("compiled-review-decision-reason"), "bulk ready");
+    await user.click(screen.getByTestId("compiled-review-approve-all-button"));
+    expect(mockBulkUpdateBatch).not.toHaveBeenCalled();
+    expect(screen.getByTestId("compiled-review-confirm-bulk-approved-button")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("compiled-review-confirm-bulk-approved-button"));
+
+    await waitFor(() =>
+      expect(mockBulkUpdateBatch).toHaveBeenCalledWith("batch-1", {
+        review_status: "approved",
+        decision_reason: "bulk ready",
+      }),
+    );
+    await waitFor(() => expect(screen.getByText(/Updated 2 rows to approved\./i)).toBeInTheDocument());
   });
 });
