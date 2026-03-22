@@ -101,6 +101,34 @@ describe("LexiconCompiledReviewPage", () => {
         created_at: "2026-03-21T00:00:00Z",
         updated_at: "2026-03-21T00:00:00Z",
       },
+      {
+        id: "item-2",
+        batch_id: "batch-1",
+        entry_id: "word:harbor",
+        entry_type: "word",
+        normalized_form: "harbor",
+        display_text: "harbor",
+        entity_category: "general",
+        language: "en",
+        frequency_rank: 120,
+        cefr_level: "B1",
+        review_status: "pending",
+        review_priority: 90,
+        validator_status: "pass",
+        validator_issues: [],
+        qc_status: "pass",
+        qc_score: 0.9,
+        qc_issues: [],
+        regen_requested: false,
+        import_eligible: false,
+        decision_reason: null,
+        reviewed_by: null,
+        reviewed_at: null,
+        compiled_payload: { entry_id: "word:harbor", word: "harbor" },
+        compiled_payload_sha256: "c".repeat(64),
+        created_at: "2026-03-21T00:00:00Z",
+        updated_at: "2026-03-21T00:00:00Z",
+      },
     ]);
     mockUpdateItem.mockResolvedValue({
       ...(mockListItems.mock.results[0]?.value?.[0] ?? {
@@ -186,7 +214,7 @@ describe("LexiconCompiledReviewPage", () => {
     });
   });
 
-  it("renders batches, allows approve, and downloads approved export", async () => {
+  it("renders batches, confirms decisions, advances to the next pending row, and downloads approved export", async () => {
     const user = userEvent.setup();
     window.history.pushState(
       {},
@@ -219,10 +247,14 @@ describe("LexiconCompiledReviewPage", () => {
 
     await user.type(screen.getByTestId("compiled-review-decision-reason"), "ready");
     await user.click(screen.getByTestId("compiled-review-approve-button"));
+    expect(mockUpdateItem).not.toHaveBeenCalled();
+    expect(screen.getByTestId("compiled-review-confirm-approved-button")).toBeInTheDocument();
+    await user.click(screen.getByTestId("compiled-review-confirm-approved-button"));
 
     await waitFor(() =>
       expect(mockUpdateItem).toHaveBeenCalledWith("item-1", { review_status: "approved", decision_reason: "ready" }),
     );
+    await waitFor(() => expect(screen.getByTestId("compiled-review-item-title")).toHaveTextContent("harbor"));
 
     expect(screen.getByText(/Approve keeps the compiled row eligible for final import as reviewed\/approved\.jsonl\./)).toBeInTheDocument();
     expect(screen.getByText(/Reject removes the row from reviewed\/approved\.jsonl, records the review decision ledger, and includes it in regeneration requests\./)).toBeInTheDocument();

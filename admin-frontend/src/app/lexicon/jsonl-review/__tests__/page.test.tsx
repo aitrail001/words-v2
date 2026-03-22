@@ -46,8 +46,8 @@ describe("LexiconJsonlReviewPage", () => {
       artifact_path: "/tmp/words.enriched.jsonl",
       decisions_path: "/tmp/reviewed/review.decisions.jsonl",
       output_dir: "/tmp/reviewed",
-      total_items: 2,
-      pending_count: 1,
+      total_items: 3,
+      pending_count: 2,
       approved_count: 1,
       rejected_count: 0,
       items: [
@@ -93,6 +93,27 @@ describe("LexiconJsonlReviewPage", () => {
           reviewed_at: null,
           compiled_payload: { entry_id: "phrase:break-a-leg", word: "break a leg" },
         },
+        {
+          entry_id: "word:harbor",
+          entry_type: "word",
+          normalized_form: "harbor",
+          display_text: "harbor",
+          review_priority: "normal",
+          warning_count: 0,
+          warning_labels: [],
+          review_summary: {
+            sense_count: 1,
+            form_variant_count: 1,
+            confusable_count: 0,
+            provenance_sources: ["snapshot"],
+            primary_definition: "a sheltered body of water",
+            primary_example: "The ship reached the harbor.",
+          },
+          review_status: "pending",
+          decision_reason: null,
+          reviewed_at: null,
+          compiled_payload: { entry_id: "word:harbor", word: "harbor" },
+        },
       ],
     });
     mockUpdateItem.mockResolvedValue({
@@ -128,7 +149,7 @@ describe("LexiconJsonlReviewPage", () => {
     mockDownloadApproved.mockResolvedValue("{\"entry_id\":\"word:bank\"}\n");
   });
 
-  it("loads rows, filters them, saves a decision sidecar update, and materializes outputs", async () => {
+  it("loads rows, confirms decisions, advances to the next pending item, and materializes outputs", async () => {
     const user = userEvent.setup();
     window.history.pushState(
       {},
@@ -184,6 +205,9 @@ describe("LexiconJsonlReviewPage", () => {
     await user.click(screen.getAllByText("break a leg")[0]);
     await user.type(screen.getByTestId("jsonl-review-decision-reason"), "regen");
     await user.click(screen.getByTestId("jsonl-review-reject-button"));
+    expect(mockUpdateItem).not.toHaveBeenCalled();
+    expect(screen.getByTestId("jsonl-review-confirm-rejected-button")).toBeInTheDocument();
+    await user.click(screen.getByTestId("jsonl-review-confirm-rejected-button"));
 
     await waitFor(() =>
       expect(mockUpdateItem).toHaveBeenCalledWith("phrase:break-a-leg", {
@@ -195,15 +219,18 @@ describe("LexiconJsonlReviewPage", () => {
     );
 
     await user.clear(screen.getByPlaceholderText("Search entry id or display text"));
-    await user.click(screen.getByText("Risk first"));
-    await user.keyboard("j");
-    await user.keyboard("a");
     await waitFor(() =>
-      expect(mockUpdateItem).toHaveBeenCalledWith("word:bank", {
+      expect(screen.getByRole("heading", { name: "harbor" })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByTestId("jsonl-review-approve-button"));
+    expect(screen.getByTestId("jsonl-review-confirm-approved-button")).toBeInTheDocument();
+    await user.click(screen.getByTestId("jsonl-review-confirm-approved-button"));
+    await waitFor(() =>
+      expect(mockUpdateItem).toHaveBeenCalledWith("word:harbor", {
         artifactPath: "/tmp/words.enriched.jsonl",
         decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
         reviewStatus: "approved",
-        decisionReason: "ready",
+        decisionReason: null,
       }),
     );
 
