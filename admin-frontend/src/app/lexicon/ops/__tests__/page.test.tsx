@@ -58,9 +58,9 @@ describe("LexiconOpsPage", () => {
       workflow_stage: "approved_ready_for_import",
       recommended_action: "open_import_db",
       preferred_review_artifact_path: "/data/lexicon/snapshots/words-100-20260312/words.enriched.jsonl",
-      preferred_import_artifact_path: "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+      preferred_import_artifact_path: "/data/lexicon/snapshots/words-100-20260312/reviewed/approved.jsonl",
       outside_portal_steps: [
-        "Run import-db with /data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+        "Run import-db with /data/lexicon/snapshots/words-100-20260312/reviewed/approved.jsonl",
         "Verify the imported rows in DB Inspector after import-db completes for snapshot_path /data/lexicon/snapshots/words-100-20260312",
       ],
     },
@@ -87,7 +87,7 @@ describe("LexiconOpsPage", () => {
       preferred_import_artifact_path: null,
       outside_portal_steps: [
         "Review /data/lexicon/snapshots/words-50-20260311/words.enriched.jsonl in Compiled Review or JSONL Review",
-        "Materialize or export approved.jsonl beside snapshot_path /data/lexicon/snapshots/words-50-20260311 before import-db",
+        "Materialize or export reviewed/approved.jsonl under snapshot_path /data/lexicon/snapshots/words-50-20260311 before import-db",
       ],
     },
     {
@@ -137,9 +137,9 @@ describe("LexiconOpsPage", () => {
     workflow_stage: "approved_ready_for_import",
     recommended_action: "open_import_db",
     preferred_review_artifact_path: "/data/lexicon/snapshots/words-100-20260312/words.enriched.jsonl",
-    preferred_import_artifact_path: "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+    preferred_import_artifact_path: "/data/lexicon/snapshots/words-100-20260312/reviewed/approved.jsonl",
     outside_portal_steps: [
-      "Run import-db with /data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+      "Run import-db with /data/lexicon/snapshots/words-100-20260312/reviewed/approved.jsonl",
       "Verify the imported rows in DB Inspector after import-db completes for snapshot_path /data/lexicon/snapshots/words-100-20260312",
     ],
     artifacts: [
@@ -160,7 +160,7 @@ describe("LexiconOpsPage", () => {
         read_error: null,
       },
       {
-        file_name: "approved.jsonl",
+        file_name: "reviewed/approved.jsonl",
         exists: true,
         row_count: 12,
         size_bytes: 3200,
@@ -296,7 +296,7 @@ describe("LexiconOpsPage", () => {
     await waitFor(() => expect(screen.getByTestId("lexicon-ops-open-jsonl-review")).toBeInTheDocument());
     await waitFor(() =>
       expect(screen.getByTestId("lexicon-ops-import-input-path")).toHaveValue(
-        "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+        "/data/lexicon/snapshots/words-100-20260312/reviewed/approved.jsonl",
       ),
     );
 
@@ -310,7 +310,7 @@ describe("LexiconOpsPage", () => {
     expect(push).toHaveBeenCalledWith(expect.stringContaining("autostart=1"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/compiled-review"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/import-db"));
-    expect(push).toHaveBeenCalledWith(expect.stringContaining("inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Fapproved.jsonl"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Freviewed%2Fapproved.jsonl"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/db-inspector"));
   });
 
@@ -322,7 +322,7 @@ describe("LexiconOpsPage", () => {
       expect(screen.getByTestId("lexicon-ops-workflow-stage")).toHaveTextContent("Import approved rows"),
     );
     expect(screen.getByTestId("lexicon-ops-next-step")).toHaveTextContent("Open Import DB");
-    expect(screen.getByTestId("lexicon-ops-outside-portal")).toHaveTextContent("approved.jsonl");
+    expect(screen.getByTestId("lexicon-ops-outside-portal")).toHaveTextContent("reviewed/approved.jsonl");
     expect(screen.getByTestId("lexicon-ops-outside-portal")).toHaveTextContent("snapshot_path");
   });
 
@@ -333,7 +333,7 @@ describe("LexiconOpsPage", () => {
     expect(screen.getByTestId("lexicon-ops-import-input-path")).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByTestId("lexicon-ops-import-input-path")).toHaveValue(
-        "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+        "/data/lexicon/snapshots/words-100-20260312/reviewed/approved.jsonl",
       ),
     );
     expect(screen.getByTestId("lexicon-ops-import-dry-run-button")).toBeInTheDocument();

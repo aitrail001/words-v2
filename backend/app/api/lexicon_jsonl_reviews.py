@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from app.api.auth import get_current_admin_user
 from app.core.config import Settings, get_settings
 from app.models.user import User
 from app.services.lexicon_jsonl_reviews import (
+    build_materialized_review_outputs,
     load_jsonl_review_session,
     materialize_jsonl_review_outputs,
     resolve_compiled_artifact_path,
@@ -95,8 +97,13 @@ def _resolve_paths(
 ) -> tuple[str, str, str | None]:
     artifact = resolve_compiled_artifact_path(artifact_path, settings=settings)
     decisions = resolve_decisions_sidecar_path(artifact, decisions_path, settings=settings)
-    materialize_output_dir = str(resolve_output_dir_path(artifact, output_dir, settings=settings)) if output_dir else None
+    materialize_output_dir = str(resolve_output_dir_path(artifact, output_dir, settings=settings))
     return str(artifact), str(decisions), materialize_output_dir
+
+
+def _jsonl_response(rows: list[dict[str, Any]]) -> Response:
+    body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+    return Response(content=body, media_type="application/x-ndjson")
 
 
 @router.post("/load", response_model=LexiconJsonlReviewSessionResponse)
@@ -162,8 +169,6 @@ async def materialize_lexicon_jsonl_review_outputs_route(
         output_dir=request.output_dir,
         settings=settings,
     )
-    if output_dir is None:
-        output_dir = str(resolve_compiled_artifact_path(artifact_path, settings=settings).parent)
     payload = materialize_jsonl_review_outputs(
         artifact_path=resolve_compiled_artifact_path(artifact_path, settings=settings),
         decisions_path=resolve_decisions_sidecar_path(
@@ -175,7 +180,39 @@ async def materialize_lexicon_jsonl_review_outputs_route(
             resolve_compiled_artifact_path(artifact_path, settings=settings),
             output_dir,
             settings=settings,
-        )
-        or resolve_compiled_artifact_path(artifact_path, settings=settings).parent,
+        ),
     )
     return LexiconJsonlReviewMaterializeResponse(**payload)
+
+
+@router.post("/download/{kind}")
+async def download_lexicon_jsonl_review_output(
+    kind: str,
+    request: LexiconJsonlReviewMaterializeRequest,
+    _: User = Depends(get_current_admin_user),
+    settings: Settings = Depends(get_settings),
+):
+    artifact_path, decisions_path, _ = _resolve_paths(
+        artifact_path=request.artifact_path,
+        decisions_path=request.decisions_path,
+        output_dir=request.output_dir,
+        settings=settings,
+    )
+    session = load_jsonl_review_session(
+        artifact_path=resolve_compiled_artifact_path(artifact_path, settings=settings),
+        decisions_path=resolve_decisions_sidecar_path(
+            resolve_compiled_artifact_path(artifact_path, settings=settings),
+            decisions_path,
+            settings=settings,
+        ),
+    )
+    outputs = build_materialized_review_outputs(session)
+    if kind == "approved":
+        return _jsonl_response(outputs["approved_rows"])
+    if kind == "rejected":
+        return _jsonl_response(outputs["rejected_rows"])
+    if kind == "regenerate":
+        return _jsonl_response(outputs["regenerate_rows"])
+    if kind == "decisions":
+        return _jsonl_response(outputs["finalized_decisions"])
+    raise HTTPException(status_code=404, detail="Unknown download kind")

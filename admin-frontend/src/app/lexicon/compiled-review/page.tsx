@@ -6,6 +6,7 @@ import { readAccessToken } from "@/lib/auth-session";
 import {
   LexiconCompiledReviewBatch,
   LexiconCompiledReviewItem,
+  LexiconCompiledReviewMaterializeResult,
   downloadCompiledReviewDecisionsExport,
   downloadApprovedCompiledReviewExport,
   downloadRegenerateCompiledReviewExport,
@@ -14,6 +15,7 @@ import {
   importLexiconCompiledReviewBatchByPath,
   listLexiconCompiledReviewBatches,
   listLexiconCompiledReviewItems,
+  materializeLexiconCompiledReviewOutputs,
   updateLexiconCompiledReviewItem,
 } from "@/lib/lexicon-compiled-reviews-client";
 
@@ -40,6 +42,24 @@ function downloadTextFile(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
+function slugifySegment(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildExportFilename(batch: LexiconCompiledReviewBatch, kind: "approved" | "rejected" | "regenerate" | "decisions"): string {
+  const context =
+    slugifySegment(batch.source_reference ?? "") ||
+    slugifySegment(batch.snapshot_id ?? "") ||
+    slugifySegment(batch.artifact_filename.replace(/\.jsonl$/i, "")) ||
+    slugifySegment(batch.artifact_family) ||
+    "compiled-review";
+  return `${context}.${kind}.jsonl`;
+}
+
 export default function LexiconCompiledReviewPage() {
   const [itemSearch, setItemSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
@@ -55,6 +75,8 @@ export default function LexiconCompiledReviewPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importSourceReference, setImportSourceReference] = useState("");
   const [importArtifactPath, setImportArtifactPath] = useState("");
+  const [materializeOutputDir, setMaterializeOutputDir] = useState("");
+  const [materializeResult, setMaterializeResult] = useState<LexiconCompiledReviewMaterializeResult | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
   const [saveLoading, setSaveLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -124,6 +146,11 @@ export default function LexiconCompiledReviewPage() {
     setImportArtifactPath(searchParam("artifactPath"));
     void loadBatches();
   }, []);
+
+  useEffect(() => {
+    if (!snapshotContext) return;
+    setMaterializeOutputDir(`/app/data/lexicon/snapshots/${snapshotContext}/reviewed`);
+  }, [snapshotContext]);
 
   useEffect(() => {
     if (!autoStart || !artifactPathContext.trim()) return;
@@ -242,10 +269,23 @@ export default function LexiconCompiledReviewPage() {
             : kind === "decisions"
               ? await downloadCompiledReviewDecisionsExport(selectedBatch.id)
             : await downloadRegenerateCompiledReviewExport(selectedBatch.id);
-      downloadTextFile(`${selectedBatch.artifact_family}.${kind}.jsonl`, text);
+      downloadTextFile(buildExportFilename(selectedBatch, kind), text);
       setMessage(`Downloaded ${kind} export.`);
     } catch (nextError) {
       setMessage(nextError instanceof Error ? nextError.message : `Failed to export ${kind}.`);
+    }
+  };
+
+  const handleMaterialize = async () => {
+    if (!selectedBatch) return;
+    try {
+      const result = await materializeLexiconCompiledReviewOutputs(selectedBatch.id, {
+        outputDir: materializeOutputDir || undefined,
+      });
+      setMaterializeResult(result);
+      setMessage("Materialized reviewed outputs.");
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Failed to materialize reviewed outputs.");
     }
   };
 
@@ -277,17 +317,54 @@ export default function LexiconCompiledReviewPage() {
               Refresh
             </button>
             <button type="button" onClick={() => void handleExport("approved")} disabled={!selectedBatch} className="rounded-md border border-blue-300 px-3 py-2 text-sm text-blue-700 disabled:opacity-50" data-testid="compiled-review-export-approved">
-              Export Approved
+              Download Approved Rows
             </button>
             <button type="button" onClick={() => void handleExport("decisions")} disabled={!selectedBatch} className="rounded-md border border-emerald-300 px-3 py-2 text-sm text-emerald-700 disabled:opacity-50">
-              Export Decisions
+              Download Decision Ledger
             </button>
             <button type="button" onClick={() => void handleExport("rejected")} disabled={!selectedBatch} className="rounded-md border border-amber-300 px-3 py-2 text-sm text-amber-700 disabled:opacity-50">
-              Export Rejected
+              Download Rejected Overlay
             </button>
             <button type="button" onClick={() => void handleExport("regenerate")} disabled={!selectedBatch} className="rounded-md border border-violet-300 px-3 py-2 text-sm text-violet-700 disabled:opacity-50">
-              Export Regenerate
+              Download Regeneration Requests
             </button>
+            <button type="button" onClick={() => void handleMaterialize()} disabled={!selectedBatch} className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">
+              Materialize Reviewed Outputs
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Approve</p>
+            <p className="mt-2">Approve keeps the compiled row eligible for final import as reviewed/approved.jsonl.</p>
+          </div>
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Reject</p>
+            <p className="mt-2">Reject removes the row from reviewed/approved.jsonl, records the review decision ledger, and includes it in regeneration requests.</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reopen</p>
+            <p className="mt-2">Reopen clears the final decision so the row stays pending and is excluded from reviewed exports.</p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 md:grid-cols-4">
+          <div className="text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Approved rows</p>
+            <p className="mt-1">Reviewed compiled rows for final Import DB. Equivalent to <span className="font-mono text-xs">reviewed/approved.jsonl</span>.</p>
+          </div>
+          <div className="text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Decision ledger</p>
+            <p className="mt-1">Final approve/reject overlay with review metadata. Equivalent to <span className="font-mono text-xs">reviewed/review.decisions.jsonl</span>.</p>
+          </div>
+          <div className="text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Rejected overlay</p>
+            <p className="mt-1">Rejected rows plus the decision metadata preserved for audit and analysis.</p>
+          </div>
+          <div className="text-sm text-gray-700">
+            <p className="font-medium text-gray-900">Regeneration requests</p>
+            <p className="mt-1">Subset of rejected rows exported as requests for a new generation pass. There is no separate regenerate status.</p>
           </div>
         </div>
 
@@ -319,9 +396,41 @@ export default function LexiconCompiledReviewPage() {
             {importLoading ? "Importing..." : "Import by Path"}
           </button>
         </div>
+        <div className="mt-3 grid gap-3 rounded-lg border border-dashed border-emerald-300 bg-emerald-50 p-4 md:grid-cols-[1fr_auto]">
+          <input
+            value={materializeOutputDir}
+            onChange={(event) => setMaterializeOutputDir(event.target.value)}
+            placeholder="data/lexicon/snapshots/.../reviewed"
+            className="rounded-md border border-emerald-200 px-3 py-2 font-mono text-sm"
+            data-testid="compiled-review-materialize-output-dir"
+          />
+          <div className="self-center text-xs text-emerald-800">
+            Write approved, decisions, rejected, and regenerate outputs into the shared reviewed/ directory.
+          </div>
+        </div>
         {importError ? <p className="mt-2 text-sm text-red-600">{importError}</p> : null}
         {message ? <p className="mt-2 text-sm text-green-700">{message}</p> : null}
         {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+        {materializeResult ? (
+          <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 md:grid-cols-2">
+            <div>
+              <p className="font-medium text-slate-900">Approved</p>
+              <p className="mt-1 break-all font-mono text-xs">{materializeResult.approved_output_path}</p>
+            </div>
+            <div>
+              <p className="font-medium text-slate-900">Decision ledger</p>
+              <p className="mt-1 break-all font-mono text-xs">{materializeResult.decisions_output_path}</p>
+            </div>
+            <div>
+              <p className="font-medium text-slate-900">Rejected</p>
+              <p className="mt-1 break-all font-mono text-xs">{materializeResult.rejected_output_path}</p>
+            </div>
+            <div>
+              <p className="font-medium text-slate-900">Regenerate</p>
+              <p className="mt-1 break-all font-mono text-xs">{materializeResult.regenerate_output_path}</p>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">

@@ -56,6 +56,17 @@ export type LexiconCompiledReviewItemUpdateRequest = {
   decision_reason?: string | null;
 };
 
+export type LexiconCompiledReviewMaterializeResult = {
+  decision_count: number;
+  approved_count: number;
+  rejected_count: number;
+  regenerate_count: number;
+  decisions_output_path: string;
+  approved_output_path: string;
+  rejected_output_path: string;
+  regenerate_output_path: string;
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 async function downloadExport(path: string): Promise<string> {
@@ -118,3 +129,11 @@ export const downloadRegenerateCompiledReviewExport = (batchId: string): Promise
 
 export const downloadCompiledReviewDecisionsExport = (batchId: string): Promise<string> =>
   downloadExport(`/lexicon-compiled-reviews/batches/${batchId}/export/decisions`);
+
+export const materializeLexiconCompiledReviewOutputs = (
+  batchId: string,
+  input?: { outputDir?: string },
+): Promise<LexiconCompiledReviewMaterializeResult> =>
+  apiClient.post<LexiconCompiledReviewMaterializeResult>(`/lexicon-compiled-reviews/batches/${batchId}/materialize`, {
+    output_dir: input?.outputDir,
+  });

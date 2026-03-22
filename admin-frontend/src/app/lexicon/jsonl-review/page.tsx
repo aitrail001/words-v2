@@ -5,6 +5,10 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
+  downloadApprovedLexiconJsonlReviewOutput,
+  downloadDecisionLexiconJsonlReviewOutput,
+  downloadRegenerateLexiconJsonlReviewOutput,
+  downloadRejectedLexiconJsonlReviewOutput,
   LexiconJsonlReviewItem,
   LexiconJsonlReviewMaterializeResult,
   LexiconJsonlReviewSession,
@@ -12,6 +16,18 @@ import {
   materializeLexiconJsonlReviewOutputs,
   updateLexiconJsonlReviewItem,
 } from "@/lib/lexicon-jsonl-reviews-client";
+
+function downloadTextFile(filename: string, text: string): void {
+  const blob = new Blob([text], { type: "application/x-ndjson" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 function searchParam(name: string): string {
   if (typeof window === "undefined") return "";
@@ -54,8 +70,8 @@ export default function LexiconJsonlReviewPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const artifactPathHint = "Use a container-visible repo path like data/lexicon/snapshots/... or /app/data/lexicon/snapshots/....";
-  const decisionsPathHint = "Optional. Defaults to review.decisions.jsonl beside the artifact.";
-  const outputDirHint = "Optional. Defaults to the artifact directory when materializing outputs.";
+  const decisionsPathHint = "Optional. Defaults to reviewed/review.decisions.jsonl under the snapshot.";
+  const outputDirHint = "Optional. Defaults to the shared reviewed/ directory under the artifact snapshot.";
   const selectedCount = session?.items.length ?? 0;
   const contextArtifactPath = session?.artifact_path ?? artifactPath;
   const contextDecisionsPath = session?.decisions_path ?? decisionsPath;
@@ -198,6 +214,33 @@ export default function LexiconJsonlReviewPage() {
     }
   };
 
+  const downloadOutput = async (kind: "approved" | "decisions" | "rejected" | "regenerate") => {
+    if (!session) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const input = {
+        artifactPath: session.artifact_path,
+        decisionsPath: decisionsPath || session.decisions_path,
+        outputDir: outputDir || undefined,
+      };
+      const text =
+        kind === "approved"
+          ? await downloadApprovedLexiconJsonlReviewOutput(input)
+          : kind === "decisions"
+            ? await downloadDecisionLexiconJsonlReviewOutput(input)
+            : kind === "rejected"
+              ? await downloadRejectedLexiconJsonlReviewOutput(input)
+              : await downloadRegenerateLexiconJsonlReviewOutput(input);
+      downloadTextFile(`jsonl-review.${kind}.jsonl`, text);
+      setMessage(`Downloaded ${kind} output.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : `Failed to download ${kind} output.`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -291,7 +334,22 @@ export default function LexiconJsonlReviewPage() {
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Decision sidecar</p>
-                <p className="mt-2 break-all font-mono text-sm text-slate-800">{decisionsPath || "review.decisions.jsonl"}</p>
+                <p className="mt-2 break-all font-mono text-sm text-slate-800">{decisionsPath || "reviewed/review.decisions.jsonl"}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:grid-cols-3">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Approve</p>
+                <p className="mt-2">Approve keeps the compiled row eligible for reviewed/approved.jsonl, the reviewed file you should import into the final DB.</p>
+              </div>
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Reject</p>
+                <p className="mt-2">Reject records the row in reviewed/review.decisions.jsonl, writes the rejected overlay, and adds a regeneration request row.</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reopen</p>
+                <p className="mt-2">Reopen removes the final decision so the row stays pending until you decide again.</p>
               </div>
             </div>
           </div>
@@ -324,7 +382,7 @@ export default function LexiconJsonlReviewPage() {
               value={decisionsPath}
               onChange={(event) => setDecisionsPath(event.target.value)}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-              placeholder="review.decisions.jsonl"
+              placeholder="data/lexicon/snapshots/.../reviewed/review.decisions.jsonl"
             />
             <span className="text-xs leading-5 text-slate-500">{decisionsPathHint}</span>
           </label>
@@ -335,13 +393,25 @@ export default function LexiconJsonlReviewPage() {
               value={outputDir}
               onChange={(event) => setOutputDir(event.target.value)}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-              placeholder="optional materialize folder"
+              placeholder="data/lexicon/snapshots/.../reviewed"
             />
             <span className="text-xs leading-5 text-slate-500">{outputDirHint}</span>
           </label>
           <div className="flex flex-wrap gap-3 xl:justify-end">
             <button type="submit" disabled={!artifactPath || loading} className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-50">
               {loading ? "Loading..." : "Load Artifact"}
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("approved")} className="rounded-lg border border-emerald-300 bg-white px-5 py-2.5 text-sm font-medium text-emerald-700 shadow-sm transition hover:bg-emerald-50 disabled:opacity-50">
+              Download Approved Rows
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("decisions")} className="rounded-lg border border-sky-300 bg-white px-5 py-2.5 text-sm font-medium text-sky-700 shadow-sm transition hover:bg-sky-50 disabled:opacity-50">
+              Download Decision Ledger
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("rejected")} className="rounded-lg border border-amber-300 bg-white px-5 py-2.5 text-sm font-medium text-amber-700 shadow-sm transition hover:bg-amber-50 disabled:opacity-50">
+              Download Rejected Overlay
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("regenerate")} className="rounded-lg border border-violet-300 bg-white px-5 py-2.5 text-sm font-medium text-violet-700 shadow-sm transition hover:bg-violet-50 disabled:opacity-50">
+              Download Regeneration Requests
             </button>
             <button type="button" disabled={!session || saving} onClick={() => void materialize()} className="rounded-lg border border-sky-300 bg-white px-5 py-2.5 text-sm font-medium text-sky-700 shadow-sm transition hover:bg-sky-50 disabled:opacity-50">
               Materialize Outputs
@@ -527,9 +597,29 @@ export default function LexiconJsonlReviewPage() {
 
       {materializeResult ? (
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm text-sm text-gray-700">
-          <p>{materializeResult.approved_output_path}</p>
-          <p>{materializeResult.rejected_output_path}</p>
-          <p>{materializeResult.regenerate_output_path}</p>
+          <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Reviewed outputs</h4>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="font-medium text-emerald-900">approved.jsonl</p>
+              <p className="mt-1 break-all font-mono text-xs text-emerald-900">{materializeResult.approved_output_path}</p>
+              <p className="mt-2 text-emerald-900">approved.jsonl is the reviewed file for Import DB.</p>
+            </div>
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
+              <p className="font-medium text-sky-900">review.decisions.jsonl</p>
+              <p className="mt-1 break-all font-mono text-xs text-sky-900">{materializeResult.decisions_output_path}</p>
+              <p className="mt-2 text-sky-900">Decision ledger for the reviewed artifact.</p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="font-medium text-amber-900">rejected.jsonl</p>
+              <p className="mt-1 break-all font-mono text-xs text-amber-900">{materializeResult.rejected_output_path}</p>
+              <p className="mt-2 text-amber-900">Rejected overlay rows with attached review metadata.</p>
+            </div>
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
+              <p className="font-medium text-violet-900">regenerate.jsonl</p>
+              <p className="mt-1 break-all font-mono text-xs text-violet-900">{materializeResult.regenerate_output_path}</p>
+              <p className="mt-2 text-violet-900">Regeneration request rows derived from rejected decisions.</p>
+            </div>
+          </div>
         </section>
       ) : null}
     </div>

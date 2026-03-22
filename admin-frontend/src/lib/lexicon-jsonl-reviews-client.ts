@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api-client";
+import { readAccessToken } from "@/lib/auth-session";
 
 export type LexiconJsonlReviewItem = {
   entry_id: string;
@@ -72,6 +73,28 @@ export type LexiconJsonlReviewMaterializeResult = {
   regenerate_output_path: string;
 };
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+
+async function downloadReviewOutput(kind: "approved" | "rejected" | "regenerate" | "decisions", input: MaterializeLexiconJsonlReviewOutputsInput): Promise<string> {
+  const token = readAccessToken();
+  const response = await fetch(`${API_BASE_URL}/lexicon-jsonl-reviews/download/${kind}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      artifact_path: input.artifactPath,
+      decisions_path: input.decisionsPath,
+      output_dir: input.outputDir,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status}`);
+  }
+  return response.text();
+}
+
 export const loadLexiconJsonlReviewSession = (
   input: LoadLexiconJsonlReviewSessionInput,
 ): Promise<LexiconJsonlReviewSession> =>
@@ -100,3 +123,15 @@ export const materializeLexiconJsonlReviewOutputs = (
     decisions_path: input.decisionsPath,
     output_dir: input.outputDir,
   });
+
+export const downloadApprovedLexiconJsonlReviewOutput = (input: MaterializeLexiconJsonlReviewOutputsInput): Promise<string> =>
+  downloadReviewOutput("approved", input);
+
+export const downloadRejectedLexiconJsonlReviewOutput = (input: MaterializeLexiconJsonlReviewOutputsInput): Promise<string> =>
+  downloadReviewOutput("rejected", input);
+
+export const downloadRegenerateLexiconJsonlReviewOutput = (input: MaterializeLexiconJsonlReviewOutputsInput): Promise<string> =>
+  downloadReviewOutput("regenerate", input);
+
+export const downloadDecisionLexiconJsonlReviewOutput = (input: MaterializeLexiconJsonlReviewOutputsInput): Promise<string> =>
+  downloadReviewOutput("decisions", input);

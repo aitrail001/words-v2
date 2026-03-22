@@ -18,6 +18,7 @@ def _make_user(user_id: uuid.UUID, role: str = "admin") -> User:
 
 
 def _write_jsonl(path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
@@ -181,7 +182,7 @@ class TestLexiconOpsSnapshotListing:
             [{"entry_id": "word:run", "entry_type": "word", "word": "run", "senses": []}],
         )
         _write_jsonl(
-            approved_ready / "approved.jsonl",
+            approved_ready / "reviewed" / "approved.jsonl",
             [{"entry_id": "word:run", "entry_type": "word", "word": "run", "senses": []}],
         )
 
@@ -205,13 +206,13 @@ class TestLexiconOpsSnapshotListing:
         assert compiled_item["recommended_action"] == "open_compiled_review"
         assert compiled_item["preferred_review_artifact_path"] == str(compiled_ready / "words.enriched.jsonl")
         assert compiled_item["preferred_import_artifact_path"] is None
-        assert any("approved.jsonl" in step for step in compiled_item["outside_portal_steps"])
+        assert any("reviewed/approved.jsonl" in step for step in compiled_item["outside_portal_steps"])
 
         approved_item = by_snapshot["approved-ready"]
         assert approved_item["workflow_stage"] == "approved_ready_for_import"
         assert approved_item["recommended_action"] == "open_import_db"
         assert approved_item["preferred_review_artifact_path"] == str(approved_ready / "words.enriched.jsonl")
-        assert approved_item["preferred_import_artifact_path"] == str(approved_ready / "approved.jsonl")
+        assert approved_item["preferred_import_artifact_path"] == str(approved_ready / "reviewed" / "approved.jsonl")
         assert any("import-db" in step for step in approved_item["outside_portal_steps"])
 
 
@@ -268,7 +269,7 @@ class TestLexiconOpsSnapshotDetail:
             [{"entry_id": "word:run", "entry_type": "word", "word": "run", "senses": []}],
         )
         _write_jsonl(
-            snapshot_dir / "approved.jsonl",
+            snapshot_dir / "reviewed" / "approved.jsonl",
             [{"entry_id": "word:run", "entry_type": "word", "word": "run", "senses": []}],
         )
 
@@ -282,7 +283,7 @@ class TestLexiconOpsSnapshotDetail:
         assert payload["workflow_stage"] == "approved_ready_for_import"
         assert payload["recommended_action"] == "open_import_db"
         assert payload["preferred_review_artifact_path"] == str(snapshot_dir / "words.enriched.jsonl")
-        assert payload["preferred_import_artifact_path"] == str(snapshot_dir / "approved.jsonl")
+        assert payload["preferred_import_artifact_path"] == str(snapshot_dir / "reviewed" / "approved.jsonl")
         assert any("import-db" in step for step in payload["outside_portal_steps"])
 
     @pytest.mark.asyncio
