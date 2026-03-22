@@ -32,6 +32,11 @@ def _compiled_rows() -> list[dict]:
             "part_of_speech": ["noun"],
             "cefr_level": "B1",
             "frequency_rank": 100,
+            "phonetics": {
+                "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+                "uk": {"ipa": "/bæŋk/", "confidence": 0.98},
+                "au": {"ipa": "/bæŋk/", "confidence": 0.97},
+            },
             "forms": {"plural_forms": ["banks"], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
             "senses": [
                 {
