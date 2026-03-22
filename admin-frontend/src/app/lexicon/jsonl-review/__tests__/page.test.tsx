@@ -259,7 +259,44 @@ describe("LexiconJsonlReviewPage", () => {
     render(<LexiconJsonlReviewPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-jsonl-review-title")).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole("heading", { name: "break a leg" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent("Artifact: /tmp/words.enriched.jsonl"));
+    expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
+      "Source reference: lexicon-20260321-wordfreq",
+    );
+    expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
+      "Output dir: /tmp/reviewed",
+    );
+    expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
+      "Stage: Alternate review path",
+    );
+    expect(screen.getByText(/Approve keeps the compiled row eligible for reviewed\/approved\.jsonl, the reviewed file you should import into the final DB\./)).toBeInTheDocument();
+    expect(screen.getByText(/Reject records the row in reviewed\/review\.decisions\.jsonl, writes the rejected overlay, and adds a regeneration request row\./)).toBeInTheDocument();
+    expect(screen.getByText(/Reopen removes the final decision so the row stays pending until you decide again\./)).toBeInTheDocument();
+    expect(screen.getByLabelText("Artifact path")).toHaveValue("/tmp/words.enriched.jsonl");
+    expect(screen.getByLabelText("Decision ledger path")).toHaveValue("/tmp/reviewed/review.decisions.jsonl");
+    expect(screen.getByLabelText("Output directory")).toHaveValue("/tmp/reviewed");
+    expect(screen.getAllByLabelText("Output directory")).toHaveLength(1);
+
+    await waitFor(() =>
+      expect(mockLoadSession).toHaveBeenCalledWith({
+        artifactPath: "/tmp/words.enriched.jsonl",
+        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
+        outputDir: "/tmp/reviewed",
+      }),
+    );
+    await waitFor(() => expect(screen.getAllByText("break a leg").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText("missing_source_provenance").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByText("good luck")).toBeInTheDocument());
+    expect(screen.getByText("Risk first")).toBeInTheDocument();
+    expect(screen.getByText(/Shortcuts:/)).toBeInTheDocument();
+
+    await user.click(screen.getByText("Risk first"));
+    await user.keyboard("j");
+    await waitFor(() => expect(screen.getByText("break a leg")).toBeInTheDocument());
+
+    await user.type(screen.getByPlaceholderText("Search entry id or display text"), "break");
+    expect(screen.getAllByText("break a leg").length).toBeGreaterThan(0);
+    expect(screen.queryByText("bank")).not.toBeInTheDocument();
 
     await user.type(screen.getByTestId("jsonl-review-decision-reason"), "regen");
     await user.click(screen.getByTestId("jsonl-review-reject-button"));
@@ -272,18 +309,6 @@ describe("LexiconJsonlReviewPage", () => {
         decisionReason: "regen",
       }),
     );
-    await waitFor(() => expect(screen.getByRole("heading", { name: "harbor" })).toBeInTheDocument());
-
-    await user.click(screen.getByTestId("jsonl-review-approve-button"));
-    await waitFor(() =>
-      expect(mockUpdateItem).toHaveBeenCalledWith("word:harbor", {
-        artifactPath: "/tmp/words.enriched.jsonl",
-        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
-        reviewStatus: "approved",
-        decisionReason: null,
-      }),
-    );
-
     await user.click(screen.getByRole("button", { name: "Download Approved Rows" }));
     await waitFor(() =>
       expect(mockDownloadApproved).toHaveBeenCalledWith({

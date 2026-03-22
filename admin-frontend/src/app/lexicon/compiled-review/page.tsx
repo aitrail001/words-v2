@@ -531,6 +531,9 @@ export default function LexiconCompiledReviewPage() {
             Write approved, decisions, rejected, and regenerate outputs into the shared reviewed/ directory.
           </div>
         </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Compiled Review keeps the decision ledger in review DB tables. There is no decision-ledger path input on this page because the file only exists after download or materialize.
+        </p>
         {importError ? <p className="mt-2 text-sm text-red-600">{importError}</p> : null}
         {message ? <p className="mt-2 text-sm text-green-700">{message}</p> : null}
         {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
