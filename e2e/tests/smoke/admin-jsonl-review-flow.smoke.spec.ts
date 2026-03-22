@@ -143,7 +143,7 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   await page.getByTestId("jsonl-review-confirm-approved-button").click();
   await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as approved\\.`))).toBeVisible();
 
-  await page.getByRole("button", { name: "Materialize Outputs" }).click();
+  await page.getByRole("button", { name: "Materialize Reviewed Outputs" }).click();
   await expect(page.getByText(`${outputBackendDir}/approved.jsonl`)).toBeVisible();
   await expect(page.getByText(`${outputBackendDir}/rejected.jsonl`)).toBeVisible();
   await expect(page.getByText(`${outputBackendDir}/regenerate.jsonl`)).toBeVisible();
