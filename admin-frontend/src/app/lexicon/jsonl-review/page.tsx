@@ -445,9 +445,9 @@ export default function LexiconJsonlReviewPage() {
             />
             <span className="text-xs leading-5 text-slate-500">{outputDirHint}</span>
           </label>
-          <div className="grid gap-1 text-sm text-slate-700 xl:self-stretch">
+          <div className="grid gap-1 text-sm text-slate-700 xl:self-start">
             <span className="font-medium">Load artifact</span>
-            <button type="submit" disabled={!artifactPath || loading} className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-50">
+            <button type="submit" disabled={!artifactPath || loading} className="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
               {loading ? "Loading..." : "Load Artifact"}
             </button>
             <span className="text-xs leading-5 text-slate-500">Load the compiled artifact and sidecar paths into the review session.</span>
