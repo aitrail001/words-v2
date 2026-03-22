@@ -21,6 +21,7 @@ from tools.lexicon.enrich import (
     build_enrichment_provider,
     build_openai_compatible_enrichment_provider,
     build_openai_compatible_word_enrichment_provider,
+    build_placeholder_word_enrichment_provider,
     _default_node_runner,
     build_openai_compatible_node_enrichment_provider,
     _parse_json_payload_text,
@@ -115,6 +116,27 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(len(senses), 1)
             self.assertEqual(lexemes[0].lemma, "run")
             self.assertEqual(senses[0].sense_id, "sn_lx_run_1")
+
+    def test_placeholder_word_provider_emits_grouped_phonetics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            settings = LexiconSettings.from_env({})
+            provider = build_placeholder_word_enrichment_provider(settings=settings)
+
+            outcome = provider(
+                lexeme=lexemes[0],
+                senses=senses,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-1",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(outcome[0].phonetics["us"]["ipa"], "/run/")
+            self.assertEqual(outcome[0].phonetics["uk"]["ipa"], "/run/")
+            self.assertEqual(outcome[0].phonetics["au"]["ipa"], "/run/")
 
     def test_enrich_snapshot_writes_enrichments_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

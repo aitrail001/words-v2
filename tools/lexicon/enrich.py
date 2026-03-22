@@ -391,6 +391,15 @@ def _default_example(lemma: str, part_of_speech: str) -> str:
     return f'This {lemma} is useful for learners.'
 
 
+def _default_phonetics(lemma: str) -> dict[str, dict[str, Any]]:
+    ipa = f'/{lemma}/'
+    return {
+        'us': {'ipa': ipa, 'confidence': 0.5},
+        'uk': {'ipa': ipa, 'confidence': 0.5},
+        'au': {'ipa': ipa, 'confidence': 0.5},
+    }
+
+
 def _variant_prompt_guidance(lexeme: LexemeRecord) -> str:
     if not lexeme.is_variant_with_distinct_meanings or not lexeme.variant_base_form:
         return ""
@@ -1250,6 +1259,7 @@ def build_placeholder_enrichment_provider(
             confidence=0.5,
             review_status=review_status,
             generated_at=generated_at,
+            phonetics=_default_phonetics(lexeme.lemma),
         )
 
     return provider
