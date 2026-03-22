@@ -17,6 +17,8 @@ import {
   updateLexiconJsonlReviewItem,
 } from "@/lib/lexicon-jsonl-reviews-client";
 
+type ReviewDecisionStatus = "pending" | "approved" | "rejected";
+
 function downloadTextFile(filename: string, text: string): void {
   const blob = new Blob([text], { type: "application/x-ndjson" });
   const url = URL.createObjectURL(blob);
@@ -55,6 +57,20 @@ function compareReviewItems(a: LexiconJsonlReviewItem, b: LexiconJsonlReviewItem
   return a.display_text.localeCompare(b.display_text);
 }
 
+function nextPendingEntryId(items: LexiconJsonlReviewItem[], currentEntryId: string): string | null {
+  const pendingItems = items.filter((item) => item.review_status === "pending");
+  if (!pendingItems.length) return null;
+
+  const currentIndex = pendingItems.findIndex((item) => item.entry_id === currentEntryId);
+  if (currentIndex >= 0 && currentIndex + 1 < pendingItems.length) {
+    return pendingItems[currentIndex + 1].entry_id;
+  }
+  if (currentIndex > 0) {
+    return pendingItems[currentIndex - 1].entry_id;
+  }
+  return pendingItems[0]?.entry_id ?? null;
+}
+
 export default function LexiconJsonlReviewPage() {
   const [artifactPath, setArtifactPath] = useState("");
   const [decisionsPath, setDecisionsPath] = useState("");
@@ -69,6 +85,7 @@ export default function LexiconJsonlReviewPage() {
   const [materializeResult, setMaterializeResult] = useState<LexiconJsonlReviewMaterializeResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pendingDecision, setPendingDecision] = useState<ReviewDecisionStatus | null>(null);
   const artifactPathHint = "Use a container-visible repo path like data/lexicon/snapshots/... or /app/data/lexicon/snapshots/....";
   const decisionsPathHint = "Optional. Defaults to reviewed/review.decisions.jsonl under the snapshot.";
   const outputDirHint = "Optional. Defaults to the shared reviewed/ directory under the artifact snapshot.";
@@ -152,6 +169,7 @@ export default function LexiconJsonlReviewPage() {
 
   useEffect(() => {
     setDecisionReason(selectedItem?.decision_reason ?? "");
+    setPendingDecision(null);
   }, [selectedItem?.decision_reason, selectedItem?.entry_id]);
 
   const loadSession = async (event: FormEvent) => {
@@ -175,8 +193,9 @@ export default function LexiconJsonlReviewPage() {
     });
   };
 
-  const saveDecision = useCallback(async (reviewStatus: "pending" | "approved" | "rejected") => {
+  const confirmDecision = useCallback(async (reviewStatus: ReviewDecisionStatus) => {
     if (!selectedItem || !session) return;
+    const nextEntryId = nextPendingEntryId([...(session.items ?? [])].sort(compareReviewItems), selectedItem.entry_id);
     setSaving(true);
     setMessage(null);
     try {
@@ -188,6 +207,10 @@ export default function LexiconJsonlReviewPage() {
       });
       replaceItem(updated);
       setMessage(`Saved ${updated.entry_id} as ${updated.review_status}.`);
+      if (nextEntryId && nextEntryId !== updated.entry_id) {
+        setSelectedItemId(nextEntryId);
+      }
+      setPendingDecision(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save decision.");
     } finally {
@@ -257,6 +280,19 @@ export default function LexiconJsonlReviewPage() {
         return;
       }
 
+      if (pendingDecision) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          void confirmDecision(pendingDecision);
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setPendingDecision(null);
+          return;
+        }
+      }
+
       const currentIndex = filteredItems.findIndex((item) => item.entry_id === selectedItem?.entry_id);
       if (event.key === "j") {
         event.preventDefault();
@@ -278,26 +314,24 @@ export default function LexiconJsonlReviewPage() {
 
       if (event.key === "a") {
         event.preventDefault();
-        void saveDecision("approved");
+        setPendingDecision("approved");
       } else if (event.key === "r") {
         event.preventDefault();
-        void saveDecision("rejected");
+        setPendingDecision("rejected");
       } else if (event.key === "p") {
         event.preventDefault();
-        void saveDecision("pending");
+        setPendingDecision("pending");
       }
     };
 
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [filteredItems, loading, saving, selectedItem, session, decisionReason, decisionsPath, saveDecision]);
+  }, [confirmDecision, filteredItems, loading, pendingDecision, saving, selectedItem, session]);
 
   return (
-    <div className="relative isolate mx-auto w-full max-w-[1900px] space-y-6 px-4 py-6 xl:px-6 2xl:px-8" data-testid="lexicon-jsonl-review-page">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 bg-[radial-gradient(circle_at_top_right,_rgba(59,130,246,0.18),_transparent_35%),radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),_transparent_30%)]" />
-
+    <div className="space-y-6" data-testid="lexicon-jsonl-review-page">
       {(contextArtifactPath || contextDecisionsPath || contextOutputDir || sourceReference) ? (
-        <section className="rounded-2xl border border-sky-200 bg-sky-50/90 p-4 text-sm text-sky-900 shadow-sm" data-testid="lexicon-jsonl-review-context">
+        <section className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900" data-testid="lexicon-jsonl-review-context">
           <p className="font-medium">Workflow context</p>
           {sourceReference ? <p className="mt-1">Source reference: {sourceReference}</p> : null}
           <p>Artifact: {contextArtifactPath || "—"}</p>
@@ -308,53 +342,53 @@ export default function LexiconJsonlReviewPage() {
         </section>
       ) : null}
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-[0_18px_60px_-36px_rgba(15,23,42,0.35)] backdrop-blur">
-        <div className="grid gap-6 p-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(18rem,22rem)] xl:p-8">
+      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_20rem]">
           <div className="space-y-5">
             <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
               JSONL Review Mode
             </div>
             <div className="max-w-4xl">
-              <h3 className="text-3xl font-semibold tracking-tight text-slate-950" data-testid="lexicon-jsonl-review-title">
+              <h3 className="text-2xl font-semibold text-gray-900" data-testid="lexicon-jsonl-review-title">
                 JSONL-Only Lexicon Review
               </h3>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              <p className="mt-1 text-sm text-gray-600">
                 Review compiled artifacts directly from JSONL and persist decisions as a sidecar without using review DB tables.
               </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Artifact path</p>
                 <p className="mt-2 break-all font-mono text-sm text-slate-800">{artifactPath || "Not loaded yet"}</p>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Items</p>
                 <p className="mt-2 text-2xl font-semibold text-slate-950">{selectedCount}</p>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Decision sidecar</p>
                 <p className="mt-2 break-all font-mono text-sm text-slate-800">{decisionsPath || "reviewed/review.decisions.jsonl"}</p>
               </div>
             </div>
 
-            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:grid-cols-3">
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+            <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Approve</p>
                 <p className="mt-2">Approve keeps the compiled row eligible for reviewed/approved.jsonl, the reviewed file you should import into the final DB.</p>
               </div>
-              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Reject</p>
                 <p className="mt-2">Reject records the row in reviewed/review.decisions.jsonl, writes the rejected overlay, and adds a regeneration request row.</p>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900">
+              <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reopen</p>
                 <p className="mt-2">Reopen removes the final decision so the row stays pending until you decide again.</p>
               </div>
             </div>
           </div>
 
-          <aside className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
+          <aside className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Path format</p>
             <p className="mt-2 leading-6">{artifactPathHint}</p>
             <p className="mt-4 text-xs leading-5 text-amber-800">
@@ -363,14 +397,14 @@ export default function LexiconJsonlReviewPage() {
           </aside>
         </div>
 
-        <form onSubmit={loadSession} className="grid gap-4 border-t border-slate-200 bg-slate-50/60 p-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end xl:p-8">
+        <form onSubmit={loadSession} className="mt-6 grid gap-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
           <label className="grid gap-1 text-sm text-slate-700">
             <span className="font-medium">Artifact path</span>
             <input
               aria-label="Artifact path"
               value={artifactPath}
               onChange={(event) => setArtifactPath(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-sm"
               placeholder="data/lexicon/snapshots/.../words.enriched.jsonl"
             />
             <span className="text-xs leading-5 text-slate-500">{artifactPathHint}</span>
@@ -381,7 +415,7 @@ export default function LexiconJsonlReviewPage() {
               aria-label="Decisions path"
               value={decisionsPath}
               onChange={(event) => setDecisionsPath(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-sm"
               placeholder="data/lexicon/snapshots/.../reviewed/review.decisions.jsonl"
             />
             <span className="text-xs leading-5 text-slate-500">{decisionsPathHint}</span>
@@ -392,7 +426,7 @@ export default function LexiconJsonlReviewPage() {
               aria-label="Output directory"
               value={outputDir}
               onChange={(event) => setOutputDir(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-sm"
               placeholder="data/lexicon/snapshots/.../reviewed"
             />
             <span className="text-xs leading-5 text-slate-500">{outputDirHint}</span>
@@ -418,12 +452,12 @@ export default function LexiconJsonlReviewPage() {
             </button>
           </div>
         </form>
-        {message ? <div className="border-t border-slate-200 px-6 py-4 text-sm text-slate-700 xl:px-8">{message}</div> : null}
+        {message ? <div className="mt-3 text-sm text-slate-700">{message}</div> : null}
       </section>
 
       {session ? (
-        <section className="grid gap-6 2xl:grid-cols-[minmax(22rem,26rem)_minmax(0,1fr)]">
-          <div className="sticky top-6 self-start rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.35)] backdrop-blur">
+        <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <div className="mb-4 grid grid-cols-3 gap-3 text-sm">
               <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Pending</p>
@@ -443,7 +477,7 @@ export default function LexiconJsonlReviewPage() {
                 Risk first
               </div>
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                Shortcuts: <span className="font-semibold text-slate-900">j</span>/<span className="font-semibold text-slate-900">k</span> move, <span className="font-semibold text-emerald-700">a</span> approve, <span className="font-semibold text-rose-700">r</span> reject, <span className="font-semibold text-slate-700">p</span> reopen
+                Shortcuts: <span className="font-semibold text-slate-900">j</span>/<span className="font-semibold text-slate-900">k</span> move, <span className="font-semibold text-emerald-700">a</span> approve, <span className="font-semibold text-rose-700">r</span> reject, <span className="font-semibold text-slate-700">p</span> reopen, <span className="font-semibold text-slate-900">enter</span> confirm, <span className="font-semibold text-slate-900">esc</span> cancel
               </div>
               <input
                 value={search}
@@ -486,13 +520,12 @@ export default function LexiconJsonlReviewPage() {
             </div>
           </div>
 
-          <div className="min-w-0 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.35)] backdrop-blur">
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             {selectedItem ? (
               <div className="space-y-6">
                 <div className="space-y-4">
-                <div className="space-y-4">
                   <div>
-                    <h4 className="text-2xl font-semibold tracking-tight text-slate-950">{selectedItem.display_text}</h4>
+                    <h4 className="text-xl font-semibold text-gray-900">{selectedItem.display_text}</h4>
                     <p className="mt-1 text-sm text-slate-500">
                       {selectedItem.entry_id} · {selectedItem.entry_type} · reviewed {formatDateTime(selectedItem.reviewed_at)}
                       </p>
@@ -503,7 +536,7 @@ export default function LexiconJsonlReviewPage() {
                         {selectedItem.frequency_rank ? <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">rank: {selectedItem.frequency_rank}</span> : null}
                       </div>
                     </div>
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reviewer summary</p>
                         {(selectedItem.warning_labels ?? []).map((warning) => (
@@ -513,15 +546,15 @@ export default function LexiconJsonlReviewPage() {
                         ))}
                       </div>
                       <div className="mt-3 grid gap-3 md:grid-cols-3">
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Senses</p>
                           <p className="mt-1 text-lg font-semibold text-slate-900">{selectedItem.review_summary?.sense_count ?? 0}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Form variants</p>
                           <p className="mt-1 text-lg font-semibold text-slate-900">{selectedItem.review_summary?.form_variant_count ?? 0}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Confusables</p>
                           <p className="mt-1 text-lg font-semibold text-slate-900">{selectedItem.review_summary?.confusable_count ?? 0}</p>
                         </div>
@@ -557,33 +590,60 @@ export default function LexiconJsonlReviewPage() {
                         data-testid="jsonl-review-decision-reason"
                         value={decisionReason}
                         onChange={(event) => setDecisionReason(event.target.value)}
-                        className="min-h-32 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                        className="min-h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
                         placeholder="Optional reason to preserve in the sidecar"
                       />
                     </label>
-                    <div className="flex flex-wrap gap-3">
-                      <button type="button" data-testid="jsonl-review-approve-button" disabled={saving} onClick={() => void saveDecision("approved")} className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:opacity-50">
-                        Approve
-                      </button>
-                      <button type="button" data-testid="jsonl-review-reject-button" disabled={saving} onClick={() => void saveDecision("rejected")} className="rounded-lg border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800 shadow-sm transition hover:bg-rose-100 disabled:opacity-50">
-                        Reject
-                      </button>
-                      <button type="button" data-testid="jsonl-review-reopen-button" disabled={saving} onClick={() => void saveDecision("pending")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50">
-                        Reopen
-                      </button>
+                    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4">
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" data-testid="jsonl-review-approve-button" disabled={saving} onClick={() => setPendingDecision("approved")} className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                          Approve (A)
+                        </button>
+                        <button type="button" data-testid="jsonl-review-reject-button" disabled={saving} onClick={() => setPendingDecision("rejected")} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                          Reject (R)
+                        </button>
+                        <button type="button" data-testid="jsonl-review-reopen-button" disabled={saving} onClick={() => setPendingDecision("pending")} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50">
+                          Reopen (P)
+                        </button>
+                      </div>
+                      {pendingDecision ? (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
+                          <span className="font-medium">
+                            Confirm {pendingDecision === "approved" ? "approve" : pendingDecision === "rejected" ? "reject" : "reopen"} and move to the next pending row.
+                          </span>
+                          <button
+                            type="button"
+                            data-testid={`jsonl-review-confirm-${pendingDecision}-button`}
+                            disabled={saving}
+                            onClick={() => void confirmDecision(pendingDecision)}
+                            className="rounded-md border border-sky-300 bg-white px-3 py-2 text-sm font-medium text-sky-800 disabled:opacity-50"
+                          >
+                            Confirm {pendingDecision === "approved" ? "Approve" : pendingDecision === "rejected" ? "Reject" : "Reopen"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => setPendingDecision(null)}
+                            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-xs text-gray-500">Choose an action, then confirm it. The reviewer will move to the next pending row automatically.</p>
+                      )}
                     </div>
-                  </div>
                 </div>
 
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                     <div>
                       <h5 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Raw compiled JSON</h5>
                       <p className="mt-1 text-xs text-slate-500">Scrollable snapshot of the compiled record being reviewed.</p>
                     </div>
                     <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500">scrolling panel</span>
                   </div>
-                  <pre className="max-h-[56vh] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs leading-5 text-slate-100 shadow-inner">
+                  <pre className="max-h-[56vh] overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-5 text-slate-100 shadow-inner">
                     {JSON.stringify(selectedItem.compiled_payload, null, 2)}
                   </pre>
                 </div>

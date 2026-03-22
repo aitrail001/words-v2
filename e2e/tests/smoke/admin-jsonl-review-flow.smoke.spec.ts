@@ -131,29 +131,17 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   await expect(page.getByText("missing_source_provenance").first()).toBeVisible();
   await expect(page.getByText(new RegExp(`an idiomatic meaning for ${phrase}`)).first()).toBeVisible();
 
-  await page.getByPlaceholder("Search entry id or display text").fill(`word:${normalized}:${uniqueSuffix}`);
-  await expect(page.getByRole("button", { name: new RegExp(`^${normalized}\\b`) })).toBeVisible();
-
-  await page.getByText("Risk first").click();
-  await page.keyboard.press("a");
-  await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as approved\\.`))).toBeVisible();
-
-  await page.keyboard.press("p");
-  await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as pending\\.`))).toBeVisible();
-
-  await page.getByTestId("jsonl-review-decision-reason").fill("approved in jsonl smoke");
-  await page.getByText("Reviewer summary").click();
-  await page.keyboard.press("a");
-  await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as approved\\.`))).toBeVisible();
-
-  await page.getByPlaceholder("Search entry id or display text").fill("");
-  await page.getByText("Risk first").click();
-  await page.keyboard.press("k");
   await expect(page.getByRole("heading", { name: phrase })).toBeVisible();
   await page.getByTestId("jsonl-review-decision-reason").fill("regen from smoke");
-  await page.getByText("Reviewer summary").click();
-  await page.keyboard.press("r");
+  await page.getByTestId("jsonl-review-reject-button").click();
+  await page.getByTestId("jsonl-review-confirm-rejected-button").click();
   await expect(page.getByText(/Saved phrase:.* as rejected\./)).toBeVisible();
+  await expect(page.getByRole("heading", { name: normalized })).toBeVisible();
+
+  await page.getByTestId("jsonl-review-decision-reason").fill("approved in jsonl smoke");
+  await page.getByTestId("jsonl-review-approve-button").click();
+  await page.getByTestId("jsonl-review-confirm-approved-button").click();
+  await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as approved\\.`))).toBeVisible();
 
   await page.getByRole("button", { name: "Materialize Outputs" }).click();
   await expect(page.getByText(`${outputBackendDir}/approved.jsonl`)).toBeVisible();

@@ -82,9 +82,9 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   const user = await registerAdminViaApi(request, "admin-compiled-review-smoke");
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
   const normalized = `artifact${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
+  const secondary = `${normalized}harbor`;
   const sourceReference = `compiled-review-${uniqueSuffix}`;
-  const compiledRow = buildCompiledWordRow(uniqueSuffix, normalized);
-  const jsonl = `${JSON.stringify(compiledRow)}\n`;
+  const jsonl = `${JSON.stringify(buildCompiledWordRow(uniqueSuffix, normalized))}\n${JSON.stringify(buildCompiledWordRow(`${uniqueSuffix}-2`, secondary))}\n`;
 
   const importResponse = await request.post(`${apiUrl}/lexicon-compiled-reviews/batches/import`, {
     headers: { Authorization: `Bearer ${user.token}` },
@@ -107,21 +107,6 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   const batch = batches.find((entry) => entry.source_reference === sourceReference);
   expect(batch).toBeTruthy();
 
-  const patchResponse = await request.patch(
-    `${apiUrl}/lexicon-compiled-reviews/items/${(await (async () => {
-      const response = await request.get(`${apiUrl}/lexicon-compiled-reviews/batches/${batch!.id}/items`, {
-        headers: authHeaders(user.token),
-      });
-      const payload = (await response.json()) as CompiledReviewItem[];
-      return payload[0]!.id;
-    })())}`,
-    {
-      headers: authHeaders(user.token),
-      data: { review_status: "approved", decision_reason: "approved in compiled review smoke" },
-    },
-  );
-  expect(patchResponse.status()).toBe(200);
-
   await page.goto(`${adminUrl}/login`);
   await page.getByTestId("login-email-input").fill(user.email);
   await page.getByTestId("login-password-input").fill(user.password);
@@ -132,19 +117,26 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   await expect(page.getByTestId("lexicon-compiled-review-page")).toBeVisible();
   await expect(page.getByTestId("compiled-review-batches-list")).toContainText("words.enriched.jsonl");
   await expect(page.getByTestId("compiled-review-item-title")).toContainText(normalized);
-  await expect(page.getByTestId("compiled-review-items-list")).toContainText("approved");
-  await expect(page.getByTestId("compiled-review-decision-reason")).toHaveValue("approved in compiled review smoke");
+  await expect(page.getByTestId("compiled-review-items-list")).toContainText("pending");
+  await page.getByTestId("compiled-review-decision-reason").fill("approved in compiled review smoke");
+  await page.getByTestId("compiled-review-approve-button").click();
+  await page.getByTestId("compiled-review-confirm-approved-button").click();
+  await expect(page.getByText(new RegExp(`Updated word:${normalized}:${uniqueSuffix} to approved\\.`))).toBeVisible();
+  await expect(page.getByTestId("compiled-review-item-title")).toContainText(secondary);
 
   const itemsResponse = await request.get(`${apiUrl}/lexicon-compiled-reviews/batches/${batch!.id}/items`, {
     headers: authHeaders(user.token),
   });
   expect(itemsResponse.status()).toBe(200);
   const items = (await itemsResponse.json()) as CompiledReviewItem[];
-  expect(items).toHaveLength(1);
-  expect(items[0].review_status).toBe("approved");
-  expect(items[0].decision_reason).toBe("approved in compiled review smoke");
-  expect(items[0].import_eligible).toBe(true);
-  expect(items[0].regen_requested).toBe(false);
+  expect(items).toHaveLength(2);
+  const approvedItem = items.find((item) => item.entry_id === `word:${normalized}:${uniqueSuffix}`);
+  const pendingItem = items.find((item) => item.entry_id === `word:${secondary}:${uniqueSuffix}-2`);
+  expect(approvedItem?.review_status).toBe("approved");
+  expect(approvedItem?.decision_reason).toBe("approved in compiled review smoke");
+  expect(approvedItem?.import_eligible).toBe(true);
+  expect(approvedItem?.regen_requested).toBe(false);
+  expect(pendingItem?.review_status).toBe("pending");
 
   const decisionDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download Decision Ledger" }).click();

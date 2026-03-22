@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
@@ -18,6 +18,8 @@ import {
   materializeLexiconCompiledReviewOutputs,
   updateLexiconCompiledReviewItem,
 } from "@/lib/lexicon-compiled-reviews-client";
+
+type ReviewDecisionStatus = "pending" | "approved" | "rejected";
 
 function searchParam(name: string): string {
   if (typeof window === "undefined") return "";
@@ -60,6 +62,20 @@ function buildExportFilename(batch: LexiconCompiledReviewBatch, kind: "approved"
   return `${context}.${kind}.jsonl`;
 }
 
+function nextPendingItemId(items: LexiconCompiledReviewItem[], currentItemId: string): string | null {
+  const pendingItems = items.filter((item) => item.review_status === "pending");
+  if (!pendingItems.length) return null;
+
+  const currentIndex = pendingItems.findIndex((item) => item.id === currentItemId);
+  if (currentIndex >= 0 && currentIndex + 1 < pendingItems.length) {
+    return pendingItems[currentIndex + 1].id;
+  }
+  if (currentIndex > 0) {
+    return pendingItems[currentIndex - 1].id;
+  }
+  return pendingItems[0]?.id ?? null;
+}
+
 export default function LexiconCompiledReviewPage() {
   const [itemSearch, setItemSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
@@ -78,6 +94,7 @@ export default function LexiconCompiledReviewPage() {
   const [materializeOutputDir, setMaterializeOutputDir] = useState("");
   const [materializeResult, setMaterializeResult] = useState<LexiconCompiledReviewMaterializeResult | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
+  const [pendingDecision, setPendingDecision] = useState<ReviewDecisionStatus | null>(null);
   const [saveLoading, setSaveLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const autoImportKeyRef = useRef<string>("");
@@ -188,6 +205,7 @@ export default function LexiconCompiledReviewPage() {
 
   useEffect(() => {
     setDecisionReason(selectedItem?.decision_reason ?? "");
+    setPendingDecision(null);
   }, [selectedItem?.decision_reason, selectedItem?.id]);
 
   useEffect(() => {
@@ -239,8 +257,9 @@ export default function LexiconCompiledReviewPage() {
     }
   };
 
-  const handleDecision = async (reviewStatus: "approved" | "rejected" | "pending") => {
+  const handleDecision = useCallback(async (reviewStatus: ReviewDecisionStatus) => {
     if (!selectedItem) return;
+    const nextItemId = nextPendingItemId(items, selectedItem.id);
     setSaveLoading(true);
     setMessage(null);
     try {
@@ -250,13 +269,74 @@ export default function LexiconCompiledReviewPage() {
       });
       setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       await loadBatches(selectedBatchId || undefined);
+      if (nextItemId && nextItemId !== updated.id) {
+        setSelectedItemId(nextItemId);
+      }
+      setPendingDecision(null);
       setMessage(`Updated ${updated.entry_id} to ${updated.review_status}.`);
     } catch (nextError) {
       setMessage(nextError instanceof Error ? nextError.message : "Failed to update review item.");
     } finally {
       setSaveLoading(false);
     }
-  };
+  }, [items, selectedBatchId, selectedItem, decisionReason]);
+
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      if (!filteredItems.length || saveLoading || loading || itemsLoading) return;
+
+      if (pendingDecision) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          void handleDecision(pendingDecision);
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setPendingDecision(null);
+          return;
+        }
+      }
+
+      const currentIndex = filteredItems.findIndex((item) => item.id === selectedItem?.id);
+      if (event.key === "j") {
+        event.preventDefault();
+        const nextIndex = currentIndex >= 0 ? Math.min(currentIndex + 1, filteredItems.length - 1) : 0;
+        setSelectedItemId(filteredItems[nextIndex]?.id ?? "");
+        return;
+      }
+      if (event.key === "k") {
+        event.preventDefault();
+        const nextIndex = currentIndex >= 0 ? Math.max(currentIndex - 1, 0) : 0;
+        setSelectedItemId(filteredItems[nextIndex]?.id ?? "");
+        return;
+      }
+      if (!selectedItem) return;
+      if (event.key === "a") {
+        event.preventDefault();
+        setPendingDecision("approved");
+      } else if (event.key === "r") {
+        event.preventDefault();
+        setPendingDecision("rejected");
+      } else if (event.key === "p") {
+        event.preventDefault();
+        setPendingDecision("pending");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [filteredItems, handleDecision, itemsLoading, loading, pendingDecision, saveLoading, selectedItem]);
 
   const handleExport = async (kind: "approved" | "rejected" | "regenerate" | "decisions") => {
     if (!selectedBatch) return;
@@ -538,16 +618,47 @@ export default function LexiconCompiledReviewPage() {
                         <textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} className="mt-1 min-h-24 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" data-testid="compiled-review-decision-reason" />
                       </label>
 
-                      <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => void handleDecision("approved")} disabled={saveLoading} className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" data-testid="compiled-review-approve-button">
-                          Approve
-                        </button>
-                        <button type="button" onClick={() => void handleDecision("rejected")} disabled={saveLoading} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" data-testid="compiled-review-reject-button">
-                          Reject
-                        </button>
-                        <button type="button" onClick={() => void handleDecision("pending")} disabled={saveLoading} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50">
-                          Reopen
-                        </button>
+                      <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4">
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                          Shortcuts: <span className="font-semibold text-slate-900">j</span>/<span className="font-semibold text-slate-900">k</span> move, <span className="font-semibold text-emerald-700">a</span> approve, <span className="font-semibold text-rose-700">r</span> reject, <span className="font-semibold text-slate-700">p</span> reopen, <span className="font-semibold text-slate-900">enter</span> confirm, <span className="font-semibold text-slate-900">esc</span> cancel
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button type="button" onClick={() => setPendingDecision("approved")} disabled={saveLoading} className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" data-testid="compiled-review-approve-button">
+                            Approve (A)
+                          </button>
+                          <button type="button" onClick={() => setPendingDecision("rejected")} disabled={saveLoading} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" data-testid="compiled-review-reject-button">
+                            Reject (R)
+                          </button>
+                          <button type="button" onClick={() => setPendingDecision("pending")} disabled={saveLoading} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50" data-testid="compiled-review-reopen-button">
+                            Reopen (P)
+                          </button>
+                        </div>
+                        {pendingDecision ? (
+                          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
+                            <span className="font-medium">
+                              Confirm {pendingDecision === "approved" ? "approve" : pendingDecision === "rejected" ? "reject" : "reopen"} and move to the next pending row.
+                            </span>
+                            <button
+                              type="button"
+                              data-testid={`compiled-review-confirm-${pendingDecision}-button`}
+                              disabled={saveLoading}
+                              onClick={() => void handleDecision(pendingDecision)}
+                              className="rounded-md border border-sky-300 bg-white px-3 py-2 text-sm font-medium text-sky-800 disabled:opacity-50"
+                            >
+                              Confirm {pendingDecision === "approved" ? "Approve" : pendingDecision === "rejected" ? "Reject" : "Reopen"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={saveLoading}
+                              onClick={() => setPendingDecision(null)}
+                              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-xs text-gray-500">Choose an action, then confirm it. The reviewer will move to the next pending row automatically.</p>
+                        )}
                       </div>
 
                       <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
