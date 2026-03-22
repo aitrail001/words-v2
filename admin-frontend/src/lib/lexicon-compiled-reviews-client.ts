@@ -86,6 +86,9 @@ export const listLexiconCompiledReviewBatches = (): Promise<LexiconCompiledRevie
 export const getLexiconCompiledReviewBatch = (batchId: string): Promise<LexiconCompiledReviewBatch> =>
   apiClient.get<LexiconCompiledReviewBatch>(`/lexicon-compiled-reviews/batches/${batchId}`);
 
+export const deleteLexiconCompiledReviewBatch = (batchId: string): Promise<void> =>
+  apiClient.delete<void>(`/lexicon-compiled-reviews/batches/${batchId}`);
+
 export const listLexiconCompiledReviewItems = (batchId: string): Promise<LexiconCompiledReviewItem[]> =>
   apiClient.get<LexiconCompiledReviewItem[]>(`/lexicon-compiled-reviews/batches/${batchId}/items`);
 

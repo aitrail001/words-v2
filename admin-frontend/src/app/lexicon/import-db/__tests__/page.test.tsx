@@ -52,6 +52,10 @@ describe("LexiconImportDbPage", () => {
       "Stage: Final DB write",
     );
     expect(screen.getByText(/Use reviewed\/approved\.jsonl from Compiled Review export or JSONL Review materialize, not the raw words\.enriched\.jsonl artifact unless you are intentionally bypassing review\./)).toBeInTheDocument();
+    expect(screen.getByText("Compiled artifact")).toBeInTheDocument();
+    expect(screen.getByText("Reviewed directory")).toBeInTheDocument();
+    expect(screen.getByText("Approved import input")).toBeInTheDocument();
+    expect(screen.getAllByText("Decision ledger").length).toBeGreaterThan(0);
     expect(screen.getByPlaceholderText("data/lexicon/snapshots/.../reviewed/approved.jsonl")).toBeInTheDocument();
     await waitFor(() =>
       expect(dryRunLexiconImport).toHaveBeenCalledWith({

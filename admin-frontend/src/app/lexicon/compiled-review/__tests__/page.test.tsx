@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 
 import LexiconCompiledReviewPage from "@/app/lexicon/compiled-review/page";
 import {
+  deleteLexiconCompiledReviewBatch,
   downloadCompiledReviewDecisionsExport,
   downloadApprovedCompiledReviewExport,
   importLexiconCompiledReviewBatch,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/lexicon-compiled-reviews-client";
 
 jest.mock("@/lib/lexicon-compiled-reviews-client", () => ({
+  deleteLexiconCompiledReviewBatch: jest.fn(),
   downloadCompiledReviewDecisionsExport: jest.fn(),
   downloadApprovedCompiledReviewExport: jest.fn(),
   downloadRegenerateCompiledReviewExport: jest.fn(),
@@ -39,6 +41,7 @@ describe("LexiconCompiledReviewPage", () => {
   const mockListBatches = listLexiconCompiledReviewBatches as jest.Mock;
   const mockListItems = listLexiconCompiledReviewItems as jest.Mock;
   const mockUpdateItem = updateLexiconCompiledReviewItem as jest.Mock;
+  const mockDeleteBatch = deleteLexiconCompiledReviewBatch as jest.Mock;
   const mockDownloadDecisions = downloadCompiledReviewDecisionsExport as jest.Mock;
   const mockDownloadApproved = downloadApprovedCompiledReviewExport as jest.Mock;
   const mockImportBatch = importLexiconCompiledReviewBatch as jest.Mock;
@@ -212,6 +215,7 @@ describe("LexiconCompiledReviewPage", () => {
       regenerate_count: 0,
       decision_count: 1,
     });
+    mockDeleteBatch.mockResolvedValue(undefined);
   });
 
   it("renders batches, confirms decisions, advances to the next pending row, and downloads approved export", async () => {
@@ -259,6 +263,10 @@ describe("LexiconCompiledReviewPage", () => {
     expect(screen.getByText(/Approve keeps the compiled row eligible for final import as reviewed\/approved\.jsonl\./)).toBeInTheDocument();
     expect(screen.getByText(/Reject removes the row from reviewed\/approved\.jsonl, records the review decision ledger, and includes it in regeneration requests\./)).toBeInTheDocument();
     expect(screen.getByText(/Reopen clears the final decision so the row stays pending and is excluded from reviewed exports\./)).toBeInTheDocument();
+    expect(screen.getByText("Compiled artifact")).toBeInTheDocument();
+    expect(screen.getByText("Reviewed directory")).toBeInTheDocument();
+    expect(screen.getByText("Approved import input")).toBeInTheDocument();
+    expect(screen.getByText(/stored in the review DB/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Download Approved Rows" }));
     await waitFor(() => expect(mockDownloadApproved).toHaveBeenCalledWith("batch-1"));
@@ -270,5 +278,19 @@ describe("LexiconCompiledReviewPage", () => {
         outputDir: "/app/data/lexicon/snapshots/words-100-20260312/reviewed",
       }),
     );
+  });
+
+  it("deletes a compiled review batch after confirmation", async () => {
+    const user = userEvent.setup();
+    render(<LexiconCompiledReviewPage />);
+
+    await waitFor(() => expect(screen.getByTestId("compiled-review-batches-list")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("words.enriched.jsonl").length).toBeGreaterThan(0));
+
+    await user.click(screen.getByRole("button", { name: "Delete Batch" }));
+    expect(screen.getByText(/delete the selected review batch/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm Delete Batch" }));
+
+    await waitFor(() => expect(mockDeleteBatch).toHaveBeenCalledWith("batch-1"));
   });
 });

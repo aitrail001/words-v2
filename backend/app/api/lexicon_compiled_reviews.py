@@ -626,6 +626,18 @@ async def get_compiled_review_batch(
     return _batch_response(await _batch_or_404(batch_id, db))
 
 
+@router.delete("/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_compiled_review_batch(
+    batch_id: uuid.UUID,
+    _current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    batch = await _batch_or_404(batch_id, db)
+    await db.delete(batch)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/batches/{batch_id}/items", response_model=list[LexiconCompiledReviewItemResponse])
 async def list_compiled_review_items(
     batch_id: uuid.UUID,

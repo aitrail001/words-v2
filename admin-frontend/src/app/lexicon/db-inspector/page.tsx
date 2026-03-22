@@ -1,10 +1,18 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
-import { WordEnrichmentDetail, WordSearchResult, getWordEnrichmentDetail, searchWords } from "@/lib/words-client";
+import {
+  browseLexiconInspectorEntries,
+  getLexiconInspectorDetail,
+  LexiconInspectorDetail,
+  LexiconInspectorFamily,
+  LexiconInspectorFamilyFilter,
+  LexiconInspectorListEntry,
+  LexiconInspectorSort,
+} from "@/lib/lexicon-inspector-client";
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
@@ -17,12 +25,19 @@ function searchParam(name: string): string {
   return new URLSearchParams(window.location.search).get(name) ?? "";
 }
 
+const PAGE_LIMIT = 25;
+
 export default function LexiconDbInspectorPage() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<WordSearchResult[]>([]);
-  const [selectedWordId, setSelectedWordId] = useState("");
-  const [wordDetail, setWordDetail] = useState<WordEnrichmentDetail | null>(null);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [familyFilter, setFamilyFilter] = useState<LexiconInspectorFamilyFilter>("all");
+  const [sort, setSort] = useState<LexiconInspectorSort>("updated_desc");
+  const [offset, setOffset] = useState(0);
+  const [entries, setEntries] = useState<LexiconInspectorListEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [selectedEntryKey, setSelectedEntryKey] = useState("");
+  const [detail, setDetail] = useState<LexiconInspectorDetail | null>(null);
+  const [browseLoading, setBrowseLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const snapshotContext = searchParam("snapshot");
@@ -33,28 +48,57 @@ export default function LexiconDbInspectorPage() {
     }
   }, []);
 
-  const selectedWord = useMemo(
-    () => searchResults.find((item) => item.id === selectedWordId) ?? searchResults[0] ?? null,
-    [searchResults, selectedWordId],
+  const selectedEntry = useMemo(
+    () => entries.find((item) => `${item.family}:${item.id}` === selectedEntryKey) ?? entries[0] ?? null,
+    [entries, selectedEntryKey],
   );
 
   useEffect(() => {
-    setSelectedWordId(selectedWord?.id ?? "");
-  }, [selectedWord?.id]);
+    setSelectedEntryKey(selectedEntry ? `${selectedEntry.family}:${selectedEntry.id}` : "");
+  }, [selectedEntry]);
 
   useEffect(() => {
-    if (!selectedWordId) {
-      setWordDetail(null);
+    let active = true;
+    setBrowseLoading(true);
+    setMessage(null);
+    void (async () => {
+      try {
+        const response = await browseLexiconInspectorEntries({
+          family: familyFilter,
+          q: searchQuery || undefined,
+          sort,
+          limit: PAGE_LIMIT,
+          offset,
+        });
+        if (!active) return;
+        setEntries(response.items);
+        setTotal(response.total);
+        setHasMore(response.has_more);
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : "Failed to browse DB entries.");
+      } finally {
+        if (active) setBrowseLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [familyFilter, offset, searchQuery, sort]);
+
+  useEffect(() => {
+    if (!selectedEntry) {
+      setDetail(null);
       return;
     }
     let active = true;
     setDetailLoading(true);
+    setMessage(null);
     void (async () => {
       try {
-        const detail = await getWordEnrichmentDetail(selectedWordId);
-        if (active) setWordDetail(detail);
+        const nextDetail = await getLexiconInspectorDetail(selectedEntry.family as LexiconInspectorFamily, selectedEntry.id);
+        if (active) setDetail(nextDetail);
       } catch (error) {
-        if (active) setMessage(error instanceof Error ? error.message : "Failed to load word detail.");
+        if (active) setMessage(error instanceof Error ? error.message : "Failed to load lexicon detail.");
       } finally {
         if (active) setDetailLoading(false);
       }
@@ -62,22 +106,7 @@ export default function LexiconDbInspectorPage() {
     return () => {
       active = false;
     };
-  }, [selectedWordId]);
-
-  const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSearchLoading(true);
-    setMessage(null);
-    try {
-      const results = await searchWords(searchQuery.trim());
-      setSearchResults(results);
-      setSelectedWordId(results[0]?.id ?? "");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to search words.");
-    } finally {
-      setSearchLoading(false);
-    }
-  };
+  }, [selectedEntry]);
 
   return (
     <div className="space-y-6" data-testid="lexicon-db-inspector-page">
@@ -86,7 +115,7 @@ export default function LexiconDbInspectorPage() {
           <p className="font-medium">Workflow context</p>
           <p className="mt-1">Snapshot: {snapshotContext}</p>
           <p>Stage: Final DB verification</p>
-          <p>Inspect imported DB rows for this snapshot after import completes.</p>
+          <p>Browse imported DB rows for this snapshot after import completes.</p>
         </section>
       ) : null}
 
@@ -94,101 +123,202 @@ export default function LexiconDbInspectorPage() {
         <div>
           <h3 className="text-2xl font-semibold text-gray-900">DB Inspector</h3>
           <p className="mt-1 text-sm text-gray-600">
-            Inspect learner-facing lexicon rows that are already present in the final DB.
+            Browse and inspect final DB entries across words, phrases, and references.
           </p>
         </div>
 
-        <form onSubmit={handleSearch} className="mt-6 flex flex-wrap gap-3">
+        <div className="mt-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem_12rem]">
           <input
             data-testid="lexicon-db-inspector-search-input"
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            className="min-w-[22rem] flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
-            placeholder="Search imported word"
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+              setOffset(0);
+            }}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+            placeholder="Search imported entries"
           />
-          <button
-            type="submit"
-            data-testid="lexicon-db-inspector-search-button"
-            disabled={searchLoading || searchQuery.trim().length < 2}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          <select
+            data-testid="lexicon-db-inspector-family-filter"
+            value={familyFilter}
+            onChange={(event) => {
+              setFamilyFilter(event.target.value as LexiconInspectorFamilyFilter);
+              setOffset(0);
+            }}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
           >
-            {searchLoading ? "Searching..." : "Search"}
-          </button>
-        </form>
+            <option value="all">All families</option>
+            <option value="word">Words</option>
+            <option value="phrase">Phrases</option>
+            <option value="reference">References</option>
+          </select>
+          <select
+            data-testid="lexicon-db-inspector-sort"
+            value={sort}
+            onChange={(event) => {
+              setSort(event.target.value as LexiconInspectorSort);
+              setOffset(0);
+            }}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+          >
+            <option value="updated_desc">Newest first</option>
+            <option value="rank_asc">Rank ascending</option>
+            <option value="alpha_asc">Alphabetical</option>
+          </select>
+        </div>
         {message ? <p className="mt-3 text-sm text-gray-700">{message}</p> : null}
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <section className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Search results</h4>
-          <div className="mt-4 space-y-2">
-            {searchResults.map((item) => (
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Entries</h4>
+            <span className="text-xs text-gray-500">{total} total</span>
+          </div>
+          <div className="mt-4 space-y-2" data-testid="lexicon-db-inspector-results">
+            {entries.map((item) => (
               <button
-                key={item.id}
+                key={`${item.family}:${item.id}`}
                 type="button"
-                onClick={() => setSelectedWordId(item.id)}
-                className={`w-full rounded-lg border p-3 text-left ${item.id === selectedWord?.id ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                onClick={() => setSelectedEntryKey(`${item.family}:${item.id}`)}
+                className={`w-full rounded-lg border p-3 text-left ${item.id === selectedEntry?.id && item.family === selectedEntry?.family ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
               >
-                <p className="font-medium text-gray-900">{item.word}</p>
-                <p className="text-xs text-gray-500">{item.language} · rank {item.frequency_rank ?? "—"}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium text-gray-900">{item.display_text}</p>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{item.family}</span>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  {item.language}
+                  {item.secondary_label ? ` · ${item.secondary_label}` : ""}
+                  {item.frequency_rank ? ` · rank ${item.frequency_rank}` : ""}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {item.source_reference ?? "—"} · {formatDateTime(item.created_at)}
+                </p>
               </button>
             ))}
-            {!searchLoading && searchResults.length === 0 ? (
-              <p className="text-sm text-gray-500">Search for an imported word to inspect.</p>
+            {!browseLoading && entries.length === 0 ? (
+              <p className="text-sm text-gray-500">No imported entries matched the current filters.</p>
             ) : null}
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              data-testid="lexicon-db-inspector-prev-button"
+              onClick={() => setOffset((current) => Math.max(0, current - PAGE_LIMIT))}
+              disabled={offset === 0 || browseLoading}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="text-xs text-gray-500">offset {offset}</span>
+            <button
+              type="button"
+              data-testid="lexicon-db-inspector-next-button"
+              onClick={() => setOffset((current) => current + PAGE_LIMIT)}
+              disabled={!hasMore || browseLoading}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50"
+            >
+              Next
+            </button>
           </div>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          {detailLoading ? <p className="text-sm text-gray-500">Loading word detail...</p> : null}
-          {wordDetail ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="lexicon-db-inspector-detail">
+          {detailLoading ? <p className="text-sm text-gray-500">Loading detail...</p> : null}
+          {detail?.family === "word" ? (
             <div className="space-y-4">
               <div>
-                <h4 className="text-xl font-semibold text-gray-900">{wordDetail.word}</h4>
+                <h4 className="text-xl font-semibold text-gray-900">{detail.display_text}</h4>
                 <p className="mt-1 text-sm text-gray-500">
-                  {wordDetail.language} · CEFR {wordDetail.cefr_level ?? "—"} · rank {wordDetail.frequency_rank ?? "—"}
-                </p>
-                <p className="mt-1 text-sm text-gray-500">
-                  generated {formatDateTime(wordDetail.learner_generated_at)} · phonetic source {wordDetail.phonetic_source ?? "—"}
+                  word · {detail.language} · CEFR {detail.cefr_level ?? "—"} · rank {detail.frequency_rank ?? "—"}
                 </p>
               </div>
-
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded border border-gray-200 p-3">
                   <p className="text-gray-500">Meanings</p>
-                  <p className="font-medium">{wordDetail.meanings.length}</p>
+                  <p className="font-medium">{detail.meanings.length}</p>
                 </div>
                 <div className="rounded border border-gray-200 p-3">
                   <p className="text-gray-500">Runs</p>
-                  <p className="font-medium">{wordDetail.enrichment_runs.length}</p>
+                  <p className="font-medium">{detail.enrichment_runs.length}</p>
                 </div>
                 <div className="rounded border border-gray-200 p-3">
                   <p className="text-gray-500">Phonetic</p>
-                  <p className="font-medium">{wordDetail.phonetic ?? "—"}</p>
+                  <p className="font-medium">{detail.phonetic ?? "—"}</p>
                 </div>
               </div>
-
               <div className="space-y-3">
-                {wordDetail.meanings.map((meaning) => (
+                {detail.meanings.map((meaning) => (
                   <article key={meaning.id} className="rounded-lg border border-gray-200 p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium text-gray-900">{meaning.definition}</p>
-                      {meaning.part_of_speech ? <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{meaning.part_of_speech}</span> : null}
-                    </div>
+                    <p className="font-medium text-gray-900">{meaning.definition}</p>
                     <p className="mt-2 text-sm text-gray-600">example: {meaning.example_sentence ?? "—"}</p>
-                    {meaning.examples.length > 0 ? (
-                      <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-600">
-                        {meaning.examples.map((example) => (
-                          <li key={example.id}>{example.sentence}</li>
-                        ))}
-                      </ul>
-                    ) : null}
                   </article>
                 ))}
               </div>
             </div>
-          ) : !detailLoading ? (
-            <p className="text-sm text-gray-500">Select a result to inspect final DB state.</p>
+          ) : null}
+
+          {detail?.family === "phrase" ? (
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-xl font-semibold text-gray-900">{detail.display_text}</h4>
+                <p className="mt-1 text-sm text-gray-500">
+                  phrase · {detail.language} · {detail.phrase_kind}
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Normalized</p>
+                  <p className="font-medium">{detail.normalized_form}</p>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">CEFR</p>
+                  <p className="font-medium">{detail.cefr_level ?? "—"}</p>
+                </div>
+              </div>
+              <div className="rounded border border-gray-200 p-3">
+                <p className="text-gray-500">Usage note</p>
+                <p className="font-medium">{detail.brief_usage_note ?? "—"}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {detail?.family === "reference" ? (
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-xl font-semibold text-gray-900">{detail.display_text}</h4>
+                <p className="mt-1 text-sm text-gray-500">
+                  reference · {detail.language} · {detail.reference_type}
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Translation mode</p>
+                  <p className="font-medium">{detail.translation_mode}</p>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Pronunciation</p>
+                  <p className="font-medium">{detail.pronunciation}</p>
+                </div>
+              </div>
+              <div className="rounded border border-gray-200 p-3">
+                <p className="text-gray-500">Description</p>
+                <p className="font-medium">{detail.brief_description}</p>
+              </div>
+              <div className="space-y-2">
+                {detail.localizations.map((localization) => (
+                  <div key={localization.id} className="rounded border border-gray-200 p-3">
+                    <p className="font-medium text-gray-900">{localization.locale}</p>
+                    <p className="text-sm text-gray-600">{localization.display_form}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {!detail && !detailLoading ? (
+            <p className="text-sm text-gray-500">Select an imported entry to inspect final DB state.</p>
           ) : null}
         </div>
       </section>
