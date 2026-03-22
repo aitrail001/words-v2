@@ -248,7 +248,7 @@ describe("LexiconJsonlReviewPage", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Materialize Outputs" }));
+    await user.click(screen.getByRole("button", { name: "Materialize Reviewed Outputs" }));
     await waitFor(() =>
       expect(mockMaterialize).toHaveBeenCalledWith({
         artifactPath: "/tmp/words.enriched.jsonl",
