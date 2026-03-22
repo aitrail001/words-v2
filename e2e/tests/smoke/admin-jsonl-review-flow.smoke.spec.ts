@@ -97,7 +97,7 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
   const normalized = `jsonl${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const phrase = `break a leg ${normalized}`;
-  const hostRootDir = path.join(process.cwd(), "..", "backend", "tmp_e2e", "jsonl-review");
+  const hostRootDir = path.join(process.cwd(), "..", "tmp_e2e", "jsonl-review");
   const backendRootDir = `/app/tmp_e2e/jsonl-review`;
   const hostDir = path.join(hostRootDir, normalized);
   const backendDir = `${backendRootDir}/${normalized}`;
