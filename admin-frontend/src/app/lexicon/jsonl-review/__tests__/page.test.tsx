@@ -173,11 +173,16 @@ describe("LexiconJsonlReviewPage", () => {
     expect(screen.getByText(/Reject records the row in reviewed\/review\.decisions\.jsonl, writes the rejected overlay, and adds a regeneration request row\./)).toBeInTheDocument();
     expect(screen.getByText(/Reopen removes the final decision so the row stays pending until you decide again\./)).toBeInTheDocument();
     expect(screen.getByLabelText("Artifact path")).toHaveValue("/tmp/words.enriched.jsonl");
-    expect(screen.getByLabelText("Decisions path")).toHaveValue("/tmp/reviewed/review.decisions.jsonl");
+    expect(screen.getByLabelText("Decision ledger path")).toHaveValue("/tmp/reviewed/review.decisions.jsonl");
     expect(screen.getByLabelText("Output directory")).toHaveValue("/tmp/reviewed");
+    expect(screen.getByText("Compiled artifact")).toBeInTheDocument();
+    expect(screen.getByText("Reviewed directory")).toBeInTheDocument();
+    expect(screen.getByText("Approved import input")).toBeInTheDocument();
+    expect(screen.getAllByText("Decision ledger").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/file-backed/i).length).toBeGreaterThan(0);
 
     await user.type(screen.getByLabelText("Artifact path"), "/tmp/words.enriched.jsonl");
-    await user.type(screen.getByLabelText("Decisions path"), "/tmp/reviewed/review.decisions.jsonl");
+    await user.type(screen.getByLabelText("Decision ledger path"), "/tmp/reviewed/review.decisions.jsonl");
     await user.type(screen.getByLabelText("Output directory"), "/tmp/reviewed");
     await user.click(screen.getByRole("button", { name: "Load Artifact" }));
 

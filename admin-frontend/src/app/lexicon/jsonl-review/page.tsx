@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
@@ -87,7 +88,7 @@ export default function LexiconJsonlReviewPage() {
   const [saving, setSaving] = useState(false);
   const [pendingDecision, setPendingDecision] = useState<ReviewDecisionStatus | null>(null);
   const artifactPathHint = "Use a container-visible repo path like data/lexicon/snapshots/... or /app/data/lexicon/snapshots/....";
-  const decisionsPathHint = "Optional. Defaults to reviewed/review.decisions.jsonl under the snapshot.";
+  const decisionsPathHint = "File-backed decision ledger path. Optional. Defaults to reviewed/review.decisions.jsonl under the snapshot.";
   const outputDirHint = "Optional. Defaults to the shared reviewed/ directory under the artifact snapshot.";
   const selectedCount = session?.items.length ?? 0;
   const contextArtifactPath = session?.artifact_path ?? artifactPath;
@@ -367,7 +368,7 @@ export default function LexiconJsonlReviewPage() {
                 <p className="mt-2 text-2xl font-semibold text-slate-950">{selectedCount}</p>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Decision sidecar</p>
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Decision ledger file</p>
                 <p className="mt-2 break-all font-mono text-sm text-slate-800">{decisionsPath || "reviewed/review.decisions.jsonl"}</p>
               </div>
             </div>
@@ -388,13 +389,9 @@ export default function LexiconJsonlReviewPage() {
             </div>
           </div>
 
-          <aside className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Path format</p>
-            <p className="mt-2 leading-6">{artifactPathHint}</p>
-            <p className="mt-4 text-xs leading-5 text-amber-800">
-              Use the repo-relative `data/...` path in Docker, or the `/app/data/...` form if you prefer to be explicit.
-            </p>
-          </aside>
+          <PathGuidanceCard
+            modeNote="JSONL Review is file-backed. This page reads and writes the decision ledger file directly."
+          />
         </div>
 
         <form onSubmit={loadSession} className="mt-6 grid gap-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
@@ -410,9 +407,9 @@ export default function LexiconJsonlReviewPage() {
             <span className="text-xs leading-5 text-slate-500">{artifactPathHint}</span>
           </label>
           <label className="grid gap-1 text-sm text-slate-700">
-            <span className="font-medium">Decisions path</span>
+            <span className="font-medium">Decision ledger path</span>
             <input
-              aria-label="Decisions path"
+              aria-label="Decision ledger path"
               value={decisionsPath}
               onChange={(event) => setDecisionsPath(event.target.value)}
               className="rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-sm"

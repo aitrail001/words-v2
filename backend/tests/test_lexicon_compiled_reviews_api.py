@@ -356,6 +356,48 @@ class TestLexiconCompiledReviewApi:
         assert response.json()["detail"] == "Path must stay within the allowed roots"
 
     @pytest.mark.asyncio
+    async def test_delete_batch_removes_review_staging_batch(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(created_by=user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        mock_db.execute.side_effect = [user_result, batch_result]
+
+        response = await client.delete(
+            f"/api/lexicon-compiled-reviews/batches/{batch.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 204
+        mock_db.delete.assert_called_once_with(batch)
+        mock_db.commit.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_batch_returns_404_when_missing(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [user_result, batch_result]
+
+        response = await client.delete(
+            f"/api/lexicon-compiled-reviews/batches/{uuid.uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Compiled review batch not found"
+
+    @pytest.mark.asyncio
     async def test_patch_rejected_item_creates_regeneration_request_and_decision_export(self, client, mock_db):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))

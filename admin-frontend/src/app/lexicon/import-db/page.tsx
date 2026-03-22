@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
+import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
 import {
   LexiconImportResult,
   dryRunLexiconImport,
@@ -100,6 +101,11 @@ export default function LexiconImportDbPage() {
             </p>
           </div>
         </div>
+
+        <PathGuidanceCard
+          className="mt-4"
+          modeNote="Import DB should normally use reviewed/approved.jsonl, not the raw compiled artifact, unless you are intentionally bypassing review."
+        />
 
         <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_10rem_auto]">
           <label className="grid gap-1 text-sm text-gray-700">
