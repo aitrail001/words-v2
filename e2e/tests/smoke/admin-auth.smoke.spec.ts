@@ -6,7 +6,7 @@ const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 test("@smoke admin auth guard redirects unauthenticated users to login", async ({ page }) => {
   await page.goto(`${adminUrl}/lexicon`);
 
-  await expect(page).toHaveURL(/\/login\?next=%2Flexicon$/);
+  await expect(page).toHaveURL(/\/login\?next=%2Flexicon%2Fops$/);
   await expect(page.getByTestId("login-form")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Admin Log In" })).toBeVisible();
 });

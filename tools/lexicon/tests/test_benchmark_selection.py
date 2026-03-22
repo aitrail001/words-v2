@@ -88,8 +88,6 @@ class BenchmarkSelectionTests(unittest.TestCase):
             self.assertEqual(dataset["rerank_runs"], [])
             snapshot_dir = Path(dataset["snapshot_dir"])
             self.assertTrue((snapshot_dir / "lexemes.jsonl").exists())
-            self.assertTrue((snapshot_dir / "senses.jsonl").exists())
-            self.assertTrue((snapshot_dir / "concepts.jsonl").exists())
 
     def test_run_selection_benchmark_runs_requested_rerank_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

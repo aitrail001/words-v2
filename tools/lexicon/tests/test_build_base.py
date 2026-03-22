@@ -489,10 +489,7 @@ class BuildBaseTests(unittest.TestCase):
             paths = write_base_snapshot(Path(tmpdir), result)
 
             self.assertTrue(paths["lexemes"].exists())
-            self.assertTrue(paths["senses"].exists())
-            self.assertTrue(paths["concepts"].exists())
             self.assertIn('"lemma": "run"', paths["lexemes"].read_text())
-            self.assertIn('"wn_synset_id": "run.v.01"', paths["senses"].read_text())
 
     def test_build_base_records_prioritizes_general_verbs_for_polysemous_words(self) -> None:
         def rank_provider(word: str) -> int:

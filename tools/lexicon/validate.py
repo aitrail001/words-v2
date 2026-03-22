@@ -194,7 +194,8 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
 
 def validate_snapshot_files(snapshot_dir: Path) -> list[str]:
     lexemes = [LexemeRecord(**row) for row in read_jsonl(snapshot_dir / "lexemes.jsonl")]
-    senses = [SenseRecord(**row) for row in read_jsonl(snapshot_dir / "senses.jsonl")]
+    senses_path = snapshot_dir / "senses.jsonl"
+    senses = [SenseRecord(**row) for row in read_jsonl(senses_path)] if senses_path.exists() else []
     enrichments: list[EnrichmentRecord] = []
     enrichments_path = snapshot_dir / "enrichments.jsonl"
     if enrichments_path.exists():

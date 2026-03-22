@@ -1271,9 +1271,62 @@ def build_placeholder_word_enrichment_provider(
     model_name: str | None = None,
     review_status: str = 'draft',
 ) -> WordEnrichmentProvider:
-    sense_provider = build_placeholder_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+    effective_settings = settings or LexiconSettings.from_env()
+    effective_model_name = model_name or effective_settings.llm_model or 'placeholder-llm'
+    sense_provider = build_placeholder_enrichment_provider(
+        settings=effective_settings,
+        model_name=effective_model_name,
+        review_status=review_status,
+    )
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
+        if not senses:
+            synthetic_pos = "noun"
+            response = {
+                "decision": "keep_standard",
+                "discard_reason": None,
+                "base_word": None,
+                "phonetics": _default_phonetics(lexeme.lemma),
+                "senses": [
+                    {
+                        "part_of_speech": synthetic_pos,
+                        "sense_kind": "standard_meaning",
+                        "definition": f"placeholder learner definition for {lexeme.lemma}",
+                        "examples": [SenseExample(sentence=_default_example(lexeme.lemma, synthetic_pos), difficulty='B1')],
+                        "cefr_level": "B1",
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": f"Auto-generated learner note for {lexeme.lemma}.",
+                        "forms": _default_forms(lexeme.lemma, synthetic_pos),
+                        "confusable_words": [],
+                        "confidence": 0.5,
+                        "translations": {
+                            locale: {
+                                'definition': f'[{locale}] learner definition for {lexeme.lemma}',
+                                'usage_note': f'[{locale}] learner note for {lexeme.lemma}',
+                                'examples': [f'[{locale}] {_default_example(lexeme.lemma, synthetic_pos)}'],
+                            }
+                            for locale in _REQUIRED_TRANSLATION_LOCALES
+                        },
+                    }
+                ],
+            }
+            outcome = _build_word_job_outcome(
+                lexeme=lexeme,
+                response=response,
+                model_name=str(effective_model_name),
+                prompt_version=prompt_version,
+                generation_run_id=generation_run_id,
+                review_status=review_status,
+                generated_at=generated_at,
+            )
+            _validate_compiled_word_outcome(lexeme=lexeme, outcome=outcome)
+            return outcome
         return [
             sense_provider(
                 lexeme=lexeme,

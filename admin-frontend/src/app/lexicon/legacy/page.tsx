@@ -1,29 +1,28 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
-import LexiconPage from "@/app/lexicon/page";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 
 export default function LexiconLegacyPage() {
-  const hasToken = Boolean(readAccessToken());
+  const router = useRouter();
 
   useEffect(() => {
-    if (!hasToken) {
+    if (!readAccessToken()) {
       redirectToLogin("/lexicon/legacy");
+      return;
     }
-  }, [hasToken]);
+    router.replace("/lexicon/ops");
+  }, [router]);
 
   return (
-    <div className="space-y-6" data-testid="lexicon-legacy-page">
-      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        <p className="font-medium">Legacy Selection Review</p>
-        <p className="mt-1">
-          This surface preserves the older staged `selection_decisions.jsonl` review flow. Use the compiled-review and JSONL-review tools for the current compiled artifact workflow.
-        </p>
+    <div className="space-y-4" data-testid="lexicon-legacy-page">
+      <section className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
+        <p className="font-medium text-gray-900">Redirecting to Lexicon Ops</p>
+        <p className="mt-1">Legacy selection review has been removed. Use the compiled-review and JSONL-review tools from Lexicon Ops.</p>
       </section>
-      {hasToken ? <LexiconPage /> : null}
     </div>
   );
 }

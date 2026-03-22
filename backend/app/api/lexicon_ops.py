@@ -17,20 +17,15 @@ router = APIRouter()
 _SNAPSHOT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _EXPECTED_ARTIFACT_FILES: tuple[str, ...] = (
     "lexemes.jsonl",
-    "senses.jsonl",
-    "concepts.jsonl",
     "canonical_entries.jsonl",
     "canonical_variants.jsonl",
     "generation_status.jsonl",
     "ambiguous_forms.jsonl",
     "form_adjudications.jsonl",
-    "selection_decisions.jsonl",
-    "review_queue.jsonl",
     "enrichments.jsonl",
     "enrich.checkpoint.jsonl",
     "enrich.failures.jsonl",
     "words.enriched.jsonl",
-    "words.mode-c-safe.enriched.jsonl",
     "phrases.enriched.jsonl",
     "references.enriched.jsonl",
     "reviewed/approved.jsonl",
@@ -40,25 +35,19 @@ _EXPECTED_ARTIFACT_FILES: tuple[str, ...] = (
 )
 _COUNTED_ARTIFACT_FILES: dict[str, str] = {
     "lexemes": "lexemes.jsonl",
-    "senses": "senses.jsonl",
     "enrichments": "enrichments.jsonl",
     "compiled_words": "words.enriched.jsonl",
-    "compiled_mode_c_safe": "words.mode-c-safe.enriched.jsonl",
     "compiled_phrases": "phrases.enriched.jsonl",
     "compiled_references": "references.enriched.jsonl",
     "approved_rows": "reviewed/approved.jsonl",
     "rejected_rows": "reviewed/rejected.jsonl",
     "regenerate_rows": "reviewed/regenerate.jsonl",
     "review_decisions": "reviewed/review.decisions.jsonl",
-    "selection_decisions": "selection_decisions.jsonl",
-    "review_queue": "review_queue.jsonl",
     "ambiguous_forms": "ambiguous_forms.jsonl",
     "form_adjudications": "form_adjudications.jsonl",
 }
 _SNAPSHOT_ID_FILES: tuple[str, ...] = (
     "lexemes.jsonl",
-    "senses.jsonl",
-    "concepts.jsonl",
     "generation_status.jsonl",
     "enrichments.jsonl",
 )
@@ -81,7 +70,6 @@ class LexiconSnapshotSummaryResponse(BaseModel):
     artifact_counts: dict[str, int]
     has_enrichments: bool
     has_compiled_export: bool
-    has_selection_decisions: bool
     has_ambiguous_forms: bool
     workflow_stage: str
     recommended_action: str
@@ -228,7 +216,6 @@ def _snapshot_summary(snapshot_dir: Path) -> LexiconSnapshotSummaryResponse:
         artifact_counts=counts,
         has_enrichments=(snapshot_dir / "enrichments.jsonl").exists(),
         has_compiled_export=preferred_review_artifact is not None,
-        has_selection_decisions=(snapshot_dir / "selection_decisions.jsonl").exists(),
         has_ambiguous_forms=counts.get("ambiguous_forms", 0) > 0,
         workflow_stage=workflow_stage,
         recommended_action=recommended_action,
@@ -243,7 +230,6 @@ def _preferred_review_artifact_path(snapshot_dir: Path) -> Path | None:
         "words.enriched.jsonl",
         "phrases.enriched.jsonl",
         "references.enriched.jsonl",
-        "words.mode-c-safe.enriched.jsonl",
     ):
         candidate = snapshot_dir / file_name
         if candidate.exists() and candidate.is_file():
@@ -284,13 +270,13 @@ def _workflow_metadata(
                 f"Materialize or export reviewed/approved.jsonl under snapshot_path {snapshot_path} before import-db",
             ],
         )
-    if counts.get("lexemes", 0) > 0 or counts.get("senses", 0) > 0:
+    if counts.get("lexemes", 0) > 0 or counts.get("enrichments", 0) > 0:
         return (
             "base_artifacts",
-            "run_compile_export",
+            "run_enrich",
             [
-                f"Run compile-export from snapshot_path {snapshot_path}",
-                f"Keep reviewed/approved.jsonl under snapshot_path {snapshot_path} once review is complete",
+                f"Run enrich from snapshot_path {snapshot_path} to produce words.enriched.jsonl",
+                f"Review compiled artifacts and materialize reviewed/approved.jsonl under snapshot_path {snapshot_path} before import-db",
             ],
         )
     return (

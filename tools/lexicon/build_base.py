@@ -443,16 +443,12 @@ def write_base_snapshot(output_dir: Path, result: BaseBuildResult) -> dict[str, 
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = {
         'lexemes': output_dir / 'lexemes.jsonl',
-        'senses': output_dir / 'senses.jsonl',
-        'concepts': output_dir / 'concepts.jsonl',
         'canonical_entries': output_dir / 'canonical_entries.jsonl',
         'canonical_variants': output_dir / 'canonical_variants.jsonl',
         'generation_status': output_dir / 'generation_status.jsonl',
         'ambiguous_forms': output_dir / 'ambiguous_forms.jsonl',
     }
     write_jsonl(paths['lexemes'], [record.to_dict() for record in result.lexemes])
-    write_jsonl(paths['senses'], [record.to_dict() for record in result.senses])
-    write_jsonl(paths['concepts'], [record.to_dict() for record in result.concepts])
     write_jsonl(paths['canonical_entries'], [record.to_dict() for record in result.canonical_entries])
     write_jsonl(paths['canonical_variants'], [record.to_dict() for record in result.canonical_variants])
     write_jsonl(paths['generation_status'], [record.to_dict() for record in result.generation_status])

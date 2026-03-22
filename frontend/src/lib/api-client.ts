@@ -7,7 +7,7 @@ import {
 } from "@/lib/auth-session";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+  process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 const parseJsonBody = async (response: Response): Promise<any> =>
   response.json().catch(() => null);

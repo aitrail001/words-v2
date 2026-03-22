@@ -169,6 +169,15 @@ class ValidateSnapshotTests(unittest.TestCase):
 
             self.assertEqual(errors, [])
 
+    def test_validate_snapshot_files_allows_lexeme_only_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "lexemes.jsonl").write_text(json.dumps(self.lexeme.to_dict()) + "\n", encoding="utf-8")
+
+            errors = validate_snapshot_files(root)
+
+            self.assertEqual(errors, [])
+
 
     def test_validate_snapshot_files_flags_unresolved_ambiguous_form_leaking_into_lexemes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

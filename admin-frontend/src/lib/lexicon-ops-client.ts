@@ -8,7 +8,6 @@ export type LexiconOpsSnapshotSummary = {
   artifact_counts: Record<string, number>;
   has_enrichments: boolean;
   has_compiled_export: boolean;
-  has_selection_decisions: boolean;
   has_ambiguous_forms: boolean;
   workflow_stage: string;
   recommended_action: string;

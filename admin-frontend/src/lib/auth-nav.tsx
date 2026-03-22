@@ -64,13 +64,6 @@ export function AuthNavigation() {
       >
         DB Inspector
       </Link>
-      <Link
-        href="/lexicon/legacy"
-        className="hover:text-gray-900"
-        data-testid="nav-lexicon-legacy-link"
-      >
-        Legacy Tools
-      </Link>
       {isAuthenticated ? (
         <button
           type="button"

@@ -33,7 +33,6 @@ describe("Admin RootLayout auth navigation", () => {
     expect(screen.getByTestId("nav-lexicon-ops-link")).toBeInTheDocument();
     expect(screen.getByTestId("nav-lexicon-import-db-link")).toBeInTheDocument();
     expect(screen.getByTestId("nav-lexicon-db-inspector-link")).toBeInTheDocument();
-    expect(screen.getByTestId("nav-lexicon-legacy-link")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /logout/i }),
     ).not.toBeInTheDocument();
