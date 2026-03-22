@@ -37,13 +37,13 @@ describe("LexiconImportDbPage", () => {
     window.history.pushState(
       {},
       "",
-      "/lexicon/import-db?inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fdemo%2Fapproved.jsonl&sourceReference=lexicon-20260321-wordfreq&language=en&autostart=1",
+      "/lexicon/import-db?inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fdemo%2Freviewed%2Fapproved.jsonl&sourceReference=lexicon-20260321-wordfreq&language=en&autostart=1",
     );
     render(<LexiconImportDbPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-import-db-page")).toBeInTheDocument());
     expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
-      "Input path: /data/lexicon/snapshots/demo/approved.jsonl",
+      "Input path: /data/lexicon/snapshots/demo/reviewed/approved.jsonl",
     );
     expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
       "Source reference: lexicon-20260321-wordfreq",
@@ -51,11 +51,11 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
       "Stage: Final DB write",
     );
-    expect(screen.getByText(/Use approved\.jsonl from Compiled Review export or JSONL Review materialize, not the raw words\.enriched\.jsonl artifact unless you are intentionally bypassing review\./)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("data/lexicon/snapshots/.../approved.jsonl")).toBeInTheDocument();
+    expect(screen.getByText(/Use reviewed\/approved\.jsonl from Compiled Review export or JSONL Review materialize, not the raw words\.enriched\.jsonl artifact unless you are intentionally bypassing review\./)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("data/lexicon/snapshots/.../reviewed/approved.jsonl")).toBeInTheDocument();
     await waitFor(() =>
       expect(dryRunLexiconImport).toHaveBeenCalledWith({
-        inputPath: "/data/lexicon/snapshots/demo/approved.jsonl",
+        inputPath: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
         sourceType: "lexicon_snapshot",
         sourceReference: "lexicon-20260321-wordfreq",
         language: "en",

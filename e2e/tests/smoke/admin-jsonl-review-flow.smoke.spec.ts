@@ -97,11 +97,12 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   const hostDir = path.join(hostRootDir, normalized);
   const backendDir = `${backendRootDir}/${normalized}`;
   const compiledHostPath = path.join(hostDir, "words.enriched.jsonl");
-  const decisionsHostPath = path.join(hostDir, "review.decisions.jsonl");
-  const outputHostDir = path.join(hostDir, "materialized");
+  const reviewedHostDir = path.join(hostDir, "reviewed");
+  const decisionsHostPath = path.join(reviewedHostDir, "review.decisions.jsonl");
+  const outputHostDir = reviewedHostDir;
   const compiledBackendPath = `${backendDir}/words.enriched.jsonl`;
-  const decisionsBackendPath = `${backendDir}/review.decisions.jsonl`;
-  const outputBackendDir = `${backendDir}/materialized`;
+  const decisionsBackendPath = `${backendDir}/reviewed/review.decisions.jsonl`;
+  const outputBackendDir = `${backendDir}/reviewed`;
 
   await mkdir(hostDir, { recursive: true });
   await rm(outputHostDir, { recursive: true, force: true });

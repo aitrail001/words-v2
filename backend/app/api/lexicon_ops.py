@@ -33,10 +33,10 @@ _EXPECTED_ARTIFACT_FILES: tuple[str, ...] = (
     "words.mode-c-safe.enriched.jsonl",
     "phrases.enriched.jsonl",
     "references.enriched.jsonl",
-    "approved.jsonl",
-    "rejected.jsonl",
-    "regenerate.jsonl",
-    "review.decisions.jsonl",
+    "reviewed/approved.jsonl",
+    "reviewed/rejected.jsonl",
+    "reviewed/regenerate.jsonl",
+    "reviewed/review.decisions.jsonl",
 )
 _COUNTED_ARTIFACT_FILES: dict[str, str] = {
     "lexemes": "lexemes.jsonl",
@@ -46,7 +46,10 @@ _COUNTED_ARTIFACT_FILES: dict[str, str] = {
     "compiled_mode_c_safe": "words.mode-c-safe.enriched.jsonl",
     "compiled_phrases": "phrases.enriched.jsonl",
     "compiled_references": "references.enriched.jsonl",
-    "approved_rows": "approved.jsonl",
+    "approved_rows": "reviewed/approved.jsonl",
+    "rejected_rows": "reviewed/rejected.jsonl",
+    "regenerate_rows": "reviewed/regenerate.jsonl",
+    "review_decisions": "reviewed/review.decisions.jsonl",
     "selection_decisions": "selection_decisions.jsonl",
     "review_queue": "review_queue.jsonl",
     "ambiguous_forms": "ambiguous_forms.jsonl",
@@ -189,7 +192,7 @@ def _infer_snapshot_id(snapshot_dir: Path) -> str | None:
 
 def _snapshot_updated_at(snapshot_dir: Path) -> datetime:
     latest = snapshot_dir.stat().st_mtime
-    for child in snapshot_dir.iterdir():
+    for child in snapshot_dir.rglob("*"):
         if child.is_file():
             latest = max(latest, child.stat().st_mtime)
     return datetime.fromtimestamp(latest, tz=timezone.utc)
@@ -249,7 +252,7 @@ def _preferred_review_artifact_path(snapshot_dir: Path) -> Path | None:
 
 
 def _preferred_import_artifact_path(snapshot_dir: Path) -> Path | None:
-    approved_path = snapshot_dir / "approved.jsonl"
+    approved_path = snapshot_dir / "reviewed" / "approved.jsonl"
     if approved_path.exists() and approved_path.is_file():
         return approved_path
     return None
@@ -278,7 +281,7 @@ def _workflow_metadata(
             "open_compiled_review",
             [
                 f"Review {preferred_review_artifact} in Compiled Review or JSONL Review",
-                f"Materialize or export approved.jsonl beside snapshot_path {snapshot_path} before import-db",
+                f"Materialize or export reviewed/approved.jsonl under snapshot_path {snapshot_path} before import-db",
             ],
         )
     if counts.get("lexemes", 0) > 0 or counts.get("senses", 0) > 0:
@@ -287,7 +290,7 @@ def _workflow_metadata(
             "run_compile_export",
             [
                 f"Run compile-export from snapshot_path {snapshot_path}",
-                f"Keep approved.jsonl beside snapshot_path {snapshot_path} once review is complete",
+                f"Keep reviewed/approved.jsonl under snapshot_path {snapshot_path} once review is complete",
             ],
         )
     return (
@@ -335,9 +338,11 @@ async def get_lexicon_snapshot_detail(
 
     expected_set = set(_EXPECTED_ARTIFACT_FILES)
     extra_files = sorted(
-        path.name
-        for path in snapshot_dir.iterdir()
-        if path.is_file() and path.name not in expected_set and path.suffix in {".jsonl", ".json"}
+        str(path.relative_to(snapshot_dir))
+        for path in snapshot_dir.rglob("*")
+        if path.is_file()
+        and str(path.relative_to(snapshot_dir)) not in expected_set
+        and path.suffix in {".jsonl", ".json"}
     )
     artifact_names = [*_EXPECTED_ARTIFACT_FILES, *extra_files]
     artifacts = [_artifact_response(snapshot_dir, artifact_name) for artifact_name in artifact_names]

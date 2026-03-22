@@ -241,6 +241,48 @@ class TestLexiconCompiledReviewApi:
         assert lines[0]["entry_id"] == "word:bank"
 
     @pytest.mark.asyncio
+    async def test_materialize_writes_reviewed_outputs_under_snapshot_dir(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(created_by=user_id, source_reference="snapshot-001")
+        approved_item = make_item(batch.id, review_status="approved", import_eligible=True)
+        rejected_item = make_item(
+            batch.id,
+            entry_id="phrase:break-a-leg",
+            entry_type="phrase",
+            display_text="break a leg",
+            normalized_form="break a leg",
+            review_status="rejected",
+            regen_requested=True,
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        items_result = MagicMock()
+        items_result.scalars.return_value.all.return_value = [approved_item, rejected_item]
+        mock_db.execute.side_effect = [user_result, batch_result, items_result]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+        (tmp_path / "snapshot-001").mkdir()
+
+        response = await client.post(
+            f"/api/lexicon-compiled-reviews/batches/{batch.id}/materialize",
+            headers={"Authorization": f"Bearer {token}"},
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        reviewed_dir = tmp_path / "snapshot-001" / "reviewed"
+        assert data["approved_output_path"] == str(reviewed_dir / "approved.jsonl")
+        assert data["decisions_output_path"] == str(reviewed_dir / "review.decisions.jsonl")
+        assert (reviewed_dir / "approved.jsonl").exists()
+        assert (reviewed_dir / "rejected.jsonl").exists()
+        assert (reviewed_dir / "regenerate.jsonl").exists()
+
+    @pytest.mark.asyncio
     async def test_import_returns_existing_batch_for_duplicate_artifact_across_admins(self, client, mock_db):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))

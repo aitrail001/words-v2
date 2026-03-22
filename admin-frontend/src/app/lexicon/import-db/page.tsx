@@ -96,7 +96,7 @@ export default function LexiconImportDbPage() {
               Dry-run or execute the final `import-db` write step using an approved compiled artifact.
             </p>
             <p className="mt-2 max-w-3xl text-sm text-gray-600">
-              Use approved.jsonl from Compiled Review export or JSONL Review materialize, not the raw words.enriched.jsonl artifact unless you are intentionally bypassing review.
+              Use reviewed/approved.jsonl from Compiled Review export or JSONL Review materialize, not the raw words.enriched.jsonl artifact unless you are intentionally bypassing review.
             </p>
           </div>
         </div>
@@ -109,7 +109,7 @@ export default function LexiconImportDbPage() {
               value={inputPath}
               onChange={(event) => setInputPath(event.target.value)}
               className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"
-              placeholder="data/lexicon/snapshots/.../approved.jsonl"
+              placeholder="data/lexicon/snapshots/.../reviewed/approved.jsonl"
             />
           </label>
           <label className="grid gap-1 text-sm text-gray-700">

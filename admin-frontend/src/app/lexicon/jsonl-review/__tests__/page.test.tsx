@@ -3,12 +3,20 @@ import userEvent from "@testing-library/user-event";
 
 import LexiconJsonlReviewPage from "@/app/lexicon/jsonl-review/page";
 import {
+  downloadApprovedLexiconJsonlReviewOutput,
+  downloadDecisionLexiconJsonlReviewOutput,
+  downloadRegenerateLexiconJsonlReviewOutput,
+  downloadRejectedLexiconJsonlReviewOutput,
   loadLexiconJsonlReviewSession,
   materializeLexiconJsonlReviewOutputs,
   updateLexiconJsonlReviewItem,
 } from "@/lib/lexicon-jsonl-reviews-client";
 
 jest.mock("@/lib/lexicon-jsonl-reviews-client", () => ({
+  downloadApprovedLexiconJsonlReviewOutput: jest.fn(),
+  downloadDecisionLexiconJsonlReviewOutput: jest.fn(),
+  downloadRegenerateLexiconJsonlReviewOutput: jest.fn(),
+  downloadRejectedLexiconJsonlReviewOutput: jest.fn(),
   loadLexiconJsonlReviewSession: jest.fn(),
   materializeLexiconJsonlReviewOutputs: jest.fn(),
   updateLexiconJsonlReviewItem: jest.fn(),
@@ -26,14 +34,18 @@ describe("LexiconJsonlReviewPage", () => {
   const mockLoadSession = loadLexiconJsonlReviewSession as jest.Mock;
   const mockUpdateItem = updateLexiconJsonlReviewItem as jest.Mock;
   const mockMaterialize = materializeLexiconJsonlReviewOutputs as jest.Mock;
+  const mockDownloadApproved = downloadApprovedLexiconJsonlReviewOutput as jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    URL.createObjectURL = jest.fn(() => "blob:test");
+    URL.revokeObjectURL = jest.fn();
+    HTMLAnchorElement.prototype.click = jest.fn();
     mockLoadSession.mockResolvedValue({
       artifact_filename: "words.enriched.jsonl",
       artifact_path: "/tmp/words.enriched.jsonl",
-      decisions_path: "/tmp/review.decisions.jsonl",
-      output_dir: "/tmp/materialized",
+      decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+      output_dir: "/tmp/reviewed",
       total_items: 2,
       pending_count: 1,
       approved_count: 1,
@@ -108,11 +120,12 @@ describe("LexiconJsonlReviewPage", () => {
       approved_count: 1,
       rejected_count: 1,
       regenerate_count: 1,
-      approved_output_path: "/tmp/materialized/approved.jsonl",
-      rejected_output_path: "/tmp/materialized/rejected.jsonl",
-      regenerate_output_path: "/tmp/materialized/regenerate.jsonl",
-      decisions_output_path: "/tmp/review.decisions.jsonl",
+      approved_output_path: "/tmp/reviewed/approved.jsonl",
+      rejected_output_path: "/tmp/reviewed/rejected.jsonl",
+      regenerate_output_path: "/tmp/reviewed/regenerate.jsonl",
+      decisions_output_path: "/tmp/reviewed/review.decisions.jsonl",
     });
+    mockDownloadApproved.mockResolvedValue("{\"entry_id\":\"word:bank\"}\n");
   });
 
   it("loads rows, filters them, saves a decision sidecar update, and materializes outputs", async () => {
@@ -120,7 +133,7 @@ describe("LexiconJsonlReviewPage", () => {
     window.history.pushState(
       {},
       "",
-      "/lexicon/jsonl-review?artifactPath=%2Ftmp%2Fwords.enriched.jsonl&decisionsPath=%2Ftmp%2Freview.decisions.jsonl&outputDir=%2Ftmp%2Fmaterialized&sourceReference=lexicon-20260321-wordfreq&autostart=1",
+      "/lexicon/jsonl-review?artifactPath=%2Ftmp%2Fwords.enriched.jsonl&decisionsPath=%2Ftmp%2Freviewed%2Freview.decisions.jsonl&outputDir=%2Ftmp%2Freviewed&sourceReference=lexicon-20260321-wordfreq&autostart=1",
     );
     render(<LexiconJsonlReviewPage />);
 
@@ -130,28 +143,28 @@ describe("LexiconJsonlReviewPage", () => {
       "Source reference: lexicon-20260321-wordfreq",
     );
     expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
-      "Output dir: /tmp/materialized",
+      "Output dir: /tmp/reviewed",
     );
     expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
       "Stage: Alternate review path",
     );
-    expect(screen.getByText(/Approve keeps the compiled row eligible for approved\.jsonl, the reviewed file you should import into the final DB\./)).toBeInTheDocument();
-    expect(screen.getByText(/Reject records the row in review\.decisions\.jsonl, writes the rejected overlay, and adds a regeneration request row\./)).toBeInTheDocument();
+    expect(screen.getByText(/Approve keeps the compiled row eligible for reviewed\/approved\.jsonl, the reviewed file you should import into the final DB\./)).toBeInTheDocument();
+    expect(screen.getByText(/Reject records the row in reviewed\/review\.decisions\.jsonl, writes the rejected overlay, and adds a regeneration request row\./)).toBeInTheDocument();
     expect(screen.getByText(/Reopen removes the final decision so the row stays pending until you decide again\./)).toBeInTheDocument();
     expect(screen.getByLabelText("Artifact path")).toHaveValue("/tmp/words.enriched.jsonl");
-    expect(screen.getByLabelText("Decisions path")).toHaveValue("/tmp/review.decisions.jsonl");
-    expect(screen.getByLabelText("Output directory")).toHaveValue("/tmp/materialized");
+    expect(screen.getByLabelText("Decisions path")).toHaveValue("/tmp/reviewed/review.decisions.jsonl");
+    expect(screen.getByLabelText("Output directory")).toHaveValue("/tmp/reviewed");
 
     await user.type(screen.getByLabelText("Artifact path"), "/tmp/words.enriched.jsonl");
-    await user.type(screen.getByLabelText("Decisions path"), "/tmp/review.decisions.jsonl");
-    await user.type(screen.getByLabelText("Output directory"), "/tmp/materialized");
+    await user.type(screen.getByLabelText("Decisions path"), "/tmp/reviewed/review.decisions.jsonl");
+    await user.type(screen.getByLabelText("Output directory"), "/tmp/reviewed");
     await user.click(screen.getByRole("button", { name: "Load Artifact" }));
 
     await waitFor(() =>
       expect(mockLoadSession).toHaveBeenCalledWith({
         artifactPath: "/tmp/words.enriched.jsonl",
-        decisionsPath: "/tmp/review.decisions.jsonl",
-        outputDir: "/tmp/materialized",
+        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
+        outputDir: "/tmp/reviewed",
       }),
     );
     await waitFor(() => expect(screen.getAllByText("break a leg").length).toBeGreaterThan(0));
@@ -175,7 +188,7 @@ describe("LexiconJsonlReviewPage", () => {
     await waitFor(() =>
       expect(mockUpdateItem).toHaveBeenCalledWith("phrase:break-a-leg", {
         artifactPath: "/tmp/words.enriched.jsonl",
-        decisionsPath: "/tmp/review.decisions.jsonl",
+        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
         reviewStatus: "rejected",
         decisionReason: "regen",
       }),
@@ -188,9 +201,18 @@ describe("LexiconJsonlReviewPage", () => {
     await waitFor(() =>
       expect(mockUpdateItem).toHaveBeenCalledWith("word:bank", {
         artifactPath: "/tmp/words.enriched.jsonl",
-        decisionsPath: "/tmp/review.decisions.jsonl",
+        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
         reviewStatus: "approved",
         decisionReason: "ready",
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Download Approved Rows" }));
+    await waitFor(() =>
+      expect(mockDownloadApproved).toHaveBeenCalledWith({
+        artifactPath: "/tmp/words.enriched.jsonl",
+        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
+        outputDir: "/tmp/reviewed",
       }),
     );
 
@@ -198,8 +220,8 @@ describe("LexiconJsonlReviewPage", () => {
     await waitFor(() =>
       expect(mockMaterialize).toHaveBeenCalledWith({
         artifactPath: "/tmp/words.enriched.jsonl",
-        decisionsPath: "/tmp/review.decisions.jsonl",
-        outputDir: "/tmp/materialized",
+        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
+        outputDir: "/tmp/reviewed",
       }),
     );
     await waitFor(() => expect(screen.getByText("approved.jsonl")).toBeInTheDocument());

@@ -9,6 +9,7 @@ import {
   importLexiconCompiledReviewBatchByPath,
   listLexiconCompiledReviewBatches,
   listLexiconCompiledReviewItems,
+  materializeLexiconCompiledReviewOutputs,
   updateLexiconCompiledReviewItem,
 } from "@/lib/lexicon-compiled-reviews-client";
 
@@ -22,6 +23,7 @@ jest.mock("@/lib/lexicon-compiled-reviews-client", () => ({
   importLexiconCompiledReviewBatchByPath: jest.fn(),
   listLexiconCompiledReviewBatches: jest.fn(),
   listLexiconCompiledReviewItems: jest.fn(),
+  materializeLexiconCompiledReviewOutputs: jest.fn(),
   updateLexiconCompiledReviewItem: jest.fn(),
 }));
 
@@ -41,6 +43,7 @@ describe("LexiconCompiledReviewPage", () => {
   const mockDownloadApproved = downloadApprovedCompiledReviewExport as jest.Mock;
   const mockImportBatch = importLexiconCompiledReviewBatch as jest.Mock;
   const mockImportBatchByPath = importLexiconCompiledReviewBatchByPath as jest.Mock;
+  const mockMaterializeOutputs = materializeLexiconCompiledReviewOutputs as jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -171,6 +174,16 @@ describe("LexiconCompiledReviewPage", () => {
       updated_at: "2026-03-21T00:00:00Z",
       completed_at: null,
     });
+    mockMaterializeOutputs.mockResolvedValue({
+      approved_output_path: "/app/data/lexicon/snapshots/words-100-20260312/reviewed/approved.jsonl",
+      decisions_output_path: "/app/data/lexicon/snapshots/words-100-20260312/reviewed/review.decisions.jsonl",
+      rejected_output_path: "/app/data/lexicon/snapshots/words-100-20260312/reviewed/rejected.jsonl",
+      regenerate_output_path: "/app/data/lexicon/snapshots/words-100-20260312/reviewed/regenerate.jsonl",
+      approved_count: 1,
+      rejected_count: 0,
+      regenerate_count: 0,
+      decision_count: 1,
+    });
   });
 
   it("renders batches, allows approve, and downloads approved export", async () => {
@@ -211,13 +224,19 @@ describe("LexiconCompiledReviewPage", () => {
       expect(mockUpdateItem).toHaveBeenCalledWith("item-1", { review_status: "approved", decision_reason: "ready" }),
     );
 
-    expect(screen.getByText(/Approve keeps the compiled row eligible for final import as approved\.jsonl\./)).toBeInTheDocument();
-    expect(screen.getByText(/Reject removes the row from approved\.jsonl, records the review decision ledger, and includes it in regeneration requests\./)).toBeInTheDocument();
+    expect(screen.getByText(/Approve keeps the compiled row eligible for final import as reviewed\/approved\.jsonl\./)).toBeInTheDocument();
+    expect(screen.getByText(/Reject removes the row from reviewed\/approved\.jsonl, records the review decision ledger, and includes it in regeneration requests\./)).toBeInTheDocument();
     expect(screen.getByText(/Reopen clears the final decision so the row stays pending and is excluded from reviewed exports\./)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Download Approved Rows" }));
     await waitFor(() => expect(mockDownloadApproved).toHaveBeenCalledWith("batch-1"));
     await user.click(screen.getByRole("button", { name: "Download Decision Ledger" }));
     await waitFor(() => expect(mockDownloadDecisions).toHaveBeenCalledWith("batch-1"));
+    await user.click(screen.getByRole("button", { name: "Materialize Reviewed Outputs" }));
+    await waitFor(() =>
+      expect(mockMaterializeOutputs).toHaveBeenCalledWith("batch-1", {
+        outputDir: "/app/data/lexicon/snapshots/words-100-20260312/reviewed",
+      }),
+    );
   });
 });

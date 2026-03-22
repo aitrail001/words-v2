@@ -15,6 +15,10 @@ from app.core.config import Settings
 DECISION_SCHEMA_VERSION = "lexicon_review_decision.v1"
 ALLOWED_DECISIONS = {"approved", "rejected", "reopened"}
 DECISIONS_FILENAME = "review.decisions.jsonl"
+REVIEWED_DIRNAME = "reviewed"
+APPROVED_FILENAME = "approved.jsonl"
+REJECTED_FILENAME = "rejected.jsonl"
+REGENERATE_FILENAME = "regenerate.jsonl"
 
 
 def _import_review_prep_module() -> Any:
@@ -108,7 +112,11 @@ def resolve_repo_local_path(raw_path: str, *, settings: Settings, allow_missing:
 
 
 def default_decisions_path(artifact_path: Path) -> Path:
-    return artifact_path.with_name(DECISIONS_FILENAME)
+    return reviewed_output_dir(artifact_path) / DECISIONS_FILENAME
+
+
+def reviewed_output_dir(artifact_path: Path) -> Path:
+    return artifact_path.parent / REVIEWED_DIRNAME
 
 
 def resolve_compiled_artifact_path(raw_path: str, *, settings: Settings) -> Path:
@@ -127,8 +135,11 @@ def resolve_decisions_sidecar_path(
     candidate = default_decisions_path(artifact_path) if raw_path is None else resolve_repo_local_path(raw_path, settings=settings, allow_missing=True)
     if candidate.name != DECISIONS_FILENAME:
         raise HTTPException(status_code=400, detail=f"Decisions path must use the sidecar filename {DECISIONS_FILENAME}")
-    if candidate.parent != artifact_path.parent:
-        raise HTTPException(status_code=400, detail="Decisions path must live beside the compiled artifact")
+    reviewed_dir = reviewed_output_dir(artifact_path)
+    try:
+        candidate.parent.relative_to(reviewed_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Decisions path must stay within the reviewed output directory") from exc
     return candidate
 
 
@@ -139,13 +150,73 @@ def resolve_output_dir_path(
     settings: Settings,
 ) -> Path | None:
     if raw_path is None:
-        return None
+        return reviewed_output_dir(artifact_path)
     candidate = resolve_repo_local_path(raw_path, settings=settings, allow_missing=True)
     try:
         candidate.relative_to(artifact_path.parent)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Output directory must stay within the artifact directory") from exc
     return candidate
+
+
+def build_materialized_review_outputs(session: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    decisions_by_id = {
+        item["entry_id"]: {
+            "entry_id": item["entry_id"],
+            "entry_type": item["entry_type"],
+            "decision": "reopened" if item["review_status"] == "pending" else item["review_status"],
+            "decision_reason": item["decision_reason"],
+            "reviewed_by": item["reviewed_by"],
+            "reviewed_at": item["reviewed_at"],
+            "compiled_payload_sha256": item["compiled_payload_sha256"],
+        }
+        for item in session["items"]
+    }
+    missing = sorted(entry_id for entry_id, row in decisions_by_id.items() if row["decision"] == "reopened")
+    if missing:
+        preview = ", ".join(missing[:10])
+        raise HTTPException(status_code=400, detail=f"Missing review decisions for entry_ids: {preview}")
+
+    approved_rows: list[dict[str, Any]] = []
+    rejected_rows: list[dict[str, Any]] = []
+    regenerate_rows: list[dict[str, Any]] = []
+    finalized_decisions: list[dict[str, Any]] = []
+    for item in session["items"]:
+        decision = decisions_by_id[item["entry_id"]]
+        finalized = {
+            "schema_version": DECISION_SCHEMA_VERSION,
+            "artifact_sha256": session["artifact_sha256"],
+            "entry_id": item["entry_id"],
+            "entry_type": item["entry_type"],
+            "decision": decision["decision"],
+            "decision_reason": decision["decision_reason"],
+            "compiled_payload_sha256": item["compiled_payload_sha256"],
+            "reviewed_by": decision["reviewed_by"],
+            "reviewed_at": decision["reviewed_at"],
+        }
+        finalized_decisions.append(finalized)
+        if decision["decision"] == "approved":
+            approved_rows.append(item["compiled_payload"])
+            continue
+        rejected_rows.append({**item["compiled_payload"], **finalized})
+        if decision["decision"] == "rejected":
+            regenerate_rows.append(
+                {
+                    "schema_version": DECISION_SCHEMA_VERSION,
+                    "artifact_sha256": session["artifact_sha256"],
+                    "entry_id": item["entry_id"],
+                    "entry_type": item["entry_type"],
+                    "normalized_form": item["normalized_form"],
+                    "decision_reason": decision["decision_reason"],
+                    "compiled_payload_sha256": item["compiled_payload_sha256"],
+                }
+            )
+    return {
+        "approved_rows": approved_rows,
+        "rejected_rows": rejected_rows,
+        "regenerate_rows": regenerate_rows,
+        "finalized_decisions": finalized_decisions,
+    }
 
 
 def _display_text(row: dict[str, Any]) -> str:
@@ -341,62 +412,16 @@ def materialize_jsonl_review_outputs(
     output_dir: Path,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    approved_output_path = output_dir / "approved.jsonl"
-    rejected_output_path = output_dir / "rejected.jsonl"
-    regenerate_output_path = output_dir / "regenerate.jsonl"
+    approved_output_path = output_dir / APPROVED_FILENAME
+    rejected_output_path = output_dir / REJECTED_FILENAME
+    regenerate_output_path = output_dir / REGENERATE_FILENAME
 
     session = load_jsonl_review_session(artifact_path=artifact_path, decisions_path=decisions_path)
-    decisions_by_id = {
-        item["entry_id"]: {
-            "entry_id": item["entry_id"],
-            "entry_type": item["entry_type"],
-            "decision": "reopened" if item["review_status"] == "pending" else item["review_status"],
-            "decision_reason": item["decision_reason"],
-            "reviewed_by": item["reviewed_by"],
-            "reviewed_at": item["reviewed_at"],
-            "compiled_payload_sha256": item["compiled_payload_sha256"],
-        }
-        for item in session["items"]
-    }
-    missing = sorted(entry_id for entry_id, row in decisions_by_id.items() if row["decision"] == "reopened")
-    if missing:
-        preview = ", ".join(missing[:10])
-        raise HTTPException(status_code=400, detail=f"Missing review decisions for entry_ids: {preview}")
-
-    approved_rows: list[dict[str, Any]] = []
-    rejected_rows: list[dict[str, Any]] = []
-    regenerate_rows: list[dict[str, Any]] = []
-    finalized_decisions: list[dict[str, Any]] = []
-    for item in session["items"]:
-        decision = decisions_by_id[item["entry_id"]]
-        finalized = {
-            "schema_version": DECISION_SCHEMA_VERSION,
-            "artifact_sha256": session["artifact_sha256"],
-            "entry_id": item["entry_id"],
-            "entry_type": item["entry_type"],
-            "decision": decision["decision"],
-            "decision_reason": decision["decision_reason"],
-            "compiled_payload_sha256": item["compiled_payload_sha256"],
-            "reviewed_by": decision["reviewed_by"],
-            "reviewed_at": decision["reviewed_at"],
-        }
-        finalized_decisions.append(finalized)
-        if decision["decision"] == "approved":
-            approved_rows.append(item["compiled_payload"])
-            continue
-        rejected_rows.append({**item["compiled_payload"], **finalized})
-        if decision["decision"] == "rejected":
-            regenerate_rows.append(
-                {
-                    "schema_version": DECISION_SCHEMA_VERSION,
-                    "artifact_sha256": session["artifact_sha256"],
-                    "entry_id": item["entry_id"],
-                    "entry_type": item["entry_type"],
-                    "normalized_form": item["normalized_form"],
-                    "decision_reason": decision["decision_reason"],
-                    "compiled_payload_sha256": item["compiled_payload_sha256"],
-                }
-            )
+    outputs = build_materialized_review_outputs(session)
+    approved_rows = outputs["approved_rows"]
+    rejected_rows = outputs["rejected_rows"]
+    regenerate_rows = outputs["regenerate_rows"]
+    finalized_decisions = outputs["finalized_decisions"]
 
     _write_jsonl(decisions_path, finalized_decisions)
     _write_jsonl(approved_output_path, approved_rows)

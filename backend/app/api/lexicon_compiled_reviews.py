@@ -3,6 +3,7 @@ import json
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -19,7 +20,13 @@ from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.lexicon_artifact_review_item_event import LexiconArtifactReviewItemEvent
 from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
 from app.models.user import User
-from app.services.lexicon_jsonl_reviews import resolve_repo_local_path
+from app.services.lexicon_jsonl_reviews import (
+    APPROVED_FILENAME,
+    DECISIONS_FILENAME,
+    REGENERATE_FILENAME,
+    REJECTED_FILENAME,
+    resolve_repo_local_path,
+)
 
 router = APIRouter()
 
@@ -113,6 +120,21 @@ class LexiconCompiledReviewDecisionResponse(BaseModel):
     compiled_payload_sha256: str
     reviewed_by: str | None
     reviewed_at: datetime | None
+
+
+class LexiconCompiledReviewMaterializeRequest(BaseModel):
+    output_dir: str | None = None
+
+
+class LexiconCompiledReviewMaterializeResponse(BaseModel):
+    decision_count: int
+    approved_count: int
+    rejected_count: int
+    regenerate_count: int
+    decisions_output_path: str
+    approved_output_path: str
+    rejected_output_path: str
+    regenerate_output_path: str
 
 
 def _compiled_meaning_limit(frequency_rank: Any) -> int:
@@ -395,6 +417,73 @@ def _decision_response(batch: LexiconArtifactReviewBatch, item: LexiconArtifactR
     )
 
 
+def _batch_reviewed_output_dir(batch: LexiconArtifactReviewBatch, settings: Settings) -> Path:
+    source_reference = str(batch.source_reference or "").strip()
+    if source_reference:
+        snapshot_root = Path(settings.lexicon_snapshot_root).expanduser()
+        if not snapshot_root.is_absolute():
+            snapshot_root = (Path.cwd() / snapshot_root).resolve()
+        candidate = (snapshot_root / source_reference / "reviewed").resolve()
+        try:
+            candidate.relative_to(snapshot_root)
+            return candidate
+        except ValueError:
+            pass
+    return (Path.cwd() / "data" / "lexicon" / "compiled-review" / str(batch.id)).resolve()
+
+
+def _materialized_rows(
+    batch: LexiconArtifactReviewBatch,
+    items: Sequence[LexiconArtifactReviewItem],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    approved_rows: list[dict[str, Any]] = []
+    rejected_rows: list[dict[str, Any]] = []
+    regenerate_rows: list[dict[str, Any]] = []
+    decision_rows: list[dict[str, Any]] = []
+    for item in items:
+        if item.review_status not in {"approved", "rejected"}:
+            continue
+        decision = _decision_response(batch, item).model_dump(mode="json")
+        decision_rows.append(decision)
+        if item.review_status == "approved" and item.import_eligible:
+            approved_rows.append(item.compiled_payload)
+            continue
+        if item.review_status == "rejected":
+            rejected_rows.append(
+                {
+                    **item.compiled_payload,
+                    "entry_id": item.entry_id,
+                    "entry_type": item.entry_type,
+                    "artifact_sha256": batch.artifact_sha256,
+                    "decision": _decision_status(item),
+                    "decision_reason": item.decision_reason,
+                    "compiled_payload_sha256": item.compiled_payload_sha256,
+                    "reviewed_by": str(item.reviewed_by) if item.reviewed_by else None,
+                    "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
+                }
+            )
+            if item.regen_requested:
+                regenerate_rows.append(
+                    {
+                        "schema_version": "lexicon_review_decision.v1",
+                        "entry_id": item.entry_id,
+                        "entry_type": item.entry_type,
+                        "normalized_form": item.normalized_form,
+                        "artifact_sha256": batch.artifact_sha256,
+                        "compiled_payload_sha256": item.compiled_payload_sha256,
+                        "decision_reason": item.decision_reason,
+                    }
+                )
+    return approved_rows, rejected_rows, regenerate_rows, decision_rows
+
+
+def _write_jsonl(path: Path, rows: Sequence[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 async def _batch_or_404(batch_id: uuid.UUID, db: AsyncSession) -> LexiconArtifactReviewBatch:
     result = await db.execute(select(LexiconArtifactReviewBatch).where(LexiconArtifactReviewBatch.id == batch_id))
     batch = result.scalar_one_or_none()
@@ -602,7 +691,7 @@ async def export_approved_compiled_rows(
     _current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _batch_or_404(batch_id, db)
+    batch = await _batch_or_404(batch_id, db)
     result = await db.execute(
         select(LexiconArtifactReviewItem)
         .where(
@@ -611,12 +700,8 @@ async def export_approved_compiled_rows(
         )
         .order_by(LexiconArtifactReviewItem.display_text.asc())
     )
-    approved_items = [
-        item
-        for item in result.scalars().all()
-        if item.review_status == "approved" and item.import_eligible
-    ]
-    body = "".join(json.dumps(item.compiled_payload, ensure_ascii=False) + "\n" for item in approved_items)
+    approved_rows, _, _, _ = _materialized_rows(batch=batch, items=result.scalars().all())
+    body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in approved_rows)
     return Response(content=body, media_type="application/x-ndjson")
 
 
@@ -632,25 +717,8 @@ async def export_rejected_compiled_rows(
         .where(LexiconArtifactReviewItem.batch_id == batch_id)
         .order_by(LexiconArtifactReviewItem.display_text.asc())
     )
-    rejected_items = [item for item in result.scalars().all() if item.review_status == "rejected"]
-    body = "".join(
-        json.dumps(
-            {
-                **item.compiled_payload,
-                "entry_id": item.entry_id,
-                "entry_type": item.entry_type,
-                "artifact_sha256": batch.artifact_sha256,
-                "decision": _decision_status(item),
-                "decision_reason": item.decision_reason,
-                "compiled_payload_sha256": item.compiled_payload_sha256,
-                "reviewed_by": str(item.reviewed_by) if item.reviewed_by else None,
-                "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
-            },
-            ensure_ascii=False,
-        )
-        + "\n"
-        for item in rejected_items
-    )
+    _, rejected_rows, _, _ = _materialized_rows(batch=batch, items=result.scalars().all())
+    body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rejected_rows)
     return Response(content=body, media_type="application/x-ndjson")
 
 
@@ -666,23 +734,8 @@ async def export_regenerate_compiled_rows(
         .where(LexiconArtifactReviewItem.batch_id == batch_id)
         .order_by(LexiconArtifactReviewItem.display_text.asc())
     )
-    regenerate_items = [item for item in result.scalars().all() if item.review_status == "rejected" and item.regen_requested]
-    body = "".join(
-        json.dumps(
-            {
-                "schema_version": "lexicon_review_decision.v1",
-                "entry_id": item.entry_id,
-                "entry_type": item.entry_type,
-                "normalized_form": item.normalized_form,
-                "artifact_sha256": batch.artifact_sha256,
-                "compiled_payload_sha256": item.compiled_payload_sha256,
-                "decision_reason": item.decision_reason,
-            },
-            ensure_ascii=False,
-        )
-        + "\n"
-        for item in regenerate_items
-    )
+    _, _, regenerate_rows, _ = _materialized_rows(batch=batch, items=result.scalars().all())
+    body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in regenerate_rows)
     return Response(content=body, media_type="application/x-ndjson")
 
 
@@ -694,9 +747,42 @@ async def export_compiled_review_decisions(
 ):
     batch = await _batch_or_404(batch_id, db)
     items = await _load_batch_items(batch.id, db)
-    decision_items = [item for item in items if item.review_status in {"approved", "rejected"}]
-    body = "".join(
-        json.dumps(_decision_response(batch, item).model_dump(mode="json"), ensure_ascii=False) + "\n"
-        for item in decision_items
-    )
+    _, _, _, decision_rows = _materialized_rows(batch=batch, items=items)
+    body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in decision_rows)
     return Response(content=body, media_type="application/x-ndjson")
+
+
+@router.post("/batches/{batch_id}/materialize", response_model=LexiconCompiledReviewMaterializeResponse)
+async def materialize_compiled_review_outputs(
+    batch_id: uuid.UUID,
+    request: LexiconCompiledReviewMaterializeRequest,
+    _current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    batch = await _batch_or_404(batch_id, db)
+    items = await _load_batch_items(batch.id, db)
+    output_dir = (
+        resolve_repo_local_path(request.output_dir, settings=settings, allow_missing=True)
+        if request.output_dir
+        else _batch_reviewed_output_dir(batch, settings)
+    )
+    approved_rows, rejected_rows, regenerate_rows, decision_rows = _materialized_rows(batch=batch, items=items)
+    decisions_output_path = output_dir / DECISIONS_FILENAME
+    approved_output_path = output_dir / APPROVED_FILENAME
+    rejected_output_path = output_dir / REJECTED_FILENAME
+    regenerate_output_path = output_dir / REGENERATE_FILENAME
+    _write_jsonl(decisions_output_path, decision_rows)
+    _write_jsonl(approved_output_path, approved_rows)
+    _write_jsonl(rejected_output_path, rejected_rows)
+    _write_jsonl(regenerate_output_path, regenerate_rows)
+    return LexiconCompiledReviewMaterializeResponse(
+        decision_count=len(decision_rows),
+        approved_count=len(approved_rows),
+        rejected_count=len(rejected_rows),
+        regenerate_count=len(regenerate_rows),
+        decisions_output_path=str(decisions_output_path),
+        approved_output_path=str(approved_output_path),
+        rejected_output_path=str(rejected_output_path),
+        regenerate_output_path=str(regenerate_output_path),
+    )

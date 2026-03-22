@@ -138,7 +138,7 @@ function inferArtifactPathFromSummary(
     }
   }
   if (kind === "import" && snapshot.workflow_stage === "approved_ready_for_import") {
-    return `${snapshot.snapshot_path}/approved.jsonl`;
+    return `${snapshot.snapshot_path}/reviewed/approved.jsonl`;
   }
   return "";
 }
@@ -159,7 +159,7 @@ function actionStateForImport(importArtifactPath: string): WorkflowActionState {
   }
   return {
     enabled: false,
-    reason: "No approved.jsonl is present yet. Finish review/export or materialize approved rows first.",
+    reason: "No reviewed/approved.jsonl is present yet. Finish review/export or materialize approved rows first.",
   };
 }
 
@@ -259,12 +259,16 @@ export default function LexiconOpsPage() {
   const importArtifactPath = useMemo(() => {
     const preferred = selectedSnapshot?.preferred_import_artifact_path ?? "";
     if (preferred) return preferred;
-    const fromDetail = artifactPathFromDetail(detail, ["approved.jsonl"]);
+    const fromDetail = artifactPathFromDetail(detail, ["reviewed/approved.jsonl"]);
     if (fromDetail) return fromDetail;
     return inferArtifactPathFromSummary(selectedSnapshot, "import");
   }, [detail, selectedSnapshot]);
   const reviewDecisionsPath = useMemo(
-    () => (selectedSnapshot ? `${selectedSnapshot.snapshot_path}/review.decisions.jsonl` : ""),
+    () => (selectedSnapshot ? `${selectedSnapshot.snapshot_path}/reviewed/review.decisions.jsonl` : ""),
+    [selectedSnapshot],
+  );
+  const reviewOutputDir = useMemo(
+    () => (selectedSnapshot ? `${selectedSnapshot.snapshot_path}/reviewed` : ""),
     [selectedSnapshot],
   );
   const compiledReviewAction = useMemo(
@@ -284,7 +288,7 @@ export default function LexiconOpsPage() {
     if (!selectedSnapshot) return;
     if (selectedSnapshot.preferred_import_artifact_path) return;
     if (!importPath) {
-      const fallbackImportPath = artifactPathFromDetail(detail, ["approved.jsonl"]);
+      const fallbackImportPath = artifactPathFromDetail(detail, ["reviewed/approved.jsonl"]);
       if (fallbackImportPath) {
         setImportPath(fallbackImportPath);
       }
@@ -428,7 +432,7 @@ export default function LexiconOpsPage() {
                     onClick={() => openWorkflow("/lexicon/jsonl-review", {
                       artifactPath: reviewArtifactPath,
                       decisionsPath: reviewDecisionsPath,
-                      outputDir: selectedSnapshot.snapshot_path,
+                      outputDir: reviewOutputDir,
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
                       autostart: "1",
                     })}
@@ -542,7 +546,7 @@ export default function LexiconOpsPage() {
                       <p className="text-sm text-gray-500">Dry-run or execute the final import using an approved artifact for this snapshot.</p>
                       {!importPath ? (
                         <p className="mt-2 text-xs text-amber-700">
-                          No `approved.jsonl` artifact is present in this snapshot yet. Materialize or export approved rows first, or enter the final import path manually.
+                          No `reviewed/approved.jsonl` artifact is present in this snapshot yet. Materialize or export approved rows first, or enter the final import path manually.
                         </p>
                       ) : null}
                     </div>
@@ -555,7 +559,7 @@ export default function LexiconOpsPage() {
                         value={importPath}
                         onChange={(event) => setImportPath(event.target.value)}
                         className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"
-                        placeholder="data/lexicon/snapshots/.../approved.jsonl"
+                        placeholder="data/lexicon/snapshots/.../reviewed/approved.jsonl"
                       />
                     </label>
                     <label className="grid gap-1 text-sm text-gray-700">

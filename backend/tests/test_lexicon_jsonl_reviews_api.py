@@ -15,6 +15,7 @@ def make_user(user_id: uuid.UUID, role: str = "admin") -> User:
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
@@ -128,7 +129,7 @@ class TestLexiconJsonlReviewsApi:
         app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
 
         compiled_path = tmp_path / "words.enriched.jsonl"
-        decisions_path = tmp_path / "review.decisions.jsonl"
+        decisions_path = tmp_path / "reviewed" / "review.decisions.jsonl"
         _write_jsonl(compiled_path, _compiled_rows())
         _write_jsonl(
             decisions_path,
@@ -269,7 +270,7 @@ class TestLexiconJsonlReviewsApi:
         app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
 
         compiled_path = tmp_path / "words.enriched.jsonl"
-        decisions_path = tmp_path / "review.decisions.jsonl"
+        decisions_path = tmp_path / "reviewed" / "review.decisions.jsonl"
         _write_jsonl(compiled_path, _compiled_rows())
 
         response = await client.patch(
@@ -303,7 +304,7 @@ class TestLexiconJsonlReviewsApi:
         app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
 
         compiled_path = tmp_path / "words.enriched.jsonl"
-        decisions_path = tmp_path / "review.decisions.jsonl"
+        decisions_path = tmp_path / "reviewed" / "review.decisions.jsonl"
         _write_jsonl(compiled_path, _compiled_rows())
         _write_jsonl(
             decisions_path,
@@ -341,8 +342,8 @@ class TestLexiconJsonlReviewsApi:
         app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
 
         compiled_path = tmp_path / "words.enriched.jsonl"
-        decisions_path = tmp_path / "review.decisions.jsonl"
-        output_dir = tmp_path / "materialized"
+        decisions_path = tmp_path / "reviewed" / "review.decisions.jsonl"
+        output_dir = tmp_path / "reviewed"
         _write_jsonl(compiled_path, _compiled_rows())
         _write_jsonl(
             decisions_path,
@@ -428,7 +429,7 @@ class TestLexiconJsonlReviewsApi:
         artifact_dir = tmp_path / "snapshot"
         artifact_dir.mkdir()
         compiled_path = artifact_dir / "words.enriched.jsonl"
-        decisions_path = artifact_dir / "review.decisions.jsonl"
+        decisions_path = artifact_dir / "reviewed" / "review.decisions.jsonl"
         outside_output_dir = tmp_path / "other-output"
         _write_jsonl(compiled_path, _compiled_rows())
         _write_jsonl(decisions_path, [{"entry_id": "word:bank", "entry_type": "word", "decision": "approved"}])
@@ -445,3 +446,58 @@ class TestLexiconJsonlReviewsApi:
 
         assert response.status_code == 400
         assert "artifact directory" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_load_defaults_decisions_and_output_to_reviewed_dir(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        artifact_dir = tmp_path / "snapshot"
+        artifact_dir.mkdir()
+        compiled_path = artifact_dir / "words.enriched.jsonl"
+        _write_jsonl(compiled_path, _compiled_rows())
+
+        response = await client.post(
+            "/api/lexicon-jsonl-reviews/load",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"artifact_path": str(compiled_path)},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["decisions_path"] == str(artifact_dir / "reviewed" / "review.decisions.jsonl")
+        assert data["output_dir"] == str(artifact_dir / "reviewed")
+
+    @pytest.mark.asyncio
+    async def test_download_returns_reviewed_outputs_without_materializing(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        artifact_dir = tmp_path / "snapshot"
+        artifact_dir.mkdir()
+        compiled_path = artifact_dir / "words.enriched.jsonl"
+        decisions_path = artifact_dir / "reviewed" / "review.decisions.jsonl"
+        _write_jsonl(compiled_path, _compiled_rows())
+        _write_jsonl(
+            decisions_path,
+            [
+                {"entry_id": "word:bank", "entry_type": "word", "decision": "approved"},
+                {"entry_id": "phrase:break-a-leg", "entry_type": "phrase", "decision": "rejected", "decision_reason": "regen"},
+            ],
+        )
+
+        response = await client.post(
+            "/api/lexicon-jsonl-reviews/download/approved",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"artifact_path": str(compiled_path), "decisions_path": str(decisions_path)},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/x-ndjson")
+        rows = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        assert len(rows) == 1
+        assert rows[0]["entry_id"] == "word:bank"
