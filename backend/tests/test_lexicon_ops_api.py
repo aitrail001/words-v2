@@ -119,7 +119,6 @@ class TestLexiconOpsSnapshotListing:
             words_1000 / "lexemes.jsonl",
             [{"snapshot_id": "lexicon-20260312-wordnet-wordfreq", "lexeme_id": "lx_bank", "lemma": "bank"}],
         )
-        _write_jsonl(words_1000 / "senses.jsonl", [{"snapshot_id": "lexicon-20260312-wordnet-wordfreq", "sense_id": "sn_bank_1"}])
         _write_jsonl(words_1000 / "ambiguous_forms.jsonl", [{"surface_form": "ringed"}])
         _write_jsonl(words_1000 / "words.enriched.jsonl", [{"word": "bank", "senses": []}])
 
@@ -129,8 +128,6 @@ class TestLexiconOpsSnapshotListing:
             demo / "lexemes.jsonl",
             [{"snapshot_id": "lexicon-20260311-wordnet-wordfreq", "lexeme_id": "lx_run", "lemma": "run"}],
         )
-        _write_jsonl(demo / "selection_decisions.jsonl", [{"lexeme_id": "lx_run", "risk_band": "deterministic_only"}])
-
         response = await client.get(
             "/api/lexicon-ops/snapshots",
             headers={"Authorization": f"Bearer {token}"},
@@ -144,15 +141,12 @@ class TestLexiconOpsSnapshotListing:
         words_item = by_snapshot["words-1000"]
         assert words_item["snapshot_id"] == "lexicon-20260312-wordnet-wordfreq"
         assert words_item["artifact_counts"]["lexemes"] == 1
-        assert words_item["artifact_counts"]["senses"] == 1
         assert words_item["artifact_counts"]["compiled_words"] == 1
         assert words_item["artifact_counts"]["ambiguous_forms"] == 1
         assert words_item["has_compiled_export"] is True
         assert words_item["has_ambiguous_forms"] is True
 
         demo_item = by_snapshot["demo"]
-        assert demo_item["artifact_counts"]["selection_decisions"] == 1
-        assert demo_item["has_selection_decisions"] is True
         assert demo_item["has_enrichments"] is False
 
     @pytest.mark.asyncio
@@ -196,10 +190,10 @@ class TestLexiconOpsSnapshotListing:
 
         base_item = by_snapshot["base-only"]
         assert base_item["workflow_stage"] == "base_artifacts"
-        assert base_item["recommended_action"] == "run_compile_export"
+        assert base_item["recommended_action"] == "run_enrich"
         assert base_item["preferred_review_artifact_path"] is None
         assert base_item["preferred_import_artifact_path"] is None
-        assert any("compile-export" in step for step in base_item["outside_portal_steps"])
+        assert any("enrich" in step for step in base_item["outside_portal_steps"])
 
         compiled_item = by_snapshot["compiled-ready"]
         assert compiled_item["workflow_stage"] == "compiled_ready_for_review"

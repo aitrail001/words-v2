@@ -62,13 +62,13 @@ function workflowStage(snapshot: LexiconOpsSnapshotSummary | null | undefined): 
   }
   const stageLabelByKey: Record<string, string> = {
     snapshot_missing_artifacts: "Build snapshot",
-    base_artifacts: "Compile exported review artifact",
+    base_artifacts: "Enrich snapshot",
     compiled_ready_for_review: "Review compiled artifact",
     approved_ready_for_import: "Import approved rows",
   };
   const nextStepByKey: Record<string, string> = {
     run_build_base: "Run build-base and enrich outside the portal.",
-    run_compile_export: "Run compile-export outside the portal, then return here.",
+    run_enrich: "Run enrich outside the portal, then return here.",
     open_compiled_review: "Open Compiled Review as the default review path.",
     open_import_db: "Open Import DB to dry-run or execute the final write.",
   };
@@ -90,9 +90,6 @@ function deriveSnapshotStatus(snapshot: LexiconOpsSnapshotSummary | null | undef
   }
   if (snapshot.has_enrichments) {
     return "enriched";
-  }
-  if (snapshot.has_selection_decisions) {
-    return "review-ready";
   }
   if ((snapshot.artifact_counts.form_adjudications ?? 0) > 0) {
     return "adjudicated";
@@ -149,7 +146,7 @@ function actionStateForReview(reviewArtifactPath: string): WorkflowActionState {
   }
   return {
     enabled: false,
-    reason: "Run compile-export first. No compiled artifact is present for this snapshot yet.",
+    reason: "Run enrich first. No compiled artifact is present for this snapshot yet.",
   };
 }
 
@@ -489,8 +486,8 @@ export default function LexiconOpsPage() {
                     <p className="font-medium">{formatNumber(selectedSnapshot.artifact_counts.lexemes)}</p>
                   </div>
                   <div className="rounded border border-gray-200 bg-white p-3">
-                    <p className="text-gray-500">Senses</p>
-                    <p className="font-medium">{formatNumber(selectedSnapshot.artifact_counts.senses)}</p>
+                    <p className="text-gray-500">Approved rows</p>
+                    <p className="font-medium">{formatNumber(selectedSnapshot.artifact_counts.approved_rows)}</p>
                   </div>
                   <div className="rounded border border-gray-200 bg-white p-3">
                     <p className="text-gray-500">Enrichments</p>
@@ -501,8 +498,8 @@ export default function LexiconOpsPage() {
                     <p className="font-medium">{formatNumber(selectedSnapshot.artifact_counts.compiled_words)}</p>
                   </div>
                   <div className="rounded border border-gray-200 bg-white p-3">
-                    <p className="text-gray-500">Selection decisions</p>
-                    <p className="font-medium">{formatNumber(selectedSnapshot.artifact_counts.selection_decisions)}</p>
+                    <p className="text-gray-500">Review decisions</p>
+                    <p className="font-medium">{formatNumber(selectedSnapshot.artifact_counts.review_decisions)}</p>
                   </div>
                   <div className="rounded border border-gray-200 bg-white p-3">
                     <p className="text-gray-500">Ambiguous forms</p>
