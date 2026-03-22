@@ -33,7 +33,7 @@ const buildCompiledWordRow = (runId: string, word: string) => ({
     {
       sense_id: `sense-${runId}-1`,
       definition: `a learner-facing definition for ${word}`,
-      examples: [{ sentence: `The ${word} is visible.`, difficulty: "easy" }],
+      examples: [{ sentence: `The ${word} is visible.`, difficulty: "A1" }],
       translations: {
         "zh-Hans": { definition: `${word} 的定义`, usage_note: "常见义项", examples: [`这个${word}很明显。`] },
         es: { definition: `definicion de ${word}`, usage_note: "uso comun", examples: [`El ${word} es visible.`] },

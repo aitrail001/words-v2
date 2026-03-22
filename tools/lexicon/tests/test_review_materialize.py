@@ -38,7 +38,7 @@ def _compiled_rows() -> list[dict]:
                 {
                     "sense_id": "sense-bank-1",
                     "definition": "a financial institution",
-                    "examples": [{"sentence": "She went to the bank.", "difficulty": "easy"}],
+                    "examples": [{"sentence": "She went to the bank.", "difficulty": "A1"}],
                     "translations": {
                         "zh-Hans": {"definition": "银行", "usage_note": "常见词义", "examples": ["她去了银行。"]},
                         "es": {"definition": "banco", "usage_note": "uso comun", "examples": ["Ella fue al banco."]},

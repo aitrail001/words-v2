@@ -37,7 +37,7 @@ def _compiled_rows() -> list[dict]:
                 {
                     "sense_id": "sense-bank-1",
                     "definition": "a financial institution",
-                    "examples": [{"sentence": "She went to the bank.", "difficulty": "easy"}],
+                    "examples": [{"sentence": "She went to the bank.", "difficulty": "A1"}],
                     "translations": {},
                 }
             ],
