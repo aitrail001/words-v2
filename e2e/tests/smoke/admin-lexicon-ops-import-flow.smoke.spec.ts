@@ -81,7 +81,6 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
 
   await page.goto(`${adminUrl}/lexicon/db-inspector`);
   await page.getByTestId("lexicon-db-inspector-search-input").fill(normalized);
-  await page.getByTestId("lexicon-db-inspector-search-button").click();
   await expect(page.getByRole("button", { name: new RegExp(`^${normalized}\\b`) })).toBeVisible();
   await expect(page.getByRole("heading", { name: normalized })).toBeVisible();
 

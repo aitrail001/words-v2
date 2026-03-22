@@ -1,11 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import LexiconDbInspectorPage from "@/app/lexicon/db-inspector/page";
-import { getWordEnrichmentDetail, searchWords } from "@/lib/words-client";
 
-jest.mock("@/lib/words-client", () => ({
-  searchWords: jest.fn(),
-  getWordEnrichmentDetail: jest.fn(),
+import LexiconDbInspectorPage from "@/app/lexicon/db-inspector/page";
+import { browseLexiconInspectorEntries, getLexiconInspectorDetail } from "@/lib/lexicon-inspector-client";
+
+jest.mock("@/lib/lexicon-inspector-client", () => ({
+  browseLexiconInspectorEntries: jest.fn(),
+  getLexiconInspectorDetail: jest.fn(),
 }));
 
 jest.mock("@/lib/auth-session", () => ({
@@ -17,46 +18,100 @@ jest.mock("@/lib/auth-redirect", () => ({
 }));
 
 describe("LexiconDbInspectorPage", () => {
-  const mockSearchWords = searchWords as jest.Mock;
-  const mockGetWordEnrichmentDetail = getWordEnrichmentDetail as jest.Mock;
+  const mockBrowse = browseLexiconInspectorEntries as jest.Mock;
+  const mockDetail = getLexiconInspectorDetail as jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockSearchWords.mockResolvedValue([{ id: "word-1", word: "bank", language: "en", phonetic: "bæŋk", frequency_rank: 100 }]);
-    mockGetWordEnrichmentDetail.mockResolvedValue({
+    mockBrowse.mockResolvedValue({
+      items: [
+        {
+          id: "word-1",
+          family: "word",
+          display_text: "bank",
+          normalized_form: "bank",
+          language: "en",
+          source_reference: "snapshot-001",
+          cefr_level: "B1",
+          frequency_rank: 100,
+          secondary_label: "bæŋk",
+          created_at: "2026-03-21T00:00:00Z",
+        },
+        {
+          id: "phrase-1",
+          family: "phrase",
+          display_text: "break a leg",
+          normalized_form: "break a leg",
+          language: "en",
+          source_reference: "snapshot-001",
+          cefr_level: "B2",
+          frequency_rank: null,
+          secondary_label: "idiom",
+          created_at: "2026-03-20T00:00:00Z",
+        },
+      ],
+      total: 2,
+      family: "all",
+      q: null,
+      limit: 25,
+      offset: 0,
+      has_more: false,
+    });
+    mockDetail.mockResolvedValue({
+      family: "word",
       id: "word-1",
-      word: "bank",
+      display_text: "bank",
+      normalized_form: "bank",
       language: "en",
-      phonetic: "bæŋk",
-      frequency_rank: 100,
-      phonetic_source: "lexicon_snapshot",
-      phonetic_confidence: 0.9,
-      phonetic_enrichment_run_id: "run-1",
       cefr_level: "B1",
-      part_of_speech: ["noun"],
-      confusable_words: [],
-      learner_generated_at: "2026-03-21T00:00:00Z",
+      frequency_rank: 100,
+      phonetic: "bæŋk",
+      phonetic_source: "lexicon_snapshot",
+      source_reference: "snapshot-001",
+      created_at: "2026-03-21T00:00:00Z",
       meanings: [],
       enrichment_runs: [],
     });
   });
 
-  it("renders the standalone DB inspector search flow", async () => {
+  it("renders browse filters and loads detail for the selected entry", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/lexicon/db-inspector?snapshot=words-100-20260312");
     render(<LexiconDbInspectorPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-db-inspector-page")).toBeInTheDocument());
-    expect(screen.getByTestId("lexicon-db-inspector-context")).toHaveTextContent(
-      "Snapshot: words-100-20260312",
+    expect(screen.getByTestId("lexicon-db-inspector-context")).toHaveTextContent("Snapshot: words-100-20260312");
+    await waitFor(() =>
+      expect(mockBrowse).toHaveBeenCalledWith({
+        family: "all",
+        sort: "updated_desc",
+        limit: 25,
+        offset: 0,
+        q: undefined,
+      }),
     );
-    expect(screen.getByTestId("lexicon-db-inspector-context")).toHaveTextContent(
-      "Stage: Final DB verification",
-    );
-    await user.type(screen.getByTestId("lexicon-db-inspector-search-input"), "bank");
-    await user.click(screen.getByTestId("lexicon-db-inspector-search-button"));
+    await waitFor(() => expect(mockDetail).toHaveBeenCalledWith("word", "word-1"));
 
-    await waitFor(() => expect(mockSearchWords).toHaveBeenCalledWith("bank"));
-    await waitFor(() => expect(mockGetWordEnrichmentDetail).toHaveBeenCalledWith("word-1"));
+    await user.selectOptions(screen.getByTestId("lexicon-db-inspector-family-filter"), "phrase");
+    await waitFor(() =>
+      expect(mockBrowse).toHaveBeenLastCalledWith({
+        family: "phrase",
+        sort: "updated_desc",
+        limit: 25,
+        offset: 0,
+        q: undefined,
+      }),
+    );
+
+    await user.type(screen.getByTestId("lexicon-db-inspector-search-input"), "bank");
+    await waitFor(() =>
+      expect(mockBrowse).toHaveBeenLastCalledWith({
+        family: "phrase",
+        sort: "updated_desc",
+        limit: 25,
+        offset: 0,
+        q: "bank",
+      }),
+    );
   });
 });

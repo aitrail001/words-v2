@@ -1,12 +1,14 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
   LexiconCompiledReviewBatch,
   LexiconCompiledReviewItem,
   LexiconCompiledReviewMaterializeResult,
+  deleteLexiconCompiledReviewBatch,
   downloadCompiledReviewDecisionsExport,
   downloadApprovedCompiledReviewExport,
   downloadRegenerateCompiledReviewExport,
@@ -95,6 +97,7 @@ export default function LexiconCompiledReviewPage() {
   const [materializeResult, setMaterializeResult] = useState<LexiconCompiledReviewMaterializeResult | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
   const [pendingDecision, setPendingDecision] = useState<ReviewDecisionStatus | null>(null);
+  const [confirmDeleteBatch, setConfirmDeleteBatch] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const autoImportKeyRef = useRef<string>("");
@@ -369,6 +372,24 @@ export default function LexiconCompiledReviewPage() {
     }
   };
 
+  const handleDeleteBatch = async () => {
+    if (!selectedBatch) return;
+    setSaveLoading(true);
+    setMessage(null);
+    try {
+      await deleteLexiconCompiledReviewBatch(selectedBatch.id);
+      setConfirmDeleteBatch(false);
+      await loadBatches();
+      setItems([]);
+      setSelectedItemId("");
+      setMessage(`Deleted ${selectedBatch.artifact_filename}.`);
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Failed to delete review batch.");
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6" data-testid="lexicon-compiled-review-page">
       {(snapshotContext || sourceReferenceContext || artifactPathContext) ? (
@@ -436,7 +457,7 @@ export default function LexiconCompiledReviewPage() {
           </div>
           <div className="text-sm text-gray-700">
             <p className="font-medium text-gray-900">Decision ledger</p>
-            <p className="mt-1">Final approve/reject overlay with review metadata. Equivalent to <span className="font-mono text-xs">reviewed/review.decisions.jsonl</span>.</p>
+            <p className="mt-1">Final approve/reject overlay with review metadata stored in the review DB. Export or materialize it as <span className="font-mono text-xs">reviewed/review.decisions.jsonl</span>.</p>
           </div>
           <div className="text-sm text-gray-700">
             <p className="font-medium text-gray-900">Rejected overlay</p>
@@ -447,6 +468,11 @@ export default function LexiconCompiledReviewPage() {
             <p className="mt-1">Subset of rejected rows exported as requests for a new generation pass. There is no separate regenerate status.</p>
           </div>
         </div>
+
+        <PathGuidanceCard
+          className="mt-3"
+          modeNote="Compiled Review keeps the decision ledger in review DB tables until you export or materialize it."
+        />
 
         <form onSubmit={handleImport} className="mt-6 grid gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 md:grid-cols-[1fr_1fr_auto]">
           <input type="file" accept=".jsonl,.ndjson" onChange={(event) => setImportFile(event.target.files?.[0] ?? null)} data-testid="compiled-review-import-file" />
@@ -548,11 +574,43 @@ export default function LexiconCompiledReviewPage() {
                     {selectedBatch.artifact_family} · {selectedBatch.total_items} items · updated {formatDateTime(selectedBatch.updated_at)}
                   </p>
                 </div>
-                <div className="text-right text-xs text-gray-500">
-                  <p>schema {selectedBatch.compiled_schema_version}</p>
-                  <p>{selectedBatch.snapshot_id ?? "no snapshot id"}</p>
-                </div>
+              <div className="text-right text-xs text-gray-500">
+                <p>schema {selectedBatch.compiled_schema_version}</p>
+                <p>{selectedBatch.snapshot_id ?? "no snapshot id"}</p>
               </div>
+              <div className="flex flex-wrap gap-2">
+                {!confirmDeleteBatch ? (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteBatch(true)}
+                    className="rounded-md border border-rose-300 px-3 py-2 text-sm text-rose-700 disabled:opacity-50"
+                    disabled={saveLoading}
+                  >
+                    Delete Batch
+                  </button>
+                ) : (
+                  <>
+                    <span className="self-center text-sm text-rose-700">Delete the selected review batch from review DB staging?</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteBatch()}
+                      className="rounded-md bg-rose-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      disabled={saveLoading}
+                    >
+                      Confirm Delete Batch
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteBatch(false)}
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700"
+                      disabled={saveLoading}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
 
               <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
                 <div className="space-y-3" data-testid="compiled-review-items-list">
