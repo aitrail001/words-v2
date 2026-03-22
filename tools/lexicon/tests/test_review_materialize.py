@@ -12,6 +12,14 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
+def _phonetics() -> dict[str, object]:
+    return {
+        "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+        "uk": {"ipa": "/bæŋk/", "confidence": 0.98},
+        "au": {"ipa": "/bæŋk/", "confidence": 0.97},
+    }
+
+
 def _compiled_rows() -> list[dict]:
     return [
         {
@@ -41,6 +49,7 @@ def _compiled_rows() -> list[dict]:
                 }
             ],
             "confusable_words": [],
+            "phonetics": _phonetics(),
             "generated_at": "2026-03-21T00:00:00Z",
         },
         {

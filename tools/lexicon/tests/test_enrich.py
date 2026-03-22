@@ -21,6 +21,7 @@ from tools.lexicon.enrich import (
     build_enrichment_provider,
     build_openai_compatible_enrichment_provider,
     build_openai_compatible_word_enrichment_provider,
+    build_placeholder_word_enrichment_provider,
     _default_node_runner,
     build_openai_compatible_node_enrichment_provider,
     _parse_json_payload_text,
@@ -31,6 +32,23 @@ from tools.lexicon.errors import LexiconDependencyError
 from tools.lexicon.models import EnrichmentRecord
 
 
+class _FakeResponsesAPI:
+    def __init__(self, handler):
+        self._handler = handler
+
+    def create(self, **payload):
+        return self._handler(payload)
+
+
+class _FakeOpenAIClient:
+    def __init__(self, handler):
+        self.responses = _FakeResponsesAPI(handler)
+
+
+def _client_from_transport(transport):
+    return _FakeOpenAIClient(lambda payload: transport("https://example.test/v1/responses", payload, {"Authorization": "Bearer secret-key", "Content-Type": "application/json"}))
+
+
 def _test_translations(definition: str = "translated definition", usage_note: str = "translated usage note", examples: list[str] | None = None) -> dict[str, dict[str, object]]:
     example_rows = list(examples or ["translated example"])
     return {
@@ -39,6 +57,14 @@ def _test_translations(definition: str = "translated definition", usage_note: st
         "ar": {"definition": f"ar:{definition}", "usage_note": f"ar:{usage_note}", "examples": [f"ar:{row}" for row in example_rows]},
         "pt-BR": {"definition": f"pt:{definition}", "usage_note": f"pt:{usage_note}", "examples": [f"pt:{row}" for row in example_rows]},
         "ja": {"definition": f"ja:{definition}", "usage_note": f"ja:{usage_note}", "examples": [f"ja:{row}" for row in example_rows]},
+    }
+
+
+def _test_phonetics(us: str = "/rʌn/", uk: str = "/rʌn/", au: str = "/rɐn/") -> dict[str, dict[str, object]]:
+    return {
+        "us": {"ipa": us, "confidence": 0.99},
+        "uk": {"ipa": uk, "confidence": 0.98},
+        "au": {"ipa": au, "confidence": 0.97},
     }
 
 
@@ -90,6 +116,27 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(len(senses), 1)
             self.assertEqual(lexemes[0].lemma, "run")
             self.assertEqual(senses[0].sense_id, "sn_lx_run_1")
+
+    def test_placeholder_word_provider_emits_grouped_phonetics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            lexemes, senses = read_snapshot_inputs(snapshot_dir)
+            settings = LexiconSettings.from_env({})
+            provider = build_placeholder_word_enrichment_provider(settings=settings)
+
+            outcome = provider(
+                lexeme=lexemes[0],
+                senses=senses,
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-1",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(outcome[0].phonetics["us"]["ipa"], "/run/")
+            self.assertEqual(outcome[0].phonetics["uk"]["ipa"], "/run/")
+            self.assertEqual(outcome[0].phonetics["au"]["ipa"], "/run/")
 
     def test_enrich_snapshot_writes_enrichments_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -252,6 +299,11 @@ class EnrichSnapshotTests(unittest.TestCase):
             "decision": "keep_derived_special",
             "base_word": "meet",
             "discard_reason": None,
+            "phonetics": {
+                "us": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.98},
+                "uk": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.97},
+                "au": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.96},
+            },
             "senses": [
                 {
                     "sense_kind": "base_form_reference",
@@ -298,6 +350,7 @@ class EnrichSnapshotTests(unittest.TestCase):
 
         self.assertEqual(payload["decision"], "keep_derived_special")
         self.assertEqual(payload["base_word"], "meet")
+        self.assertEqual(payload["phonetics"]["au"]["ipa"], "/ˈmiːtɪŋ/")
         self.assertEqual([sense["sense_kind"] for sense in payload["senses"]], ["base_form_reference", "special_meaning"])
 
     def test_openai_compatible_client_uses_endpoint_and_authorization_header(self) -> None:
@@ -345,11 +398,24 @@ class EnrichSnapshotTests(unittest.TestCase):
             transport=transport,
         )
 
-        payload = client.generate_json("hello")
+        payload = client.generate_json(
+            "hello",
+            response_schema={
+                "name": "test_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {"definition": {"type": "string"}},
+                    "required": ["definition"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        )
 
         self.assertEqual(captured["url"], "https://example.test/v1/responses")
         self.assertEqual(captured["headers"]["Authorization"], "Bearer secret-key")
         self.assertEqual(captured["payload"]["model"], "gpt-test")
+        self.assertEqual(captured["payload"]["text"]["format"]["type"], "json_schema")
         self.assertEqual(payload["definition"], "to move quickly on foot")
 
     def test_openai_compatible_client_includes_reasoning_effort_when_configured(self) -> None:
@@ -398,7 +464,19 @@ class EnrichSnapshotTests(unittest.TestCase):
             transport=transport,
         )
 
-        client.generate_json("hello")
+        client.generate_json(
+            "hello",
+            response_schema={
+                "name": "test_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {"definition": {"type": "string"}},
+                    "required": ["definition"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        )
 
         self.assertEqual(captured["payload"]["reasoning"], {"effort": "low"})
 
@@ -447,13 +525,37 @@ class EnrichSnapshotTests(unittest.TestCase):
         self.assertEqual(captured["response_schema"]["name"], "test_schema")
         self.assertTrue(captured["response_schema"]["strict"])
 
-    def test_node_openai_compatible_client_falls_back_when_schema_request_hits_gateway_error(self) -> None:
-        payloads = []
-
+    def test_node_openai_compatible_client_raises_when_schema_request_fails(self) -> None:
         def runner(payload):
-            payloads.append(dict(payload))
-            if payload.get("response_schema") is not None:
-                raise RuntimeError("502 Bad gateway")
+            raise RuntimeError("502 Bad gateway")
+
+        client = NodeOpenAICompatibleResponsesClient(
+            endpoint="https://example.test/v1",
+            api_key="secret-key",
+            model="gpt-test",
+            runner=runner,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "502 Bad gateway"):
+            client.generate_json(
+                "hello",
+                response_schema={
+                    "name": "test_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"definition": {"type": "string"}},
+                        "required": ["definition"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                },
+            )
+
+    def test_openai_compatible_client_uses_sdk_client_when_provided(self) -> None:
+        captured = {}
+
+        def handler(payload):
+            captured["payload"] = payload
             return {
                 "output": [
                     {
@@ -468,11 +570,12 @@ class EnrichSnapshotTests(unittest.TestCase):
                 ]
             }
 
-        client = NodeOpenAICompatibleResponsesClient(
+        client = OpenAICompatibleResponsesClient(
             endpoint="https://example.test/v1",
             api_key="secret-key",
             model="gpt-test",
-            runner=runner,
+            client=_FakeOpenAIClient(handler),
+            reasoning_effort="low",
         )
 
         payload = client.generate_json(
@@ -490,10 +593,34 @@ class EnrichSnapshotTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["definition"], "ok")
-        self.assertEqual(len(payloads), 2)
-        self.assertIn("response_schema", payloads[0])
-        self.assertNotIn("response_schema", payloads[1])
-        self.assertEqual(client.response_schema_fallback_count, 1)
+        self.assertEqual(captured["payload"]["text"]["format"]["type"], "json_schema")
+        self.assertEqual(captured["payload"]["reasoning"], {"effort": "low"})
+
+    def test_openai_compatible_client_raises_when_schema_request_fails(self) -> None:
+        def handler(payload):
+            raise RuntimeError("schema enforcement failed")
+
+        client = OpenAICompatibleResponsesClient(
+            endpoint="https://example.test/v1",
+            api_key="secret-key",
+            model="gpt-test",
+            client=_FakeOpenAIClient(handler),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "schema enforcement failed"):
+            client.generate_json(
+                "hello",
+                response_schema={
+                    "name": "test_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"definition": {"type": "string"}},
+                        "required": ["definition"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                },
+            )
 
     def test_word_enrichment_response_schema_uses_anyof_for_nullable_fields(self) -> None:
         schema = _word_enrichment_response_schema()["schema"]
@@ -574,7 +701,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     ]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             record = provider(
                 lexeme=lexeme,
                 sense=sense,
@@ -607,7 +734,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "confidence": 0.9})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "definition"):
                 provider(
                     lexeme=lexeme,
@@ -636,7 +763,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"difficulty": "A1"}], "confidence": 0.9})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "examples"):
                 provider(
                     lexeme=lexeme,
@@ -670,7 +797,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "confidence": "0.9", "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."])})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             record = provider(
                 lexeme=lexeme,
                 sense=sense,
@@ -700,7 +827,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "confidence": "high"})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "confidence"):
                 provider(
                     lexeme=lexeme,
@@ -729,7 +856,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "cefr_level": "beginner", "confidence": 0.9})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "cefr_level"):
                 provider(
                     lexeme=lexeme,
@@ -758,7 +885,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "register": "casualish", "confidence": 0.9})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "register"):
                 provider(
                     lexeme=lexeme,
@@ -787,7 +914,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "synonyms": "jog", "confidence": 0.9})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "synonyms"):
                 provider(
                     lexeme=lexeme,
@@ -816,7 +943,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "forms": {"plural_forms": "runs"}, "confidence": 0.9})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "forms"):
                 provider(
                     lexeme=lexeme,
@@ -845,7 +972,7 @@ class EnrichSnapshotTests(unittest.TestCase):
                     "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"definition": "to move quickly on foot", "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}], "confusable_words": [{"note": "Past tense form."}], "confidence": 0.9})}]}]
                 }
 
-            provider = build_openai_compatible_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "confusable_words"):
                 provider(
                     lexeme=lexeme,
@@ -924,7 +1051,7 @@ class EnrichSnapshotTests(unittest.TestCase):
 
         sentinel_provider = object()
         with patch('tools.lexicon.enrich.build_openai_compatible_node_enrichment_provider', return_value=sentinel_provider) as mocked_builder:
-            provider = build_enrichment_provider(settings=settings, provider_mode="auto", transport=lambda *_: {})
+            provider = build_enrichment_provider(settings=settings, provider_mode="auto")
 
         self.assertIs(provider, sentinel_provider)
         mocked_builder.assert_called_once()
@@ -1058,11 +1185,11 @@ class EnrichSnapshotTests(unittest.TestCase):
                     max_failures=1,
                 )
 
-            enrichments = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            compiled_rows = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             checkpoints = [json.loads(line) for line in checkpoint_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             failures = [json.loads(line) for line in failures_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-            self.assertEqual([row["sense_id"] for row in enrichments], ["sn_lx_alpha_1"])
+            self.assertEqual([row["entry_id"] for row in compiled_rows], ["lx_alpha"])
             self.assertEqual([row["lexeme_id"] for row in checkpoints if row["status"] == "completed"], ["lx_alpha"])
             self.assertEqual([row["lexeme_id"] for row in failures], ["lx_beta"])
 
@@ -1182,10 +1309,10 @@ class EnrichSnapshotTests(unittest.TestCase):
                 resume=True,
             )
 
-            enrichments = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            compiled_rows = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(resumed_lemmas, ["beta"])
-            self.assertEqual(sorted(row["sense_id"] for row in enrichments), ["sn_lx_alpha_1", "sn_lx_beta_1"])
-            self.assertEqual(sorted(record.sense_id for record in records), ["sn_lx_alpha_1", "sn_lx_beta_1"])
+            self.assertEqual(sorted(row["entry_id"] for row in compiled_rows), ["lx_alpha", "lx_beta"])
+            self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_alpha", "lx_beta"])
 
     def test_enrich_snapshot_per_word_stops_after_max_new_completed_lexemes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1310,7 +1437,7 @@ class EnrichSnapshotTests(unittest.TestCase):
 
             self.assertEqual(seen_lemmas, ["alpha", "beta"])
             self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_beta"])
-            self.assertEqual(sorted(record.sense_id for record in records), ["sn_lx_alpha_1", "sn_lx_beta_1"])
+            self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_alpha", "lx_beta"])
 
     def test_enrich_snapshot_per_word_persists_discard_decisions_without_enrichment_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1356,12 +1483,12 @@ class EnrichSnapshotTests(unittest.TestCase):
                 generation_run_id="run-123",
             )
 
-            enrichments = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            compiled_rows = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             checkpoints = [json.loads(line) for line in (snapshot_dir / "enrich.checkpoint.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             decisions = [json.loads(line) for line in (snapshot_dir / "enrich.decisions.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
 
             self.assertEqual(records, [])
-            self.assertEqual(enrichments, [])
+            self.assertEqual(compiled_rows, [])
             self.assertEqual(len(checkpoints), 1)
             self.assertEqual(checkpoints[0]["lexeme_id"], "lx_is")
             self.assertEqual(len(decisions), 1)
@@ -1523,31 +1650,46 @@ class EnrichSnapshotTests(unittest.TestCase):
                 }) + "\n",
                 encoding="utf-8",
             )
-            (snapshot_dir / "enrichments.jsonl").write_text(
+            (snapshot_dir / "words.enriched.jsonl").write_text(
                 json.dumps({
-                    "snapshot_id": "snap-1",
-                    "enrichment_id": "en_sn_lx_alpha_1",
-                    "sense_id": "sn_lx_alpha_1",
-                    "definition": "definition for alpha",
-                    "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                    "schema_version": "1.1.0",
+                    "entry_id": "lx_alpha",
+                    "entry_type": "word",
+                    "normalized_form": "alpha",
+                    "source_provenance": [{"source": "wordfreq"}],
+                    "entity_category": "general",
+                    "word": "alpha",
+                    "part_of_speech": ["noun"],
                     "cefr_level": "A1",
-                    "primary_domain": "general",
-                    "secondary_domains": [],
-                    "register": "neutral",
-                    "synonyms": [],
-                    "antonyms": [],
-                    "collocations": [],
-                    "grammar_patterns": [],
-                    "usage_note": "note for alpha",
+                    "frequency_rank": 10,
                     "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "senses": [{
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": None,
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "definition for alpha",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "note for alpha",
+                        "enrichment_id": "en_sn_lx_alpha_1",
+                        "generation_run_id": "old-run",
+                        "model_name": "test-provider",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-03-07T00:00:00Z",
+                        "translations": _test_translations("definition for alpha", "note for alpha", ["alpha example"]),
+                    }],
                     "confusable_words": [],
-                    "model_name": "test-provider",
-                    "prompt_version": "v1",
-                    "generation_run_id": "old-run",
-                    "confidence": 0.9,
-                    "review_status": "draft",
                     "generated_at": "2026-03-07T00:00:00Z",
-                    "translations": _test_translations("definition for alpha", "note for alpha", ["alpha example"]),
                 }) + "\n",
                 encoding="utf-8",
             )
@@ -1599,7 +1741,7 @@ class EnrichSnapshotTests(unittest.TestCase):
 
             self.assertEqual(seen_lemmas, ["beta"])
             self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_beta"])
-            self.assertEqual(sorted(record.sense_id for record in records), ["sn_lx_alpha_1", "sn_lx_beta_1"])
+            self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_alpha", "lx_beta"])
 
 
 if __name__ == "__main__":
@@ -1746,7 +1888,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
             self.assertNotEqual(dynamic_index, -1)
             self.assertLess(stable_index, dynamic_index)
 
-    def test_enrich_snapshot_per_word_mode_writes_existing_enrichments_jsonl_shape(self) -> None:
+    def test_enrich_snapshot_per_word_mode_writes_compiled_words_jsonl_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
             self._write_snapshot(snapshot_dir)
@@ -1782,10 +1924,10 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             records = enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2, generated_at="2026-03-07T00:00:00Z", generation_run_id="run-123")
 
-            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1", "sn_lx_run_2", "sn_lx_play_1"])
-            payload = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(payload[0]["sense_id"], "sn_lx_run_1")
-            self.assertEqual(payload[-1]["sense_id"], "sn_lx_play_1")
+            self.assertEqual([record["entry_id"] for record in records], ["lx_run", "lx_play"])
+            payload = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(payload[0]["entry_id"], "lx_run")
+            self.assertEqual(payload[-1]["entry_id"], "lx_play")
 
     def test_enrich_snapshot_per_word_mode_preserves_output_order_under_parallelism(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1825,7 +1967,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             records = enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2)
 
-            self.assertEqual([record.sense_id for record in records], ["sn_lx_run_1", "sn_lx_run_2", "sn_lx_play_1"])
+            self.assertEqual([record["entry_id"] for record in records], ["lx_run", "lx_play"])
 
     def test_enrich_snapshot_per_word_mode_reports_failed_lexeme(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1986,6 +2128,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                         "content": [{
                             "type": "output_text",
                             "text": json.dumps({
+                                "phonetics": _test_phonetics(),
                                 "senses": [{
                                     "sense_id": "sn_lx_run_1",
                                     "definition": "to move quickly on foot",
@@ -2009,7 +2152,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             records = provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2047,6 +2190,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                                 "decision": "keep_standard",
                                 "discard_reason": None,
                                 "base_word": None,
+                                "phonetics": _test_phonetics(),
                                 "senses": [{
                                     "part_of_speech": "verb",
                                     "sense_kind": "standard_meaning",
@@ -2071,7 +2215,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2109,9 +2253,9 @@ class EnrichPerWordModeTests(unittest.TestCase):
                         "examples": [{"sentence": "x", "difficulty": "A1"}],
                         "confidence": 0.9,
                     })
-                return {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"senses": rows})}]}]}
+                return {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"phonetics": _test_phonetics(), "senses": rows})}]}]}
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "at most 4 learner-friendly meanings"):
                 provider(
                     lexeme=low_priority,
@@ -2148,6 +2292,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                         "content": [{
                             "type": "output_text",
                             "text": json.dumps({
+                                "phonetics": _test_phonetics(),
                                 "senses": [{
                                     "sense_id": "sn_lx_run_1",
                                     "definition": "to move quickly on foot",
@@ -2160,7 +2305,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             records = provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2200,6 +2345,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                             "content": [{
                                 "type": "output_text",
                                 "text": json.dumps({
+                                    "phonetics": _test_phonetics(),
                                     "senses": [{
                                         "sense_id": "sn_lx_run_1",
                                         "definition": "to move quickly on foot",
@@ -2223,6 +2369,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                             "content": [{
                                 "type": "output_text",
                                 "text": json.dumps({
+                                    "phonetics": _test_phonetics(),
                                     "senses": [{
                                         "sense_id": "sn_lx_run_1",
                                         "definition": "to move quickly on foot",
@@ -2243,6 +2390,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                         "content": [{
                             "type": "output_text",
                             "text": json.dumps({
+                                "phonetics": _test_phonetics(),
                                 "senses": [{
                                     "sense_id": "sn_lx_run_1",
                                     "definition": "to move quickly on foot",
@@ -2255,7 +2403,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             records = provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2302,13 +2450,14 @@ class EnrichPerWordModeTests(unittest.TestCase):
                             "examples": [{"sentence": "x", "difficulty": "A1"}],
                             "confidence": 0.9,
                         })
-                    return {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"senses": rows})}]}]}
+                    return {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"phonetics": _test_phonetics(), "senses": rows})}]}]}
                 return {
                     "output": [{
                         "type": "message",
                         "content": [{
                             "type": "output_text",
                             "text": json.dumps({
+                                "phonetics": _test_phonetics(),
                                 "senses": [{
                                     "sense_id": "sn_lx_run_1",
                                     "definition": "to move quickly on foot",
@@ -2321,7 +2470,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             records = provider(
                 lexeme=low_priority,
                 senses=all_senses,
@@ -2365,6 +2514,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                             "content": [{
                                 "type": "output_text",
                                 "text": json.dumps({
+                                    "phonetics": _test_phonetics(),
                                     "senses": [{
                                         "sense_id": "sn_lx_run_1",
                                         "definition": "to move quickly on foot",
@@ -2382,6 +2532,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                         "content": [{
                             "type": "output_text",
                             "text": json.dumps({
+                                "phonetics": _test_phonetics(),
                                 "senses": [{
                                     "sense_id": "sn_lx_run_1",
                                     "definition": "to move quickly on foot",
@@ -2394,7 +2545,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             records = provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2429,7 +2580,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 call_count += 1
                 raise RuntimeError("OpenAI-compatible endpoint request failed with status 403: blocked")
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, transport=transport)
+            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
             with self.assertRaisesRegex(RuntimeError, "status 403"):
                 provider(
                     lexeme=run_lexeme,
@@ -2460,29 +2611,45 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 }) + "\n",
                 encoding="utf-8",
             )
-            (snapshot_dir / "enrichments.jsonl").write_text(
+            (snapshot_dir / "words.enriched.jsonl").write_text(
                 json.dumps({
-                    "snapshot_id": "snap-1",
-                    "enrichment_id": "en_dangling",
-                    "sense_id": "sn_lx_run_1",
-                    "definition": "dangling",
-                    "examples": [{"sentence": "dangling", "difficulty": "A1"}],
+                    "schema_version": "1.1.0",
+                    "entry_id": "lx_run",
+                    "entry_type": "word",
+                    "normalized_form": "run",
+                    "source_provenance": [{"source": "wordfreq"}],
+                    "entity_category": "general",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
                     "cefr_level": "A1",
-                    "primary_domain": "general",
-                    "secondary_domains": [],
-                    "register": "neutral",
-                    "synonyms": [],
-                    "antonyms": [],
-                    "collocations": [],
-                    "grammar_patterns": [],
-                    "usage_note": "dangling",
+                    "frequency_rank": 5,
                     "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "senses": [{
+                        "sense_id": "sn_lx_run_1",
+                        "wn_synset_id": None,
+                        "pos": "verb",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "dangling",
+                        "examples": [{"sentence": "dangling", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "dangling",
+                        "enrichment_id": "en_dangling",
+                        "generation_run_id": "dangling-run",
+                        "model_name": "test-provider",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-03-07T00:00:00Z",
+                        "translations": {},
+                    }],
                     "confusable_words": [],
-                    "model_name": "test-provider",
-                    "prompt_version": "v1",
-                    "generation_run_id": "dangling-run",
-                    "confidence": 0.9,
-                    "review_status": "draft",
                     "generated_at": "2026-03-07T00:00:00Z",
                 }) + "\n",
                 encoding="utf-8",
@@ -2529,10 +2696,10 @@ class EnrichPerWordModeTests(unittest.TestCase):
             )
 
             self.assertEqual(called_lemmas, ["run", "play"])
-            self.assertEqual(sorted(record.sense_id for record in records), ["sn_lx_play_1", "sn_lx_run_1", "sn_lx_run_2"])
-            payload = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(sorted(row["sense_id"] for row in payload), ["sn_lx_play_1", "sn_lx_run_1", "sn_lx_run_2"])
-            self.assertEqual(sum(1 for row in payload if row["sense_id"] == "sn_lx_run_1"), 1)
+            self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_play", "lx_run"])
+            payload = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(sorted(row["entry_id"] for row in payload), ["lx_play", "lx_run"])
+            self.assertEqual(sum(1 for row in payload if row["entry_id"] == "lx_run"), 1)
 
     def test_enrich_snapshot_per_word_failure_flushes_later_successes_before_raise(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2584,9 +2751,9 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     request_delay_seconds=0.0,
                 )
 
-            payload = [json.loads(line) for line in (snapshot_dir / "enrichments.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            payload = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             checkpoints = [json.loads(line) for line in checkpoint_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual([row["sense_id"] for row in payload], ["sn_lx_play_1"])
+            self.assertEqual([row["entry_id"] for row in payload], ["lx_play"])
             self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_play"])
 
     def test_enrich_snapshot_per_word_request_delay_paces_global_request_starts(self) -> None:
@@ -2662,6 +2829,7 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
             "decision": "keep_standard",
             "discard_reason": None,
             "base_word": None,
+            "phonetics": _test_phonetics(),
             "senses": [
                 {
                     "sense_id": sense_id,

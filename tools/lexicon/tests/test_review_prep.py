@@ -5,6 +5,14 @@ import unittest
 from tools.lexicon.review_prep import build_review_prep_rows, build_review_queue_rows
 
 
+def _phonetics() -> dict[str, object]:
+    return {
+        "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+        "uk": {"ipa": "/bæŋk/", "confidence": 0.98},
+        "au": {"ipa": "/bæŋk/", "confidence": 0.97},
+    }
+
+
 def _compiled_word_row() -> dict[str, object]:
     return {
         "schema_version": "1.1.0",
@@ -33,6 +41,7 @@ def _compiled_word_row() -> dict[str, object]:
             }
         ],
         "confusable_words": [],
+        "phonetics": _phonetics(),
         "generated_at": "2026-03-22T00:00:00Z",
     }
 

@@ -1,6 +1,6 @@
 # Lexicon Operator Guide
 
-This guide is for the offline/admin lexicon pipeline that builds snapshot files, enriches them for learners, validates them, compiles a DB-ready JSONL export, and optionally imports that export into the local database.
+This guide is for the offline/admin lexicon pipeline that builds snapshot files, enriches them for learners, optionally materializes batch outputs, validates them, and imports the reviewed export into the local database.
 
 ## 1. What this tool is for
 
@@ -9,7 +9,7 @@ Use `tools/lexicon` when you want to:
 - enrich learner-facing fields with an LLM in a separate admin step
 - optionally rerank grounded WordNet candidates with an LLM before deciding whether the selector needs further tuning
 - run built-in tuning/holdout benchmarks to compare deterministic selection against multiple grounded rerank modes
-- validate and compile the snapshot into `words.enriched.jsonl`
+- validate and, when needed, compile or materialize the snapshot into `words.enriched.jsonl`
 - import the compiled output into the local DB
 
 This tool is intentionally separate from the app runtime path.
@@ -53,13 +53,13 @@ Use this as the canonical final DB write path for generated learner-facing lexic
 3. optional review-prep flow
 4. `enrich`
 5. `validate --snapshot-dir`
-6. `compile-export`
+6. `compile-export` only when you need a separate compile/materialization step
 7. `validate --compiled-input`
 8. `import-db`
 
 Important:
 - staged review is the review/decision layer
-- `compile-export -> import-db` is the canonical final learner-enrichment write path
+- realtime per-word enrichment now writes `words.enriched.jsonl` directly; batch flows still materialize to the same artifact later in the pipeline
 - lexicon-owned DB tables now live in the dedicated Postgres `lexicon` schema, while runtime/app tables remain outside that schema in the same database
 - for compiled per-word artifacts, `import-db` now groups senses that share the same `generation_run_id` into one DB enrichment run row per word request
 - the narrower staged-review publish path is transitional and should not be treated as the main learner-enrichment publisher
@@ -94,7 +94,7 @@ python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo -
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --model gpt-5.4 --reasoning-effort low
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/words-1000 --provider-mode auto --mode per_word --max-concurrency 4 --request-delay-seconds 1.0 --max-failures 25
 python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/words-1000 --provider-mode auto --mode per_word --max-concurrency 4 --request-delay-seconds 1.0 --max-failures 25 --resume
-# large per_word runs now append directly to enrichments.jsonl and keep enrich.checkpoint.jsonl + enrich.decisions.jsonl + enrich.failures.jsonl beside the snapshot by default
+# large per_word runs now append directly to words.enriched.jsonl and keep enrich.checkpoint.jsonl + enrich.decisions.jsonl + enrich.failures.jsonl beside the snapshot by default
 ```
 
 Validate the normalized snapshot plus enrichments:
@@ -110,14 +110,14 @@ For staged common-word runs, the operator-safe pattern is:
 - keep `enrich.checkpoint.jsonl`, `enrich.decisions.jsonl`, and `enrich.failures.jsonl` with the snapshot so `--resume` can restart without losing completed lexemes or discard audit history
 - use `--request-delay-seconds` to respect gateway pacing limits and `--max-failures` to fail loudly before burning through a large batch
 
-Compile the final export:
+Compile or materialize the final export:
 
 ```bash
 python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --output data/lexicon/snapshots/demo/words.enriched.jsonl
 python3 -m tools.lexicon.cli compile-export --snapshot-dir data/lexicon/snapshots/demo --decisions data/lexicon/snapshots/demo/selection_decisions.jsonl --decision-filter mode_c_safe --output data/lexicon/snapshots/demo/words.mode-c-safe.enriched.jsonl
 ```
 
-`compile-export` now also writes shared review-prep sidecars beside each compiled output:
+`compile-export` still writes shared review-prep sidecars beside each compiled output:
 
 - `<compiled-output>.review_qc.jsonl`
 - `<compiled-output>.review_queue.jsonl`
@@ -205,7 +205,7 @@ Decision mapping:
 Important:
 
 - the admin portal is still a workflow shell around an offline lexicon pipeline
-- `build-base`, optional ambiguous-form adjudication, `enrich`, `validate`, `compile-export`, and the batch prepare/submit/status/ingest/qc steps still happen outside the portal
+- `build-base`, optional ambiguous-form adjudication, `enrich`, `validate`, `compile-export` when needed, and the batch prepare/submit/status/ingest/qc steps still happen outside the portal
 - `/lexicon/ops` should tell you which of those steps are still outstanding for the selected snapshot
 - the admin frontend should use same-origin `/api` in the browser and a server-side `BACKEND_URL` proxy; do not flip `NEXT_PUBLIC_API_URL` between `localhost` and `backend` just to switch between macOS browser use and Docker-internal Playwright
 
@@ -241,7 +241,7 @@ Contract:
 `enrich` and `adjudicate-forms` support these provider modes:
 - `auto` — use `openai_compatible_node` when `LEXICON_LLM_TRANSPORT=node`, otherwise use the default endpoint path when LLM env is present, or placeholder mode when not
 - `placeholder` — generate deterministic fake learner-facing data for local non-LLM testing
-- `openai_compatible` — use the Python OpenAI-compatible Responses transport
+- `openai_compatible` — use the official Python OpenAI SDK against the Responses API
 - `openai_compatible_node` — use the official Node OpenAI SDK transport
 
 ## 6. Custom OpenAI-compatible gateways
@@ -252,7 +252,7 @@ For GitHub Actions, do **not** rely on local `.env` files. Configure the same va
 
 - environment variable `LEXICON_LLM_BASE_URL`
 - environment variable `LEXICON_LLM_MODEL`
-- optional environment variable `LEXICON_LLM_TRANSPORT=node`
+- optional environment variable `LEXICON_LLM_TRANSPORT=node` or `LEXICON_LLM_TRANSPORT=python`
 - environment secret `LEXICON_LLM_API_KEY`
 
 ```bash
@@ -260,6 +260,8 @@ LEXICON_LLM_BASE_URL='https://api.nwai.cc'
 LEXICON_LLM_MODEL='gpt-5.1'
 LEXICON_LLM_TRANSPORT='node'
 ```
+
+Use `LEXICON_LLM_TRANSPORT='python'` when you want `--provider-mode auto` to select the Python SDK path instead. Schema-backed enrichment now requires strict Responses structured outputs with `json_schema`; if a gateway cannot satisfy that contract, the run fails instead of downgrading to weaker JSON modes.
 
 Keep `LEXICON_LLM_API_KEY` in your local `tools/lexicon/.env.local` instead of pasting it directly into shell history. Then use either the normal `enrich` flow with `--provider-mode auto` or the bounded smoke command:
 

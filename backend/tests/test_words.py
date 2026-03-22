@@ -253,6 +253,11 @@ class TestWordEnrichmentDetail:
         word = make_word("bank")
         meaning = make_meaning(word.id, "A financial institution")
         run = make_enrichment_run()
+        word.phonetics = {
+            "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+            "uk": {"ipa": "/bæŋk/", "confidence": 0.98},
+            "au": {"ipa": "/bæŋk/", "confidence": 0.97},
+        }
         word.phonetic = "/bæŋk/"
         word.phonetic_source = "lexicon_snapshot"
         word.phonetic_confidence = 0.95
@@ -295,6 +300,8 @@ class TestWordEnrichmentDetail:
         assert response.status_code == 200
         data = response.json()
         assert data["word"] == "bank"
+        assert data["phonetics"]["us"]["ipa"] == "/bæŋk/"
+        assert data["phonetics"]["au"]["confidence"] == 0.97
         assert data["phonetic"] == "/bæŋk/"
         assert data["phonetic_source"] == "lexicon_snapshot"
         assert data["phonetic_confidence"] == 0.95

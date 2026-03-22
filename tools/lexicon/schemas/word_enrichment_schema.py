@@ -21,9 +21,32 @@ from tools.lexicon.contracts import (
     REQUIRED_TRANSLATION_LOCALES,
 )
 
+_PHONETIC_ACCENTS = ("us", "uk", "au")
+
 
 def _nullable_schema(inner: dict[str, Any]) -> dict[str, Any]:
     return {"anyOf": [inner, {"type": "null"}]}
+
+
+def _phonetic_variant_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "ipa": {"type": "string"},
+            "confidence": {"type": "number"},
+        },
+        "required": ["ipa", "confidence"],
+        "additionalProperties": False,
+    }
+
+
+def _phonetics_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {accent: _phonetic_variant_schema() for accent in _PHONETIC_ACCENTS},
+        "required": list(_PHONETIC_ACCENTS),
+        "additionalProperties": False,
+    }
 
 
 def _base_enrichment_item_schema() -> dict[str, Any]:
@@ -144,16 +167,34 @@ def build_word_enrichment_response_schema() -> dict[str, Any]:
                 "decision": {"type": "string", "enum": sorted(ALLOWED_WORD_DECISIONS)},
                 "discard_reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
                 "base_word": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "phonetics": {"anyOf": [_phonetics_schema(), {"type": "null"}]},
                 "senses": {
                     "type": "array",
                     "minItems": 0,
                     "items": item_schema,
                 },
             },
-            "required": ["decision", "discard_reason", "base_word", "senses"],
+            "required": ["decision", "discard_reason", "base_word", "phonetics", "senses"],
             "additionalProperties": False,
         },
     }
+
+
+def normalize_phonetics_payload(value: Any) -> dict[str, dict[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RuntimeError("OpenAI-compatible word enrichment payload field 'phonetics' must be an object or null")
+    normalized: dict[str, dict[str, Any]] = {}
+    for accent in _PHONETIC_ACCENTS:
+        accent_payload = value.get(accent)
+        if not isinstance(accent_payload, dict):
+            raise RuntimeError(f"OpenAI-compatible word enrichment payload field 'phonetics.{accent}' must be an object")
+        normalized[accent] = {
+            "ipa": require_non_empty_string(accent_payload.get("ipa"), field=f"phonetics.{accent}.ipa"),
+            "confidence": normalize_confidence(accent_payload.get("confidence")),
+        }
+    return normalized
 
 
 def normalize_word_enrichment_payload(response: dict[str, Any]) -> dict[str, Any]:

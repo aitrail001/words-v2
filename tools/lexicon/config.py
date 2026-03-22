@@ -8,14 +8,15 @@ import os
 
 _ALLOWED_REASONING_EFFORTS = {"none", "low", "medium", "high"}
 _DEFAULT_LLM_TIMEOUT_SECONDS = 60
+_DEFAULT_LLM_REASONING_EFFORT = "none"
 
 
 def _normalize_reasoning_effort(value: str | None) -> str | None:
     if value is None:
-        return None
+        return _DEFAULT_LLM_REASONING_EFFORT
     normalized = value.strip().lower()
     if not normalized:
-        return None
+        return _DEFAULT_LLM_REASONING_EFFORT
     if normalized not in _ALLOWED_REASONING_EFFORTS:
         raise ValueError(
             f"Unsupported LEXICON_LLM_REASONING_EFFORT '{value}'. Expected one of: none, low, medium, high."

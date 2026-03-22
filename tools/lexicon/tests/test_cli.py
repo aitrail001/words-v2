@@ -426,6 +426,42 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["words"], ["run"])
             self.assertEqual(mocked_build.call_args.kwargs["words"], ["run"])
 
+    def test_openai_compatible_smoke_command_uses_direct_words_enriched_output_without_compile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "smoke"
+            fake_result = type("FakeBaseResult", (), {
+                "lexemes": [type("Lexeme", (), {"lemma": "run"})()],
+                "senses": [object()],
+                "concepts": [object()],
+            })()
+            compiled_row = {
+                "entry_id": "lx_run",
+                "entry_type": "word",
+                "word": "run",
+                "phonetics": {
+                    "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                    "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                    "au": {"ipa": "/rɐn/", "confidence": 0.97},
+                },
+                "senses": [{"definition": "to move quickly"}],
+            }
+            with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
+                 patch("tools.lexicon.cli.build_base_records", return_value=fake_result), \
+                 patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "words.enriched.jsonl", enrichments=[object()])), \
+                 patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
+                 patch("tools.lexicon.cli.load_compiled_rows", return_value=[compiled_row]) as mocked_load, \
+                 patch("tools.lexicon.cli.compile_snapshot") as mocked_compile:
+                code, stdout, _ = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "run"])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["compiled_output"], str(output_dir / "words.enriched.jsonl"))
+            self.assertEqual(payload["compiled_count"], 1)
+            mocked_load.assert_called_once_with(output_dir / "words.enriched.jsonl")
+            mocked_compile.assert_not_called()
+            self.assertEqual(compiled_row["phonetics"]["us"]["ipa"], "/rʌn/")
+
 
     def test_openai_compatible_smoke_command_passes_provider_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -996,6 +1032,11 @@ class CliTests(unittest.TestCase):
                             }
                         ],
                         "confusable_words": [{"word": "ran", "note": "Past tense form."}],
+                        "phonetics": {
+                            "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                            "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                            "au": {"ipa": "/rɐn/", "confidence": 0.97},
+                        },
                         "generated_at": "2026-03-07T00:00:00Z",
                     }
                 )
@@ -1056,6 +1097,11 @@ class CliTests(unittest.TestCase):
                             }
                         ],
                         "confusable_words": [],
+                        "phonetics": {
+                            "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                            "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                            "au": {"ipa": "/rɐn/", "confidence": 0.97},
+                        },
                         "generated_at": "2026-03-07T00:00:00Z",
                     }
                 )

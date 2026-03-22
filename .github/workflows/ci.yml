@@ -172,8 +172,18 @@ jobs:
           python -m tools.lexicon.cli build-base run set lead --output-dir "$smoke_dir"
           python -m tools.lexicon.cli enrich --snapshot-dir "$smoke_dir" --provider-mode placeholder
           python -m tools.lexicon.cli validate --snapshot-dir "$smoke_dir"
-          python -m tools.lexicon.cli compile-export --snapshot-dir "$smoke_dir" --output "$smoke_dir/words.enriched.jsonl"
           test -f "$smoke_dir/words.enriched.jsonl"
+          python - <<'PY' "$smoke_dir/words.enriched.jsonl"
+          import json
+          import sys
+          from pathlib import Path
+
+          rows = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()]
+          assert rows, "expected at least one compiled word row"
+          phonetics = rows[0]["phonetics"]
+          assert set(phonetics.keys()) == {"us", "uk", "au"}
+          assert all(isinstance(phonetics[accent]["ipa"], str) and phonetics[accent]["ipa"] for accent in ("us", "uk", "au"))
+          PY
 
   e2e-smoke:
     name: E2E Smoke (required)

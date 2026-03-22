@@ -98,6 +98,11 @@ class ModelSerializationTests(unittest.TestCase):
             ],
             confusable_words=[{"word": "ran", "note": "Past tense, not a different lemma."}],
             generated_at="2026-03-07T00:00:00Z",
+            phonetics={
+                "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                "au": {"ipa": "/rɐn/", "confidence": 0.97},
+            },
         )
 
         payload = record.to_dict()
@@ -108,6 +113,7 @@ class ModelSerializationTests(unittest.TestCase):
         self.assertEqual(payload["source_provenance"], [])
         self.assertEqual(payload["entity_category"], "general")
         self.assertEqual(payload["senses"][0]["examples"][0]["sentence"], "I run every morning.")
+        self.assertEqual(payload["phonetics"]["us"]["ipa"], "/rʌn/")
 
     def test_supporting_records_serialize_with_links(self) -> None:
         sense = SenseRecord(
@@ -145,6 +151,11 @@ class ModelSerializationTests(unittest.TestCase):
             confidence=0.9,
             review_status="draft",
             generated_at="2026-03-07T00:00:00Z",
+            phonetics={
+                "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                "au": {"ipa": "/rɐn/", "confidence": 0.97},
+            },
         )
         concept = ConceptRecord(
             snapshot_id="lexicon-20260307-wordnet-wordfreq",
@@ -171,6 +182,7 @@ class ModelSerializationTests(unittest.TestCase):
 
         self.assertEqual(sense.to_dict()["lexeme_id"], "lx_run")
         self.assertEqual(enrichment.to_dict()["examples"][0]["difficulty"], "A1")
+        self.assertEqual(enrichment.to_dict()["phonetics"]["uk"]["ipa"], "/rʌn/")
         self.assertEqual(concept.to_dict()["lemma_ids"], ["lx_run"])
         self.assertEqual(expression.to_dict()["linked_concept_ids"], ["cp_run_v_01"])
 

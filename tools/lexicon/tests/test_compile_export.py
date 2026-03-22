@@ -49,6 +49,7 @@ class CompileWordsTests(unittest.TestCase):
                 confidence=0.75,
                 review_status="approved",
                 generated_at="2026-03-16T00:00:00Z",
+                phonetics={"us": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.98}, "uk": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.97}, "au": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.96}},
             ),
             EnrichmentRecord(
                 snapshot_id="snap-1",
@@ -79,6 +80,7 @@ class CompileWordsTests(unittest.TestCase):
                 confidence=0.92,
                 review_status="approved",
                 generated_at="2026-03-16T00:00:00Z",
+                phonetics={"us": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.98}, "uk": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.97}, "au": {"ipa": "/ˈmiːtɪŋ/", "confidence": 0.96}},
             ),
         ]
 
@@ -91,6 +93,7 @@ class CompileWordsTests(unittest.TestCase):
         self.assertEqual([sense["sense_kind"] for sense in row["senses"]], ["base_form_reference", "special_meaning"])
         self.assertEqual(row["senses"][0]["base_word"], "meet")
         self.assertIsNone(row["senses"][0]["wn_synset_id"])
+        self.assertEqual(row["phonetics"]["us"]["ipa"], "/ˈmiːtɪŋ/")
 
     def test_compile_words_groups_normalized_records_into_compiled_rows(self) -> None:
         lexeme = LexemeRecord(
@@ -159,6 +162,7 @@ class CompileWordsTests(unittest.TestCase):
                 confidence=0.8,
                 review_status="approved",
                 generated_at="2026-03-07T00:00:00Z",
+                phonetics={"us": {"ipa": "/rʌn/", "confidence": 0.99}, "uk": {"ipa": "/rʌn/", "confidence": 0.98}, "au": {"ipa": "/rɐn/", "confidence": 0.97}},
             ),
             EnrichmentRecord(
                 snapshot_id="snap-1",
@@ -195,6 +199,7 @@ class CompileWordsTests(unittest.TestCase):
                 confidence=0.9,
                 review_status="approved",
                 generated_at="2026-03-07T00:00:00Z",
+                phonetics={"us": {"ipa": "/rʌn/", "confidence": 0.99}, "uk": {"ipa": "/rʌn/", "confidence": 0.98}, "au": {"ipa": "/rɐn/", "confidence": 0.97}},
             ),
         ]
 
@@ -217,6 +222,7 @@ class CompileWordsTests(unittest.TestCase):
         self.assertEqual(row["senses"][0]["prompt_version"], "v1")
         self.assertEqual(row["senses"][0]["confidence"], 0.9)
         self.assertEqual(row["senses"][0]["generated_at"], "2026-03-07T00:00:00Z")
+        self.assertEqual(row["phonetics"]["au"]["ipa"], "/rɐn/")
 
     def test_compile_words_skips_lexemes_without_enrichments(self) -> None:
         lexeme = LexemeRecord(
@@ -308,6 +314,7 @@ class CompileWordsTests(unittest.TestCase):
             confidence=0.9,
             review_status="approved",
             generated_at="2026-03-07T00:00:00Z",
+            phonetics={"us": {"ipa": "/rʌn/", "confidence": 0.99}, "uk": {"ipa": "/rʌn/", "confidence": 0.98}, "au": {"ipa": "/rɐn/", "confidence": 0.97}},
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -323,6 +330,7 @@ class CompileWordsTests(unittest.TestCase):
             payload = json.loads(out_path.read_text(encoding="utf-8").strip())
             self.assertEqual(payload["word"], "run")
             self.assertEqual(payload["senses"][0]["definition"], "to move quickly on foot")
+            self.assertEqual(payload["phonetics"]["us"]["ipa"], "/rʌn/")
             qc_rows = [json.loads(line) for line in (root / "words.enriched.review_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             queue_rows = [json.loads(line) for line in (root / "words.enriched.review_queue.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(qc_rows), 1)
