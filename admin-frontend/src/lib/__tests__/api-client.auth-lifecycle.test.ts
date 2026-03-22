@@ -41,7 +41,7 @@ describe("apiClient auth lifecycle", () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/words/search?q=bank",
+      "/api/words/search?q=bank",
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer seed-token",
@@ -79,7 +79,7 @@ describe("apiClient auth lifecycle", () => {
     expect(result).toEqual([{ id: "2", word: "branch" }]);
     expect(mockFetch).toHaveBeenCalledTimes(3);
     expect(mockFetch.mock.calls[1][0]).toBe(
-      "http://localhost:8000/api/auth/refresh",
+      "/api/auth/refresh",
     );
     expect(mockFetch.mock.calls[1][1]).toEqual(
       expect.objectContaining({

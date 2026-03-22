@@ -56,7 +56,7 @@ export type LexiconCompiledReviewItemUpdateRequest = {
   decision_reason?: string | null;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 async function downloadExport(path: string): Promise<string> {
   const token = readAccessToken();

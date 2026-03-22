@@ -189,6 +189,7 @@ Important:
 - the admin portal is still a workflow shell around an offline lexicon pipeline
 - `build-base`, optional ambiguous-form adjudication, `enrich`, `validate`, `compile-export`, and the batch prepare/submit/status/ingest/qc steps still happen outside the portal
 - `/lexicon/ops` should tell you which of those steps are still outstanding for the selected snapshot
+- the admin frontend should use same-origin `/api` in the browser and a server-side `BACKEND_URL` proxy; do not flip `NEXT_PUBLIC_API_URL` between `localhost` and `backend` just to switch between macOS browser use and Docker-internal Playwright
 
 Run an import dry-run summary:
 
