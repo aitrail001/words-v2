@@ -43,9 +43,16 @@ describe("LexiconDbInspectorPage", () => {
 
   it("renders the standalone DB inspector search flow", async () => {
     const user = userEvent.setup();
+    window.history.pushState({}, "", "/lexicon/db-inspector?snapshot=words-100-20260312");
     render(<LexiconDbInspectorPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-db-inspector-page")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-db-inspector-context")).toHaveTextContent(
+      "Snapshot: words-100-20260312",
+    );
+    expect(screen.getByTestId("lexicon-db-inspector-context")).toHaveTextContent(
+      "Stage: Final DB verification",
+    );
     await user.type(screen.getByTestId("lexicon-db-inspector-search-input"), "bank");
     await user.click(screen.getByTestId("lexicon-db-inspector-search-button"));
 

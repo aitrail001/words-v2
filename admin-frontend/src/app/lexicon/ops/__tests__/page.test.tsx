@@ -52,9 +52,17 @@ describe("LexiconOpsPage", () => {
         ambiguous_forms: 9,
       },
       has_enrichments: true,
-      has_compiled_export: false,
+      has_compiled_export: true,
       has_selection_decisions: true,
       has_ambiguous_forms: true,
+      workflow_stage: "approved_ready_for_import",
+      recommended_action: "open_import_db",
+      preferred_review_artifact_path: "/data/lexicon/snapshots/words-100-20260312/words.enriched.jsonl",
+      preferred_import_artifact_path: "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+      outside_portal_steps: [
+        "Run import-db with /data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+        "Verify the imported rows in DB Inspector after import-db completes for snapshot_path /data/lexicon/snapshots/words-100-20260312",
+      ],
     },
     {
       snapshot: "words-50-20260311",
@@ -73,6 +81,14 @@ describe("LexiconOpsPage", () => {
       has_compiled_export: true,
       has_selection_decisions: true,
       has_ambiguous_forms: false,
+      workflow_stage: "compiled_ready_for_review",
+      recommended_action: "open_compiled_review",
+      preferred_review_artifact_path: "/data/lexicon/snapshots/words-50-20260311/words.enriched.jsonl",
+      preferred_import_artifact_path: null,
+      outside_portal_steps: [
+        "Review /data/lexicon/snapshots/words-50-20260311/words.enriched.jsonl in Compiled Review or JSONL Review",
+        "Materialize or export approved.jsonl beside snapshot_path /data/lexicon/snapshots/words-50-20260311 before import-db",
+      ],
     },
   ];
 
@@ -93,6 +109,14 @@ describe("LexiconOpsPage", () => {
     has_compiled_export: false,
     has_selection_decisions: true,
     has_ambiguous_forms: true,
+    workflow_stage: "approved_ready_for_import",
+    recommended_action: "open_import_db",
+    preferred_review_artifact_path: "/data/lexicon/snapshots/words-100-20260312/words.enriched.jsonl",
+    preferred_import_artifact_path: "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+    outside_portal_steps: [
+      "Run import-db with /data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+      "Verify the imported rows in DB Inspector after import-db completes for snapshot_path /data/lexicon/snapshots/words-100-20260312",
+    ],
     artifacts: [
       {
         file_name: "lexemes.jsonl",
@@ -260,6 +284,18 @@ describe("LexiconOpsPage", () => {
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/compiled-review"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/import-db"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/db-inspector"));
+  });
+
+  it("shows workflow shell guidance for the selected snapshot", async () => {
+    render(<LexiconOpsPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-ops-workflow-shell")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-workflow-stage")).toHaveTextContent("Import approved rows"),
+    );
+    expect(screen.getByTestId("lexicon-ops-next-step")).toHaveTextContent("Open Import DB");
+    expect(screen.getByTestId("lexicon-ops-outside-portal")).toHaveTextContent("approved.jsonl");
+    expect(screen.getByTestId("lexicon-ops-outside-portal")).toHaveTextContent("snapshot_path");
   });
 
   it("shows a final-import panel for the selected snapshot", async () => {

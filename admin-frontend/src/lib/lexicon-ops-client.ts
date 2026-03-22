@@ -10,6 +10,11 @@ export type LexiconOpsSnapshotSummary = {
   has_compiled_export: boolean;
   has_selection_decisions: boolean;
   has_ambiguous_forms: boolean;
+  workflow_stage: string;
+  recommended_action: string;
+  preferred_review_artifact_path: string | null;
+  preferred_import_artifact_path: string | null;
+  outside_portal_steps: string[];
 };
 
 export type LexiconOpsSnapshotArtifact = {

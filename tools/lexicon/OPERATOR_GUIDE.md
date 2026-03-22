@@ -155,12 +155,15 @@ Important:
 The admin portal now exposes the current lexicon workflow as separate tools instead of a single mixed review page:
 
 - `/lexicon/ops`
-  - snapshot-first hub
+  - canonical workflow shell
   - inspects `data/lexicon/snapshots/*`
+  - derives the current workflow stage, preferred review artifact, preferred import artifact, and next recommended action from snapshot artifacts
+  - shows which steps still happen outside the admin portal
   - deep-links into review/import/inspection flows with the selected snapshot prefilled
 - `/lexicon/compiled-review`
   - DB-backed review staging for immutable compiled artifacts
   - imports compiled JSONL into review tables, not final lexicon tables
+  - supports both file upload and import-by-path for an existing compiled artifact selected in `/lexicon/ops`
 - `/lexicon/jsonl-review`
   - file-backed review path for compiled artifacts plus `review.decisions.jsonl`
   - keeps JSONL as source of truth and never imports review state into review tables
@@ -175,10 +178,17 @@ The admin portal now exposes the current lexicon workflow as separate tools inst
 Recommended operator order:
 
 1. start in `/lexicon/ops`
-2. choose `compiled-review` or `jsonl-review`
-3. export or materialize approved JSONL
-4. run `/lexicon/import-db`
-5. confirm the final state in `/lexicon/db-inspector`
+2. follow the stage guidance shown for the selected snapshot
+3. use `/lexicon/compiled-review` as the default review path, or `/lexicon/jsonl-review` as the alternate file-backed path
+4. export or materialize approved JSONL
+5. run `/lexicon/import-db`
+6. confirm the final state in `/lexicon/db-inspector`
+
+Important:
+
+- the admin portal is still a workflow shell around an offline lexicon pipeline
+- `build-base`, optional ambiguous-form adjudication, `enrich`, `validate`, `compile-export`, and the batch prepare/submit/status/ingest/qc steps still happen outside the portal
+- `/lexicon/ops` should tell you which of those steps are still outstanding for the selected snapshot
 
 Run an import dry-run summary:
 

@@ -34,9 +34,23 @@ describe("LexiconImportDbPage", () => {
 
   it("renders import dry-run and execute controls", async () => {
     const user = userEvent.setup();
+    window.history.pushState(
+      {},
+      "",
+      "/lexicon/import-db?inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fdemo%2Fapproved.jsonl&sourceReference=lexicon-20260321-wordfreq&language=en",
+    );
     render(<LexiconImportDbPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-import-db-page")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
+      "Input path: /data/lexicon/snapshots/demo/approved.jsonl",
+    );
+    expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
+      "Source reference: lexicon-20260321-wordfreq",
+    );
+    expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
+      "Stage: Final DB write",
+    );
     await user.type(screen.getByTestId("lexicon-import-db-input-path"), "data/lexicon/snapshots/demo/words.enriched.jsonl");
     await user.click(screen.getByTestId("lexicon-import-db-dry-run-button"));
 

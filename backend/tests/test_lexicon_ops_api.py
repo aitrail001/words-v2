@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.redis import get_redis
 from app.core.security import create_access_token
@@ -154,6 +154,66 @@ class TestLexiconOpsSnapshotListing:
         assert demo_item["has_selection_decisions"] is True
         assert demo_item["has_enrichments"] is False
 
+    @pytest.mark.asyncio
+    async def test_list_snapshots_includes_workflow_metadata(self, client, mock_db, snapshot_root_env):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        base_only = snapshot_root_env / "base-only"
+        base_only.mkdir()
+        _write_jsonl(
+            base_only / "lexemes.jsonl",
+            [{"snapshot_id": "snapshot-base", "lexeme_id": "lx_bank", "lemma": "bank"}],
+        )
+
+        compiled_ready = snapshot_root_env / "compiled-ready"
+        compiled_ready.mkdir()
+        _write_jsonl(
+            compiled_ready / "words.enriched.jsonl",
+            [{"entry_id": "word:bank", "entry_type": "word", "word": "bank", "senses": []}],
+        )
+
+        approved_ready = snapshot_root_env / "approved-ready"
+        approved_ready.mkdir()
+        _write_jsonl(
+            approved_ready / "words.enriched.jsonl",
+            [{"entry_id": "word:run", "entry_type": "word", "word": "run", "senses": []}],
+        )
+        _write_jsonl(
+            approved_ready / "approved.jsonl",
+            [{"entry_id": "word:run", "entry_type": "word", "word": "run", "senses": []}],
+        )
+
+        response = await client.get(
+            "/api/lexicon-ops/snapshots",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        by_snapshot = {item["snapshot"]: item for item in response.json()}
+
+        base_item = by_snapshot["base-only"]
+        assert base_item["workflow_stage"] == "base_artifacts"
+        assert base_item["recommended_action"] == "run_compile_export"
+        assert base_item["preferred_review_artifact_path"] is None
+        assert base_item["preferred_import_artifact_path"] is None
+        assert any("compile-export" in step for step in base_item["outside_portal_steps"])
+
+        compiled_item = by_snapshot["compiled-ready"]
+        assert compiled_item["workflow_stage"] == "compiled_ready_for_review"
+        assert compiled_item["recommended_action"] == "open_compiled_review"
+        assert compiled_item["preferred_review_artifact_path"] == str(compiled_ready / "words.enriched.jsonl")
+        assert compiled_item["preferred_import_artifact_path"] is None
+        assert any("approved.jsonl" in step for step in compiled_item["outside_portal_steps"])
+
+        approved_item = by_snapshot["approved-ready"]
+        assert approved_item["workflow_stage"] == "approved_ready_for_import"
+        assert approved_item["recommended_action"] == "open_import_db"
+        assert approved_item["preferred_review_artifact_path"] == str(approved_ready / "words.enriched.jsonl")
+        assert approved_item["preferred_import_artifact_path"] == str(approved_ready / "approved.jsonl")
+        assert any("import-db" in step for step in approved_item["outside_portal_steps"])
+
 
 class TestLexiconOpsSnapshotDetail:
     @pytest.mark.asyncio
@@ -193,6 +253,37 @@ class TestLexiconOpsSnapshotDetail:
         assert artifacts["lexemes.jsonl"]["row_count"] == 1
         assert artifacts["notes.json"]["exists"] is True
         assert artifacts["notes.json"]["row_count"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_snapshot_detail_includes_workflow_metadata(self, client, mock_db, snapshot_root_env):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(snapshot_root_env))
+
+        snapshot_dir = snapshot_root_env / "approved-ready"
+        snapshot_dir.mkdir()
+        _write_jsonl(
+            snapshot_dir / "words.enriched.jsonl",
+            [{"entry_id": "word:run", "entry_type": "word", "word": "run", "senses": []}],
+        )
+        _write_jsonl(
+            snapshot_dir / "approved.jsonl",
+            [{"entry_id": "word:run", "entry_type": "word", "word": "run", "senses": []}],
+        )
+
+        response = await client.get(
+            "/api/lexicon-ops/snapshots/approved-ready",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["workflow_stage"] == "approved_ready_for_import"
+        assert payload["recommended_action"] == "open_import_db"
+        assert payload["preferred_review_artifact_path"] == str(snapshot_dir / "words.enriched.jsonl")
+        assert payload["preferred_import_artifact_path"] == str(snapshot_dir / "approved.jsonl")
+        assert any("import-db" in step for step in payload["outside_portal_steps"])
 
     @pytest.mark.asyncio
     async def test_get_snapshot_detail_rejects_invalid_snapshot_identifier(self, client, mock_db, snapshot_root_env):

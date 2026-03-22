@@ -12,6 +12,11 @@ function formatDateTime(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function searchParam(name: string): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(name) ?? "";
+}
+
 export default function LexiconDbInspectorPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<WordSearchResult[]>([]);
@@ -20,6 +25,7 @@ export default function LexiconDbInspectorPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const snapshotContext = searchParam("snapshot");
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -75,6 +81,15 @@ export default function LexiconDbInspectorPage() {
 
   return (
     <div className="space-y-6" data-testid="lexicon-db-inspector-page">
+      {snapshotContext ? (
+        <section className="rounded-lg border border-gray-200 bg-slate-50 p-4 text-sm text-slate-800" data-testid="lexicon-db-inspector-context">
+          <p className="font-medium">Workflow context</p>
+          <p className="mt-1">Snapshot: {snapshotContext}</p>
+          <p>Stage: Final DB verification</p>
+          <p>Inspect imported DB rows for this snapshot after import completes.</p>
+        </section>
+      ) : null}
+
       <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div>
           <h3 className="text-2xl font-semibold text-gray-900">DB Inspector</h3>

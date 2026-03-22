@@ -117,9 +117,24 @@ describe("LexiconJsonlReviewPage", () => {
 
   it("loads rows, filters them, saves a decision sidecar update, and materializes outputs", async () => {
     const user = userEvent.setup();
+    window.history.pushState(
+      {},
+      "",
+      "/lexicon/jsonl-review?artifactPath=%2Ftmp%2Fwords.enriched.jsonl&decisionsPath=%2Ftmp%2Freview.decisions.jsonl&outputDir=%2Ftmp%2Fmaterialized&sourceReference=lexicon-20260321-wordfreq",
+    );
     render(<LexiconJsonlReviewPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-jsonl-review-title")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent("Artifact: /tmp/words.enriched.jsonl"));
+    expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
+      "Source reference: lexicon-20260321-wordfreq",
+    );
+    expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
+      "Output dir: /tmp/materialized",
+    );
+    expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
+      "Stage: Alternate review path",
+    );
 
     await user.type(screen.getByLabelText("Artifact path"), "/tmp/words.enriched.jsonl");
     await user.type(screen.getByLabelText("Decisions path"), "/tmp/review.decisions.jsonl");

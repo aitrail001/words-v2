@@ -96,6 +96,17 @@ export const importLexiconCompiledReviewBatch = async (input: {
   return apiClient.post<LexiconCompiledReviewBatch>("/lexicon-compiled-reviews/batches/import", formData);
 };
 
+export const importLexiconCompiledReviewBatchByPath = (input: {
+  artifactPath: string;
+  sourceType?: string;
+  sourceReference?: string;
+}): Promise<LexiconCompiledReviewBatch> =>
+  apiClient.post<LexiconCompiledReviewBatch>("/lexicon-compiled-reviews/batches/import-by-path", {
+    artifact_path: input.artifactPath,
+    source_type: input.sourceType,
+    source_reference: input.sourceReference,
+  });
+
 export const downloadApprovedCompiledReviewExport = (batchId: string): Promise<string> =>
   downloadExport(`/lexicon-compiled-reviews/batches/${batchId}/export/approved`);
 

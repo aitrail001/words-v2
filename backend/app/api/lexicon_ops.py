@@ -31,6 +31,12 @@ _EXPECTED_ARTIFACT_FILES: tuple[str, ...] = (
     "enrich.failures.jsonl",
     "words.enriched.jsonl",
     "words.mode-c-safe.enriched.jsonl",
+    "phrases.enriched.jsonl",
+    "references.enriched.jsonl",
+    "approved.jsonl",
+    "rejected.jsonl",
+    "regenerate.jsonl",
+    "review.decisions.jsonl",
 )
 _COUNTED_ARTIFACT_FILES: dict[str, str] = {
     "lexemes": "lexemes.jsonl",
@@ -38,6 +44,9 @@ _COUNTED_ARTIFACT_FILES: dict[str, str] = {
     "enrichments": "enrichments.jsonl",
     "compiled_words": "words.enriched.jsonl",
     "compiled_mode_c_safe": "words.mode-c-safe.enriched.jsonl",
+    "compiled_phrases": "phrases.enriched.jsonl",
+    "compiled_references": "references.enriched.jsonl",
+    "approved_rows": "approved.jsonl",
     "selection_decisions": "selection_decisions.jsonl",
     "review_queue": "review_queue.jsonl",
     "ambiguous_forms": "ambiguous_forms.jsonl",
@@ -71,6 +80,11 @@ class LexiconSnapshotSummaryResponse(BaseModel):
     has_compiled_export: bool
     has_selection_decisions: bool
     has_ambiguous_forms: bool
+    workflow_stage: str
+    recommended_action: str
+    preferred_review_artifact_path: str | None
+    preferred_import_artifact_path: str | None
+    outside_portal_steps: list[str]
 
 
 class LexiconSnapshotDetailResponse(LexiconSnapshotSummaryResponse):
@@ -195,6 +209,14 @@ def _artifact_counts(snapshot_dir: Path) -> dict[str, int]:
 
 def _snapshot_summary(snapshot_dir: Path) -> LexiconSnapshotSummaryResponse:
     counts = _artifact_counts(snapshot_dir)
+    preferred_review_artifact = _preferred_review_artifact_path(snapshot_dir)
+    preferred_import_artifact = _preferred_import_artifact_path(snapshot_dir)
+    workflow_stage, recommended_action, outside_portal_steps = _workflow_metadata(
+        snapshot_dir,
+        counts=counts,
+        preferred_review_artifact=preferred_review_artifact,
+        preferred_import_artifact=preferred_import_artifact,
+    )
     return LexiconSnapshotSummaryResponse(
         snapshot=snapshot_dir.name,
         snapshot_path=str(snapshot_dir),
@@ -202,9 +224,78 @@ def _snapshot_summary(snapshot_dir: Path) -> LexiconSnapshotSummaryResponse:
         updated_at=_snapshot_updated_at(snapshot_dir),
         artifact_counts=counts,
         has_enrichments=(snapshot_dir / "enrichments.jsonl").exists(),
-        has_compiled_export=(snapshot_dir / "words.enriched.jsonl").exists(),
+        has_compiled_export=preferred_review_artifact is not None,
         has_selection_decisions=(snapshot_dir / "selection_decisions.jsonl").exists(),
         has_ambiguous_forms=counts.get("ambiguous_forms", 0) > 0,
+        workflow_stage=workflow_stage,
+        recommended_action=recommended_action,
+        preferred_review_artifact_path=str(preferred_review_artifact) if preferred_review_artifact else None,
+        preferred_import_artifact_path=str(preferred_import_artifact) if preferred_import_artifact else None,
+        outside_portal_steps=outside_portal_steps,
+    )
+
+
+def _preferred_review_artifact_path(snapshot_dir: Path) -> Path | None:
+    for file_name in (
+        "words.enriched.jsonl",
+        "phrases.enriched.jsonl",
+        "references.enriched.jsonl",
+        "words.mode-c-safe.enriched.jsonl",
+    ):
+        candidate = snapshot_dir / file_name
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _preferred_import_artifact_path(snapshot_dir: Path) -> Path | None:
+    approved_path = snapshot_dir / "approved.jsonl"
+    if approved_path.exists() and approved_path.is_file():
+        return approved_path
+    return None
+
+
+def _workflow_metadata(
+    snapshot_dir: Path,
+    *,
+    counts: dict[str, int],
+    preferred_review_artifact: Path | None,
+    preferred_import_artifact: Path | None,
+) -> tuple[str, str, list[str]]:
+    snapshot_path = str(snapshot_dir)
+    if preferred_import_artifact is not None:
+        return (
+            "approved_ready_for_import",
+            "open_import_db",
+            [
+                f"Run import-db with {preferred_import_artifact}",
+                f"Verify the imported rows in DB Inspector after import-db completes for snapshot_path {snapshot_path}",
+            ],
+        )
+    if preferred_review_artifact is not None:
+        return (
+            "compiled_ready_for_review",
+            "open_compiled_review",
+            [
+                f"Review {preferred_review_artifact} in Compiled Review or JSONL Review",
+                f"Materialize or export approved.jsonl beside snapshot_path {snapshot_path} before import-db",
+            ],
+        )
+    if counts.get("lexemes", 0) > 0 or counts.get("senses", 0) > 0:
+        return (
+            "base_artifacts",
+            "run_compile_export",
+            [
+                f"Run compile-export from snapshot_path {snapshot_path}",
+                f"Keep approved.jsonl beside snapshot_path {snapshot_path} once review is complete",
+            ],
+        )
+    return (
+        "snapshot_missing_artifacts",
+        "run_build_base",
+        [
+            f"Run build-base and enrich before using snapshot_path {snapshot_path}",
+        ],
     )
 
 

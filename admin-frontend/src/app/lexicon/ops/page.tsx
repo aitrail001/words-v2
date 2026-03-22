@@ -41,6 +41,41 @@ function formatBytes(value: number | null | undefined): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+type WorkflowShellData = {
+  stage: string;
+  nextStep: string;
+  outsidePortal: string[];
+};
+
+function workflowStage(snapshot: LexiconOpsSnapshotSummary | null | undefined): WorkflowShellData {
+  if (!snapshot) {
+    return {
+      stage: "Select a snapshot",
+      nextStep: "Pick a snapshot to see the handoff path.",
+      outsidePortal: ["Outside portal guidance appears after a snapshot is selected."],
+    };
+  }
+  const stageLabelByKey: Record<string, string> = {
+    snapshot_missing_artifacts: "Build snapshot",
+    base_artifacts: "Compile exported review artifact",
+    compiled_ready_for_review: "Review compiled artifact",
+    approved_ready_for_import: "Import approved rows",
+  };
+  const nextStepByKey: Record<string, string> = {
+    run_build_base: "Run build-base and enrich outside the portal.",
+    run_compile_export: "Run compile-export outside the portal, then return here.",
+    open_compiled_review: "Open Compiled Review as the default review path.",
+    open_import_db: "Open Import DB to dry-run or execute the final write.",
+  };
+  return {
+    stage: stageLabelByKey[snapshot.workflow_stage] ?? snapshot.workflow_stage,
+    nextStep: nextStepByKey[snapshot.recommended_action] ?? snapshot.recommended_action,
+    outsidePortal: snapshot.outside_portal_steps?.length
+      ? snapshot.outside_portal_steps
+      : [`Work directly from snapshot_path ${snapshot.snapshot_path} when you leave the portal.`],
+  };
+}
+
 function deriveSnapshotStatus(snapshot: LexiconOpsSnapshotSummary | null | undefined): string {
   if (!snapshot) {
     return "unknown";
@@ -95,6 +130,7 @@ export default function LexiconOpsPage() {
     () => snapshots.find((snapshot) => snapshot.snapshot === selectedSnapshotName) ?? null,
     [selectedSnapshotName, snapshots],
   );
+  const workflow = useMemo(() => workflowStage(selectedSnapshot), [selectedSnapshot]);
 
   const loadSnapshots = useCallback(async () => {
     setSnapshotsLoading(true);
@@ -152,16 +188,13 @@ export default function LexiconOpsPage() {
 
   useEffect(() => {
     if (!selectedSnapshot) return;
-    const approvedArtifact = detail?.snapshot === selectedSnapshot.snapshot
-      && detail.artifacts.some((artifact) => artifact.file_name === "approved.jsonl" && artifact.exists)
-      ? `${selectedSnapshot.snapshot_path}/approved.jsonl`
-      : "";
+    const approvedArtifact = selectedSnapshot.preferred_import_artifact_path ?? "";
     setImportPath(approvedArtifact);
     setImportSourceReference(selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot);
   }, [detail, selectedSnapshot]);
 
   const reviewArtifactPath = useMemo(
-    () => (selectedSnapshot ? `${selectedSnapshot.snapshot_path}/words.enriched.jsonl` : ""),
+    () => selectedSnapshot?.preferred_review_artifact_path ?? "",
     [selectedSnapshot],
   );
   const reviewDecisionsPath = useMemo(
@@ -202,6 +235,41 @@ export default function LexiconOpsPage() {
 
   return (
     <div className="space-y-6" data-testid="lexicon-ops-page">
+      <section className="rounded-lg border border-slate-200 bg-slate-50 p-5 shadow-sm" data-testid="lexicon-ops-workflow-shell">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Workflow shell</p>
+            <h3 className="mt-1 text-2xl font-semibold text-slate-950">Lexicon Ops</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Stage guidance stays here. Use the selected snapshot to jump into review, import, or DB inspection.
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            <p className="font-medium text-slate-900">Selected snapshot</p>
+            <p className="mt-1 break-all">{selectedSnapshot?.snapshot_path ?? "Select a snapshot to continue."}</p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          <div className="rounded-lg border border-slate-200 bg-white p-4" data-testid="lexicon-ops-workflow-stage">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current stage</p>
+            <p className="mt-2 text-lg font-semibold text-slate-950">{workflow.stage}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-4" data-testid="lexicon-ops-next-step">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Next step</p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">{workflow.nextStep}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-4" data-testid="lexicon-ops-outside-portal">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Outside portal</p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+              {workflow.outsidePortal.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </section>
+
       <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
