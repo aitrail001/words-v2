@@ -56,6 +56,11 @@ export type LexiconCompiledReviewItemUpdateRequest = {
   decision_reason?: string | null;
 };
 
+export type LexiconCompiledReviewBulkUpdateRequest = {
+  review_status: "pending" | "approved" | "rejected";
+  decision_reason?: string | null;
+};
+
 export type LexiconCompiledReviewMaterializeResult = {
   decision_count: number;
   approved_count: number;
@@ -65,6 +70,11 @@ export type LexiconCompiledReviewMaterializeResult = {
   approved_output_path: string;
   rejected_output_path: string;
   regenerate_output_path: string;
+};
+
+export type LexiconCompiledReviewBulkUpdateResult = {
+  batch: LexiconCompiledReviewBatch;
+  items: LexiconCompiledReviewItem[];
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
@@ -94,6 +104,12 @@ export const updateLexiconCompiledReviewItem = (
   payload: LexiconCompiledReviewItemUpdateRequest,
 ): Promise<LexiconCompiledReviewItem> =>
   apiClient.patch<LexiconCompiledReviewItem>(`/lexicon-compiled-reviews/items/${itemId}`, payload);
+
+export const bulkUpdateLexiconCompiledReviewBatch = (
+  batchId: string,
+  payload: LexiconCompiledReviewBulkUpdateRequest,
+): Promise<LexiconCompiledReviewBulkUpdateResult> =>
+  apiClient.post<LexiconCompiledReviewBulkUpdateResult>(`/lexicon-compiled-reviews/batches/${batchId}/bulk-update`, payload);
 
 export const importLexiconCompiledReviewBatch = async (input: {
   file: File;

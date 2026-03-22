@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
+  bulkUpdateLexiconJsonlReviewItems,
   downloadApprovedLexiconJsonlReviewOutput,
   downloadDecisionLexiconJsonlReviewOutput,
   downloadRegenerateLexiconJsonlReviewOutput,
@@ -71,6 +72,16 @@ function nextPendingEntryId(items: LexiconJsonlReviewItem[], currentEntryId: str
   return pendingItems[0]?.entry_id ?? null;
 }
 
+function sessionCounts(items: LexiconJsonlReviewItem[]) {
+  const approved = items.filter((item) => item.review_status === "approved").length;
+  const rejected = items.filter((item) => item.review_status === "rejected").length;
+  return {
+    approved,
+    rejected,
+    pending: items.length - approved - rejected,
+  };
+}
+
 export default function LexiconJsonlReviewPage() {
   const [artifactPath, setArtifactPath] = useState("");
   const [decisionsPath, setDecisionsPath] = useState("");
@@ -85,7 +96,7 @@ export default function LexiconJsonlReviewPage() {
   const [materializeResult, setMaterializeResult] = useState<LexiconJsonlReviewMaterializeResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [pendingDecision, setPendingDecision] = useState<ReviewDecisionStatus | null>(null);
+  const [pendingBulkDecision, setPendingBulkDecision] = useState<ReviewDecisionStatus | null>(null);
   const artifactPathHint = "Use a container-visible repo path like data/lexicon/snapshots/... or /app/data/lexicon/snapshots/....";
   const decisionsPathHint = "Optional. Defaults to reviewed/review.decisions.jsonl under the snapshot.";
   const outputDirHint = "Optional. Defaults to the shared reviewed/ directory under the artifact snapshot.";
@@ -169,7 +180,6 @@ export default function LexiconJsonlReviewPage() {
 
   useEffect(() => {
     setDecisionReason(selectedItem?.decision_reason ?? "");
-    setPendingDecision(null);
   }, [selectedItem?.decision_reason, selectedItem?.entry_id]);
 
   const loadSession = async (event: FormEvent) => {
@@ -210,13 +220,34 @@ export default function LexiconJsonlReviewPage() {
       if (nextEntryId && nextEntryId !== updated.entry_id) {
         setSelectedItemId(nextEntryId);
       }
-      setPendingDecision(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save decision.");
     } finally {
       setSaving(false);
     }
   }, [decisionsPath, selectedItem, session, decisionReason]);
+
+  const confirmBulkDecision = useCallback(async (reviewStatus: ReviewDecisionStatus) => {
+    if (!session) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const nextSession = await bulkUpdateLexiconJsonlReviewItems({
+        artifactPath: session.artifact_path,
+        decisionsPath: decisionsPath || session.decisions_path,
+        reviewStatus,
+        decisionReason: decisionReason || null,
+      });
+      setSession(nextSession);
+      setSelectedItemId(nextSession.items.find((item) => item.review_status === "pending")?.entry_id ?? nextSession.items[0]?.entry_id ?? "");
+      setPendingBulkDecision(null);
+      setMessage(`Updated ${nextSession.items.length} rows to ${reviewStatus}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save bulk decision.");
+    } finally {
+      setSaving(false);
+    }
+  }, [decisionReason, decisionsPath, session]);
 
   const materialize = async () => {
     if (!session) return;
@@ -280,19 +311,6 @@ export default function LexiconJsonlReviewPage() {
         return;
       }
 
-      if (pendingDecision) {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          void confirmDecision(pendingDecision);
-          return;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          setPendingDecision(null);
-          return;
-        }
-      }
-
       const currentIndex = filteredItems.findIndex((item) => item.entry_id === selectedItem?.entry_id);
       if (event.key === "j") {
         event.preventDefault();
@@ -314,19 +332,19 @@ export default function LexiconJsonlReviewPage() {
 
       if (event.key === "a") {
         event.preventDefault();
-        setPendingDecision("approved");
+        void confirmDecision("approved");
       } else if (event.key === "r") {
         event.preventDefault();
-        setPendingDecision("rejected");
+        void confirmDecision("rejected");
       } else if (event.key === "p") {
         event.preventDefault();
-        setPendingDecision("pending");
+        void confirmDecision("pending");
       }
     };
 
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [confirmDecision, filteredItems, loading, pendingDecision, saving, selectedItem, session]);
+  }, [confirmDecision, filteredItems, loading, saving, selectedItem, session]);
 
   return (
     <div className="space-y-6" data-testid="lexicon-jsonl-review-page">
@@ -343,20 +361,39 @@ export default function LexiconJsonlReviewPage() {
       ) : null}
 
       <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_20rem]">
-          <div className="space-y-5">
-            <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
-              JSONL Review Mode
-            </div>
-            <div className="max-w-4xl">
-              <h3 className="text-2xl font-semibold text-gray-900" data-testid="lexicon-jsonl-review-title">
-                JSONL-Only Lexicon Review
-              </h3>
-              <p className="mt-1 text-sm text-gray-600">
-                Review compiled artifacts directly from JSONL and persist decisions as a sidecar without using review DB tables.
-              </p>
-            </div>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-2xl font-semibold text-gray-900" data-testid="lexicon-jsonl-review-title">
+              JSONL-Only Lexicon Review
+            </h3>
+            <p className="mt-1 text-sm text-gray-600">
+              Review compiled artifacts directly from JSONL and persist decisions as a sidecar without using review DB tables.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button type="submit" form="jsonl-review-load-form" disabled={!artifactPath || loading} className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("approved")} className="rounded-md border border-blue-300 px-3 py-2 text-sm text-blue-700 disabled:opacity-50">
+              Download Approved Rows
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("decisions")} className="rounded-md border border-emerald-300 px-3 py-2 text-sm text-emerald-700 disabled:opacity-50">
+              Download Decision Ledger
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("rejected")} className="rounded-md border border-amber-300 px-3 py-2 text-sm text-amber-700 disabled:opacity-50">
+              Download Rejected Overlay
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("regenerate")} className="rounded-md border border-violet-300 px-3 py-2 text-sm text-violet-700 disabled:opacity-50">
+              Download Regeneration Requests
+            </button>
+            <button type="button" disabled={!session || saving} onClick={() => void materialize()} className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">
+              Materialize Reviewed Outputs
+            </button>
+          </div>
+        </div>
 
+        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_20rem]">
+          <div className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Artifact path</p>
@@ -397,7 +434,7 @@ export default function LexiconJsonlReviewPage() {
           </aside>
         </div>
 
-        <form onSubmit={loadSession} className="mt-6 grid gap-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+        <form id="jsonl-review-load-form" onSubmit={loadSession} className="mt-6 grid gap-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] xl:items-end">
           <label className="grid gap-1 text-sm text-slate-700">
             <span className="font-medium">Artifact path</span>
             <input
@@ -431,26 +468,6 @@ export default function LexiconJsonlReviewPage() {
             />
             <span className="text-xs leading-5 text-slate-500">{outputDirHint}</span>
           </label>
-          <div className="flex flex-wrap gap-3 xl:justify-end">
-            <button type="submit" disabled={!artifactPath || loading} className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-50">
-              {loading ? "Loading..." : "Load Artifact"}
-            </button>
-            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("approved")} className="rounded-lg border border-emerald-300 bg-white px-5 py-2.5 text-sm font-medium text-emerald-700 shadow-sm transition hover:bg-emerald-50 disabled:opacity-50">
-              Download Approved Rows
-            </button>
-            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("decisions")} className="rounded-lg border border-sky-300 bg-white px-5 py-2.5 text-sm font-medium text-sky-700 shadow-sm transition hover:bg-sky-50 disabled:opacity-50">
-              Download Decision Ledger
-            </button>
-            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("rejected")} className="rounded-lg border border-amber-300 bg-white px-5 py-2.5 text-sm font-medium text-amber-700 shadow-sm transition hover:bg-amber-50 disabled:opacity-50">
-              Download Rejected Overlay
-            </button>
-            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("regenerate")} className="rounded-lg border border-violet-300 bg-white px-5 py-2.5 text-sm font-medium text-violet-700 shadow-sm transition hover:bg-violet-50 disabled:opacity-50">
-              Download Regeneration Requests
-            </button>
-            <button type="button" disabled={!session || saving} onClick={() => void materialize()} className="rounded-lg border border-sky-300 bg-white px-5 py-2.5 text-sm font-medium text-sky-700 shadow-sm transition hover:bg-sky-50 disabled:opacity-50">
-              Materialize Outputs
-            </button>
-          </div>
         </form>
         {message ? <div className="mt-3 text-sm text-slate-700">{message}</div> : null}
       </section>
@@ -459,25 +476,32 @@ export default function LexiconJsonlReviewPage() {
         <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <div className="mb-4 grid grid-cols-3 gap-3 text-sm">
-              <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Pending</p>
-                <p className="mt-1 text-xl font-semibold text-amber-950">{session.pending_count}</p>
-              </div>
-              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Approved</p>
-                <p className="mt-1 text-xl font-semibold text-emerald-950">{session.approved_count}</p>
-              </div>
-              <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Rejected</p>
-                <p className="mt-1 text-xl font-semibold text-rose-950">{session.rejected_count}</p>
-              </div>
+              {(() => {
+                const counts = sessionCounts(session.items);
+                return (
+                  <>
+                    <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Pending</p>
+                      <p className="mt-1 text-xl font-semibold text-amber-950">{counts.pending}</p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Approved</p>
+                      <p className="mt-1 text-xl font-semibold text-emerald-950">{counts.approved}</p>
+                    </div>
+                    <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Rejected</p>
+                      <p className="mt-1 text-xl font-semibold text-rose-950">{counts.rejected}</p>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
             <div className="grid gap-2">
               <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
                 Risk first
               </div>
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                Shortcuts: <span className="font-semibold text-slate-900">j</span>/<span className="font-semibold text-slate-900">k</span> move, <span className="font-semibold text-emerald-700">a</span> approve, <span className="font-semibold text-rose-700">r</span> reject, <span className="font-semibold text-slate-700">p</span> reopen, <span className="font-semibold text-slate-900">enter</span> confirm, <span className="font-semibold text-slate-900">esc</span> cancel
+                Shortcuts: <span className="font-semibold text-slate-900">j</span>/<span className="font-semibold text-slate-900">k</span> move, <span className="font-semibold text-emerald-700">a</span> approve, <span className="font-semibold text-rose-700">r</span> reject, <span className="font-semibold text-slate-700">p</span> reopen
               </div>
               <input
                 value={search}
@@ -596,62 +620,78 @@ export default function LexiconJsonlReviewPage() {
                     </label>
                     <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4">
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" data-testid="jsonl-review-approve-button" disabled={saving} onClick={() => setPendingDecision("approved")} className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                        <button type="button" data-testid="jsonl-review-approve-button" disabled={saving} onClick={() => void confirmDecision("approved")} className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
                           Approve (A)
                         </button>
-                        <button type="button" data-testid="jsonl-review-reject-button" disabled={saving} onClick={() => setPendingDecision("rejected")} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                        <button type="button" data-testid="jsonl-review-reject-button" disabled={saving} onClick={() => void confirmDecision("rejected")} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
                           Reject (R)
                         </button>
-                        <button type="button" data-testid="jsonl-review-reopen-button" disabled={saving} onClick={() => setPendingDecision("pending")} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50">
+                        <button type="button" data-testid="jsonl-review-reopen-button" disabled={saving} onClick={() => void confirmDecision("pending")} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50">
                           Reopen (P)
                         </button>
                       </div>
-                      {pendingDecision ? (
+                      <div className="mt-3 border-t border-dashed border-slate-300 pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Snapshot actions</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button type="button" data-testid="jsonl-review-approve-all-button" disabled={saving} onClick={() => setPendingBulkDecision("approved")} className="rounded-md border border-emerald-300 bg-white px-4 py-2 text-sm font-medium text-emerald-700 disabled:opacity-50">
+                            Approve All
+                          </button>
+                          <button type="button" data-testid="jsonl-review-reject-all-button" disabled={saving} onClick={() => setPendingBulkDecision("rejected")} className="rounded-md border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 disabled:opacity-50">
+                            Reject All
+                          </button>
+                          <button type="button" data-testid="jsonl-review-reopen-all-button" disabled={saving} onClick={() => setPendingBulkDecision("pending")} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50">
+                            Reopen All
+                          </button>
+                        </div>
+                      </div>
+                      {pendingBulkDecision ? (
                         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
                           <span className="font-medium">
-                            Confirm {pendingDecision === "approved" ? "approve" : pendingDecision === "rejected" ? "reject" : "reopen"} and move to the next pending row.
+                            Confirm {pendingBulkDecision === "approved" ? "approve" : pendingBulkDecision === "rejected" ? "reject" : "reopen"} every row in this snapshot.
                           </span>
                           <button
                             type="button"
-                            data-testid={`jsonl-review-confirm-${pendingDecision}-button`}
+                            data-testid={`jsonl-review-confirm-bulk-${pendingBulkDecision}-button`}
                             disabled={saving}
-                            onClick={() => void confirmDecision(pendingDecision)}
+                            onClick={() => void confirmBulkDecision(pendingBulkDecision)}
                             className="rounded-md border border-sky-300 bg-white px-3 py-2 text-sm font-medium text-sky-800 disabled:opacity-50"
                           >
-                            Confirm {pendingDecision === "approved" ? "Approve" : pendingDecision === "rejected" ? "Reject" : "Reopen"}
+                            Confirm {pendingBulkDecision === "approved" ? "Approve All" : pendingBulkDecision === "rejected" ? "Reject All" : "Reopen All"}
                           </button>
                           <button
                             type="button"
                             disabled={saving}
-                            onClick={() => setPendingDecision(null)}
+                            onClick={() => setPendingBulkDecision(null)}
                             className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
                           >
                             Cancel
                           </button>
                         </div>
                       ) : (
-                        <p className="mt-3 text-xs text-gray-500">Choose an action, then confirm it. The reviewer will move to the next pending row automatically.</p>
+                        <p className="mt-3 text-xs text-gray-500">Per-row actions save immediately and move to the next pending row. Snapshot actions require confirmation.</p>
                       )}
                     </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div>
-                      <h5 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Raw compiled JSON</h5>
-                      <p className="mt-1 text-xs text-slate-500">Scrollable snapshot of the compiled record being reviewed.</p>
-                    </div>
-                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500">scrolling panel</span>
-                  </div>
-                  <pre className="max-h-[56vh] overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-5 text-slate-100 shadow-inner">
-                    {JSON.stringify(selectedItem.compiled_payload, null, 2)}
-                  </pre>
                 </div>
               </div>
             ) : (
               <p className="text-sm text-gray-500">No items match the current filter.</p>
             )}
           </div>
+        </section>
+      ) : null}
+
+      {session && selectedItem ? (
+        <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <div>
+              <h5 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Raw compiled JSON</h5>
+              <p className="mt-1 text-xs text-slate-500">Scrollable snapshot of the compiled record being reviewed.</p>
+            </div>
+            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500">wide panel</span>
+          </div>
+          <pre className="mt-3 max-h-[40rem] overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-5 text-slate-100 shadow-inner">
+            {JSON.stringify(selectedItem.compiled_payload, null, 2)}
+          </pre>
         </section>
       ) : null}
 

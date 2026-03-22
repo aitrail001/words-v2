@@ -335,6 +335,38 @@ class TestLexiconJsonlReviewsApi:
         assert persisted_rows[0]["decision_reason"] == "needs another look"
 
     @pytest.mark.asyncio
+    async def test_bulk_patch_updates_all_rows_and_returns_updated_session(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        compiled_path = tmp_path / "words.enriched.jsonl"
+        decisions_path = tmp_path / "reviewed" / "review.decisions.jsonl"
+        _write_jsonl(compiled_path, _compiled_rows())
+
+        response = await client.post(
+            "/api/lexicon-jsonl-reviews/bulk-update",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "artifact_path": str(compiled_path),
+                "decisions_path": str(decisions_path),
+                "review_status": "approved",
+                "decision_reason": "bulk ready",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["approved_count"] == 2
+        assert data["pending_count"] == 0
+        assert data["rejected_count"] == 0
+        assert all(item["review_status"] == "approved" for item in data["items"])
+        persisted_rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert len(persisted_rows) == 2
+        assert {row["decision"] for row in persisted_rows} == {"approved"}
+
+    @pytest.mark.asyncio
     async def test_materialize_writes_outputs_via_review_materialize(self, client, mock_db, tmp_path: Path):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
