@@ -14,6 +14,8 @@ from tools.lexicon.import_db import ImportSummary, import_compiled_rows
 class FakeWord:
     word: str
     language: str = "en"
+    phonetics: object = None
+    phonetic: object = None
     frequency_rank: object = None
     cefr_level: object = None
     learner_part_of_speech: object = None
@@ -227,6 +229,11 @@ class ImportCompiledRowsTests(unittest.TestCase):
                     },
                 ],
                 "confusable_words": [{"word": "ran", "note": "Past tense form."}],
+                "phonetics": {
+                    "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                    "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                    "au": {"ipa": "/rɐn/", "confidence": 0.97},
+                },
                 "generated_at": "2026-03-07T00:00:00Z",
             }
         ]
@@ -252,6 +259,10 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_word.source_type, "lexicon_snapshot")
         self.assertEqual(imported_word.source_reference, "snapshot-20260307")
         self.assertEqual(imported_word.word_forms["verb_forms"]["past"], "ran")
+        self.assertEqual(imported_word.phonetics["au"]["ipa"], "/rɐn/")
+        self.assertEqual(imported_word.phonetic, "/rʌn/")
+        self.assertEqual(imported_word.phonetic_source, "lexicon_snapshot")
+        self.assertEqual(imported_word.phonetic_confidence, 0.99)
         self.assertIsNotNone(imported_word.learner_generated_at)
         self.assertEqual(imported_meanings[0].source, "lexicon_snapshot")
         self.assertEqual(imported_meanings[0].primary_domain, "general")
@@ -381,6 +392,11 @@ class ImportCompiledRowsTests(unittest.TestCase):
                     }
                 ],
                 "confusable_words": [],
+                "phonetics": {
+                    "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                    "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                    "au": {"ipa": "/rɐn/", "confidence": 0.97},
+                },
                 "generated_at": "2026-03-07T00:00:00Z",
             }
         ]
@@ -468,6 +484,11 @@ class ImportCompiledRowsTests(unittest.TestCase):
                     }
                 ],
                 "confusable_words": [],
+                "phonetics": {
+                    "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                    "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                    "au": {"ipa": "/rɐn/", "confidence": 0.97},
+                },
                 "generated_at": "2026-03-07T00:00:00Z",
             }
         ]
@@ -527,6 +548,10 @@ class ImportCompiledRowsTests(unittest.TestCase):
         )
         self.assertTrue(all(item.enrichment_run_id == imported_run.id for item in imported_examples))
         self.assertTrue(all(item.enrichment_run_id == imported_run.id for item in imported_relations))
+        self.assertEqual(imported_word.phonetics["uk"]["ipa"], "/rʌn/")
+        self.assertEqual(imported_word.phonetic, "/rʌn/")
+        self.assertEqual(imported_word.phonetic_confidence, 0.99)
+        self.assertEqual(imported_word.phonetic_enrichment_run_id, imported_run.id)
 
     def test_import_collapses_same_generation_run_id_to_one_enrichment_run_per_word(self) -> None:
         session = MagicMock()

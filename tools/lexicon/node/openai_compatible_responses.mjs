@@ -49,7 +49,6 @@ async function handleRequest(rawLine) {
     });
     return;
   }
-
   const client = new OpenAI({
     apiKey,
     baseURL,

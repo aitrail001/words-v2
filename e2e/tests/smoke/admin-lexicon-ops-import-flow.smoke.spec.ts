@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { injectAdminToken, registerAdminViaApi } from "../helpers/auth";
+import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi } from "../helpers/auth";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
@@ -17,6 +17,11 @@ const buildCompiledWordRow = (runId: string, word: string) => ({
   part_of_speech: ["noun"],
   cefr_level: "B1",
   frequency_rank: 100,
+  phonetics: {
+    us: { ipa: `/${word}/`, confidence: 0.99 },
+    uk: { ipa: `/${word}/`, confidence: 0.98 },
+    au: { ipa: `/${word}/`, confidence: 0.97 },
+  },
   forms: {
     plural_forms: [`${word}s`],
     verb_forms: {},
@@ -84,6 +89,28 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   await page.getByTestId("lexicon-db-inspector-search-button").click();
   await expect(page.getByRole("button", { name: new RegExp(`^${normalized}\\b`) })).toBeVisible();
   await expect(page.getByRole("heading", { name: normalized })).toBeVisible();
+
+  const searchResponse = await request.get(`${apiUrl}/words/search?q=${normalized}`, {
+    headers: authHeaders(user.token),
+  });
+  expect(searchResponse.ok()).toBeTruthy();
+  const searchRows = (await searchResponse.json()) as Array<{ id: string }>;
+  expect(searchRows.length).toBeGreaterThan(0);
+
+  const enrichmentResponse = await request.get(`${apiUrl}/words/${searchRows[0].id}/enrichment`, {
+    headers: authHeaders(user.token),
+  });
+  expect(enrichmentResponse.ok()).toBeTruthy();
+  const enrichment = (await enrichmentResponse.json()) as {
+    phonetics: {
+      us: { ipa: string; confidence: number };
+      uk: { ipa: string; confidence: number };
+      au: { ipa: string; confidence: number };
+    } | null;
+  };
+  expect(enrichment.phonetics?.us.ipa).toBe(`/${normalized}/`);
+  expect(enrichment.phonetics?.uk.confidence).toBe(0.98);
+  expect(enrichment.phonetics?.au.confidence).toBe(0.97);
 
   await rm(hostSnapshotDir, { recursive: true, force: true });
 });

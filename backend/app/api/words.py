@@ -20,6 +20,17 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+class PhoneticVariantResponse(BaseModel):
+    ipa: str
+    confidence: float
+
+
+class PhoneticsResponse(BaseModel):
+    us: PhoneticVariantResponse
+    uk: PhoneticVariantResponse
+    au: PhoneticVariantResponse
+
+
 # Schemas
 class MeaningResponse(BaseModel):
     id: str
@@ -33,6 +44,7 @@ class WordResponse(BaseModel):
     id: str
     word: str
     language: str
+    phonetics: PhoneticsResponse | None = None
     phonetic: str | None
     frequency_rank: int | None
 
@@ -121,6 +133,7 @@ def _word_response(word: Word) -> WordResponse:
         id=str(word.id),
         word=word.word,
         language=word.language,
+        phonetics=word.phonetics,
         phonetic=word.phonetic,
         frequency_rank=word.frequency_rank,
     )
@@ -218,6 +231,7 @@ async def get_word_enrichment(
         id=str(word.id),
         word=word.word,
         language=word.language,
+        phonetics=word.phonetics,
         phonetic=word.phonetic,
         frequency_rank=word.frequency_rank,
         phonetic_source=word.phonetic_source,

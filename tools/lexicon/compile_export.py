@@ -44,83 +44,108 @@ def compile_words(
             enrichments_by_lexeme.get(lexeme.lexeme_id, []),
             key=lambda item: (item.sense_order, item.sense_id),
         )
-        compiled_senses: list[dict] = []
-        top_level_pos: list[str] = []
-        top_level_forms = None
-        top_level_confusables = None
-        top_level_cefr = None
-        generated_at = None
-
-        for enrichment in ordered_enrichments:
-            source_sense = sense_by_id.get(enrichment.sense_id)
-            part_of_speech = enrichment.part_of_speech or (source_sense.part_of_speech if source_sense is not None else None)
-            if part_of_speech and part_of_speech not in top_level_pos:
-                top_level_pos.append(part_of_speech)
-            if top_level_forms is None:
-                top_level_forms = enrichment.forms
-            if top_level_confusables is None:
-                top_level_confusables = enrichment.confusable_words
-            if top_level_cefr is None:
-                top_level_cefr = enrichment.cefr_level
-            if generated_at is None:
-                generated_at = enrichment.generated_at
-            compiled_senses.append(
-                {
-                    "sense_id": enrichment.sense_id,
-                    "wn_synset_id": source_sense.wn_synset_id if source_sense is not None else None,
-                    "pos": part_of_speech,
-                    "sense_kind": enrichment.sense_kind,
-                    "decision": enrichment.decision,
-                    "base_word": enrichment.base_word,
-                    "primary_domain": enrichment.primary_domain,
-                    "secondary_domains": enrichment.secondary_domains,
-                    "register": enrichment.register,
-                    "definition": enrichment.definition,
-                    "examples": [example.to_dict() for example in enrichment.examples],
-                    "synonyms": enrichment.synonyms,
-                    "antonyms": enrichment.antonyms,
-                    "collocations": enrichment.collocations,
-                    "grammar_patterns": enrichment.grammar_patterns,
-                    "usage_note": enrichment.usage_note,
-                    "enrichment_id": enrichment.enrichment_id,
-                    "generation_run_id": enrichment.generation_run_id,
-                    "model_name": enrichment.model_name,
-                    "prompt_version": enrichment.prompt_version,
-                    "confidence": enrichment.confidence,
-                    "generated_at": enrichment.generated_at,
-                    "translations": enrichment.translations or {},
-                }
-            )
-
-        if not compiled_senses:
-            continue
-
-        compiled.append(
-            CompiledWordRecord(
-                schema_version=COMPILED_SCHEMA_VERSION,
-                entry_id=lexeme.entry_id,
-                entry_type=lexeme.entry_type,
-                normalized_form=lexeme.normalized_form,
-                source_provenance=lexeme.source_provenance,
-                entity_category=lexeme.entity_category,
-                word=lexeme.lemma,
-                part_of_speech=top_level_pos,
-                cefr_level=top_level_cefr or "B1",
-                frequency_rank=lexeme.wordfreq_rank,
-                forms=top_level_forms or {
-                    "plural_forms": [],
-                    "verb_forms": {},
-                    "comparative": None,
-                    "superlative": None,
-                    "derivations": [],
-                },
-                senses=compiled_senses,
-                confusable_words=top_level_confusables or [],
-                generated_at=generated_at or lexeme.created_at,
-            )
+        compiled_record = compile_word_result(
+            lexeme=lexeme,
+            enrichments=ordered_enrichments,
+            sense_by_id=sense_by_id,
         )
+        if compiled_record is not None:
+            compiled.append(compiled_record)
 
     return compiled
+
+
+def compile_word_result(
+    *,
+    lexeme: LexemeRecord,
+    enrichments: list[EnrichmentRecord],
+    sense_by_id: dict[str, SenseRecord] | None = None,
+) -> CompiledWordRecord | None:
+    resolved_sense_by_id = sense_by_id or {}
+    compiled_senses: list[dict] = []
+    top_level_pos: list[str] = []
+    top_level_forms = None
+    top_level_confusables = None
+    top_level_cefr = None
+    generated_at = None
+    top_level_phonetics = None
+
+    def example_to_dict(example: object) -> dict[str, object]:
+        if isinstance(example, SenseExample):
+            return example.to_dict()
+        if isinstance(example, dict):
+            return dict(example)
+        return {"sentence": str(example), "difficulty": "B1"}
+
+    for enrichment in enrichments:
+        source_sense = resolved_sense_by_id.get(enrichment.sense_id)
+        part_of_speech = enrichment.part_of_speech or (source_sense.part_of_speech if source_sense is not None else None)
+        if part_of_speech and part_of_speech not in top_level_pos:
+            top_level_pos.append(part_of_speech)
+        if top_level_forms is None:
+            top_level_forms = enrichment.forms
+        if top_level_confusables is None:
+            top_level_confusables = enrichment.confusable_words
+        if top_level_cefr is None:
+            top_level_cefr = enrichment.cefr_level
+        if generated_at is None:
+            generated_at = enrichment.generated_at
+        if top_level_phonetics is None:
+            top_level_phonetics = enrichment.phonetics
+        compiled_senses.append(
+            {
+                "sense_id": enrichment.sense_id,
+                "wn_synset_id": source_sense.wn_synset_id if source_sense is not None else None,
+                "pos": part_of_speech,
+                "sense_kind": enrichment.sense_kind,
+                "decision": enrichment.decision,
+                "base_word": enrichment.base_word,
+                "primary_domain": enrichment.primary_domain,
+                "secondary_domains": enrichment.secondary_domains,
+                "register": enrichment.register,
+                "definition": enrichment.definition,
+                "examples": [example_to_dict(example) for example in enrichment.examples],
+                "synonyms": enrichment.synonyms,
+                "antonyms": enrichment.antonyms,
+                "collocations": enrichment.collocations,
+                "grammar_patterns": enrichment.grammar_patterns,
+                "usage_note": enrichment.usage_note,
+                "enrichment_id": enrichment.enrichment_id,
+                "generation_run_id": enrichment.generation_run_id,
+                "model_name": enrichment.model_name,
+                "prompt_version": enrichment.prompt_version,
+                "confidence": enrichment.confidence,
+                "generated_at": enrichment.generated_at,
+                "translations": enrichment.translations or {},
+            }
+        )
+
+    if not compiled_senses:
+        return None
+
+    return CompiledWordRecord(
+        schema_version=COMPILED_SCHEMA_VERSION,
+        entry_id=lexeme.entry_id,
+        entry_type=lexeme.entry_type,
+        normalized_form=lexeme.normalized_form,
+        source_provenance=lexeme.source_provenance,
+        entity_category=lexeme.entity_category,
+        word=lexeme.lemma,
+        part_of_speech=top_level_pos,
+        cefr_level=top_level_cefr or "B1",
+        frequency_rank=lexeme.wordfreq_rank,
+        forms=top_level_forms or {
+            "plural_forms": [],
+            "verb_forms": {},
+            "comparative": None,
+            "superlative": None,
+            "derivations": [],
+        },
+        senses=compiled_senses,
+        confusable_words=top_level_confusables or [],
+        generated_at=generated_at or lexeme.created_at,
+        phonetics=top_level_phonetics,
+    )
 
 
 def compile_phrase_rows(snapshot_dir: Path) -> list[dict[str, object]]:

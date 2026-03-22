@@ -10,6 +10,7 @@ class LexiconSettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.output_root, Path("data/lexicon"))
         self.assertEqual(settings.llm_timeout_seconds, 60)
+        self.assertEqual(settings.llm_reasoning_effort, "none")
 
     def test_settings_reads_llm_values_from_env(self) -> None:
         settings = LexiconSettings.from_env(

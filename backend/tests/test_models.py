@@ -45,6 +45,7 @@ class TestWordModel:
 
     def test_word_optional_fields_are_nullable(self):
         word = Word(word="test")
+        assert word.phonetics is None
         assert word.phonetic is None
         assert word.frequency_rank is None
         assert word.word_forms is None

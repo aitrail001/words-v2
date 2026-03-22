@@ -284,6 +284,11 @@ class ValidateCompiledRecordTests(unittest.TestCase):
             ],
             confusable_words=[],
             generated_at="2026-03-07T00:00:00Z",
+            phonetics={
+                "us": {"ipa": "/rʌn/", "confidence": 0.99},
+                "uk": {"ipa": "/rʌn/", "confidence": 0.98},
+                "au": {"ipa": "/rɐn/", "confidence": 0.97},
+            },
         )
 
         self.assertEqual(validate_compiled_record(record), [])
@@ -421,6 +426,11 @@ if __name__ == "__main__":
             ],
             "confusable_words": [],
             "generated_at": "2026-03-07T00:00:00Z",
+            "phonetics": {
+                "us": {"ipa": "/rɛəwɜːd/", "confidence": 0.91},
+                "uk": {"ipa": "/rɛəwɜːd/", "confidence": 0.9},
+                "au": {"ipa": "/reːwɜːd/", "confidence": 0.89},
+            },
         }
 
         errors = validate_compiled_record(record)

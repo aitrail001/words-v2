@@ -684,6 +684,8 @@ def _batch_ingest_command(args: argparse.Namespace) -> int:
         'input': str(output_path),
         'output': str(results_path),
         'failures_output': str(failure_path),
+        'accepted_output': str(snapshot_dir / 'words.enriched.jsonl'),
+        'regenerate_output': str(snapshot_dir / 'words.regenerate.jsonl'),
         'result_count': len(result_rows),
     }
     print(json.dumps(payload))
@@ -835,6 +837,7 @@ def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
             provider_mode=args.provider_mode,
             model_name=args.model,
             reasoning_effort=args.reasoning_effort,
+            mode='per_word',
         )
         errors = validate_snapshot_files(output_dir)
         if errors:
@@ -847,7 +850,10 @@ def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
             }))
             return 2
         compiled_output = output_dir / 'words.enriched.jsonl'
-        compiled = compile_snapshot(output_dir, compiled_output)
+        if enrichment_result.output_path.name == 'words.enriched.jsonl':
+            compiled = load_compiled_rows(enrichment_result.output_path)
+        else:
+            compiled = compile_snapshot(output_dir, compiled_output)
     except (LexiconDependencyError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -933,12 +939,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     enrich = subparsers.add_parser('enrich', help='write learner-facing enrichment rows for a snapshot directory')
     enrich.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')
-    enrich.add_argument('--output', help='optional output path for enrichments.jsonl')
+    enrich.add_argument('--output', help='optional output path for realtime `words.enriched.jsonl` or legacy per-sense `enrichments.jsonl`')
     enrich.add_argument('--prompt-version', default='v1', help='prompt version tag for generated enrichment rows')
     enrich.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='enrichment provider mode')
     enrich.add_argument('--model', help='optional model override for this enrichment run')
     enrich.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for real endpoint runs')
-    enrich.add_argument('--mode', choices=['per_sense', 'per_word'], default='per_sense', help='enrichment execution mode')
+    enrich.add_argument('--mode', choices=['per_sense', 'per_word'], default='per_word', help='enrichment execution mode')
     enrich.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel lexeme jobs for per_word enrichment mode')
     enrich.add_argument('--resume', action='store_true', help='resume a prior per_word enrichment run using the checkpoint file')
     enrich.add_argument('--checkpoint-path', help='optional override path for the per_word checkpoint JSONL file')

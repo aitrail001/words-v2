@@ -26,7 +26,7 @@ Summarize request, job, result, and QC counts for a snapshot directory.
 
 ### `batch-ingest`
 
-Convert a completed batch output JSONL file into `batch_results.jsonl`.
+Convert a completed batch output JSONL file into `batch_results.jsonl`, materialize accepted `word` rows into `words.enriched.jsonl`, and write failed materializations to `words.regenerate.jsonl`.
 
 ### `batch-retry`
 
@@ -49,6 +49,7 @@ snapshot/
   batch_requests.jsonl
   batch_jobs.jsonl
   batch_results.jsonl
+  words.regenerate.jsonl
   batch_qc.jsonl
   enrichment_review_queue.jsonl
   batches/
@@ -61,11 +62,11 @@ snapshot/
 
 Reference, phrase, and word families remain separate input sources. All joins across prepare, submit, ingest, retry, and QC use `custom_id`.
 
-`compile-export` now writes family-aware compiled outputs when the corresponding snapshot source files exist. `import-db` can dry-run those directory layouts and count the families, and the backend schema now supports phrase and reference writes as well.
+`compile-export` still writes family-aware compiled outputs when the corresponding snapshot source files exist. `import-db` can dry-run those directory layouts and count the families, and the backend schema now supports phrase and reference writes as well. Realtime per-word enrichment now skips that separate compile step and writes final `words.enriched.jsonl` rows directly.
 
 `batch-qc` produces the initial flagged review queue, and `review-apply` replays approved overrides onto the persisted QC verdict rows before the next compile/import pass.
 
-Realtime exports now emit artifact-specific sidecars such as `words.enriched.review_qc.jsonl` and `words.enriched.review_queue.jsonl` through the same shared review-prep logic that batch QC uses. That gives `word`, `phrase`, and `reference` artifacts the same deterministic warning labels, review priority, and queue semantics before human review, without forcing realtime runs through batch transport ledgers.
+Realtime and batch word flows now share the same post-generation word-level validation/materialization rules. Realtime applies them inline before persistence; batch applies them during ingest/finalize, then sends failures to `words.regenerate.jsonl` for human rerun decisions.
 
 ## Compiled Review Staging
 

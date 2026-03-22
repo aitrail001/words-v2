@@ -11,7 +11,6 @@ from tools.lexicon.enrich import (
     NodeOpenAICompatibleResponsesClient,
     OpenAICompatibleResponsesClient,
     _default_node_runner,
-    _default_transport,
 )
 from tools.lexicon.errors import LexiconDependencyError
 from tools.lexicon.jsonl_io import read_jsonl, write_jsonl
@@ -143,7 +142,6 @@ def _client_for_mode(*, settings: LexiconSettings, provider_mode: str, model_nam
             endpoint=settings.llm_base_url,
             api_key=settings.llm_api_key,
             model=str(effective_model),
-            transport=_default_transport,
             reasoning_effort=reasoning_effort or settings.llm_reasoning_effort,
         )
     raise ValueError(f"Unsupported provider mode: {provider_mode}")

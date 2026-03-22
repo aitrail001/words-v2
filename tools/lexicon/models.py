@@ -182,6 +182,7 @@ class EnrichmentRecord(SerializableRecord):
     decision: str = "keep_standard"
     base_word: str | None = None
     translations: dict[str, dict[str, Any]] | None = None
+    phonetics: dict[str, dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +210,7 @@ class CompiledWordRecord(SerializableRecord):
     senses: list[dict[str, Any]]
     confusable_words: list[dict[str, str]]
     generated_at: str
+    phonetics: dict[str, dict[str, Any]] | None = None
     entry_id: str | None = None
     entry_type: str = "word"
     normalized_form: str | None = None
@@ -239,4 +241,5 @@ class CompiledWordRecord(SerializableRecord):
             "senses": self.senses,
             "confusable_words": self.confusable_words,
             "generated_at": self.generated_at,
+            "phonetics": self.phonetics,
         }

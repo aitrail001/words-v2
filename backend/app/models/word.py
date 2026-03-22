@@ -25,6 +25,7 @@ class Word(Base):
     )
     word: Mapped[str] = mapped_column(String(255), nullable=False)
     language: Mapped[str] = mapped_column(String(10), nullable=False, insert_default="en")
+    phonetics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     phonetic: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phonetic_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     phonetic_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)

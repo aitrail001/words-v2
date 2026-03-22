@@ -16,12 +16,18 @@ class TestWordEnrichmentFields:
         word = Word(
             word="bank",
             language="en",
+            phonetics={
+                "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+                "uk": {"ipa": "/bæŋk/", "confidence": 0.98},
+                "au": {"ipa": "/bæŋk/", "confidence": 0.97},
+            },
             phonetic_source="llm",
             phonetic_confidence=0.9,
             cefr_level="B1",
             learner_part_of_speech=["noun"],
             confusable_words=[{"word": "bench", "note": "Different object."}],
         )
+        assert word.phonetics["us"]["ipa"] == "/bæŋk/"
         assert word.phonetic_source == "llm"
         assert word.phonetic_confidence == 0.9
         assert word.phonetic_enrichment_run_id is None

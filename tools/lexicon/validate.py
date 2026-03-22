@@ -26,6 +26,26 @@ REQUIRED_COMPILED_FIELDS = [
     "generated_at",
 ]
 
+_PHONETIC_ACCENTS = ("us", "uk", "au")
+
+
+def _validate_compiled_phonetics(value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return ["phonetics must be an object"]
+    errors: list[str] = []
+    for accent in _PHONETIC_ACCENTS:
+        payload = value.get(accent)
+        if not isinstance(payload, dict):
+            errors.append(f"phonetics.{accent} must be an object")
+            continue
+        ipa = payload.get("ipa")
+        if not isinstance(ipa, str) or not ipa.strip():
+            errors.append(f"phonetics.{accent}.ipa must be a non-empty string")
+        confidence = payload.get("confidence")
+        if not isinstance(confidence, (int, float)) or float(confidence) < 0 or float(confidence) > 1:
+            errors.append(f"phonetics.{accent}.confidence must be a number between 0 and 1")
+    return errors
+
 
 def _validate_compiled_sense_translations(value: Any, *, sense_index: int, example_count: int) -> list[str]:
     errors: list[str] = []
@@ -142,6 +162,7 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
         errors.append("senses must be a non-empty list")
 
     if isinstance(senses, list) and (entry_type in {None, "word"}):
+        errors.extend(_validate_compiled_phonetics(payload.get("phonetics")))
         max_senses = compiled_meaning_limit(payload.get("frequency_rank"))
         if len(senses) > max_senses:
             errors.append(f"senses exceeds allowed limit {max_senses} for frequency_rank {payload.get('frequency_rank')}")

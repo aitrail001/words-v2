@@ -313,13 +313,32 @@ def _sync_word_level_enrichment_fields(word: Any, row: dict[str, Any], run: Any 
         word.learner_generated_at = _parse_timestamp(row.get("generated_at"))
     if row.get("generated_at") is not None and hasattr(word, "generated_at"):
         word.generated_at = _parse_timestamp(row.get("generated_at"))
-    if row.get("phonetic") is not None and hasattr(word, "phonetic"):
-        word.phonetic = row.get("phonetic")
-    if row.get("phonetic") is not None and hasattr(word, "phonetic_source"):
+    phonetic = row.get("phonetic")
+    phonetic_confidence = row.get("phonetic_confidence")
+    phonetics = row.get("phonetics")
+    if isinstance(phonetics, dict) and hasattr(word, "phonetics"):
+        word.phonetics = {
+            accent: dict(payload)
+            for accent, payload in phonetics.items()
+            if isinstance(accent, str) and isinstance(payload, dict)
+        }
+    if phonetic is None and isinstance(phonetics, dict):
+        for accent in ("us", "uk", "au"):
+            accent_payload = phonetics.get(accent)
+            if not isinstance(accent_payload, dict):
+                continue
+            ipa = accent_payload.get("ipa")
+            if isinstance(ipa, str) and ipa.strip():
+                phonetic = ipa.strip()
+                phonetic_confidence = accent_payload.get("confidence")
+                break
+    if phonetic is not None and hasattr(word, "phonetic"):
+        word.phonetic = phonetic
+    if phonetic is not None and hasattr(word, "phonetic_source"):
         word.phonetic_source = source_type
-    if row.get("phonetic_confidence") is not None and hasattr(word, "phonetic_confidence"):
-        word.phonetic_confidence = _normalize_confidence(row.get("phonetic_confidence"))
-    if run is not None and row.get("phonetic") is not None and hasattr(word, "phonetic_enrichment_run_id"):
+    if phonetic_confidence is not None and hasattr(word, "phonetic_confidence"):
+        word.phonetic_confidence = _normalize_confidence(phonetic_confidence)
+    if run is not None and phonetic is not None and hasattr(word, "phonetic_enrichment_run_id"):
         word.phonetic_enrichment_run_id = run.id
 
 
