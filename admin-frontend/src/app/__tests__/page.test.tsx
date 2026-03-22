@@ -25,6 +25,7 @@ describe("AdminHomePage", () => {
     render(<AdminHomePage />);
 
     expect(screen.getByTestId("admin-home-page")).toBeInTheDocument();
+    expect(screen.getByText(/Compiled Review as the default review path/i)).toBeInTheDocument();
     expect(screen.getByTestId("admin-home-lexicon-link")).toHaveAttribute(
       "href",
       "/lexicon/ops",
