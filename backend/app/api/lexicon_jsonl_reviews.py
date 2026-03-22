@@ -11,10 +11,6 @@ from app.api.auth import get_current_admin_user
 from app.core.config import Settings, get_settings
 from app.models.user import User
 from app.services.lexicon_jsonl_reviews import (
-    APPROVED_FILENAME,
-    DECISIONS_FILENAME,
-    REGENERATE_FILENAME,
-    REJECTED_FILENAME,
     build_materialized_review_outputs,
     load_jsonl_review_session,
     materialize_jsonl_review_outputs,
