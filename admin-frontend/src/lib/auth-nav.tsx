@@ -69,7 +69,7 @@ export function AuthNavigation() {
         className="hover:text-gray-900"
         data-testid="nav-lexicon-legacy-link"
       >
-        Legacy
+        Legacy Tools
       </Link>
       {isAuthenticated ? (
         <button

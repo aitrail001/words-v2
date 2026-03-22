@@ -56,7 +56,7 @@ export type LexiconCompiledReviewItemUpdateRequest = {
   decision_reason?: string | null;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 async function downloadExport(path: string): Promise<string> {
   const token = readAccessToken();
@@ -95,6 +95,17 @@ export const importLexiconCompiledReviewBatch = async (input: {
   if (input.sourceReference) formData.append("source_reference", input.sourceReference);
   return apiClient.post<LexiconCompiledReviewBatch>("/lexicon-compiled-reviews/batches/import", formData);
 };
+
+export const importLexiconCompiledReviewBatchByPath = (input: {
+  artifactPath: string;
+  sourceType?: string;
+  sourceReference?: string;
+}): Promise<LexiconCompiledReviewBatch> =>
+  apiClient.post<LexiconCompiledReviewBatch>("/lexicon-compiled-reviews/batches/import-by-path", {
+    artifact_path: input.artifactPath,
+    source_type: input.sourceType,
+    source_reference: input.sourceReference,
+  });
 
 export const downloadApprovedCompiledReviewExport = (batchId: string): Promise<string> =>
   downloadExport(`/lexicon-compiled-reviews/batches/${batchId}/export/approved`);

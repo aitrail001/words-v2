@@ -2,11 +2,14 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
+from app.main import app
 from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
 from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
@@ -259,6 +262,56 @@ class TestLexiconCompiledReviewApi:
 
         assert response.status_code == 201
         assert response.json()["id"] == str(existing_batch.id)
+
+    @pytest.mark.asyncio
+    async def test_import_compiled_batch_by_path_success(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        existing_batch_result = MagicMock()
+        existing_batch_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [user_result, existing_batch_result]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        snapshot_dir = tmp_path / "snapshot-001"
+        snapshot_dir.mkdir()
+        compiled_path = snapshot_dir / "words.enriched.jsonl"
+        compiled_path.write_bytes(build_jsonl_bytes(make_item(uuid.uuid4()).compiled_payload))
+
+        response = await client.post(
+            "/api/lexicon-compiled-reviews/batches/import-by-path",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"artifact_path": str(compiled_path), "source_reference": "snapshot-001"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["artifact_filename"] == "words.enriched.jsonl"
+        assert data["artifact_family"] == "compiled_words"
+        assert data["source_reference"] == "snapshot-001"
+
+    @pytest.mark.asyncio
+    async def test_import_compiled_batch_by_path_rejects_unsafe_paths(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        response = await client.post(
+            "/api/lexicon-compiled-reviews/batches/import-by-path",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"artifact_path": "/tmp/not-allowed/words.enriched.jsonl"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Path must stay within the allowed roots"
 
     @pytest.mark.asyncio
     async def test_patch_rejected_item_creates_regeneration_request_and_decision_export(self, client, mock_db):

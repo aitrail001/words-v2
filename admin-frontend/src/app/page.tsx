@@ -32,7 +32,7 @@ export default function AdminHomePage() {
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         <h3 className="text-lg font-semibold">Lexicon Review</h3>
         <p className="mt-2 text-sm text-gray-600">
-          Review staged lexicon batches, approve items, publish approved rows, and inspect imported learner-facing data.
+          Start in Lexicon Ops, use Compiled Review as the default review path, then import approved rows and verify the final DB state.
         </p>
         <Link
           href="/lexicon/ops"

@@ -155,18 +155,25 @@ Important:
 The admin portal now exposes the current lexicon workflow as separate tools instead of a single mixed review page:
 
 - `/lexicon/ops`
-  - snapshot-first hub
+  - canonical workflow shell
   - inspects `data/lexicon/snapshots/*`
+  - derives the current workflow stage, preferred review artifact, preferred import artifact, and next recommended action from snapshot artifacts
+  - shows which steps still happen outside the admin portal
+  - disables review/import actions when the required compiled or approved artifacts do not exist yet, instead of sending operators into empty downstream pages
   - deep-links into review/import/inspection flows with the selected snapshot prefilled
 - `/lexicon/compiled-review`
   - DB-backed review staging for immutable compiled artifacts
   - imports compiled JSONL into review tables, not final lexicon tables
+  - supports both file upload and import-by-path for an existing compiled artifact selected in `/lexicon/ops`
+  - when launched from `/lexicon/ops`, it should auto-import the selected compiled artifact into review staging and keep snapshot/source-reference context visible in the batch list
 - `/lexicon/jsonl-review`
   - file-backed review path for compiled artifacts plus `review.decisions.jsonl`
   - keeps JSONL as source of truth and never imports review state into review tables
+  - when launched from `/lexicon/ops`, it should auto-load the selected artifact and sidecar paths instead of opening as a blank form
 - `/lexicon/import-db`
   - explicit final import step for approved compiled JSONL
   - supports dry-run and real import
+  - when launched from `/lexicon/ops`, it should arrive prefilled and auto-run the dry-run, but still require an explicit click for the final DB write
 - `/lexicon/db-inspector`
   - post-import verification against the real lexicon DB
 - `/lexicon/legacy`
@@ -175,10 +182,18 @@ The admin portal now exposes the current lexicon workflow as separate tools inst
 Recommended operator order:
 
 1. start in `/lexicon/ops`
-2. choose `compiled-review` or `jsonl-review`
-3. export or materialize approved JSONL
-4. run `/lexicon/import-db`
-5. confirm the final state in `/lexicon/db-inspector`
+2. follow the stage guidance shown for the selected snapshot
+3. use `/lexicon/compiled-review` as the default review path, or `/lexicon/jsonl-review` as the alternate file-backed path
+4. export or materialize approved JSONL
+5. run `/lexicon/import-db`
+6. confirm the final state in `/lexicon/db-inspector`
+
+Important:
+
+- the admin portal is still a workflow shell around an offline lexicon pipeline
+- `build-base`, optional ambiguous-form adjudication, `enrich`, `validate`, `compile-export`, and the batch prepare/submit/status/ingest/qc steps still happen outside the portal
+- `/lexicon/ops` should tell you which of those steps are still outstanding for the selected snapshot
+- the admin frontend should use same-origin `/api` in the browser and a server-side `BACKEND_URL` proxy; do not flip `NEXT_PUBLIC_API_URL` between `localhost` and `backend` just to switch between macOS browser use and Docker-internal Playwright
 
 Run an import dry-run summary:
 

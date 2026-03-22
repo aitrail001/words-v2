@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
@@ -22,6 +22,7 @@ export default function LexiconImportDbPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<LexiconImportResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const autoStart = searchParam("autostart") === "1";
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -38,8 +39,13 @@ export default function LexiconImportDbPage() {
     () => Object.entries(result?.import_summary ?? {}),
     [result?.import_summary],
   );
+  const hasContext =
+    Boolean(searchParam("inputPath") || searchParam("sourceReference") || searchParam("language")) ||
+    inputPath.trim().length > 0 ||
+    sourceReference.trim().length > 0 ||
+    language.trim() !== "en";
 
-  const execute = async (mode: "dry-run" | "run") => {
+  const execute = useCallback(async (mode: "dry-run" | "run") => {
     if (!canRun) return;
     setLoading(true);
     setMessage(null);
@@ -60,10 +66,28 @@ export default function LexiconImportDbPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [canRun, inputPath, language, sourceReference]);
+
+  useEffect(() => {
+    if (!autoStart || !inputPath.trim() || loading || result) {
+      return;
+    }
+    void execute("dry-run");
+  }, [autoStart, execute, inputPath, loading, result]);
 
   return (
     <div className="space-y-6" data-testid="lexicon-import-db-page">
+      {hasContext ? (
+        <section className="rounded-lg border border-gray-200 bg-slate-50 p-4 text-sm text-slate-800" data-testid="lexicon-import-db-context">
+          <p className="font-medium">Workflow context</p>
+          <p className="mt-1">Input path: {inputPath || "—"}</p>
+          <p>Source reference: {sourceReference || "—"}</p>
+          <p>Language: {language || "—"}</p>
+          <p className="mt-1">Stage: Final DB write</p>
+          <p>Next step: Open DB Inspector after import to verify the final state.</p>
+        </section>
+      ) : null}
+
       <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>

@@ -74,7 +74,8 @@ The shipped admin review path for compiled learner-facing artifacts is DB-backed
 Flow:
 
 1. Compile a learner-facing JSONL artifact such as `words.enriched.jsonl`
-2. Import that artifact into the admin compiled-review surface at `/lexicon/compiled-review`
+2. Open `/lexicon/ops` to confirm the selected snapshot stage and preferred review artifact
+3. Import that artifact into the admin compiled-review surface at `/lexicon/compiled-review`
 3. Review rows in the admin UI
 4. Export one or more JSONL outputs:
    - approved compiled rows
@@ -89,3 +90,5 @@ Important:
 - The compiled-review import writes to dedicated review-staging tables, not to final word/meaning/reference tables.
 - Final lexicon data is still written only by `import-db`.
 - Review decisions remain an overlay on immutable compiled artifacts.
+- `/lexicon/ops` is now the canonical workflow shell for snapshot-first operators and shows which steps still happen outside the admin portal.
+- `/lexicon/compiled-review` now supports both upload-based import and import-by-path for an existing compiled artifact chosen from `/lexicon/ops`.

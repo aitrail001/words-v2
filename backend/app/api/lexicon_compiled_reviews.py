@@ -12,12 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_admin_user
+from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
 from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.lexicon_artifact_review_item_event import LexiconArtifactReviewItemEvent
 from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
 from app.models.user import User
+from app.services.lexicon_jsonl_reviews import resolve_repo_local_path
 
 router = APIRouter()
 
@@ -93,6 +95,12 @@ class LexiconCompiledReviewItemResponse(BaseModel):
 class LexiconCompiledReviewItemUpdateRequest(BaseModel):
     review_status: str
     decision_reason: str | None = None
+
+
+class LexiconCompiledReviewImportByPathRequest(BaseModel):
+    artifact_path: str
+    source_type: str | None = "lexicon_compiled_export"
+    source_reference: str | None = None
 
 
 class LexiconCompiledReviewDecisionResponse(BaseModel):
@@ -207,6 +215,96 @@ def _payload_sha256(payload: Any) -> str:
 
 def _artifact_sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _parse_compiled_rows(payload_bytes: bytes) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(payload_bytes.decode("utf-8").splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Compiled review import line {line_number} is not valid JSON: {exc.msg}") from exc
+        errors = _validate_compiled_record(row)
+        if errors:
+            raise HTTPException(status_code=400, detail=f"Compiled review import validation failed: {'; '.join(errors)}")
+        rows.append(row)
+    if not rows:
+        raise HTTPException(status_code=400, detail="Compiled review import file is empty")
+    seen_entry_ids: set[str] = set()
+    for row in rows:
+        entry_id = str(row.get("entry_id") or "").strip()
+        if entry_id in seen_entry_ids:
+            raise HTTPException(status_code=400, detail=f"Compiled review import contains duplicate entry_id: {entry_id}")
+        seen_entry_ids.add(entry_id)
+    return rows
+
+
+async def _persist_compiled_review_batch(
+    *,
+    artifact_filename: str,
+    payload_bytes: bytes,
+    rows: list[dict[str, Any]],
+    source_type: str | None,
+    source_reference: str | None,
+    current_user: User,
+    db: AsyncSession,
+) -> LexiconCompiledReviewBatchResponse:
+    artifact_sha256 = _artifact_sha256_bytes(payload_bytes)
+    existing_result = await db.execute(
+        select(LexiconArtifactReviewBatch).where(LexiconArtifactReviewBatch.artifact_sha256 == artifact_sha256)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing is not None:
+        return _batch_response(existing)
+
+    artifact_family = _artifact_family(artifact_filename, rows)
+    batch = LexiconArtifactReviewBatch(
+        artifact_family=artifact_family,
+        artifact_filename=artifact_filename,
+        artifact_sha256=artifact_sha256,
+        artifact_row_count=len(rows),
+        compiled_schema_version=str(rows[0].get("schema_version") or ""),
+        snapshot_id=str(rows[0].get("snapshot_id") or "") or None,
+        source_type=source_type,
+        source_reference=source_reference,
+        status="pending_review",
+        total_items=len(rows),
+        pending_count=len(rows),
+        approved_count=0,
+        rejected_count=0,
+        created_by=current_user.id,
+    )
+    db.add(batch)
+    await db.flush()
+
+    for row in rows:
+        item = LexiconArtifactReviewItem(
+            batch_id=batch.id,
+            entry_id=str(row.get("entry_id") or ""),
+            entry_type=str(row.get("entry_type") or "word"),
+            normalized_form=str(row.get("normalized_form") or "") or None,
+            display_text=str(row.get("display_form") or row.get("word") or row.get("normalized_form") or ""),
+            entity_category=str(row.get("entity_category") or "") or None,
+            language=str(row.get("language") or "en"),
+            frequency_rank=row.get("frequency_rank"),
+            cefr_level=str(row.get("cefr_level") or "") or None,
+            validator_status="pass",
+            validator_issues=[],
+            qc_status=None,
+            qc_score=None,
+            qc_issues=[],
+            compiled_payload=row,
+            compiled_payload_sha256=_payload_sha256(row),
+            search_text=" ".join(
+                str(value) for value in [row.get("entry_id"), row.get("normalized_form"), row.get("display_form"), row.get("word")] if value
+            ),
+        )
+        db.add(item)
+    await db.commit()
+    return _batch_response(batch)
 
 
 def _artifact_family(filename: str, rows: list[dict[str, Any]]) -> str:
@@ -383,82 +481,39 @@ async def import_compiled_review_batch(
     db: AsyncSession = Depends(get_db),
 ):
     payload_bytes = await file.read()
-    rows: list[dict[str, Any]] = []
-    for line_number, line in enumerate(payload_bytes.decode("utf-8").splitlines(), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail=f"Compiled review import line {line_number} is not valid JSON: {exc.msg}") from exc
-        errors = _validate_compiled_record(row)
-        if errors:
-            raise HTTPException(status_code=400, detail=f"Compiled review import validation failed: {'; '.join(errors)}")
-        rows.append(row)
-    if not rows:
-        raise HTTPException(status_code=400, detail="Compiled review import file is empty")
-
-    seen_entry_ids: set[str] = set()
-    for row in rows:
-        entry_id = str(row.get("entry_id") or "").strip()
-        if entry_id in seen_entry_ids:
-            raise HTTPException(status_code=400, detail=f"Compiled review import contains duplicate entry_id: {entry_id}")
-        seen_entry_ids.add(entry_id)
-
-    artifact_sha256 = _artifact_sha256_bytes(payload_bytes)
-    existing_result = await db.execute(
-        select(LexiconArtifactReviewBatch).where(LexiconArtifactReviewBatch.artifact_sha256 == artifact_sha256)
-    )
-    existing = existing_result.scalar_one_or_none()
-    if existing is not None:
-        return _batch_response(existing)
-
-    artifact_family = _artifact_family(file.filename or "", rows)
-    batch = LexiconArtifactReviewBatch(
-        artifact_family=artifact_family,
+    rows = _parse_compiled_rows(payload_bytes)
+    return await _persist_compiled_review_batch(
         artifact_filename=file.filename or "compiled.jsonl",
-        artifact_sha256=artifact_sha256,
-        artifact_row_count=len(rows),
-        compiled_schema_version=str(rows[0].get("schema_version") or ""),
-        snapshot_id=str(rows[0].get("snapshot_id") or "") or None,
+        payload_bytes=payload_bytes,
+        rows=rows,
         source_type=source_type,
         source_reference=source_reference,
-        status="pending_review",
-        total_items=len(rows),
-        pending_count=len(rows),
-        approved_count=0,
-        rejected_count=0,
-        created_by=current_user.id,
+        current_user=current_user,
+        db=db,
     )
-    db.add(batch)
-    await db.flush()
 
-    for row in rows:
-        item = LexiconArtifactReviewItem(
-            batch_id=batch.id,
-            entry_id=str(row.get("entry_id") or ""),
-            entry_type=str(row.get("entry_type") or "word"),
-            normalized_form=str(row.get("normalized_form") or "") or None,
-            display_text=str(row.get("display_form") or row.get("word") or row.get("normalized_form") or ""),
-            entity_category=str(row.get("entity_category") or "") or None,
-            language=str(row.get("language") or "en"),
-            frequency_rank=row.get("frequency_rank"),
-            cefr_level=str(row.get("cefr_level") or "") or None,
-            validator_status="pass",
-            validator_issues=[],
-            qc_status=None,
-            qc_score=None,
-            qc_issues=[],
-            compiled_payload=row,
-            compiled_payload_sha256=_payload_sha256(row),
-            search_text=" ".join(
-                str(value) for value in [row.get("entry_id"), row.get("normalized_form"), row.get("display_form"), row.get("word")] if value
-            ),
-        )
-        db.add(item)
-    await db.commit()
-    return _batch_response(batch)
+
+@router.post("/batches/import-by-path", response_model=LexiconCompiledReviewBatchResponse, status_code=status.HTTP_201_CREATED)
+async def import_compiled_review_batch_by_path(
+    request: LexiconCompiledReviewImportByPathRequest,
+    current_user: User = Depends(get_current_admin_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+):
+    artifact_path = resolve_repo_local_path(request.artifact_path, settings=settings)
+    if artifact_path.suffix != ".jsonl":
+        raise HTTPException(status_code=400, detail="Artifact path must point to a .jsonl file")
+    payload_bytes = artifact_path.read_bytes()
+    rows = _parse_compiled_rows(payload_bytes)
+    return await _persist_compiled_review_batch(
+        artifact_filename=artifact_path.name,
+        payload_bytes=payload_bytes,
+        rows=rows,
+        source_type=request.source_type,
+        source_reference=request.source_reference,
+        current_user=current_user,
+        db=db,
+    )
 
 
 @router.get("/batches", response_model=list[LexiconCompiledReviewBatchResponse])

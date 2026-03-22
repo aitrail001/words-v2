@@ -43,6 +43,7 @@ export default function LexiconJsonlReviewPage() {
   const [artifactPath, setArtifactPath] = useState("");
   const [decisionsPath, setDecisionsPath] = useState("");
   const [outputDir, setOutputDir] = useState("");
+  const [sourceReference, setSourceReference] = useState("");
   const [session, setSession] = useState<LexiconJsonlReviewSession | null>(null);
   const [selectedItemId, setSelectedItemId] = useState("");
   const [search, setSearch] = useState("");
@@ -56,6 +57,9 @@ export default function LexiconJsonlReviewPage() {
   const decisionsPathHint = "Optional. Defaults to review.decisions.jsonl beside the artifact.";
   const outputDirHint = "Optional. Defaults to the artifact directory when materializing outputs.";
   const selectedCount = session?.items.length ?? 0;
+  const contextArtifactPath = session?.artifact_path ?? artifactPath;
+  const contextDecisionsPath = session?.decisions_path ?? decisionsPath;
+  const contextOutputDir = session?.output_dir ?? outputDir;
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -93,10 +97,12 @@ export default function LexiconJsonlReviewPage() {
     const nextArtifactPath = searchParam("artifactPath");
     const nextDecisionsPath = searchParam("decisionsPath");
     const nextOutputDir = searchParam("outputDir");
+    const nextSourceReference = searchParam("sourceReference");
     if (nextArtifactPath) {
       setArtifactPath(nextArtifactPath);
       setDecisionsPath(nextDecisionsPath);
       setOutputDir(nextOutputDir);
+      setSourceReference(nextSourceReference);
       void loadSessionForPaths(nextArtifactPath, nextDecisionsPath, nextOutputDir);
     }
   }, [loadSessionForPaths]);
@@ -246,6 +252,18 @@ export default function LexiconJsonlReviewPage() {
   return (
     <div className="relative isolate mx-auto w-full max-w-[1900px] space-y-6 px-4 py-6 xl:px-6 2xl:px-8" data-testid="lexicon-jsonl-review-page">
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-64 bg-[radial-gradient(circle_at_top_right,_rgba(59,130,246,0.18),_transparent_35%),radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),_transparent_30%)]" />
+
+      {(contextArtifactPath || contextDecisionsPath || contextOutputDir || sourceReference) ? (
+        <section className="rounded-2xl border border-sky-200 bg-sky-50/90 p-4 text-sm text-sky-900 shadow-sm" data-testid="lexicon-jsonl-review-context">
+          <p className="font-medium">Workflow context</p>
+          {sourceReference ? <p className="mt-1">Source reference: {sourceReference}</p> : null}
+          <p>Artifact: {contextArtifactPath || "—"}</p>
+          <p>Decisions: {contextDecisionsPath || "—"}</p>
+          <p>Output dir: {contextOutputDir || "—"}</p>
+          <p className="mt-1">Stage: Alternate review path</p>
+          <p>Next step: Materialize approved rows, then open Import DB.</p>
+        </section>
+      ) : null}
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-[0_18px_60px_-36px_rgba(15,23,42,0.35)] backdrop-blur">
         <div className="grid gap-6 p-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(18rem,22rem)] xl:p-8">

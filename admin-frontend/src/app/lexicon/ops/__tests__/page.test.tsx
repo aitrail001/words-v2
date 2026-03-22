@@ -52,9 +52,17 @@ describe("LexiconOpsPage", () => {
         ambiguous_forms: 9,
       },
       has_enrichments: true,
-      has_compiled_export: false,
+      has_compiled_export: true,
       has_selection_decisions: true,
       has_ambiguous_forms: true,
+      workflow_stage: "approved_ready_for_import",
+      recommended_action: "open_import_db",
+      preferred_review_artifact_path: "/data/lexicon/snapshots/words-100-20260312/words.enriched.jsonl",
+      preferred_import_artifact_path: "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+      outside_portal_steps: [
+        "Run import-db with /data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+        "Verify the imported rows in DB Inspector after import-db completes for snapshot_path /data/lexicon/snapshots/words-100-20260312",
+      ],
     },
     {
       snapshot: "words-50-20260311",
@@ -73,6 +81,39 @@ describe("LexiconOpsPage", () => {
       has_compiled_export: true,
       has_selection_decisions: true,
       has_ambiguous_forms: false,
+      workflow_stage: "compiled_ready_for_review",
+      recommended_action: "open_compiled_review",
+      preferred_review_artifact_path: "/data/lexicon/snapshots/words-50-20260311/words.enriched.jsonl",
+      preferred_import_artifact_path: null,
+      outside_portal_steps: [
+        "Review /data/lexicon/snapshots/words-50-20260311/words.enriched.jsonl in Compiled Review or JSONL Review",
+        "Materialize or export approved.jsonl beside snapshot_path /data/lexicon/snapshots/words-50-20260311 before import-db",
+      ],
+    },
+    {
+      snapshot: "words-raw-20260310",
+      snapshot_path: "/data/lexicon/snapshots/words-raw-20260310",
+      snapshot_id: "lexicon-20260310-wordnet-wordfreq",
+      updated_at: "2026-03-10T07:40:00Z",
+      artifact_counts: {
+        lexemes: 80,
+        senses: 240,
+        enrichments: 0,
+        compiled_words: 0,
+        selection_decisions: 0,
+        ambiguous_forms: 0,
+      },
+      has_enrichments: false,
+      has_compiled_export: false,
+      has_selection_decisions: false,
+      has_ambiguous_forms: false,
+      workflow_stage: "base_artifacts",
+      recommended_action: "run_compile_export",
+      preferred_review_artifact_path: null,
+      preferred_import_artifact_path: null,
+      outside_portal_steps: [
+        "Run enrich and compile-export outside the portal for snapshot_path /data/lexicon/snapshots/words-raw-20260310",
+      ],
     },
   ];
 
@@ -93,6 +134,14 @@ describe("LexiconOpsPage", () => {
     has_compiled_export: false,
     has_selection_decisions: true,
     has_ambiguous_forms: true,
+    workflow_stage: "approved_ready_for_import",
+    recommended_action: "open_import_db",
+    preferred_review_artifact_path: "/data/lexicon/snapshots/words-100-20260312/words.enriched.jsonl",
+    preferred_import_artifact_path: "/data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+    outside_portal_steps: [
+      "Run import-db with /data/lexicon/snapshots/words-100-20260312/approved.jsonl",
+      "Verify the imported rows in DB Inspector after import-db completes for snapshot_path /data/lexicon/snapshots/words-100-20260312",
+    ],
     artifacts: [
       {
         file_name: "lexemes.jsonl",
@@ -257,9 +306,24 @@ describe("LexiconOpsPage", () => {
     await user.click(screen.getByTestId("lexicon-ops-open-db-inspector"));
 
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/jsonl-review"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("artifactPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Fwords.enriched.jsonl"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("autostart=1"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/compiled-review"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/import-db"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Fapproved.jsonl"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/db-inspector"));
+  });
+
+  it("shows workflow shell guidance for the selected snapshot", async () => {
+    render(<LexiconOpsPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-ops-workflow-shell")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-workflow-stage")).toHaveTextContent("Import approved rows"),
+    );
+    expect(screen.getByTestId("lexicon-ops-next-step")).toHaveTextContent("Open Import DB");
+    expect(screen.getByTestId("lexicon-ops-outside-portal")).toHaveTextContent("approved.jsonl");
+    expect(screen.getByTestId("lexicon-ops-outside-portal")).toHaveTextContent("snapshot_path");
   });
 
   it("shows a final-import panel for the selected snapshot", async () => {
@@ -274,5 +338,59 @@ describe("LexiconOpsPage", () => {
     );
     expect(screen.getByTestId("lexicon-ops-import-dry-run-button")).toBeInTheDocument();
     expect(screen.getByTestId("lexicon-ops-import-run-button")).toBeInTheDocument();
+  });
+
+  it("disables review and import actions when the selected snapshot is not ready", async () => {
+    const user = userEvent.setup();
+    mockGetLexiconOpsSnapshot.mockImplementation(async (snapshotName: string) => {
+      if (snapshotName === "words-raw-20260310") {
+        return {
+          ...detail,
+          snapshot: "words-raw-20260310",
+          snapshot_path: "/data/lexicon/snapshots/words-raw-20260310",
+          snapshot_id: "lexicon-20260310-wordnet-wordfreq",
+          has_enrichments: false,
+          has_compiled_export: false,
+          has_selection_decisions: false,
+          workflow_stage: "base_artifacts",
+          recommended_action: "run_compile_export",
+          preferred_review_artifact_path: null,
+          preferred_import_artifact_path: null,
+          artifacts: [
+            {
+              file_name: "lexemes.jsonl",
+              exists: true,
+              row_count: 80,
+              size_bytes: 3200,
+              modified_at: "2026-03-10T07:35:00Z",
+              read_error: null,
+            },
+          ],
+        };
+      }
+      return detail;
+    });
+
+    render(<LexiconOpsPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-ops-snapshot-words-raw-20260310")).toBeInTheDocument());
+    await user.click(screen.getByTestId("lexicon-ops-snapshot-words-raw-20260310"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-action-reasons")).toHaveTextContent("Run compile-export first"),
+    );
+
+    expect(screen.getByTestId("lexicon-ops-open-jsonl-review")).toBeDisabled();
+    expect(screen.getByTestId("lexicon-ops-open-compiled-review")).toBeDisabled();
+    expect(screen.getByTestId("lexicon-ops-open-import-db")).toBeDisabled();
+    expect(screen.getByTestId("lexicon-ops-open-db-inspector")).not.toBeDisabled();
+
+    await user.click(screen.getByTestId("lexicon-ops-open-jsonl-review"));
+    await user.click(screen.getByTestId("lexicon-ops-open-compiled-review"));
+    await user.click(screen.getByTestId("lexicon-ops-open-import-db"));
+
+    expect(push).not.toHaveBeenCalledWith(expect.stringContaining("/lexicon/jsonl-review"));
+    expect(push).not.toHaveBeenCalledWith(expect.stringContaining("/lexicon/compiled-review"));
+    expect(push).not.toHaveBeenCalledWith(expect.stringContaining("/lexicon/import-db"));
   });
 });
