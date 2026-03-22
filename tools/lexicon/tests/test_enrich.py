@@ -29,7 +29,7 @@ from tools.lexicon.enrich import (
     read_snapshot_inputs,
 )
 from tools.lexicon.errors import LexiconDependencyError
-from tools.lexicon.models import EnrichmentRecord
+from tools.lexicon.models import EnrichmentRecord, LexemeRecord
 
 
 class _FakeResponsesAPI:
@@ -137,6 +137,33 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(outcome[0].phonetics["us"]["ipa"], "/run/")
             self.assertEqual(outcome[0].phonetics["uk"]["ipa"], "/run/")
             self.assertEqual(outcome[0].phonetics["au"]["ipa"], "/run/")
+
+    def test_placeholder_word_provider_supports_lexeme_only_snapshots(self) -> None:
+        settings = LexiconSettings.from_env({})
+        provider = build_placeholder_word_enrichment_provider(settings=settings)
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="lx_run",
+            lemma="run",
+            language="en",
+            wordfreq_rank=5,
+            is_wordnet_backed=False,
+            source_refs=["wordfreq"],
+            created_at="2026-03-07T00:00:00Z",
+        )
+        outcome = provider(
+            lexeme=lexeme,
+            senses=[],
+            settings=settings,
+            generated_at="2026-03-07T00:00:00Z",
+            generation_run_id="run-1",
+            prompt_version="v1",
+        )
+
+        self.assertEqual(outcome.decision, "keep_standard")
+        self.assertEqual(len(outcome.records), 1)
+        self.assertEqual(outcome.records[0].definition, "placeholder learner definition for run")
+        self.assertEqual(outcome.records[0].phonetics["us"]["ipa"], "/run/")
 
     def test_enrich_snapshot_writes_enrichments_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
