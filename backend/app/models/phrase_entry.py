@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, String, Text, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Float, String, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -21,6 +21,10 @@ class PhraseEntry(Base):
     cefr_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
     register_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
     brief_usage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compiled_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    seed_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

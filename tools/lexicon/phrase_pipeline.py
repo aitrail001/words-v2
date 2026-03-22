@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from tools.lexicon.ids import make_entry_id
-from tools.lexicon.inventory import build_seed_inventory, normalize_surface_text
+from tools.lexicon.inventory import normalize_surface_text
 from tools.lexicon.jsonl_io import write_jsonl
 
 
@@ -44,6 +44,7 @@ def build_phrase_snapshot_rows(
                 "phrase_kind": phrase_kind,
                 "language": str(raw_row.get("language") or "en").strip() or "en",
                 "source_provenance": list(raw_row.get("source_provenance") or [{"source": "phrase_seed"}]),
+                "seed_metadata": dict(raw_row.get("seed_metadata") or {}),
                 "created_at": timestamp,
             }
         )

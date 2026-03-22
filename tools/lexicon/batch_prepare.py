@@ -6,7 +6,34 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from tools.lexicon.batch_ledger import append_jsonl_rows, build_batch_custom_id, build_batch_job_rows, load_jsonl_rows, parse_batch_custom_id, write_jsonl_rows
+from tools.lexicon.enrich import build_phrase_enrichment_prompt
 from tools.lexicon.jsonl_io import write_jsonl
+from tools.lexicon.models import LexemeRecord
+from tools.lexicon.schemas.phrase_enrichment_schema import build_phrase_enrichment_response_schema
+
+
+def _response_text_format(response_schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "name": str(response_schema["name"]),
+        "schema": response_schema["schema"],
+        "strict": bool(response_schema.get("strict", True)),
+    }
+
+
+def _build_phrase_request_input(row: dict[str, Any]) -> str:
+    try:
+        lexeme = LexemeRecord(**row)
+    except TypeError:
+        display_form = str(row.get("display_form") or row.get("normalized_form") or row.get("entry_id") or "phrase").strip()
+        phrase_kind = str(row.get("phrase_kind") or "phrase").strip() or "phrase"
+        return (
+            "You are enriching a learner-facing English phrase entry.\n"
+            f"Display form: {display_form}\n"
+            f"Phrase kind: {phrase_kind}\n"
+            "Return structured learner-friendly phrase senses."
+        )
+    return build_phrase_enrichment_prompt(lexeme=lexeme)
 
 
 def build_batch_request_rows(
@@ -33,14 +60,27 @@ def build_batch_request_rows(
                 "custom_id": custom_id,
                 "method": "POST",
                 "url": "/responses",
-                "body": {
+                "body": (
+                    {
+                        "entry_kind": entry_kind,
+                        "entry_id": entry_id,
+                        "snapshot_id": snapshot_id,
+                        "model": model,
+                        "prompt_version": prompt_version,
+                        "source_row": dict(row),
+                        "input": _build_phrase_request_input(dict(row)),
+                        "text": {"format": _response_text_format(build_phrase_enrichment_response_schema())},
+                    }
+                    if entry_kind == "phrase"
+                    else {
                     "entry_kind": entry_kind,
                     "entry_id": entry_id,
                     "snapshot_id": snapshot_id,
                     "model": model,
                     "prompt_version": prompt_version,
                     "source_row": dict(row),
-                },
+                    }
+                ),
             }
         )
     return request_rows

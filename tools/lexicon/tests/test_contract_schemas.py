@@ -53,7 +53,7 @@ class ContractSchemaTests(unittest.TestCase):
         self.assertEqual(schema["name"], "lexicon_enrichment_phrase")
         self.assertTrue(schema["strict"])
         self.assertIn("phrase_kind", schema["schema"]["properties"])
-        self.assertIn("translations", schema["schema"]["properties"])
+        self.assertIn("senses", schema["schema"]["properties"])
 
     def test_reference_schema_is_available(self) -> None:
         schema = build_reference_entry_response_schema()
@@ -83,4 +83,3 @@ class ContractSchemaTests(unittest.TestCase):
         self.assertTrue(schema["strict"])
         self.assertIn("schema_version", schema["schema"]["properties"])
         self.assertIn("senses", schema["schema"]["properties"])
-

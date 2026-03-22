@@ -56,7 +56,70 @@ class BatchIngestTests(unittest.TestCase):
             write_jsonl(
                 output_path,
                 [
-                    {"custom_id": request_rows[1]["custom_id"], "response": {"body": {"ok": True}}},
+                    {
+                        "custom_id": request_rows[1]["custom_id"],
+                        "response": {
+                            "body": {
+                                "output": [
+                                    {
+                                        "type": "message",
+                                        "content": [
+                                            {
+                                                "type": "output_text",
+                                                "text": json.dumps(
+                                                    {
+                                                        "phrase_kind": "multiword_expression",
+                                                        "confidence": 0.8,
+                                                        "senses": [
+                                                            {
+                                                                "definition": "to leave the ground suddenly",
+                                                                "part_of_speech": "phrase",
+                                                                "examples": [
+                                                                    {
+                                                                        "sentence": "The plane will take off soon.",
+                                                                        "difficulty": "B1",
+                                                                    }
+                                                                ],
+                                                                "grammar_patterns": ["subject + take off"],
+                                                                "usage_note": "Common travel phrase.",
+                                                                "translations": {
+                                                                    "es": {
+                                                                        "definition": "despegar",
+                                                                        "examples": ["The plane will take off soon."],
+                                                                        "usage_note": "Common travel phrase.",
+                                                                    },
+                                                                    "zh-Hans": {
+                                                                        "definition": "起飞",
+                                                                        "examples": ["The plane will take off soon."],
+                                                                        "usage_note": "Common travel phrase.",
+                                                                    },
+                                                                    "ar": {
+                                                                        "definition": "يقلع",
+                                                                        "examples": ["The plane will take off soon."],
+                                                                        "usage_note": "Common travel phrase.",
+                                                                    },
+                                                                    "pt-BR": {
+                                                                        "definition": "decolar",
+                                                                        "examples": ["The plane will take off soon."],
+                                                                        "usage_note": "Common travel phrase.",
+                                                                    },
+                                                                    "ja": {
+                                                                        "definition": "離陸する",
+                                                                        "examples": ["The plane will take off soon."],
+                                                                        "usage_note": "Common travel phrase.",
+                                                                    },
+                                                                },
+                                                            }
+                                                        ],
+                                                    }
+                                                ),
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        },
+                    },
                     {"custom_id": request_rows[0]["custom_id"], "error": {"class": "validation_error", "message": "bad payload"}},
                 ],
             )
@@ -80,3 +143,123 @@ class BatchIngestTests(unittest.TestCase):
             self.assertEqual(persisted_results[2]["custom_id"], request_rows[0]["custom_id"])
             self.assertEqual(len(failures), 1)
             self.assertEqual(failures[0]["custom_id"], request_rows[0]["custom_id"])
+
+    def test_ingest_batch_outputs_materializes_accepted_phrase_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            request_rows = build_batch_request_rows(
+                snapshot_id="lexicon-20260320-seeds",
+                model="gpt-5-mini",
+                prompt_version="v1",
+                rows=[
+                    {
+                        "entry_kind": "phrase",
+                        "entry_id": "ph_break_a_leg",
+                        "entry_type": "phrase",
+                        "lexeme_id": "ph_break_a_leg",
+                        "lemma": "break a leg",
+                        "normalized_form": "break a leg",
+                        "display_form": "Break a leg",
+                        "phrase_kind": "idiom",
+                        "language": "en",
+                        "wordfreq_rank": 0,
+                        "is_wordnet_backed": False,
+                        "source_refs": ["phrase_seed"],
+                        "source_provenance": [{"source": "phrase_seed"}],
+                        "seed_metadata": {"raw_reviewed_as": "idiom"},
+                        "created_at": "2026-03-23T00:00:00Z",
+                        "snapshot_id": "lexicon-20260320-seeds",
+                    },
+                ],
+            )
+            write_jsonl(snapshot_dir / "batch_requests.jsonl", request_rows)
+            write_jsonl(
+                snapshot_dir / "batch_output.jsonl",
+                [
+                    {
+                        "custom_id": request_rows[0]["custom_id"],
+                        "response": {
+                            "body": {
+                                "output": [
+                                    {
+                                        "type": "message",
+                                        "content": [
+                                            {
+                                                "type": "output_text",
+                                                "text": json.dumps(
+                                                    {
+                                                        "phrase_kind": "idiom",
+                                                        "confidence": 0.91,
+                                                        "senses": [
+                                                            {
+                                                                "definition": "used to wish someone good luck",
+                                                                "part_of_speech": "phrase",
+                                                                "examples": [
+                                                                    {
+                                                                        "sentence": "Break a leg tonight.",
+                                                                        "difficulty": "B1",
+                                                                    }
+                                                                ],
+                                                                "grammar_patterns": ["say + phrase"],
+                                                                "usage_note": "Common before a performance.",
+                                                                "translations": {
+                                                                    "es": {
+                                                                        "definition": "buena suerte",
+                                                                        "examples": ["Break a leg tonight."],
+                                                                        "usage_note": "Common before a performance.",
+                                                                    },
+                                                                    "zh-Hans": {
+                                                                        "definition": "祝你好运",
+                                                                        "examples": ["Break a leg tonight."],
+                                                                        "usage_note": "Common before a performance.",
+                                                                    },
+                                                                    "ar": {
+                                                                        "definition": "حظا سعيدا",
+                                                                        "examples": ["Break a leg tonight."],
+                                                                        "usage_note": "Common before a performance.",
+                                                                    },
+                                                                    "pt-BR": {
+                                                                        "definition": "boa sorte",
+                                                                        "examples": ["Break a leg tonight."],
+                                                                        "usage_note": "Common before a performance.",
+                                                                    },
+                                                                    "ja": {
+                                                                        "definition": "頑張って",
+                                                                        "examples": ["Break a leg tonight."],
+                                                                        "usage_note": "Common before a performance.",
+                                                                    },
+                                                                },
+                                                            }
+                                                        ],
+                                                    }
+                                                ),
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                ],
+            )
+
+            ingest_batch_outputs(
+                snapshot_dir=snapshot_dir,
+                output_path=snapshot_dir / "batch_results.jsonl",
+                request_path=snapshot_dir / "batch_requests.jsonl",
+                batch_output_path=snapshot_dir / "batch_output.jsonl",
+                ingested_at="2026-03-23T00:00:00Z",
+                failure_output_path=snapshot_dir / "batch_failures.jsonl",
+            )
+
+            compiled_rows = [
+                json.loads(line)
+                for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+            self.assertEqual(len(compiled_rows), 1)
+            self.assertEqual(compiled_rows[0]["entry_type"], "phrase")
+            self.assertEqual(compiled_rows[0]["phrase_kind"], "idiom")
+            self.assertEqual(compiled_rows[0]["display_form"], "Break a leg")
+            self.assertEqual(compiled_rows[0]["senses"][0]["definition"], "used to wish someone good luck")

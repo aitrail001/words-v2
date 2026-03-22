@@ -64,11 +64,26 @@ def _compiled_rows() -> list[dict]:
             "cefr_level": "B1",
             "frequency_rank": 5000,
             "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
-            "senses": [{"sense_id": "phrase-1", "definition": "good luck", "examples": [{"sentence": "Break a leg tonight.", "difficulty": "easy"}]}],
+            "senses": [{
+                "sense_id": "phrase-1",
+                "definition": "good luck",
+                "part_of_speech": "phrase",
+                "examples": [{"sentence": "Break a leg tonight.", "difficulty": "A1"}],
+                "grammar_patterns": ["say + phrase"],
+                "usage_note": "Usually before a performance.",
+                "translations": {
+                    "zh-Hans": {"definition": "祝你好运", "usage_note": "演出前常说", "examples": ["今晚祝你好运。"]},
+                    "es": {"definition": "buena suerte", "usage_note": "se dice antes de actuar", "examples": ["Buena suerte esta noche."]},
+                    "ar": {"definition": "حظا سعيدا", "usage_note": "تقال قبل العرض", "examples": ["حظا سعيدا الليلة."]},
+                    "pt-BR": {"definition": "boa sorte", "usage_note": "dito antes de se apresentar", "examples": ["Boa sorte esta noite."]},
+                    "ja": {"definition": "頑張って", "usage_note": "公演前によく言う", "examples": ["今夜頑張って。"]},
+                },
+            }],
             "confusable_words": [],
             "generated_at": "2026-03-21T00:00:00Z",
             "phrase_kind": "idiom",
             "display_form": "break a leg",
+            "seed_metadata": {"raw_reviewed_as": "idiom"},
         },
         {
             "schema_version": "1.1.0",
@@ -138,6 +153,8 @@ def test_materialize_review_outputs_happy_path(tmp_path: Path) -> None:
     assert approved_rows == [rows[0], rows[2]]
     assert rejected_rows[0]["entry_id"] == "phrase:break-a-leg"
     assert rejected_rows[0]["decision"] == "rejected"
+    assert rejected_rows[0]["seed_metadata"]["raw_reviewed_as"] == "idiom"
+    assert rejected_rows[0]["senses"][0]["translations"]["es"]["definition"] == "buena suerte"
     assert regenerate_rows[0]["entry_id"] == "phrase:break-a-leg"
     assert regenerate_rows[0]["entry_type"] == "phrase"
     assert len(decision_rows) == 3

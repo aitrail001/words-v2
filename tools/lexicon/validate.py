@@ -179,6 +179,15 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
                 errors.append(f"missing required phrase field: {field}")
         if not isinstance(payload.get("part_of_speech"), list):
             errors.append("phrase part_of_speech must be a list")
+        if isinstance(senses, list):
+            if len(senses) > 2:
+                errors.append("phrase senses must contain at most 2 items")
+            for index, sense in enumerate(senses, start=1):
+                examples = sense.get("examples", []) if isinstance(sense, dict) else []
+                if not examples:
+                    errors.append(f"phrase sense {index} must include at least one example")
+                if isinstance(sense, dict):
+                    errors.extend(_validate_compiled_sense_translations(sense.get('translations'), sense_index=index, example_count=len(examples)))
 
     if entry_type == "reference":
         for field in ("reference_type", "display_form", "normalized_form", "translation_mode", "brief_description", "pronunciation", "generated_at"):

@@ -145,6 +145,9 @@ def compile_word_result(
         confusable_words=top_level_confusables or [],
         generated_at=generated_at or lexeme.created_at,
         phonetics=top_level_phonetics,
+        display_form=lexeme.display_form,
+        phrase_kind=lexeme.phrase_kind,
+        seed_metadata=lexeme.seed_metadata or {},
     )
 
 
@@ -178,6 +181,7 @@ def compile_phrase_rows(snapshot_dir: Path) -> list[dict[str, object]]:
                 "generated_at": row.get("generated_at") or row.get("created_at"),
                 "phrase_kind": row.get("phrase_kind"),
                 "display_form": row.get("display_form"),
+                "seed_metadata": row.get("seed_metadata") or {},
             }
         )
     return compiled_rows

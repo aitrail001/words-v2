@@ -91,7 +91,72 @@ class BatchLifecycleTests(unittest.TestCase):
             output_path.write_text(
                 "\n".join(
                     [
-                        json.dumps({"custom_id": request_rows[1]["custom_id"], "response": {"body": {"ok": True}}}),
+                        json.dumps(
+                            {
+                                "custom_id": request_rows[1]["custom_id"],
+                                "response": {
+                                    "body": {
+                                        "output": [
+                                            {
+                                                "type": "message",
+                                                "content": [
+                                                    {
+                                                        "type": "output_text",
+                                                        "text": json.dumps(
+                                                            {
+                                                                "phrase_kind": "multiword_expression",
+                                                                "confidence": 0.8,
+                                                                "senses": [
+                                                                    {
+                                                                        "definition": "to leave the ground suddenly",
+                                                                        "part_of_speech": "phrase",
+                                                                        "examples": [
+                                                                            {
+                                                                                "sentence": "The plane will take off soon.",
+                                                                                "difficulty": "B1",
+                                                                            }
+                                                                        ],
+                                                                        "grammar_patterns": ["subject + take off"],
+                                                                        "usage_note": "Common travel phrase.",
+                                                                        "translations": {
+                                                                            "es": {
+                                                                                "definition": "despegar",
+                                                                                "examples": ["The plane will take off soon."],
+                                                                                "usage_note": "Common travel phrase.",
+                                                                            },
+                                                                            "zh-Hans": {
+                                                                                "definition": "起飞",
+                                                                                "examples": ["The plane will take off soon."],
+                                                                                "usage_note": "Common travel phrase.",
+                                                                            },
+                                                                            "ar": {
+                                                                                "definition": "يقلع",
+                                                                                "examples": ["The plane will take off soon."],
+                                                                                "usage_note": "Common travel phrase.",
+                                                                            },
+                                                                            "pt-BR": {
+                                                                                "definition": "decolar",
+                                                                                "examples": ["The plane will take off soon."],
+                                                                                "usage_note": "Common travel phrase.",
+                                                                            },
+                                                                            "ja": {
+                                                                                "definition": "離陸する",
+                                                                                "examples": ["The plane will take off soon."],
+                                                                                "usage_note": "Common travel phrase.",
+                                                                            },
+                                                                        },
+                                                                    }
+                                                                ],
+                                                            }
+                                                        ),
+                                                    }
+                                                ],
+                                            }
+                                        ]
+                                    }
+                                },
+                            }
+                        ),
                         json.dumps({"custom_id": request_rows[0]["custom_id"], "error": {"class": "validation_error", "message": "bad payload"}}),
                     ]
                 )

@@ -354,8 +354,23 @@ class CompileWordsTests(unittest.TestCase):
                     "display_form": "take off",
                     "phrase_kind": "phrasal_verb",
                     "language": "en",
-                    "source_provenance": [],
-                    "senses": [{"sense_id": "phrase-1", "definition": "leave the ground", "examples": []}],
+                    "source_provenance": [{"source": "phrase_seed"}],
+                    "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+                    "senses": [{
+                        "sense_id": "phrase-1",
+                        "definition": "leave the ground",
+                        "part_of_speech": "verb",
+                        "examples": [{"sentence": "The plane took off.", "difficulty": "A1"}],
+                        "grammar_patterns": ["subject + take off"],
+                        "usage_note": "Common for planes.",
+                        "translations": {
+                            "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。"]},
+                            "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó."]},
+                            "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة."]},
+                            "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou."]},
+                            "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。"]},
+                        },
+                    }],
                     "created_at": "2026-03-20T00:00:00Z",
                 })
             ]) + "\n", encoding="utf-8")
@@ -386,15 +401,17 @@ class CompileWordsTests(unittest.TestCase):
             phrase_rows = [json.loads(line) for line in (root / "phrases.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             reference_rows = [json.loads(line) for line in (root / "references.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(phrase_rows[0]["entry_type"], "phrase")
+            self.assertEqual(phrase_rows[0]["seed_metadata"]["raw_reviewed_as"], "phrasal verb")
+            self.assertEqual(phrase_rows[0]["senses"][0]["translations"]["es"]["definition"], "despegar")
             self.assertEqual(reference_rows[0]["entry_type"], "reference")
             qc_rows = [json.loads(line) for line in (root / "words.enriched.review_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             queue_rows = [json.loads(line) for line in (root / "words.enriched.review_queue.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(qc_rows), 2)
             self.assertEqual(qc_rows[0]["entry_id"], "ph_take_off")
-            self.assertEqual(qc_rows[0]["verdict"], "fail")
+            self.assertEqual(qc_rows[0]["verdict"], "pass")
             self.assertEqual(qc_rows[1]["entry_id"], "rf_australia")
             self.assertEqual(qc_rows[1]["warning_labels"], ["missing_localizations"])
-            self.assertEqual(len(queue_rows), 2)
+            self.assertEqual(len(queue_rows), 1)
 
 
 if __name__ == "__main__":

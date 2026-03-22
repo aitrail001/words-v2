@@ -39,6 +39,7 @@ from tools.lexicon.policy_data import excluded_canonical_forms
 from tools.lexicon.wordfreq_provider import build_wordfreq_rank_provider
 from tools.lexicon.wordfreq_utils import build_wordfreq_inventory_provider
 from tools.lexicon.wordnet_provider import LexiconDependencyError, build_wordnet_sense_provider
+from tools.lexicon.phrase_inventory import build_phrase_inventory_records
 
 _REASONING_EFFORT_CHOICES = ['none', 'low', 'medium', 'high']
 
@@ -427,6 +428,39 @@ def _phrase_build_base_command(args: argparse.Namespace) -> int:
         'output': str(output_path),
         'snapshot_id': args.snapshot_id or None,
         'phrase_count': len(rows),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def _build_phrases_command(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir)
+    source_paths = [Path(item) for item in args.inputs]
+    snapshot_id = args.snapshot_id or build_snapshot_id(
+        date_stamp=datetime.now(timezone.utc).strftime('%Y%m%d'),
+        source_label='phrase-csv',
+    )
+    try:
+        phrase_rows = build_phrase_inventory_records(source_paths)
+        output_rows = build_phrase_snapshot_rows(
+            phrases=phrase_rows,
+            snapshot_id=snapshot_id,
+            created_at=_utc_now(),
+        )
+        output_path = write_phrase_snapshot(output_dir, output_rows)
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    payload = {
+        'command': 'build-phrases',
+        'inputs': [str(path) for path in source_paths],
+        'source_count': len(source_paths),
+        'input_count': sum(len(row.get('source_provenance') or []) for row in phrase_rows),
+        'phrase_count': len(output_rows),
+        'deduped_count': max(0, sum(len(row.get('source_provenance') or []) for row in phrase_rows) - len(output_rows)),
+        'output_dir': str(output_dir),
+        'output': str(output_path),
+        'snapshot_id': snapshot_id,
     }
     print(json.dumps(payload))
     return 0
@@ -872,6 +906,12 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_enrichment.add_argument('--provider-mode', choices=['openai_compatible', 'openai_compatible_node'], default='openai_compatible_node', help='enrichment provider mode for benchmark runs')
     benchmark_enrichment.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for models that support it')
     benchmark_enrichment.set_defaults(handler=_benchmark_enrichment_command)
+
+    build_phrases = subparsers.add_parser('build-phrases', help='build normalized phrase snapshot rows from one or more reviewed CSV files')
+    build_phrases.add_argument('--output-dir', required=True, help='directory to write phrase snapshot JSONL output')
+    build_phrases.add_argument('--snapshot-id', help='optional snapshot identifier override')
+    build_phrases.add_argument('inputs', nargs='+', help='reviewed CSV files containing phrase inventory rows')
+    build_phrases.set_defaults(handler=_build_phrases_command)
 
     phrase_build_base = subparsers.add_parser('phrase-build-base', help='build normalized phrase snapshot rows from a JSONL seed file')
     phrase_build_base.add_argument('--input', required=True, help='JSONL seed file containing phrase rows')

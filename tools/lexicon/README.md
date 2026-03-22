@@ -1,20 +1,21 @@
 # Lexicon Tool
 
-Offline/admin lexicon pipeline for building lexeme snapshots, generating learner-facing enrichments, reviewing them, and importing approved rows into the DB.
+Offline/admin lexicon pipeline for building word and phrase snapshots, generating learner-facing enrichments, reviewing them, and importing approved rows into the DB.
 
 ## Current contract
 
-The active pipeline is word-level and lexeme-first:
+The active pipeline is lexeme-first for words, with curated phrase inventory support on the same compiled/review/import contract:
 
 1. `build-base`
+2. optional `build-phrases`
 2. optional ambiguous-form adjudication
 3. `enrich`
 4. `validate`
 5. human review of `words.enriched.jsonl`
 6. `import-db` from reviewed `approved.jsonl`
 
-Realtime enrichment writes final compiled word rows directly to `words.enriched.jsonl`.
-Batch enrichment can still use intermediate request/result ledgers, but accepted rows are materialized into the same `words.enriched.jsonl` contract.
+Realtime enrichment writes final compiled word and phrase rows directly to `words.enriched.jsonl`.
+Batch enrichment can still use intermediate request/result ledgers, but accepted word and phrase rows are materialized into the same `words.enriched.jsonl` contract.
 
 Legacy sense-selection and staged-selection review flows are removed from the supported operator surface.
 
@@ -27,9 +28,12 @@ Legacy sense-selection and staged-selection review flows are removed from the su
   - emits only unresolved canonicalization tails
 - `python3 -m tools.lexicon.cli adjudicate-forms ...`
   - resolves bounded ambiguous-form tails
+- `python3 -m tools.lexicon.cli build-phrases --input ... --output-dir ...`
+  - builds curated phrase inventory rows from one or more reviewed CSVs
+  - writes `phrases.jsonl`
 - `python3 -m tools.lexicon.cli enrich --snapshot-dir ...`
-  - realtime per-word enrichment
-  - reads `lexemes.jsonl`
+  - realtime per-entry enrichment
+  - reads `lexemes.jsonl` and optional `phrases.jsonl`
   - writes `words.enriched.jsonl`
   - keeps `enrich.checkpoint.jsonl`, `enrich.decisions.jsonl`, `enrich.failures.jsonl`
 - `python3 -m tools.lexicon.cli validate --snapshot-dir ...`
@@ -50,6 +54,7 @@ Legacy sense-selection and staged-selection review flows are removed from the su
 Core snapshot files now used by the active pipeline:
 
 - `lexemes.jsonl`
+- optional `phrases.jsonl`
 - `canonical_entries.jsonl`
 - `canonical_variants.jsonl`
 - `generation_status.jsonl`
@@ -77,6 +82,7 @@ The active pipeline no longer relies on `senses.jsonl`, `concepts.jsonl`, `selec
 
 ```bash
 python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/lexicon/snapshots/words-100
+python3 -m tools.lexicon.cli build-phrases --input data/lexicon/phrasals/reviewed_phrasal_verbs.csv --input data/lexicon/idioms/reviewed_idioms.csv --output-dir data/lexicon/snapshots/phrases-demo
 python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
 python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
 python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
@@ -119,9 +125,9 @@ The current admin workflow is:
 - `/lexicon/compiled-review`
   - DB-backed review staging for compiled artifacts
 - `/lexicon/jsonl-review`
-  - file-backed review path for compiled artifacts
+  - file-backed review path for compiled artifacts, including phrase senses/examples/translations
 - `/lexicon/import-db`
-  - dry-run and final DB import for reviewed outputs
+  - dry-run and final DB import for reviewed word and phrase outputs
 - `/lexicon/db-inspector`
   - post-import verification against the live DB
 
@@ -129,6 +135,6 @@ The current admin workflow is:
 
 ## Related docs
 
-- [OPERATOR_GUIDE.md](/Users/johnson/AI/src/words-v2/.worktrees/feat_lexicon_remove_sense_era_20260322/tools/lexicon/OPERATOR_GUIDE.md)
-- [batch.md](/Users/johnson/AI/src/words-v2/.worktrees/feat_lexicon_remove_sense_era_20260322/tools/lexicon/docs/batch.md)
-- [ADR-004-lexicon-canonical-final-ingestion-path.md](/Users/johnson/AI/src/words-v2/.worktrees/feat_lexicon_remove_sense_era_20260322/docs/decisions/ADR-004-lexicon-canonical-final-ingestion-path.md)
+- [OPERATOR_GUIDE.md](/Users/johnson/AI/src/words-v2/.worktrees/feat_phrase_enrichment_20260323/tools/lexicon/OPERATOR_GUIDE.md)
+- [batch.md](/Users/johnson/AI/src/words-v2/.worktrees/feat_phrase_enrichment_20260323/tools/lexicon/docs/batch.md)
+- [ADR-004-lexicon-canonical-final-ingestion-path.md](/Users/johnson/AI/src/words-v2/.worktrees/feat_phrase_enrichment_20260323/docs/decisions/ADR-004-lexicon-canonical-final-ingestion-path.md)

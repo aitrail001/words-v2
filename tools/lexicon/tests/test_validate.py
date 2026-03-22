@@ -357,7 +357,7 @@ class ValidateCompiledRecordTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
-    def test_validate_compiled_record_accepts_phrase_warning_only_shape(self) -> None:
+    def test_validate_compiled_record_rejects_phrase_rows_without_examples(self) -> None:
         errors = validate_compiled_record(
             {
                 "schema_version": "1.1.0",
@@ -379,7 +379,7 @@ class ValidateCompiledRecordTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(errors, [])
+        self.assertIn("phrase sense 1 must include at least one example", errors)
 
     def test_validate_compiled_record_accepts_reference_warning_only_shape(self) -> None:
         errors = validate_compiled_record(

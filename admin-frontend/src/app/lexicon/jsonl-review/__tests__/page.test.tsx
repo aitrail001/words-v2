@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import LexiconJsonlReviewPage from "@/app/lexicon/jsonl-review/page";
@@ -353,5 +353,69 @@ describe("LexiconJsonlReviewPage", () => {
       }),
     );
     await waitFor(() => expect(screen.getByText(/Updated 3 rows to approved\./i)).toBeInTheDocument());
+  });
+
+  it("renders structured phrase details from the compiled payload", async () => {
+    mockLoadSession.mockResolvedValueOnce({
+      artifact_filename: "words.enriched.jsonl",
+      artifact_path: "/tmp/words.enriched.jsonl",
+      decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+      output_dir: "/tmp/reviewed",
+      total_items: 1,
+      pending_count: 1,
+      approved_count: 0,
+      rejected_count: 0,
+      items: [
+        {
+          entry_id: "phrase:break-a-leg",
+          entry_type: "phrase",
+          normalized_form: "break a leg",
+          display_text: "Break a leg",
+          review_priority: "warning",
+          warning_count: 1,
+          warning_labels: ["missing_source_provenance"],
+          review_summary: {
+            sense_count: 1,
+            form_variant_count: 0,
+            confusable_count: 0,
+            provenance_sources: [],
+            primary_definition: "good luck",
+            primary_example: "Break a leg tonight.",
+          },
+          review_status: "pending",
+          decision_reason: null,
+          reviewed_at: null,
+          compiled_payload: {
+            entry_id: "phrase:break-a-leg",
+            phrase_kind: "idiom",
+            senses: [
+              {
+                definition: "good luck",
+                examples: ["Break a leg tonight."],
+                translations: {
+                  es: {
+                    definition: "buena suerte",
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    window.history.pushState(
+      {},
+      "",
+      "/lexicon/jsonl-review?artifactPath=%2Ftmp%2Fwords.enriched.jsonl&decisionsPath=%2Ftmp%2Freviewed%2Freview.decisions.jsonl&outputDir=%2Ftmp%2Freviewed",
+    );
+    render(<LexiconJsonlReviewPage />);
+
+    await waitFor(() => expect(screen.getByTestId("jsonl-review-phrase-details")).toBeInTheDocument());
+    const phraseDetails = screen.getByTestId("jsonl-review-phrase-details");
+    expect(within(phraseDetails).getByText("Phrase details")).toBeInTheDocument();
+    expect(within(phraseDetails).getByText("idiom")).toBeInTheDocument();
+    expect(within(phraseDetails).getByText("good luck")).toBeInTheDocument();
+    expect(within(phraseDetails).getByText("Break a leg tonight.")).toBeInTheDocument();
+    expect(within(phraseDetails).getByText("buena suerte")).toBeInTheDocument();
   });
 });

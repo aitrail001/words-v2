@@ -68,12 +68,27 @@ def _compiled_rows() -> list[dict]:
             "cefr_level": "B1",
             "frequency_rank": 5000,
             "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
-            "senses": [{"sense_id": "phrase-1", "definition": "good luck", "examples": [{"sentence": "Break a leg tonight.", "difficulty": "easy"}]}],
+            "senses": [{
+                "sense_id": "phrase-1",
+                "definition": "good luck",
+                "part_of_speech": "phrase",
+                "examples": [{"sentence": "Break a leg tonight.", "difficulty": "A1"}],
+                "grammar_patterns": ["say + phrase"],
+                "usage_note": "Used before a performance.",
+                "translations": {
+                    "zh-Hans": {"definition": "祝你好运", "usage_note": "演出前常说", "examples": ["今晚祝你好运。"]},
+                    "es": {"definition": "buena suerte", "usage_note": "se dice antes de actuar", "examples": ["Buena suerte esta noche."]},
+                    "ar": {"definition": "حظا سعيدا", "usage_note": "تقال قبل العرض", "examples": ["حظا سعيدا الليلة."]},
+                    "pt-BR": {"definition": "boa sorte", "usage_note": "dito antes de se apresentar", "examples": ["Boa sorte esta noite."]},
+                    "ja": {"definition": "頑張って", "usage_note": "公演前によく言う", "examples": ["今夜頑張って。"]},
+                },
+            }],
             "confusable_words": [],
             "generated_at": "2026-03-21T00:00:00Z",
-            "display_form": "break a leg",
+            "display_form": "Break a leg",
             "phrase_kind": "idiom",
             "snapshot_id": "snapshot-001",
+            "seed_metadata": {"raw_reviewed_as": "idiom"},
         },
     ]
 
@@ -81,7 +96,6 @@ def _compiled_rows() -> list[dict]:
 def _compiled_rows_with_warning() -> list[dict]:
     rows = _compiled_rows()
     rows[1]["source_provenance"] = []
-    rows[1]["senses"] = [{"sense_id": "phrase-1", "definition": "good luck", "examples": []}]
     return rows
 
 
@@ -218,11 +232,12 @@ class TestLexiconJsonlReviewsApi:
         assert data["items"][0]["review_summary"]["provenance_sources"] == ["snapshot"]
         assert data["items"][0]["review_summary"]["primary_definition"] == "a financial institution"
 
-        assert data["items"][1]["warning_count"] == 2
+        assert data["items"][1]["warning_count"] == 1
         assert data["items"][1]["review_priority"] == "warning"
-        assert data["items"][1]["warning_labels"] == ["missing_source_provenance", "missing_examples"]
+        assert data["items"][1]["warning_labels"] == ["missing_source_provenance"]
         assert data["items"][1]["review_summary"]["sense_count"] == 1
         assert data["items"][1]["review_summary"]["primary_definition"] == "good luck"
+        assert data["items"][1]["review_summary"]["primary_example"] == "Break a leg tonight."
         assert data["items"][1]["review_summary"]["provenance_sources"] == []
 
     @pytest.mark.asyncio

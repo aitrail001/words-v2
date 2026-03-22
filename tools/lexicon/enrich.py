@@ -29,6 +29,10 @@ from tools.lexicon.schemas.word_enrichment_schema import (
     normalize_phonetics_payload as _normalize_phonetics_payload,
     normalize_word_enrichment_payload as _normalize_word_enrichment_payload,
 )
+from tools.lexicon.schemas.phrase_enrichment_schema import (
+    build_phrase_enrichment_response_schema as _build_phrase_enrichment_response_schema,
+    normalize_phrase_enrichment_payload as _normalize_phrase_enrichment_payload,
+)
 try:
     from openai import OpenAI
 except ImportError:  # pragma: no cover
@@ -676,6 +680,10 @@ def _validate_openai_compatible_payload(response: dict[str, Any]) -> dict[str, A
     return _normalize_word_enrichment_payload(response)
 
 
+def _validate_openai_compatible_phrase_payload(response: dict[str, Any]) -> dict[str, Any]:
+    return _normalize_phrase_enrichment_payload(response)
+
+
 def _normalize_examples(value: Any, *, fallback_sentence: str) -> list[SenseExample]:
     examples: list[SenseExample] = []
     if isinstance(value, list):
@@ -786,6 +794,22 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
         f"The response is invalid if the senses array contains more than {max_meanings} items.\n"
         + "\n".join(line for line in guidance_lines if line)
         + "\n"
+    )
+
+
+def build_phrase_enrichment_prompt(*, lexeme: LexemeRecord) -> str:
+    display_form = lexeme.display_form or lexeme.lemma
+    phrase_kind = lexeme.phrase_kind or "multiword_expression"
+    return (
+        f"Create learner-facing enrichment for the English phrase '{display_form}'.\n"
+        f"Phrase kind: {phrase_kind}.\n"
+        "Return 1 to 2 learner-relevant senses for the phrase as a whole, not its component words.\n"
+        "Each sense must include definition, part_of_speech, at least one example, grammar_patterns, usage_note, and translations.\n"
+        f"Each example difficulty must be one of: {', '.join(_ALLOWED_CEFR_LEVELS)}.\n"
+        f"Use the exact required translation locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        "Use the exact phrase naturally in the examples.\n"
+        "Return JSON only.\n"
     )
 
 
@@ -906,6 +930,10 @@ def _single_sense_response_schema() -> dict[str, Any]:
 
 def _word_enrichment_response_schema() -> dict[str, Any]:
     return _build_word_enrichment_response_schema()
+
+
+def _phrase_enrichment_response_schema() -> dict[str, Any]:
+    return _build_phrase_enrichment_response_schema()
 
 
 def _is_repairable_word_payload_error(error: RuntimeError) -> bool:
@@ -1123,6 +1151,56 @@ def _build_word_job_outcome(
         discard_reason=discard_reason,
         phonetics=response.get("phonetics"),
     )
+
+
+def _build_phrase_job_outcome(
+    *,
+    lexeme: LexemeRecord,
+    response: dict[str, Any],
+    model_name: str,
+    prompt_version: str,
+    generation_run_id: str,
+    review_status: str,
+    generated_at: str,
+) -> WordJobOutcome:
+    records: list[EnrichmentRecord] = []
+    for index, row in enumerate(response.get("senses") or [], start=1):
+        sense_id = make_sense_id(lexeme.lexeme_id, index)
+        part_of_speech = str(row.get("part_of_speech") or "phrase").strip() or "phrase"
+        records.append(
+            EnrichmentRecord(
+                snapshot_id=lexeme.snapshot_id,
+                enrichment_id=make_enrichment_id(sense_id, prompt_version),
+                sense_id=sense_id,
+                definition=row["definition"],
+                examples=row["examples"],
+                cefr_level="B1",
+                primary_domain="general",
+                secondary_domains=[],
+                register="neutral",
+                synonyms=[],
+                antonyms=[],
+                collocations=[],
+                grammar_patterns=row.get("grammar_patterns") or [],
+                usage_note=str(row.get("usage_note") or f"Auto-generated learner note for {lexeme.lemma}."),
+                forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                confusable_words=[],
+                translations=row.get("translations") or {},
+                model_name=str(model_name),
+                prompt_version=prompt_version,
+                generation_run_id=generation_run_id,
+                confidence=response["confidence"],
+                review_status=review_status,
+                generated_at=generated_at,
+                lexeme_id=lexeme.lexeme_id,
+                sense_order=index,
+                part_of_speech=part_of_speech,
+                sense_kind="standard_meaning",
+                decision="keep_standard",
+                base_word=None,
+            )
+        )
+    return WordJobOutcome(records=records, decision="keep_standard", base_word=None, discard_reason=None, phonetics=None)
 
 
 def _validate_openai_compatible_word_payload(response: dict[str, Any], *, lexeme: LexemeRecord, senses: list[SenseRecord]) -> dict[str, Any]:
@@ -1526,6 +1604,54 @@ def build_openai_compatible_word_enrichment_provider(
     return provider
 
 
+def build_openai_compatible_phrase_enrichment_provider(
+    *,
+    settings: LexiconSettings,
+    model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    review_status: str = 'draft',
+    client: Any | None = None,
+) -> WordEnrichmentProvider:
+    if not settings.llm_base_url:
+        raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
+    if not (model_name or settings.llm_model):
+        raise LexiconDependencyError('LEXICON_LLM_MODEL is required for openai_compatible enrichment mode')
+    if not settings.llm_api_key:
+        raise LexiconDependencyError('LEXICON_LLM_API_KEY is required for openai_compatible enrichment mode')
+
+    effective_model_name = model_name or settings.llm_model
+    effective_reasoning_effort = reasoning_effort or settings.llm_reasoning_effort
+    client = OpenAICompatibleResponsesClient(
+        endpoint=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=str(effective_model_name),
+        client=client,
+        timeout_seconds=settings.llm_timeout_seconds,
+        reasoning_effort=effective_reasoning_effort,
+    )
+
+    def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> WordJobOutcome:
+        del senses
+        response = _validate_openai_compatible_phrase_payload(
+            _client_generate_json(
+                client,
+                build_phrase_enrichment_prompt(lexeme=lexeme),
+                response_schema=_phrase_enrichment_response_schema(),
+            )
+        )
+        return _build_phrase_job_outcome(
+            lexeme=lexeme,
+            response=response,
+            model_name=str(effective_model_name),
+            prompt_version=prompt_version,
+            generation_run_id=generation_run_id,
+            review_status=review_status,
+            generated_at=generated_at,
+        )
+
+    return provider
+
+
 def build_enrichment_provider(
     *,
     settings: LexiconSettings,
@@ -1624,8 +1750,39 @@ def build_word_enrichment_provider(
     return build_placeholder_word_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
 
 
+def _build_phrase_lexeme(row: dict[str, Any]) -> LexemeRecord:
+    source_refs = [
+        str(item.get("source") or "").strip()
+        for item in list(row.get("source_provenance") or [])
+        if isinstance(item, dict) and str(item.get("source") or "").strip()
+    ] or ["phrase_seed"]
+    display_form = str(row.get("display_form") or row.get("normalized_form") or "").strip()
+    normalized_form = str(row.get("normalized_form") or display_form).strip().lower()
+    return LexemeRecord(
+        snapshot_id=str(row.get("snapshot_id") or ""),
+        lexeme_id=str(row.get("entry_id") or ""),
+        lemma=display_form or normalized_form,
+        language=str(row.get("language") or "en"),
+        wordfreq_rank=int(row.get("frequency_rank") or 0),
+        is_wordnet_backed=False,
+        source_refs=source_refs,
+        created_at=str(row.get("created_at") or _utc_now()),
+        entry_id=str(row.get("entry_id") or ""),
+        entry_type="phrase",
+        normalized_form=normalized_form,
+        source_provenance=list(row.get("source_provenance") or []),
+        display_form=display_form or normalized_form,
+        phrase_kind=str(row.get("phrase_kind") or "multiword_expression"),
+        seed_metadata=dict(row.get("seed_metadata") or {}),
+    )
+
+
 def read_snapshot_inputs(snapshot_dir: Path) -> tuple[list[LexemeRecord], list[SenseRecord]]:
-    lexemes = [LexemeRecord(**row) for row in read_jsonl(snapshot_dir / 'lexemes.jsonl')]
+    lexemes_path = snapshot_dir / 'lexemes.jsonl'
+    lexemes = [LexemeRecord(**row) for row in read_jsonl(lexemes_path)] if lexemes_path.exists() else []
+    phrases_path = snapshot_dir / 'phrases.jsonl'
+    if phrases_path.exists():
+        lexemes.extend(_build_phrase_lexeme(row) for row in read_jsonl(phrases_path))
     senses_path = snapshot_dir / 'senses.jsonl'
     senses = [SenseRecord(**row) for row in read_jsonl(senses_path)] if senses_path.exists() else []
     return lexemes, senses
@@ -1799,7 +1956,12 @@ def _write_per_word_checkpoint(checkpoint_path: Path, *, lexeme: LexemeRecord, g
 def _write_per_word_failure(failures_output: Path, *, lexeme: LexemeRecord, generation_run_id: str, error_message: str, failed_at: str) -> None:
     append_jsonl(failures_output, [{
         'lexeme_id': lexeme.lexeme_id,
+        'entry_id': lexeme.entry_id,
+        'entry_type': lexeme.entry_type,
         'lemma': lexeme.lemma,
+        'display_form': lexeme.display_form,
+        'normalized_form': lexeme.normalized_form,
+        'phrase_kind': lexeme.phrase_kind,
         'status': 'failed',
         'generation_run_id': generation_run_id,
         'failed_at': failed_at,
@@ -1889,6 +2051,17 @@ def enrich_snapshot(
         review_status=review_status,
         client=None,
     )
+    phrase_enrichment_provider = (
+        build_openai_compatible_phrase_enrichment_provider(
+            settings=effective_settings,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            review_status=review_status,
+            client=None,
+        )
+        if provider_mode == 'openai_compatible'
+        else build_placeholder_word_enrichment_provider(settings=effective_settings, model_name=model_name, review_status=review_status)
+    )
     ordered_lexemes = sorted(lexemes, key=lambda item: (item.wordfreq_rank, item.lemma))
     ordered_sense_lists = {
         lexeme.lexeme_id: sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
@@ -1949,8 +2122,13 @@ def enrich_snapshot(
                     time.sleep(wait_for)
                     now = time.monotonic()
                 last_request_started_at[0] = now
+        selected_provider = (
+            word_provider
+            if word_provider is not None
+            else (phrase_enrichment_provider if lexeme.entry_type == "phrase" else word_enrichment_provider)
+        )
         return _coerce_word_job_outcome(
-            word_enrichment_provider(
+            selected_provider(
                 lexeme=lexeme,
                 senses=word_senses,
                 settings=effective_settings,

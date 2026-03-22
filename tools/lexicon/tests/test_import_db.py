@@ -109,6 +109,10 @@ class FakePhraseEntry:
     cefr_level: object = None
     register_label: object = None
     brief_usage_note: object = None
+    compiled_payload: object = None
+    seed_metadata: object = None
+    confidence_score: object = None
+    generated_at: object = None
     source_type: object = None
     source_reference: object = None
     created_at: object = None
@@ -679,11 +683,27 @@ class ImportCompiledRowsTests(unittest.TestCase):
                 "cefr_level": "B1",
                 "frequency_rank": 0,
                 "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
-                "senses": [],
+                "senses": [{
+                    "sense_id": "phrase-1",
+                    "definition": "leave the ground",
+                    "part_of_speech": "verb",
+                    "examples": [{"sentence": "The plane took off.", "difficulty": "A1"}],
+                    "grammar_patterns": ["subject + take off"],
+                    "usage_note": "Common for planes.",
+                    "translations": {
+                        "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。"]},
+                        "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó."]},
+                        "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة."]},
+                        "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou."]},
+                        "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。"]},
+                    },
+                }],
                 "confusable_words": [],
                 "generated_at": "2026-03-20T00:00:00Z",
                 "phrase_kind": "phrasal_verb",
                 "display_form": "take off",
+                "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+                "confidence": 0.91,
             },
             {
                 "schema_version": "1.1.0",
@@ -731,6 +751,10 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(any(isinstance(item, FakePhraseEntry) for item in added), True)
         self.assertEqual(any(isinstance(item, FakeReferenceEntry) for item in added), True)
         self.assertEqual(any(isinstance(item, FakeReferenceLocalization) for item in added), True)
+        imported_phrase = next(item for item in added if isinstance(item, FakePhraseEntry))
+        self.assertEqual(imported_phrase.compiled_payload["entry_id"], "ph_take_off")
+        self.assertEqual(imported_phrase.seed_metadata["raw_reviewed_as"], "phrasal verb")
+        self.assertEqual(imported_phrase.confidence_score, 0.91)
 
     def test_load_compiled_rows_reads_family_directory_and_dry_run_counts(self) -> None:
         from tools.lexicon.import_db import load_compiled_rows, summarize_compiled_rows

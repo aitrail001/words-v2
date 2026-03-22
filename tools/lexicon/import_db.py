@@ -423,6 +423,10 @@ def import_compiled_rows(
                     cefr_level=row.get("cefr_level"),
                     register_label=row.get("register") or row.get("register_label"),
                     brief_usage_note=row.get("brief_usage_note") or row.get("usage_note"),
+                    compiled_payload=row if hasattr(resolved_phrase_model, "compiled_payload") else None,
+                    seed_metadata=row.get("seed_metadata") if hasattr(resolved_phrase_model, "seed_metadata") else None,
+                    confidence_score=_normalize_confidence(row.get("confidence")) if hasattr(resolved_phrase_model, "confidence_score") else None,
+                    generated_at=_parse_timestamp(row.get("generated_at")) if hasattr(resolved_phrase_model, "generated_at") else None,
                     source_type=source_type,
                     source_reference=source_reference,
                 )
@@ -435,6 +439,14 @@ def import_compiled_rows(
                 existing_phrase.cefr_level = row.get("cefr_level")
                 existing_phrase.register_label = row.get("register") or row.get("register_label")
                 existing_phrase.brief_usage_note = row.get("brief_usage_note") or row.get("usage_note")
+                if hasattr(existing_phrase, "compiled_payload"):
+                    existing_phrase.compiled_payload = row
+                if hasattr(existing_phrase, "seed_metadata"):
+                    existing_phrase.seed_metadata = row.get("seed_metadata")
+                if hasattr(existing_phrase, "confidence_score"):
+                    existing_phrase.confidence_score = _normalize_confidence(row.get("confidence"))
+                if hasattr(existing_phrase, "generated_at"):
+                    existing_phrase.generated_at = _parse_timestamp(row.get("generated_at"))
                 if hasattr(existing_phrase, "source_type"):
                     existing_phrase.source_type = source_type
                 if hasattr(existing_phrase, "source_reference"):
