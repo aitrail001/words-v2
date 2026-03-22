@@ -505,6 +505,8 @@ def _compile_export_command(args: argparse.Namespace) -> int:
         'command': 'compile-export',
         'compiled_count': len(compiled),
         'output': str(Path(args.output)),
+        'review_qc_output': str(Path(args.snapshot_dir) / 'compiled_review_qc.jsonl'),
+        'review_queue_output': str(Path(args.snapshot_dir) / 'compiled_review_queue.jsonl'),
     }
     if args.decision_filter:
         payload['decision_filter'] = args.decision_filter

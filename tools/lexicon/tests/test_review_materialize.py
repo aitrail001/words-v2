@@ -61,6 +61,31 @@ def _compiled_rows() -> list[dict]:
             "phrase_kind": "idiom",
             "display_form": "break a leg",
         },
+        {
+            "schema_version": "1.1.0",
+            "entry_id": "rf_australia",
+            "entry_type": "reference",
+            "normalized_form": "australia",
+            "source_provenance": [{"source": "reference_seed"}],
+            "entity_category": "general",
+            "word": "Australia",
+            "part_of_speech": [],
+            "cefr_level": "B1",
+            "frequency_rank": 0,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "senses": [],
+            "confusable_words": [],
+            "generated_at": "2026-03-21T00:00:00Z",
+            "reference_type": "country",
+            "display_form": "Australia",
+            "translation_mode": "localized",
+            "brief_description": "A country in the Southern Hemisphere.",
+            "pronunciation": "/ɔˈstreɪliə/",
+            "localized_display_form": {"es": "Australia"},
+            "localized_brief_description": {"es": "País del hemisferio sur."},
+            "learner_tip": "Stress is on STRAY.",
+            "localizations": [],
+        },
     ]
 
 
@@ -79,6 +104,7 @@ def test_materialize_review_outputs_happy_path(tmp_path: Path) -> None:
         [
             {"entry_id": "word:bank", "entry_type": "word", "decision": "approved", "decision_reason": "ready"},
             {"entry_id": "phrase:break-a-leg", "entry_type": "phrase", "decision": "rejected", "decision_reason": "needs regen"},
+            {"entry_id": "rf_australia", "entry_type": "reference", "decision": "approved", "decision_reason": "safe"},
         ],
     )
 
@@ -91,7 +117,7 @@ def test_materialize_review_outputs_happy_path(tmp_path: Path) -> None:
         regenerate_output_path=regenerate_path,
     )
 
-    assert summary["approved_count"] == 1
+    assert summary["approved_count"] == 2
     assert summary["rejected_count"] == 1
     assert summary["regenerate_count"] == 1
 
@@ -100,12 +126,12 @@ def test_materialize_review_outputs_happy_path(tmp_path: Path) -> None:
     regenerate_rows = [json.loads(line) for line in regenerate_path.read_text(encoding="utf-8").splitlines()]
     decision_rows = [json.loads(line) for line in decisions_output_path.read_text(encoding="utf-8").splitlines()]
 
-    assert approved_rows == [rows[0]]
+    assert approved_rows == [rows[0], rows[2]]
     assert rejected_rows[0]["entry_id"] == "phrase:break-a-leg"
     assert rejected_rows[0]["decision"] == "rejected"
     assert regenerate_rows[0]["entry_id"] == "phrase:break-a-leg"
     assert regenerate_rows[0]["entry_type"] == "phrase"
-    assert len(decision_rows) == 2
+    assert len(decision_rows) == 3
     assert all(row["artifact_sha256"] for row in decision_rows)
     assert all(row["compiled_payload_sha256"] for row in decision_rows)
 

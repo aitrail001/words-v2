@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from importlib import import_module
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,110 +15,18 @@ from app.core.config import Settings
 DECISION_SCHEMA_VERSION = "lexicon_review_decision.v1"
 ALLOWED_DECISIONS = {"approved", "rejected", "reopened"}
 DECISIONS_FILENAME = "review.decisions.jsonl"
-ALLOWED_ENTITY_CATEGORIES = {"general", "name", "place", "brand", "entity_other"}
-_REQUIRED_COMPILED_FIELDS = {
-    "schema_version",
-    "entry_id",
-    "entry_type",
-    "normalized_form",
-    "source_provenance",
-    "word",
-    "part_of_speech",
-    "cefr_level",
-    "frequency_rank",
-    "forms",
-    "senses",
-    "confusable_words",
-    "generated_at",
-}
 
 
-def _warning_labels(row: dict[str, Any]) -> list[str]:
-    warnings: list[str] = []
-    if not row.get("source_provenance"):
-        warnings.append("missing_source_provenance")
-
-    entry_type = str(row.get("entry_type") or "")
-    senses = row.get("senses")
-    if entry_type in {"word", "phrase"} and isinstance(senses, list) and senses:
-        if all(not (sense.get("examples") or []) for sense in senses if isinstance(sense, dict)):
-            warnings.append("missing_examples")
-
-    if entry_type == "reference" and row.get("translation_mode") == "localized":
-        if not row.get("localizations"):
-            warnings.append("missing_localizations")
-    return warnings
-
-
-def _form_variant_count(forms: dict[str, Any]) -> int:
-    count = 0
-    plural_forms = forms.get("plural_forms")
-    if isinstance(plural_forms, list):
-        count += len(plural_forms)
-
-    verb_forms = forms.get("verb_forms")
-    if isinstance(verb_forms, dict):
-        for value in verb_forms.values():
-            if isinstance(value, list):
-                count += len(value)
-            elif value:
-                count += 1
-
-    derivations = forms.get("derivations")
-    if isinstance(derivations, list):
-        count += len(derivations)
-
-    if forms.get("comparative"):
-        count += 1
-    if forms.get("superlative"):
-        count += 1
-    return count
-
-
-def _provenance_sources(row: dict[str, Any]) -> list[str]:
-    sources: list[str] = []
-    for item in row.get("source_provenance") or []:
-        if isinstance(item, dict):
-            value = str(item.get("source") or "").strip()
-        else:
-            value = str(item or "").strip()
-        if value:
-            sources.append(value)
-    return sources
-
-
-def _primary_definition(row: dict[str, Any]) -> str | None:
-    senses = row.get("senses")
-    if not isinstance(senses, list):
-        return None
-    for sense in senses:
-        if not isinstance(sense, dict):
-            continue
-        for key in ("definition", "gloss", "summary"):
-            value = str(sense.get(key) or "").strip()
-            if value:
-                return value
-    return None
-
-
-def _primary_example(row: dict[str, Any]) -> str | None:
-    senses = row.get("senses")
-    if not isinstance(senses, list):
-        return None
-    for sense in senses:
-        if not isinstance(sense, dict):
-            continue
-        examples = sense.get("examples")
-        if not isinstance(examples, list):
-            continue
-        for example in examples:
-            if isinstance(example, dict):
-                value = str(example.get("sentence") or example.get("text") or "").strip()
-            else:
-                value = str(example or "").strip()
-            if value:
-                return value
-    return None
+def _import_review_prep_module() -> Any:
+    try:
+        return import_module("tools.lexicon.review_prep")
+    except ModuleNotFoundError as exc:
+        if not exc.name or not exc.name.startswith("tools"):
+            raise
+        repo_root = Path(__file__).resolve().parents[3]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        return import_module("tools.lexicon.review_prep")
 
 
 def _canonical_json_bytes(payload: Any) -> bytes:
@@ -155,49 +65,6 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-
-def _validate_compiled_record(row: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    missing = sorted(field for field in _REQUIRED_COMPILED_FIELDS if field not in row)
-    if missing:
-        errors.append(f"missing required fields: {', '.join(missing)}")
-    entry_type = str(row.get("entry_type") or "")
-    if entry_type not in {"word", "phrase", "reference"}:
-        errors.append("entry_type must be word, phrase, or reference")
-    if row.get("entity_category", "general") not in ALLOWED_ENTITY_CATEGORIES:
-        errors.append("entity_category must be a supported value")
-    if not isinstance(row.get("source_provenance"), list):
-        errors.append("source_provenance must be a list")
-    if not isinstance(row.get("part_of_speech"), list):
-        errors.append("part_of_speech must be a list")
-
-    if not isinstance(row.get("forms"), dict):
-        errors.append("forms must be an object")
-
-    senses = row.get("senses")
-    if not isinstance(senses, list):
-        errors.append("senses must be a list")
-    elif entry_type in {"word", "phrase"} and not senses:
-        errors.append("senses must be a non-empty list")
-
-    if entry_type == "phrase":
-        for field in ("phrase_kind", "display_form", "normalized_form", "generated_at"):
-            if row.get(field) in (None, ""):
-                errors.append(f"missing required phrase field: {field}")
-
-    if entry_type == "reference":
-        for field in ("reference_type", "display_form", "normalized_form", "translation_mode", "brief_description", "pronunciation", "generated_at"):
-            if row.get(field) in (None, ""):
-                errors.append(f"missing required reference field: {field}")
-        for field in ("localized_display_form", "localized_brief_description"):
-            value = row.get(field)
-            if value is not None and not isinstance(value, dict):
-                errors.append(f"{field} must be an object")
-        localizations = row.get("localizations")
-        if localizations is not None and not isinstance(localizations, list):
-            errors.append("localizations must be a list")
-    return errors
 
 
 def _snapshot_root(settings: Settings) -> Path:
@@ -288,19 +155,6 @@ def _display_text(row: dict[str, Any]) -> str:
             return value
     return "unknown"
 
-
-def _review_summary(row: dict[str, Any]) -> dict[str, Any]:
-    forms = row.get("forms")
-    return {
-        "sense_count": len(row.get("senses") or []) if isinstance(row.get("senses"), list) else 0,
-        "form_variant_count": _form_variant_count(forms) if isinstance(forms, dict) else 0,
-        "confusable_count": len(row.get("confusable_words") or []) if isinstance(row.get("confusable_words"), list) else 0,
-        "provenance_sources": _provenance_sources(row),
-        "primary_definition": _primary_definition(row),
-        "primary_example": _primary_example(row),
-    }
-
-
 def _normalize_decision_rows(
     rows: list[dict[str, Any]],
     *,
@@ -358,10 +212,15 @@ def load_jsonl_review_session(
     compiled_by_id: dict[str, dict[str, Any]] = {}
     payload_sha_by_id: dict[str, str] = {}
     items: list[dict[str, Any]] = []
+    review_prep = _import_review_prep_module()
+    prepared_rows = review_prep.build_review_prep_rows(compiled_rows, origin="realtime")
     for index, row in enumerate(compiled_rows, start=1):
-        errors = _validate_compiled_record(row)
-        if errors:
-            raise HTTPException(status_code=400, detail=f"Compiled row {index} failed validation: {'; '.join(errors)}")
+        prepared = prepared_rows[index - 1]
+        if prepared["reasons"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Compiled row {index} failed validation: {'; '.join(prepared['reasons'])}",
+            )
         entry_id = str(row.get("entry_id") or "").strip()
         if not entry_id:
             raise HTTPException(status_code=400, detail=f"Compiled row {index} is missing entry_id")
@@ -381,11 +240,9 @@ def load_jsonl_review_session(
 
     approved_count = 0
     rejected_count = 0
-    for row in compiled_rows:
+    for row, prepared in zip(compiled_rows, prepared_rows, strict=False):
         entry_id = str(row.get("entry_id") or "")
         decision = decisions_by_id.get(entry_id)
-        warning_labels = _warning_labels(row)
-        review_summary = _review_summary(row)
         review_status = "pending"
         if decision:
             if decision["decision"] == "approved":
@@ -404,10 +261,10 @@ def load_jsonl_review_session(
                 "language": row.get("language") or "en",
                 "frequency_rank": row.get("frequency_rank"),
                 "cefr_level": row.get("cefr_level"),
-                "review_priority": "warning" if warning_labels else "normal",
-                "warning_count": len(warning_labels),
-                "warning_labels": warning_labels,
-                "review_summary": review_summary,
+                "review_priority": "warning" if prepared["warning_labels"] else "normal",
+                "warning_count": prepared["warning_count"],
+                "warning_labels": prepared["warning_labels"],
+                "review_summary": prepared["review_summary"],
                 "review_status": review_status,
                 "decision_reason": decision.get("decision_reason") if decision else None,
                 "reviewed_by": decision.get("reviewed_by") if decision else None,

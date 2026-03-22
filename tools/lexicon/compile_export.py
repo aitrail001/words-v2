@@ -5,6 +5,7 @@ from pathlib import Path
 
 from tools.lexicon.jsonl_io import read_jsonl, write_jsonl
 from tools.lexicon.models import CompiledWordRecord, EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
+from tools.lexicon.review_prep import build_review_prep_rows, build_review_queue_rows
 
 
 COMPILED_SCHEMA_VERSION = "1.1.0"
@@ -301,7 +302,8 @@ def compile_snapshot(
         enrichments = [enrichment for enrichment in enrichments if enrichment.sense_id in allowed_sense_ids]
 
     compiled = compile_words(lexemes, senses, enrichments)
-    write_jsonl(output_path, [record.to_dict() for record in compiled])
+    compiled_word_rows = [record.to_dict() for record in compiled]
+    write_jsonl(output_path, compiled_word_rows)
 
     phrase_rows = compile_phrase_rows(snapshot_dir)
     if phrase_rows:
@@ -310,5 +312,11 @@ def compile_snapshot(
     reference_rows = compile_reference_rows(snapshot_dir)
     if reference_rows:
         write_jsonl(snapshot_dir / "references.enriched.jsonl", reference_rows)
+
+    compiled_review_rows = [*compiled_word_rows, *phrase_rows, *reference_rows]
+    review_qc_rows = build_review_prep_rows(compiled_review_rows, origin="realtime")
+    review_queue_rows = build_review_queue_rows(review_qc_rows)
+    write_jsonl(snapshot_dir / "compiled_review_qc.jsonl", review_qc_rows)
+    write_jsonl(snapshot_dir / "compiled_review_queue.jsonl", review_queue_rows)
 
     return compiled

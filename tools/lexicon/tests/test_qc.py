@@ -24,6 +24,10 @@ class QCTests(unittest.TestCase):
 
         self.assertEqual(verdict_rows[0]["verdict"], "pass")
         self.assertEqual(verdict_rows[1]["verdict"], "fail")
+        self.assertEqual(verdict_rows[0]["review_priority"], 100)
+        self.assertEqual(verdict_rows[1]["review_priority"], 200)
+        self.assertEqual(verdict_rows[0]["warning_labels"], [])
+        self.assertEqual(verdict_rows[1]["warning_labels"], [])
         self.assertEqual(review_queue_rows[0]["custom_id"], "phrase:lexicon:s2:attempt1")
 
     def test_run_batch_qc_applies_overrides(self) -> None:
@@ -52,6 +56,7 @@ class QCTests(unittest.TestCase):
             persisted = [json.loads(line) for line in (snapshot_dir / "batch_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(verdict_rows[1]["verdict"], "pass")
             self.assertTrue(verdict_rows[1]["override_applied"])
+            self.assertEqual(verdict_rows[1]["review_priority"], 100)
             self.assertEqual(review_queue_rows, [])
             self.assertEqual(persisted[1]["review_notes"], "approved")
 

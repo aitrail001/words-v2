@@ -35,6 +35,14 @@ def apply_manual_overrides(
         for key in ("verdict", "confidence", "reasons", "review_notes", "model_name", "prompt_version"):
             if key in override and override[key] is not None:
                 merged[key] = override[key]
+        if "review_priority" in override and override["review_priority"] is not None:
+            merged["review_priority"] = override["review_priority"]
+        else:
+            verdict = str(merged.get("verdict") or "").strip().lower()
+            if verdict == "pass":
+                merged["review_priority"] = 100
+            elif verdict:
+                merged["review_priority"] = 200
         merged["override_applied"] = True
         updated_rows.append(merged)
     return updated_rows
