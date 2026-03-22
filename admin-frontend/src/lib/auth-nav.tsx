@@ -30,13 +30,6 @@ export function AuthNavigation() {
         Home
       </Link>
       <Link
-        href="/lexicon"
-        className="hover:text-gray-900"
-        data-testid="nav-lexicon-link"
-      >
-        Lexicon Review
-      </Link>
-      <Link
         href="/lexicon/ops"
         className="hover:text-gray-900"
         data-testid="nav-lexicon-ops-link"
@@ -56,6 +49,27 @@ export function AuthNavigation() {
         data-testid="nav-lexicon-jsonl-review-link"
       >
         JSONL Review
+      </Link>
+      <Link
+        href="/lexicon/import-db"
+        className="hover:text-gray-900"
+        data-testid="nav-lexicon-import-db-link"
+      >
+        Import DB
+      </Link>
+      <Link
+        href="/lexicon/db-inspector"
+        className="hover:text-gray-900"
+        data-testid="nav-lexicon-db-inspector-link"
+      >
+        DB Inspector
+      </Link>
+      <Link
+        href="/lexicon/legacy"
+        className="hover:text-gray-900"
+        data-testid="nav-lexicon-legacy-link"
+      >
+        Legacy
       </Link>
       {isAuthenticated ? (
         <button

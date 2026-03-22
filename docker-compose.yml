@@ -52,6 +52,8 @@ services:
       - DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED:-true}
     volumes:
       - ./backend:/app
+      - ./tools:/app/tools:ro
+      - ./data:/app/data:ro
       - backend_uploads:/app/uploads
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -78,6 +80,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./backend:/app
+      - ./tools:/app/tools:ro
+      - ./data:/app/data:ro
       - backend_uploads:/app/uploads
     depends_on:
       postgres:

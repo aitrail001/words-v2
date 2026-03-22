@@ -21,13 +21,13 @@ jest.mock("@/lib/auth-redirect", () => ({
 }));
 
 describe("AdminHomePage", () => {
-  it("renders admin dashboard and lexicon link", () => {
+  it("renders admin dashboard and lexicon ops link", () => {
     render(<AdminHomePage />);
 
     expect(screen.getByTestId("admin-home-page")).toBeInTheDocument();
     expect(screen.getByTestId("admin-home-lexicon-link")).toHaveAttribute(
       "href",
-      "/lexicon",
+      "/lexicon/ops",
     );
   });
 });

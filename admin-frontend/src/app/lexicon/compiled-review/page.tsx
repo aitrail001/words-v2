@@ -16,6 +16,11 @@ import {
   updateLexiconCompiledReviewItem,
 } from "@/lib/lexicon-compiled-reviews-client";
 
+function searchParam(name: string): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(name) ?? "";
+}
+
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
@@ -105,6 +110,7 @@ export default function LexiconCompiledReviewPage() {
       redirectToLogin("/lexicon/compiled-review");
       return;
     }
+    setImportSourceReference(searchParam("sourceReference"));
     void loadBatches();
   }, []);
 

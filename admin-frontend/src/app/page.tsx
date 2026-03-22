@@ -35,11 +35,11 @@ export default function AdminHomePage() {
           Review staged lexicon batches, approve items, publish approved rows, and inspect imported learner-facing data.
         </p>
         <Link
-          href="/lexicon"
+          href="/lexicon/ops"
           className="mt-4 inline-flex rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
           data-testid="admin-home-lexicon-link"
         >
-          Open Lexicon Review
+          Open Lexicon Ops
         </Link>
       </div>
     </div>

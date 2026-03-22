@@ -143,6 +143,36 @@ Important:
 - It writes to dedicated `lexicon_artifact_review_*` tables, not to the final lexicon `word` / `meaning` / `phrase_entries` / `reference_entries` tables.
 - The final learner-facing DB write path remains `compile-export -> import-db`.
 
+### 4.3 Admin workflow map
+
+The admin portal now exposes the current lexicon workflow as separate tools instead of a single mixed review page:
+
+- `/lexicon/ops`
+  - snapshot-first hub
+  - inspects `data/lexicon/snapshots/*`
+  - deep-links into review/import/inspection flows with the selected snapshot prefilled
+- `/lexicon/compiled-review`
+  - DB-backed review staging for immutable compiled artifacts
+  - imports compiled JSONL into review tables, not final lexicon tables
+- `/lexicon/jsonl-review`
+  - file-backed review path for compiled artifacts plus `review.decisions.jsonl`
+  - keeps JSONL as source of truth and never imports review state into review tables
+- `/lexicon/import-db`
+  - explicit final import step for approved compiled JSONL
+  - supports dry-run and real import
+- `/lexicon/db-inspector`
+  - post-import verification against the real lexicon DB
+- `/lexicon/legacy`
+  - deprecated `selection_decisions.jsonl` review surface kept only for historical staged-selection flows
+
+Recommended operator order:
+
+1. start in `/lexicon/ops`
+2. choose `compiled-review` or `jsonl-review`
+3. export or materialize approved JSONL
+4. run `/lexicon/import-db`
+5. confirm the final state in `/lexicon/db-inspector`
+
 Run an import dry-run summary:
 
 ```bash
