@@ -120,7 +120,7 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   await expect(page.getByTestId("lexicon-jsonl-review-page")).toBeVisible();
 
   await page.getByLabel("Artifact path").fill(compiledBackendPath);
-  await page.getByLabel("Decisions path").fill(decisionsBackendPath);
+  await page.getByLabel("Decision ledger path").fill(decisionsBackendPath);
   await page.getByLabel("Output directory").fill(outputBackendDir);
   await page.getByRole("button", { name: "Load Artifact" }).click();
 
