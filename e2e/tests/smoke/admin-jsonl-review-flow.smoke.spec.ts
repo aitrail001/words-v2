@@ -127,7 +127,7 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   await page.getByLabel("Artifact path").fill(compiledBackendPath);
   await page.getByLabel("Decision ledger path").fill(decisionsBackendPath);
   await page.getByLabel("Output directory").fill(outputBackendDir);
-  await page.getByRole("button", { name: "Load Artifact" }).click();
+  await page.getByRole("button", { name: "Refresh" }).click();
 
   await expect(page.getByText(`Loaded ${path.basename(compiledBackendPath)}`)).toBeVisible();
   await expect(page.getByText("Risk first")).toBeVisible();
@@ -139,13 +139,11 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   await expect(page.getByRole("heading", { name: phrase })).toBeVisible();
   await page.getByTestId("jsonl-review-decision-reason").fill("regen from smoke");
   await page.getByTestId("jsonl-review-reject-button").click();
-  await page.getByTestId("jsonl-review-confirm-rejected-button").click();
   await expect(page.getByText(/Saved phrase:.* as rejected\./)).toBeVisible();
   await expect(page.getByRole("heading", { name: normalized })).toBeVisible();
 
   await page.getByTestId("jsonl-review-decision-reason").fill("approved in jsonl smoke");
   await page.getByTestId("jsonl-review-approve-button").click();
-  await page.getByTestId("jsonl-review-confirm-approved-button").click();
   await expect(page.getByText(new RegExp(`Saved word:${normalized}:${uniqueSuffix} as approved\\.`))).toBeVisible();
 
   await page.getByRole("button", { name: "Materialize Reviewed Outputs" }).click();
