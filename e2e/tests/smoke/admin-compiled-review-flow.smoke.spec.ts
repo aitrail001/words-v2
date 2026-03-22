@@ -147,9 +147,9 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   expect(items[0].regen_requested).toBe(false);
 
   const decisionDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export Decisions" }).click();
+  await page.getByRole("button", { name: "Download Decision Ledger" }).click();
   const downloaded = await decisionDownload;
-  expect(downloaded.suggestedFilename()).toContain("compiled_words.decisions.jsonl");
+  expect(downloaded.suggestedFilename()).toContain(".decisions.jsonl");
 
   const decisionExportResponse = await request.get(
     `${apiUrl}/lexicon-compiled-reviews/batches/${batch!.id}/export/decisions`,

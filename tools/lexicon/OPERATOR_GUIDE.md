@@ -188,6 +188,20 @@ Recommended operator order:
 5. run `/lexicon/import-db`
 6. confirm the final state in `/lexicon/db-inspector`
 
+Reviewed artifact contract:
+
+- `words.enriched.jsonl` / `phrases.enriched.jsonl` / `references.enriched.jsonl` are the immutable compiled artifacts before review
+- `approved.jsonl` is the reviewed output you should normally pass to `import-db`
+- `review.decisions.jsonl` is the finalized decision ledger or overlay
+- `rejected.jsonl` preserves rejected rows plus decision metadata for audit
+- `regenerate.jsonl` is derived from rejected rows and is the request set for a new generation pass
+
+Decision mapping:
+
+- `Approve` adds the row to `approved.jsonl`
+- `Reject` keeps the row out of `approved.jsonl`, records the decision ledger, and adds a regeneration request row
+- `Reopen` clears the final decision so the row stays pending and is excluded from reviewed outputs
+
 Important:
 
 - the admin portal is still a workflow shell around an offline lexicon pipeline
@@ -195,10 +209,10 @@ Important:
 - `/lexicon/ops` should tell you which of those steps are still outstanding for the selected snapshot
 - the admin frontend should use same-origin `/api` in the browser and a server-side `BACKEND_URL` proxy; do not flip `NEXT_PUBLIC_API_URL` between `localhost` and `backend` just to switch between macOS browser use and Docker-internal Playwright
 
-Run an import dry-run summary:
+Run an import dry-run summary against the reviewed output:
 
 ```bash
-python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/words.enriched.jsonl --dry-run
+python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/approved.jsonl --dry-run
 python3 -m tools.lexicon.cli rerank-senses --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --candidate-source candidates --candidate-limit 8
 python3 -m tools.lexicon.cli compare-selection --snapshot-dir data/lexicon/snapshots/demo --rerank-file data/lexicon/snapshots/demo/sense_reranks.jsonl
 python3 -m tools.lexicon.cli benchmark-selection --output-dir /tmp/lexicon-benchmark --dataset tuning --dataset holdout --with-rerank --provider-mode auto --candidate-source selected_only --candidate-source candidates --candidate-source full_wordnet
@@ -292,7 +306,7 @@ For a real non-dry-run import, your backend DB settings must be available in the
 
 ```bash
 python3 -m tools.lexicon.cli import-db \
-  --input data/lexicon/snapshots/demo/words.enriched.jsonl \
+  --input data/lexicon/snapshots/demo/approved.jsonl \
   --source-type lexicon_snapshot \
   --source-reference demo-snapshot-20260307 \
   --language en
@@ -309,6 +323,11 @@ A single snapshot directory links together the pipeline stages:
 - `selection_decisions.jsonl` stores deterministic selection, risk scoring, and rerank/review state for each lexeme, and can drive both admin review import and `compile-export --decision-filter mode_c_safe`
 - `review_queue.jsonl` stores only the lexemes still marked `review_required=true` after bounded rerank
 - `words.enriched.jsonl` is the compiled learner-facing export used by `import-db`, including sense-level enrichment provenance needed for local DB writeback
+- reviewed export flows then derive:
+  - `approved.jsonl` for final import
+  - `review.decisions.jsonl` for the review ledger
+  - `rejected.jsonl` for rejected overlays
+  - `regenerate.jsonl` for new generation requests
 
 Re-run any stage independently as long as the required upstream files already exist in that snapshot directory.
 
@@ -327,6 +346,7 @@ After a successful run, keep or inspect these artifacts:
 - the snapshot directory containing `lexemes.jsonl`, `senses.jsonl`, `enrichments.jsonl`, and any staged review outputs
 - the staged review artifacts `selection_decisions.jsonl` and optional `review_queue.jsonl` when you run the review-prep flow
 - the compiled export `words.enriched.jsonl`
+- the reviewed output `approved.jsonl` when review is part of the flow
 - the exact command lines used for `build-base`, `enrich`, `score-selection-risk`, `prepare-review`, `validate`, `compile-export`, and optional `import-db`
 - the summary counts printed by the CLI so you can compare later reruns, rerank decisions, and imports, including examples/relations and enrichment job/run reuse
 

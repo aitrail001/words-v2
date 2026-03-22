@@ -294,6 +294,21 @@ export default function LexiconJsonlReviewPage() {
                 <p className="mt-2 break-all font-mono text-sm text-slate-800">{decisionsPath || "review.decisions.jsonl"}</p>
               </div>
             </div>
+
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:grid-cols-3">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Approve</p>
+                <p className="mt-2">Approve keeps the compiled row eligible for approved.jsonl, the reviewed file you should import into the final DB.</p>
+              </div>
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Reject</p>
+                <p className="mt-2">Reject records the row in review.decisions.jsonl, writes the rejected overlay, and adds a regeneration request row.</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reopen</p>
+                <p className="mt-2">Reopen removes the final decision so the row stays pending until you decide again.</p>
+              </div>
+            </div>
           </div>
 
           <aside className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
@@ -527,9 +542,29 @@ export default function LexiconJsonlReviewPage() {
 
       {materializeResult ? (
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm text-sm text-gray-700">
-          <p>{materializeResult.approved_output_path}</p>
-          <p>{materializeResult.rejected_output_path}</p>
-          <p>{materializeResult.regenerate_output_path}</p>
+          <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Reviewed outputs</h4>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="font-medium text-emerald-900">approved.jsonl</p>
+              <p className="mt-1 break-all font-mono text-xs text-emerald-900">{materializeResult.approved_output_path}</p>
+              <p className="mt-2 text-emerald-900">approved.jsonl is the reviewed file for Import DB.</p>
+            </div>
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
+              <p className="font-medium text-sky-900">review.decisions.jsonl</p>
+              <p className="mt-1 break-all font-mono text-xs text-sky-900">{materializeResult.decisions_output_path}</p>
+              <p className="mt-2 text-sky-900">Decision ledger for the reviewed artifact.</p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="font-medium text-amber-900">rejected.jsonl</p>
+              <p className="mt-1 break-all font-mono text-xs text-amber-900">{materializeResult.rejected_output_path}</p>
+              <p className="mt-2 text-amber-900">Rejected overlay rows with attached review metadata.</p>
+            </div>
+            <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
+              <p className="font-medium text-violet-900">regenerate.jsonl</p>
+              <p className="mt-1 break-all font-mono text-xs text-violet-900">{materializeResult.regenerate_output_path}</p>
+              <p className="mt-2 text-violet-900">Regeneration request rows derived from rejected decisions.</p>
+            </div>
+          </div>
         </section>
       ) : null}
     </div>

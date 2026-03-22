@@ -51,6 +51,8 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
       "Stage: Final DB write",
     );
+    expect(screen.getByText(/Use approved\.jsonl from Compiled Review export or JSONL Review materialize, not the raw words\.enriched\.jsonl artifact unless you are intentionally bypassing review\./)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("data/lexicon/snapshots/.../approved.jsonl")).toBeInTheDocument();
     await waitFor(() =>
       expect(dryRunLexiconImport).toHaveBeenCalledWith({
         inputPath: "/data/lexicon/snapshots/demo/approved.jsonl",

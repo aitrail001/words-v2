@@ -135,6 +135,9 @@ describe("LexiconJsonlReviewPage", () => {
     expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
       "Stage: Alternate review path",
     );
+    expect(screen.getByText(/Approve keeps the compiled row eligible for approved\.jsonl, the reviewed file you should import into the final DB\./)).toBeInTheDocument();
+    expect(screen.getByText(/Reject records the row in review\.decisions\.jsonl, writes the rejected overlay, and adds a regeneration request row\./)).toBeInTheDocument();
+    expect(screen.getByText(/Reopen removes the final decision so the row stays pending until you decide again\./)).toBeInTheDocument();
     expect(screen.getByLabelText("Artifact path")).toHaveValue("/tmp/words.enriched.jsonl");
     expect(screen.getByLabelText("Decisions path")).toHaveValue("/tmp/review.decisions.jsonl");
     expect(screen.getByLabelText("Output directory")).toHaveValue("/tmp/materialized");
@@ -199,6 +202,7 @@ describe("LexiconJsonlReviewPage", () => {
         outputDir: "/tmp/materialized",
       }),
     );
-    await waitFor(() => expect(screen.getByText(/approved\.jsonl/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("approved.jsonl")).toBeInTheDocument());
+    expect(screen.getByText(/approved\.jsonl is the reviewed file for Import DB\./)).toBeInTheDocument();
   });
 });

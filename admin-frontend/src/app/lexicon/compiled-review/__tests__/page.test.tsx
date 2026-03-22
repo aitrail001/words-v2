@@ -211,9 +211,13 @@ describe("LexiconCompiledReviewPage", () => {
       expect(mockUpdateItem).toHaveBeenCalledWith("item-1", { review_status: "approved", decision_reason: "ready" }),
     );
 
-    await user.click(screen.getByTestId("compiled-review-export-approved"));
+    expect(screen.getByText(/Approve keeps the compiled row eligible for final import as approved\.jsonl\./)).toBeInTheDocument();
+    expect(screen.getByText(/Reject removes the row from approved\.jsonl, records the review decision ledger, and includes it in regeneration requests\./)).toBeInTheDocument();
+    expect(screen.getByText(/Reopen clears the final decision so the row stays pending and is excluded from reviewed exports\./)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Download Approved Rows" }));
     await waitFor(() => expect(mockDownloadApproved).toHaveBeenCalledWith("batch-1"));
-    await user.click(screen.getByRole("button", { name: "Export Decisions" }));
+    await user.click(screen.getByRole("button", { name: "Download Decision Ledger" }));
     await waitFor(() => expect(mockDownloadDecisions).toHaveBeenCalledWith("batch-1"));
   });
 });
