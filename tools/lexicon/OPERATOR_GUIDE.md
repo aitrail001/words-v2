@@ -164,12 +164,15 @@ The admin portal now exposes the current lexicon workflow as separate tools inst
   - DB-backed review staging for immutable compiled artifacts
   - imports compiled JSONL into review tables, not final lexicon tables
   - supports both file upload and import-by-path for an existing compiled artifact selected in `/lexicon/ops`
+  - when launched from `/lexicon/ops`, it should auto-import the selected compiled artifact into review staging and keep snapshot/source-reference context visible in the batch list
 - `/lexicon/jsonl-review`
   - file-backed review path for compiled artifacts plus `review.decisions.jsonl`
   - keeps JSONL as source of truth and never imports review state into review tables
+  - when launched from `/lexicon/ops`, it should auto-load the selected artifact and sidecar paths instead of opening as a blank form
 - `/lexicon/import-db`
   - explicit final import step for approved compiled JSONL
   - supports dry-run and real import
+  - when launched from `/lexicon/ops`, it should arrive prefilled and auto-run the dry-run, but still require an explicit click for the final DB write
 - `/lexicon/db-inspector`
   - post-import verification against the real lexicon DB
 - `/lexicon/legacy`

@@ -120,7 +120,7 @@ describe("LexiconJsonlReviewPage", () => {
     window.history.pushState(
       {},
       "",
-      "/lexicon/jsonl-review?artifactPath=%2Ftmp%2Fwords.enriched.jsonl&decisionsPath=%2Ftmp%2Freview.decisions.jsonl&outputDir=%2Ftmp%2Fmaterialized&sourceReference=lexicon-20260321-wordfreq",
+      "/lexicon/jsonl-review?artifactPath=%2Ftmp%2Fwords.enriched.jsonl&decisionsPath=%2Ftmp%2Freview.decisions.jsonl&outputDir=%2Ftmp%2Fmaterialized&sourceReference=lexicon-20260321-wordfreq&autostart=1",
     );
     render(<LexiconJsonlReviewPage />);
 
@@ -135,6 +135,9 @@ describe("LexiconJsonlReviewPage", () => {
     expect(screen.getByTestId("lexicon-jsonl-review-context")).toHaveTextContent(
       "Stage: Alternate review path",
     );
+    expect(screen.getByLabelText("Artifact path")).toHaveValue("/tmp/words.enriched.jsonl");
+    expect(screen.getByLabelText("Decisions path")).toHaveValue("/tmp/review.decisions.jsonl");
+    expect(screen.getByLabelText("Output directory")).toHaveValue("/tmp/materialized");
 
     await user.type(screen.getByLabelText("Artifact path"), "/tmp/words.enriched.jsonl");
     await user.type(screen.getByLabelText("Decisions path"), "/tmp/review.decisions.jsonl");

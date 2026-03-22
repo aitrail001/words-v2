@@ -111,6 +111,33 @@ function fileBadgeText(file: LexiconOpsSnapshotArtifact): string {
   return "ok";
 }
 
+function artifactPathFromDetail(
+  detail: LexiconOpsSnapshotDetail | null,
+  fileNames: string[],
+): string {
+  if (!detail) return "";
+  const match = detail.artifacts.find(
+    (artifact) => artifact.exists && fileNames.includes(artifact.file_name),
+  );
+  return match ? `${detail.snapshot_path}/${match.file_name}` : "";
+}
+
+function inferArtifactPathFromSummary(
+  snapshot: LexiconOpsSnapshotSummary | null,
+  kind: "review" | "import",
+): string {
+  if (!snapshot) return "";
+  if (kind === "review" && snapshot.has_compiled_export) {
+    if ((snapshot.artifact_counts.compiled_words ?? 0) > 0) {
+      return `${snapshot.snapshot_path}/words.enriched.jsonl`;
+    }
+  }
+  if (kind === "import" && snapshot.workflow_stage === "approved_ready_for_import") {
+    return `${snapshot.snapshot_path}/approved.jsonl`;
+  }
+  return "";
+}
+
 export default function LexiconOpsPage() {
   const router = useRouter();
   const [snapshots, setSnapshots] = useState<LexiconOpsSnapshotSummary[]>([]);
@@ -193,21 +220,47 @@ export default function LexiconOpsPage() {
     setImportSourceReference(selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot);
   }, [detail, selectedSnapshot]);
 
-  const reviewArtifactPath = useMemo(
-    () => selectedSnapshot?.preferred_review_artifact_path ?? "",
-    [selectedSnapshot],
-  );
+  const reviewArtifactPath = useMemo(() => {
+    const preferred = selectedSnapshot?.preferred_review_artifact_path ?? "";
+    if (preferred) return preferred;
+    const fromDetail = artifactPathFromDetail(detail, [
+      "words.enriched.jsonl",
+      "phrases.enriched.jsonl",
+      "references.enriched.jsonl",
+    ]);
+    if (fromDetail) return fromDetail;
+    return inferArtifactPathFromSummary(selectedSnapshot, "review");
+  }, [detail, selectedSnapshot]);
+  const importArtifactPath = useMemo(() => {
+    const preferred = selectedSnapshot?.preferred_import_artifact_path ?? "";
+    if (preferred) return preferred;
+    const fromDetail = artifactPathFromDetail(detail, ["approved.jsonl"]);
+    if (fromDetail) return fromDetail;
+    return inferArtifactPathFromSummary(selectedSnapshot, "import");
+  }, [detail, selectedSnapshot]);
   const reviewDecisionsPath = useMemo(
     () => (selectedSnapshot ? `${selectedSnapshot.snapshot_path}/review.decisions.jsonl` : ""),
     [selectedSnapshot],
   );
+
+  useEffect(() => {
+    if (!selectedSnapshot) return;
+    if (selectedSnapshot.preferred_import_artifact_path) return;
+    if (!importPath) {
+      const fallbackImportPath = artifactPathFromDetail(detail, ["approved.jsonl"]);
+      if (fallbackImportPath) {
+        setImportPath(fallbackImportPath);
+      }
+    }
+  }, [detail, importPath, selectedSnapshot]);
 
   const openWorkflow = (route: string, params: Record<string, string>) => {
     const searchParams = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
       if (value) searchParams.set(key, value);
     }
-    router.push(searchParams.size > 0 ? `${route}?${searchParams.toString()}` : route);
+    const query = searchParams.toString();
+    router.push(query ? `${route}?${query}` : route);
   };
 
   const runImport = async (mode: "dry-run" | "run") => {
@@ -339,6 +392,7 @@ export default function LexiconOpsPage() {
                       decisionsPath: reviewDecisionsPath,
                       outputDir: selectedSnapshot.snapshot_path,
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
+                      autostart: "1",
                     })}
                   >
                     Open JSONL Review
@@ -351,6 +405,7 @@ export default function LexiconOpsPage() {
                       snapshot: selectedSnapshot.snapshot,
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
                       artifactPath: reviewArtifactPath,
+                      autostart: "1",
                     })}
                   >
                     Open Compiled Review
@@ -360,8 +415,9 @@ export default function LexiconOpsPage() {
                     data-testid="lexicon-ops-open-import-db"
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
                     onClick={() => openWorkflow("/lexicon/import-db", {
-                      inputPath: importPath,
+                      inputPath: importArtifactPath || importPath,
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
+                      autostart: "1",
                     })}
                   >
                     Open Import DB

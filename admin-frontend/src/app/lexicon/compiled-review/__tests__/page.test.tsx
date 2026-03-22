@@ -178,7 +178,7 @@ describe("LexiconCompiledReviewPage", () => {
     window.history.pushState(
       {},
       "",
-      "/lexicon/compiled-review?snapshot=words-100-20260312&sourceReference=lexicon-20260312-wordnet-wordfreq&artifactPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Fwords.enriched.jsonl",
+      "/lexicon/compiled-review?snapshot=words-100-20260312&sourceReference=lexicon-20260312-wordnet-wordfreq&artifactPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Fwords.enriched.jsonl&autostart=1",
     );
     render(<LexiconCompiledReviewPage />);
 
@@ -193,7 +193,15 @@ describe("LexiconCompiledReviewPage", () => {
     expect(screen.getByTestId("lexicon-compiled-review-context")).toHaveTextContent(
       "Stage: Review compiled artifact",
     );
+    await waitFor(() =>
+      expect(mockImportBatchByPath).toHaveBeenCalledWith({
+        artifactPath: "/data/lexicon/snapshots/words-100-20260312/words.enriched.jsonl",
+        sourceReference: "lexicon-20260312-wordnet-wordfreq",
+      }),
+    );
     await waitFor(() => expect(screen.getAllByText("words.enriched.jsonl").length).toBeGreaterThan(0));
+    expect(screen.getByTestId("compiled-review-batches-list")).toHaveTextContent("snapshot-001");
+    expect(screen.getByTestId("compiled-review-batches-list")).toHaveTextContent("2026");
     await waitFor(() => expect(screen.getByTestId("compiled-review-item-title")).toHaveTextContent("bank"));
 
     await user.type(screen.getByTestId("compiled-review-decision-reason"), "ready");
@@ -207,13 +215,5 @@ describe("LexiconCompiledReviewPage", () => {
     await waitFor(() => expect(mockDownloadApproved).toHaveBeenCalledWith("batch-1"));
     await user.click(screen.getByRole("button", { name: "Export Decisions" }));
     await waitFor(() => expect(mockDownloadDecisions).toHaveBeenCalledWith("batch-1"));
-
-    await user.click(screen.getByTestId("compiled-review-import-by-path-button"));
-    await waitFor(() =>
-      expect(mockImportBatchByPath).toHaveBeenCalledWith({
-        artifactPath: "/data/lexicon/snapshots/words-100-20260312/words.enriched.jsonl",
-        sourceReference: "lexicon-20260312-wordnet-wordfreq",
-      }),
-    );
   });
 });

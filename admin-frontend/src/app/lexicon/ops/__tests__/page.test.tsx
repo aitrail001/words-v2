@@ -281,8 +281,11 @@ describe("LexiconOpsPage", () => {
     await user.click(screen.getByTestId("lexicon-ops-open-db-inspector"));
 
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/jsonl-review"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("artifactPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Fwords.enriched.jsonl"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("autostart=1"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/compiled-review"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/import-db"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fwords-100-20260312%2Fapproved.jsonl"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/db-inspector"));
   });
 

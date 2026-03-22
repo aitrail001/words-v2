@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
@@ -58,9 +58,11 @@ export default function LexiconCompiledReviewPage() {
   const [decisionReason, setDecisionReason] = useState("");
   const [saveLoading, setSaveLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const autoImportKeyRef = useRef<string>("");
   const snapshotContext = searchParam("snapshot");
   const sourceReferenceContext = searchParam("sourceReference");
   const artifactPathContext = searchParam("artifactPath");
+  const autoStart = searchParam("autostart") === "1";
 
   const selectedBatch = useMemo(
     () => batches.find((batch) => batch.id === selectedBatchId) ?? null,
@@ -87,7 +89,10 @@ export default function LexiconCompiledReviewPage() {
     try {
       const nextBatches = await listLexiconCompiledReviewBatches();
       setBatches(nextBatches);
-      const nextSelected = preferredBatchId ?? nextBatches[0]?.id ?? "";
+      const nextSelected =
+        nextBatches.find((batch) => batch.id === preferredBatchId)?.id ??
+        nextBatches[0]?.id ??
+        "";
       setSelectedBatchId(nextSelected);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to load compiled review batches.");
@@ -119,6 +124,31 @@ export default function LexiconCompiledReviewPage() {
     setImportArtifactPath(searchParam("artifactPath"));
     void loadBatches();
   }, []);
+
+  useEffect(() => {
+    if (!autoStart || !artifactPathContext.trim()) return;
+    const importKey = `${artifactPathContext}::${sourceReferenceContext}`;
+    if (autoImportKeyRef.current === importKey) return;
+    autoImportKeyRef.current = importKey;
+    setImportArtifactPath(artifactPathContext);
+    setImportSourceReference(sourceReferenceContext);
+    setImportLoading(true);
+    setImportError(null);
+    void importLexiconCompiledReviewBatchByPath({
+      artifactPath: artifactPathContext,
+      sourceReference: sourceReferenceContext || undefined,
+    })
+      .then(async (created) => {
+        await loadBatches(created.id);
+        setMessage(`Imported ${created.artifact_filename} from ${sourceReferenceContext || "path"}.`);
+      })
+      .catch((nextError) => {
+        setImportError(nextError instanceof Error ? nextError.message : "Import by path failed.");
+      })
+      .finally(() => {
+        setImportLoading(false);
+      });
+  }, [artifactPathContext, autoStart, sourceReferenceContext]);
 
   useEffect(() => {
     if (!selectedBatchId) {
@@ -307,7 +337,10 @@ export default function LexiconCompiledReviewPage() {
                 className={`w-full rounded-lg border p-3 text-left ${batch.id === selectedBatchId ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
               >
                 <p className="font-medium text-gray-900">{batch.artifact_filename}</p>
-                <p className="text-xs text-gray-500">{batch.artifact_family}</p>
+                <p className="text-xs text-gray-500">
+                  {batch.source_reference ?? batch.snapshot_id ?? "unknown snapshot"} · {batch.artifact_family}
+                </p>
+                <p className="text-xs text-gray-500">{formatDateTime(batch.created_at)}</p>
                 <p className="mt-1 text-xs text-gray-500">
                   pending {batch.pending_count} · approved {batch.approved_count} · rejected {batch.rejected_count}
                 </p>

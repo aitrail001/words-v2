@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
@@ -22,6 +22,7 @@ export default function LexiconImportDbPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<LexiconImportResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const autoStart = searchParam("autostart") === "1";
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -44,7 +45,7 @@ export default function LexiconImportDbPage() {
     sourceReference.trim().length > 0 ||
     language.trim() !== "en";
 
-  const execute = async (mode: "dry-run" | "run") => {
+  const execute = useCallback(async (mode: "dry-run" | "run") => {
     if (!canRun) return;
     setLoading(true);
     setMessage(null);
@@ -65,7 +66,14 @@ export default function LexiconImportDbPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [canRun, inputPath, language, sourceReference]);
+
+  useEffect(() => {
+    if (!autoStart || !inputPath.trim() || loading || result) {
+      return;
+    }
+    void execute("dry-run");
+  }, [autoStart, execute, inputPath, loading, result]);
 
   return (
     <div className="space-y-6" data-testid="lexicon-import-db-page">
