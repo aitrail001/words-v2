@@ -17,6 +17,11 @@ const buildCompiledWordRow = (runId: string, word: string) => ({
   part_of_speech: ["noun"],
   cefr_level: "B1",
   frequency_rank: 100,
+  phonetics: {
+    us: { ipa: `/${word}/`, confidence: 0.99 },
+    uk: { ipa: `/${word}/`, confidence: 0.98 },
+    au: { ipa: `/${word}/`, confidence: 0.97 },
+  },
   forms: {
     plural_forms: [`${word}s`],
     verb_forms: {},
