@@ -25,7 +25,7 @@ from tools.lexicon.batch_ledger import (
 from tools.lexicon.batch_ingest import build_batch_output_summary, build_batch_result_rows, ingest_batch_outputs
 from tools.lexicon.batch_client import BatchClient
 from tools.lexicon.form_adjudication import adjudicate_forms, load_adjudications
-from tools.lexicon.compile_export import compile_snapshot
+from tools.lexicon.compile_export import compile_snapshot, review_qc_output_path, review_queue_output_path
 from tools.lexicon.enrich import run_enrichment
 from tools.lexicon.ids import build_snapshot_id
 from tools.lexicon.inventory import load_seed_rows
@@ -505,6 +505,8 @@ def _compile_export_command(args: argparse.Namespace) -> int:
         'command': 'compile-export',
         'compiled_count': len(compiled),
         'output': str(Path(args.output)),
+        'review_qc_output': str(review_qc_output_path(Path(args.output))),
+        'review_queue_output': str(review_queue_output_path(Path(args.output))),
     }
     if args.decision_filter:
         payload['decision_filter'] = args.decision_filter

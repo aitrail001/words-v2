@@ -55,6 +55,8 @@ snapshot/
   words.enriched.jsonl
   phrases.enriched.jsonl
   references.enriched.jsonl
+  <compiled-output>.review_qc.jsonl
+  <compiled-output>.review_queue.jsonl
 ```
 
 Reference, phrase, and word families remain separate input sources. All joins across prepare, submit, ingest, retry, and QC use `custom_id`.
@@ -62,6 +64,8 @@ Reference, phrase, and word families remain separate input sources. All joins ac
 `compile-export` now writes family-aware compiled outputs when the corresponding snapshot source files exist. `import-db` can dry-run those directory layouts and count the families, and the backend schema now supports phrase and reference writes as well.
 
 `batch-qc` produces the initial flagged review queue, and `review-apply` replays approved overrides onto the persisted QC verdict rows before the next compile/import pass.
+
+Realtime exports now emit artifact-specific sidecars such as `words.enriched.review_qc.jsonl` and `words.enriched.review_queue.jsonl` through the same shared review-prep logic that batch QC uses. That gives `word`, `phrase`, and `reference` artifacts the same deterministic warning labels, review priority, and queue semantics before human review, without forcing realtime runs through batch transport ledgers.
 
 ## Compiled Review Staging
 

@@ -130,8 +130,17 @@ def validate_compiled_record(record: CompiledWordRecord | dict[str, Any]) -> lis
     entity_category = payload.get("entity_category", "general")
     if entity_category not in ALLOWED_ENTITY_CATEGORIES:
         errors.append(f"unsupported entity_category: {entity_category}")
+    if not isinstance(payload.get("part_of_speech"), list):
+        errors.append("part_of_speech must be a list")
+    if not isinstance(payload.get("forms"), dict):
+        errors.append("forms must be an object")
 
     senses = payload.get("senses", [])
+    if not isinstance(senses, list):
+        errors.append("senses must be a list")
+    elif entry_type in {None, "word", "phrase"} and not senses:
+        errors.append("senses must be a non-empty list")
+
     if isinstance(senses, list) and (entry_type in {None, "word"}):
         max_senses = compiled_meaning_limit(payload.get("frequency_rank"))
         if len(senses) > max_senses:

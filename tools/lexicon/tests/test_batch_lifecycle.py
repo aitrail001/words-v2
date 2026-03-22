@@ -65,6 +65,8 @@ class BatchLifecycleTests(unittest.TestCase):
         self.assertEqual(verdict_rows[0]["verdict"], "pass")
         self.assertEqual(verdict_rows[1]["verdict"], "pass")
         self.assertEqual(verdict_rows[1]["override_applied"], True)
+        self.assertEqual(verdict_rows[0]["review_priority"], 100)
+        self.assertEqual(verdict_rows[1]["review_priority"], 100)
         self.assertEqual(review_queue_rows, [])
 
     def test_cli_batch_lifecycle_commands(self) -> None:
@@ -152,4 +154,3 @@ class BatchLifecycleTests(unittest.TestCase):
             self.assertEqual(qc_payload["review_queue_count"], 0)
             self.assertTrue((snapshot_dir / "batch_qc.jsonl").exists())
             self.assertTrue((snapshot_dir / "enrichment_review_queue.jsonl").exists())
-

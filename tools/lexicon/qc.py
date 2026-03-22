@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from tools.lexicon.batch_ledger import load_jsonl_rows, write_jsonl_rows
 from tools.lexicon.overrides import apply_manual_overrides, load_manual_overrides
+from tools.lexicon.review_prep import build_review_prep_rows, build_review_queue_rows as build_shared_review_queue_rows
 
 
 def build_qc_verdict_rows(
@@ -17,27 +18,18 @@ def build_qc_verdict_rows(
     prompt_version: str = "v1",
     overrides: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    verdict_rows: list[dict[str, Any]] = []
+    qc_input_rows: list[dict[str, Any]] = []
     for row in result_rows:
         custom_id = str(row.get("custom_id") or "").strip()
         if not custom_id:
             continue
-        status = str(row.get("status") or "").strip().lower()
-        validation_status = str(row.get("validation_status") or "").strip().lower()
-        pass_qc = status == "accepted" and validation_status == "valid"
-        verdict_row = {
-            "custom_id": custom_id,
-            "entry_kind": row.get("entry_kind"),
-            "entry_id": row.get("entry_id"),
-            "verdict": "pass" if pass_qc else "fail",
-            "confidence": 1.0 if pass_qc else 0.0,
-            "reasons": [] if pass_qc else [f"status={status or 'unknown'}", f"validation_status={validation_status or 'unknown'}"],
-            "review_notes": None if pass_qc else row.get("error_detail"),
-            "model_name": judge_model,
-            "prompt_version": prompt_version,
-            "reviewed_at": reviewed_at,
-        }
-        verdict_rows.append(verdict_row)
+        qc_input_rows.append(dict(row))
+
+    verdict_rows = build_review_prep_rows(qc_input_rows, origin="batch")
+    for verdict_row in verdict_rows:
+        verdict_row["model_name"] = judge_model
+        verdict_row["prompt_version"] = prompt_version
+        verdict_row["reviewed_at"] = reviewed_at
 
     if overrides:
         verdict_rows = apply_manual_overrides(verdict_rows, overrides)
@@ -45,21 +37,7 @@ def build_qc_verdict_rows(
 
 
 def build_review_queue_rows(verdict_rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    queue_rows: list[dict[str, Any]] = []
-    for row in verdict_rows:
-        verdict = str(row.get("verdict") or "").strip().lower()
-        if verdict == "pass":
-            continue
-        queue_rows.append(
-            {
-                "custom_id": row.get("custom_id"),
-                "entry_kind": row.get("entry_kind"),
-                "entry_id": row.get("entry_id"),
-                "review_status": "needs_review",
-                "review_notes": row.get("review_notes"),
-            }
-        )
-    return queue_rows
+    return build_shared_review_queue_rows(verdict_rows)
 
 
 def run_batch_qc(

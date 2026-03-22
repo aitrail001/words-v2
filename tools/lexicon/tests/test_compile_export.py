@@ -323,6 +323,12 @@ class CompileWordsTests(unittest.TestCase):
             payload = json.loads(out_path.read_text(encoding="utf-8").strip())
             self.assertEqual(payload["word"], "run")
             self.assertEqual(payload["senses"][0]["definition"], "to move quickly on foot")
+            qc_rows = [json.loads(line) for line in (root / "words.enriched.review_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            queue_rows = [json.loads(line) for line in (root / "words.enriched.review_queue.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(qc_rows), 1)
+            self.assertEqual(qc_rows[0]["entry_id"], "lx_run")
+            self.assertEqual(qc_rows[0]["verdict"], "pass")
+            self.assertEqual(queue_rows, [])
 
     def test_compile_snapshot_writes_phrase_and_reference_outputs_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -340,7 +346,8 @@ class CompileWordsTests(unittest.TestCase):
                     "display_form": "take off",
                     "phrase_kind": "phrasal_verb",
                     "language": "en",
-                    "source_provenance": [{"source": "phrase_seed"}],
+                    "source_provenance": [],
+                    "senses": [{"sense_id": "phrase-1", "definition": "leave the ground", "examples": []}],
                     "created_at": "2026-03-20T00:00:00Z",
                 })
             ]) + "\n", encoding="utf-8")
@@ -356,8 +363,6 @@ class CompileWordsTests(unittest.TestCase):
                     "translation_mode": "localized",
                     "brief_description": "A country in the Southern Hemisphere.",
                     "pronunciation": "/ɔˈstreɪliə/",
-                    "localized_display_form": {"es": "Australia"},
-                    "localized_brief_description": {"es": "País del hemisferio sur."},
                     "learner_tip": "Stress is on STRAY.",
                     "language": "en",
                     "source_provenance": [{"source": "reference_seed"}],
@@ -374,6 +379,14 @@ class CompileWordsTests(unittest.TestCase):
             reference_rows = [json.loads(line) for line in (root / "references.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(phrase_rows[0]["entry_type"], "phrase")
             self.assertEqual(reference_rows[0]["entry_type"], "reference")
+            qc_rows = [json.loads(line) for line in (root / "words.enriched.review_qc.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            queue_rows = [json.loads(line) for line in (root / "words.enriched.review_queue.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(qc_rows), 2)
+            self.assertEqual(qc_rows[0]["entry_id"], "ph_take_off")
+            self.assertEqual(qc_rows[0]["verdict"], "fail")
+            self.assertEqual(qc_rows[1]["entry_id"], "rf_australia")
+            self.assertEqual(qc_rows[1]["warning_labels"], ["missing_localizations"])
+            self.assertEqual(len(queue_rows), 2)
 
 
 if __name__ == "__main__":
@@ -517,12 +530,14 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
                     "review_required": True,
                 }),
             ]) + "\n", encoding="utf-8")
-            output_path = root / "words.enriched.jsonl"
+            output_path = root / "words.mode-c-safe.enriched.jsonl"
 
             compiled = compile_snapshot(root, output_path, decisions_path=decisions_path, decision_filter="mode_c_safe")
 
             self.assertEqual(len(compiled), 1)
             self.assertEqual(compiled[0].word, "run")
+            self.assertTrue((root / "words.mode-c-safe.enriched.review_qc.jsonl").exists())
+            self.assertTrue((root / "words.mode-c-safe.enriched.review_queue.jsonl").exists())
 
     def test_compile_snapshot_mode_c_safe_requires_decisions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

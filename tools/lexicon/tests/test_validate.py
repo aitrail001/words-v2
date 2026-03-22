@@ -302,7 +302,7 @@ class ValidateCompiledRecordTests(unittest.TestCase):
                 "cefr_level": "B1",
                 "frequency_rank": 0,
                 "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
-                "senses": [],
+                "senses": [{"sense_id": "phrase-1", "definition": "depart", "examples": [{"sentence": "The plane took off.", "difficulty": "A1"}]}],
                 "confusable_words": [],
                 "generated_at": "2026-03-20T00:00:00Z",
                 "phrase_kind": "phrasal_verb",
@@ -343,6 +343,60 @@ class ValidateCompiledRecordTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
+    def test_validate_compiled_record_accepts_phrase_warning_only_shape(self) -> None:
+        errors = validate_compiled_record(
+            {
+                "schema_version": "1.1.0",
+                "entry_id": "phrase:break-a-leg",
+                "entry_type": "phrase",
+                "normalized_form": "break a leg",
+                "source_provenance": [],
+                "entity_category": "general",
+                "word": "break a leg",
+                "part_of_speech": ["idiom"],
+                "cefr_level": "B1",
+                "frequency_rank": 5000,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [{"sense_id": "phrase-1", "definition": "good luck", "examples": []}],
+                "confusable_words": [],
+                "generated_at": "2026-03-22T00:00:00Z",
+                "display_form": "break a leg",
+                "phrase_kind": "idiom",
+            }
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_validate_compiled_record_accepts_reference_warning_only_shape(self) -> None:
+        errors = validate_compiled_record(
+            {
+                "schema_version": "1.1.0",
+                "entry_id": "rf_australia",
+                "entry_type": "reference",
+                "normalized_form": "australia",
+                "source_provenance": [{"source": "reference_seed"}],
+                "entity_category": "general",
+                "word": "Australia",
+                "part_of_speech": [],
+                "cefr_level": "B1",
+                "frequency_rank": 0,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [],
+                "confusable_words": [],
+                "generated_at": "2026-03-22T00:00:00Z",
+                "reference_type": "country",
+                "display_form": "Australia",
+                "translation_mode": "localized",
+                "brief_description": "A country in the Southern Hemisphere.",
+                "pronunciation": "/ɔˈstreɪliə/",
+                "localized_display_form": {"es": "Australia"},
+                "localized_brief_description": {"es": "País del hemisferio sur."},
+                "learner_tip": "Stress is on STRAY.",
+                "localizations": [],
+            }
+        )
+
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":

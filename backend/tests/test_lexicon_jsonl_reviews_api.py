@@ -79,6 +79,12 @@ def _compiled_rows_with_warning() -> list[dict]:
     return rows
 
 
+def _invalid_compiled_word_row() -> dict:
+    row = _compiled_rows()[0]
+    row["senses"] = []
+    return row
+
+
 def _compiled_reference_row() -> dict:
     return {
         "schema_version": "1.1.0",
@@ -105,6 +111,12 @@ def _compiled_reference_row() -> dict:
         "learner_tip": "Stress is on STRAY.",
         "localizations": [{"locale": "es", "display_form": "Australia", "translation_mode": "localized"}],
     }
+
+
+def _compiled_reference_row_with_warning() -> dict:
+    row = _compiled_reference_row()
+    row["localizations"] = []
+    return row
 
 
 class TestLexiconJsonlReviewsApi:
@@ -206,6 +218,48 @@ class TestLexiconJsonlReviewsApi:
         assert data["items"][1]["review_summary"]["sense_count"] == 1
         assert data["items"][1]["review_summary"]["primary_definition"] == "good luck"
         assert data["items"][1]["review_summary"]["provenance_sources"] == []
+
+    @pytest.mark.asyncio
+    async def test_load_reference_rows_use_shared_warning_labels(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        compiled_path = tmp_path / "references.enriched.jsonl"
+        _write_jsonl(compiled_path, [_compiled_reference_row_with_warning()])
+
+        response = await client.post(
+            "/api/lexicon-jsonl-reviews/load",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"artifact_path": str(compiled_path)},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["items"][0]["entry_type"] == "reference"
+        assert data["items"][0]["review_priority"] == "warning"
+        assert data["items"][0]["warning_labels"] == ["missing_localizations"]
+        assert data["items"][0]["review_summary"]["primary_definition"] is None
+
+    @pytest.mark.asyncio
+    async def test_load_rejects_invalid_compiled_word_rows(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        compiled_path = tmp_path / "words.enriched.jsonl"
+        _write_jsonl(compiled_path, [_invalid_compiled_word_row()])
+
+        response = await client.post(
+            "/api/lexicon-jsonl-reviews/load",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"artifact_path": str(compiled_path)},
+        )
+
+        assert response.status_code == 400
+        assert "senses must be a non-empty list" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_patch_item_writes_sidecar_decision_row(self, client, mock_db, tmp_path: Path):
