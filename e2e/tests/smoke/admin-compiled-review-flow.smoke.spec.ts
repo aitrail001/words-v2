@@ -174,4 +174,8 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
       entry_id: `word:${normalized}:${uniqueSuffix}`,
     }),
   ]);
+
+  await page.getByRole("button", { name: "Delete Batch" }).click();
+  await page.getByRole("button", { name: "Confirm Delete Batch" }).click();
+  await expect(page.getByText("Deleted words.enriched.jsonl.")).toBeVisible();
 });

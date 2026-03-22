@@ -1,5 +1,6 @@
 import { apiClient } from "@/lib/api-client";
 import {
+  deleteLexiconCompiledReviewBatch,
   downloadCompiledReviewDecisionsExport,
   downloadApprovedCompiledReviewExport,
   listLexiconCompiledReviewBatches,
@@ -8,7 +9,7 @@ import {
 } from "@/lib/lexicon-compiled-reviews-client";
 
 jest.mock("@/lib/api-client", () => ({
-  apiClient: { get: jest.fn(), post: jest.fn(), patch: jest.fn() },
+  apiClient: { get: jest.fn(), post: jest.fn(), patch: jest.fn(), delete: jest.fn() },
 }));
 
 jest.mock("@/lib/auth-session", () => ({
@@ -39,6 +40,12 @@ describe("admin lexicon-compiled-reviews-client", () => {
     await updateLexiconCompiledReviewItem("item-1", { review_status: "approved", decision_reason: "ready" });
     expect(mockApiClient.get).toHaveBeenCalledWith("/lexicon-compiled-reviews/batches/batch-1/items");
     expect(mockApiClient.patch).toHaveBeenCalledWith("/lexicon-compiled-reviews/items/item-1", { review_status: "approved", decision_reason: "ready" });
+  });
+
+  it("deletes a compiled review batch", async () => {
+    mockApiClient.delete.mockResolvedValueOnce(undefined as any);
+    await deleteLexiconCompiledReviewBatch("batch-1");
+    expect(mockApiClient.delete).toHaveBeenCalledWith("/lexicon-compiled-reviews/batches/batch-1");
   });
 
   it("downloads approved export text", async () => {

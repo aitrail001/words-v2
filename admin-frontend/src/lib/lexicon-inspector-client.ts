@@ -1,0 +1,110 @@
+import { apiClient } from "@/lib/api-client";
+
+export type LexiconInspectorFamily = "word" | "phrase" | "reference";
+export type LexiconInspectorFamilyFilter = "all" | LexiconInspectorFamily;
+export type LexiconInspectorSort = "updated_desc" | "rank_asc" | "alpha_asc";
+
+export type LexiconInspectorListEntry = {
+  id: string;
+  family: LexiconInspectorFamily;
+  display_text: string;
+  normalized_form: string | null;
+  language: string;
+  source_reference: string | null;
+  cefr_level: string | null;
+  frequency_rank: number | null;
+  secondary_label: string | null;
+  created_at: string | null;
+};
+
+export type LexiconInspectorListResponse = {
+  items: LexiconInspectorListEntry[];
+  total: number;
+  family: LexiconInspectorFamilyFilter;
+  q: string | null;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
+export type LexiconInspectorWordDetail = {
+  family: "word";
+  id: string;
+  display_text: string;
+  normalized_form: string;
+  language: string;
+  cefr_level: string | null;
+  frequency_rank: number | null;
+  phonetic: string | null;
+  phonetic_source: string | null;
+  source_reference: string | null;
+  created_at: string | null;
+  meanings: Array<{
+    id: string;
+    definition: string;
+    part_of_speech: string | null;
+    example_sentence: string | null;
+    order_index: number;
+    examples: Array<{ id: string; sentence: string; difficulty: string | null; order_index: number }>;
+    relations: Array<{ id: string; relation_type: string; related_word: string }>;
+  }>;
+  enrichment_runs: Array<{ id: string; generator_model: string | null; validator_model: string | null; prompt_version: string | null; verdict: string | null; created_at: string }>;
+};
+
+export type LexiconInspectorPhraseDetail = {
+  family: "phrase";
+  id: string;
+  display_text: string;
+  normalized_form: string;
+  language: string;
+  cefr_level: string | null;
+  source_reference: string | null;
+  phrase_kind: string;
+  register_label: string | null;
+  brief_usage_note: string | null;
+  created_at: string | null;
+};
+
+export type LexiconInspectorReferenceDetail = {
+  family: "reference";
+  id: string;
+  display_text: string;
+  normalized_form: string;
+  language: string;
+  source_reference: string | null;
+  reference_type: string;
+  translation_mode: string;
+  brief_description: string;
+  pronunciation: string;
+  learner_tip: string | null;
+  created_at: string | null;
+  localizations: Array<{ id: string; locale: string; display_form: string; brief_description: string | null; translation_mode: string | null }>;
+};
+
+export type LexiconInspectorDetail =
+  | LexiconInspectorWordDetail
+  | LexiconInspectorPhraseDetail
+  | LexiconInspectorReferenceDetail;
+
+export const browseLexiconInspectorEntries = (input: {
+  family: LexiconInspectorFamilyFilter;
+  q?: string;
+  sort: LexiconInspectorSort;
+  limit: number;
+  offset: number;
+}): Promise<LexiconInspectorListResponse> => {
+  const params = new URLSearchParams({
+    family: input.family,
+    sort: input.sort,
+    limit: String(input.limit),
+    offset: String(input.offset),
+  });
+  if (input.q?.trim()) params.set("q", input.q.trim());
+  return apiClient.get<LexiconInspectorListResponse>(`/lexicon-inspector/entries?${params.toString()}`);
+};
+
+export const getLexiconInspectorDetail = (
+  family: LexiconInspectorFamily,
+  id: string,
+): Promise<LexiconInspectorDetail> =>
+  apiClient.get<LexiconInspectorDetail>(`/lexicon-inspector/entries/${family}/${id}`);
