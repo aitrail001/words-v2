@@ -411,7 +411,7 @@ export default function LexiconJsonlReviewPage() {
           modeNote="JSONL Review is file-backed. This page reads and writes the decision ledger file directly."
         />
 
-        <form onSubmit={loadSession} className="mt-6 grid gap-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+        <form onSubmit={loadSession} className="mt-6 grid gap-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_14rem] xl:items-start">
           <label className="grid gap-1 text-sm text-slate-700">
             <span className="font-medium">Artifact path</span>
             <input
@@ -445,10 +445,12 @@ export default function LexiconJsonlReviewPage() {
             />
             <span className="text-xs leading-5 text-slate-500">{outputDirHint}</span>
           </label>
-          <div className="flex flex-wrap gap-3 xl:justify-end">
+          <div className="grid gap-1 text-sm text-slate-700 xl:self-stretch">
+            <span className="font-medium">Load artifact</span>
             <button type="submit" disabled={!artifactPath || loading} className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-50">
               {loading ? "Loading..." : "Load Artifact"}
             </button>
+            <span className="text-xs leading-5 text-slate-500">Load the compiled artifact and sidecar paths into the review session.</span>
           </div>
         </form>
         {message ? <div className="mt-3 text-sm text-slate-700">{message}</div> : null}
