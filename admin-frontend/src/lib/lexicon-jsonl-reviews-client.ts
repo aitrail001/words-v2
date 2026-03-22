@@ -55,6 +55,13 @@ export type UpdateLexiconJsonlReviewItemInput = {
   decisionReason?: string | null;
 };
 
+export type BulkUpdateLexiconJsonlReviewItemsInput = {
+  artifactPath: string;
+  decisionsPath?: string;
+  reviewStatus: "pending" | "approved" | "rejected";
+  decisionReason?: string | null;
+};
+
 export type MaterializeLexiconJsonlReviewOutputsInput = {
   artifactPath: string;
   decisionsPath?: string;
@@ -122,6 +129,16 @@ export const materializeLexiconJsonlReviewOutputs = (
     artifact_path: input.artifactPath,
     decisions_path: input.decisionsPath,
     output_dir: input.outputDir,
+  });
+
+export const bulkUpdateLexiconJsonlReviewItems = (
+  input: BulkUpdateLexiconJsonlReviewItemsInput,
+): Promise<LexiconJsonlReviewSession> =>
+  apiClient.post<LexiconJsonlReviewSession>("/lexicon-jsonl-reviews/bulk-update", {
+    artifact_path: input.artifactPath,
+    decisions_path: input.decisionsPath,
+    review_status: input.reviewStatus,
+    decision_reason: input.decisionReason,
   });
 
 export const downloadApprovedLexiconJsonlReviewOutput = (input: MaterializeLexiconJsonlReviewOutputsInput): Promise<string> =>

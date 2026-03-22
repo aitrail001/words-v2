@@ -104,6 +104,11 @@ class LexiconCompiledReviewItemUpdateRequest(BaseModel):
     decision_reason: str | None = None
 
 
+class LexiconCompiledReviewBulkUpdateRequest(BaseModel):
+    review_status: str
+    decision_reason: str | None = None
+
+
 class LexiconCompiledReviewImportByPathRequest(BaseModel):
     artifact_path: str
     source_type: str | None = "lexicon_compiled_export"
@@ -135,6 +140,11 @@ class LexiconCompiledReviewMaterializeResponse(BaseModel):
     approved_output_path: str
     rejected_output_path: str
     regenerate_output_path: str
+
+
+class LexiconCompiledReviewBulkUpdateResponse(BaseModel):
+    batch: LexiconCompiledReviewBatchResponse
+    items: list[LexiconCompiledReviewItemResponse]
 
 
 def _compiled_meaning_limit(frequency_rank: Any) -> int:
@@ -695,6 +705,48 @@ async def update_compiled_review_item(
     _refresh_batch_counts(batch, await _load_batch_items(batch.id, db))
     await db.commit()
     return _item_response(item)
+
+
+@router.post("/batches/{batch_id}/bulk-update", response_model=LexiconCompiledReviewBulkUpdateResponse)
+async def bulk_update_compiled_review_batch(
+    batch_id: uuid.UUID,
+    request: LexiconCompiledReviewBulkUpdateRequest,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if request.review_status not in {"pending", "approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Invalid compiled review status")
+
+    batch = await _batch_or_404(batch_id, db)
+    items = await _load_batch_items(batch.id, db)
+    reviewed_at = datetime.now(timezone.utc)
+    for item in items:
+        previous_status = item.review_status
+        item.review_status = request.review_status
+        item.decision_reason = request.decision_reason
+        item.reviewed_by = current_user.id
+        item.reviewed_at = reviewed_at
+        item.updated_at = reviewed_at
+        item.import_eligible = request.review_status == "approved"
+        item.regen_requested = request.review_status == "rejected"
+        await _upsert_regeneration_request(batch=batch, item=item, current_user=current_user, db=db)
+        db.add(
+            LexiconArtifactReviewItemEvent(
+                item_id=item.id,
+                event_type=request.review_status,
+                from_status=previous_status,
+                to_status=request.review_status,
+                actor_user_id=current_user.id,
+                reason=request.decision_reason,
+            )
+        )
+
+    _refresh_batch_counts(batch, items)
+    await db.commit()
+    return LexiconCompiledReviewBulkUpdateResponse(
+        batch=_batch_response(batch),
+        items=[_item_response(item) for item in items],
+    )
 
 
 @router.get("/batches/{batch_id}/export/approved")

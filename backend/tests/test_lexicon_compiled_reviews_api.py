@@ -463,3 +463,53 @@ class TestLexiconCompiledReviewApi:
                 "reviewed_at": item.reviewed_at.isoformat().replace("+00:00", "Z"),
             }
         ]
+
+    @pytest.mark.asyncio
+    async def test_bulk_patch_batch_updates_all_items_and_batch_counts(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(created_by=uuid.uuid4(), total_items=2, pending_count=2)
+        item_one = make_item(batch.id)
+        item_two = make_item(
+            batch.id,
+            id=uuid.uuid4(),
+            entry_id="word:harbor",
+            normalized_form="harbor",
+            display_text="harbor",
+            compiled_payload={**make_item(batch.id).compiled_payload, "entry_id": "word:harbor", "normalized_form": "harbor", "word": "harbor"},
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        items_result = MagicMock()
+        items_result.scalars.return_value.all.return_value = [item_one, item_two]
+        regen_request_result_one = MagicMock()
+        regen_request_result_one.scalar_one_or_none.return_value = None
+        regen_request_result_two = MagicMock()
+        regen_request_result_two.scalar_one_or_none.return_value = None
+        refreshed_items_result = MagicMock()
+        refreshed_items_result.scalars.return_value.all.return_value = [item_one, item_two]
+        mock_db.execute.side_effect = [
+            user_result,
+            batch_result,
+            items_result,
+            regen_request_result_one,
+            regen_request_result_two,
+            refreshed_items_result,
+        ]
+
+        response = await client.post(
+            f"/api/lexicon-compiled-reviews/batches/{batch.id}/bulk-update",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"review_status": "approved", "decision_reason": "bulk ready"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["batch"]["approved_count"] == 2
+        assert data["batch"]["pending_count"] == 0
+        assert all(item["review_status"] == "approved" for item in data["items"])
+        assert batch.status == "completed"

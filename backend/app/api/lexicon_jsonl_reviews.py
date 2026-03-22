@@ -12,6 +12,7 @@ from app.core.config import Settings, get_settings
 from app.models.user import User
 from app.services.lexicon_jsonl_reviews import (
     build_materialized_review_outputs,
+    bulk_update_jsonl_review_decisions,
     load_jsonl_review_session,
     materialize_jsonl_review_outputs,
     resolve_compiled_artifact_path,
@@ -40,6 +41,13 @@ class LexiconJsonlReviewMaterializeRequest(BaseModel):
     artifact_path: str
     decisions_path: str | None = None
     output_dir: str | None = None
+
+
+class LexiconJsonlReviewBulkUpdateRequest(BaseModel):
+    artifact_path: str
+    decisions_path: str | None = None
+    review_status: str
+    decision_reason: str | None = None
 
 
 class LexiconJsonlReviewItemResponse(BaseModel):
@@ -155,6 +163,32 @@ async def update_lexicon_jsonl_review_item(
         reviewed_by=str(current_user.id),
     )
     return LexiconJsonlReviewItemResponse(**payload)
+
+
+@router.post("/bulk-update", response_model=LexiconJsonlReviewSessionResponse)
+async def bulk_update_lexicon_jsonl_review_items(
+    request: LexiconJsonlReviewBulkUpdateRequest,
+    current_user: User = Depends(get_current_admin_user),
+    settings: Settings = Depends(get_settings),
+) -> LexiconJsonlReviewSessionResponse:
+    artifact_path, decisions_path, output_dir = _resolve_paths(
+        artifact_path=request.artifact_path,
+        decisions_path=request.decisions_path,
+        output_dir=None,
+        settings=settings,
+    )
+    payload = bulk_update_jsonl_review_decisions(
+        artifact_path=resolve_compiled_artifact_path(artifact_path, settings=settings),
+        decisions_path=resolve_decisions_sidecar_path(
+            resolve_compiled_artifact_path(artifact_path, settings=settings),
+            decisions_path,
+            settings=settings,
+        ),
+        review_status=request.review_status,
+        decision_reason=request.decision_reason,
+        reviewed_by=str(current_user.id),
+    )
+    return LexiconJsonlReviewSessionResponse(**payload, output_dir=output_dir)
 
 
 @router.post("/materialize", response_model=LexiconJsonlReviewMaterializeResponse)

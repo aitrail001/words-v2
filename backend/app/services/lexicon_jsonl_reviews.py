@@ -405,6 +405,40 @@ def update_jsonl_review_decision(
     return next(item for item in refreshed["items"] if item["entry_id"] == entry_id)
 
 
+def bulk_update_jsonl_review_decisions(
+    *,
+    artifact_path: Path,
+    decisions_path: Path,
+    review_status: str,
+    decision_reason: str | None,
+    reviewed_by: str,
+) -> dict[str, Any]:
+    if review_status not in {"pending", "approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Invalid review_status")
+
+    session = load_jsonl_review_session(artifact_path=artifact_path, decisions_path=decisions_path)
+    reviewed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    ordered_rows: list[dict[str, Any]] = []
+    for item in session["items"]:
+        ordered_rows.append(
+            {
+                "schema_version": DECISION_SCHEMA_VERSION,
+                "artifact_sha256": session["artifact_sha256"],
+                "entry_id": item["entry_id"],
+                "entry_type": item["entry_type"],
+                "decision": "reopened" if review_status == "pending" else review_status,
+                "decision_reason": decision_reason,
+                "compiled_payload_sha256": item["compiled_payload_sha256"],
+                "reviewed_by": reviewed_by,
+                "reviewed_at": reviewed_at,
+            }
+        )
+
+    decisions_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(decisions_path, ordered_rows)
+    return load_jsonl_review_session(artifact_path=artifact_path, decisions_path=decisions_path)
+
+
 def materialize_jsonl_review_outputs(
     *,
     artifact_path: Path,

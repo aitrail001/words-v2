@@ -5,6 +5,7 @@ import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
+  bulkUpdateLexiconCompiledReviewBatch,
   LexiconCompiledReviewBatch,
   LexiconCompiledReviewItem,
   LexiconCompiledReviewMaterializeResult,
@@ -78,6 +79,16 @@ function nextPendingItemId(items: LexiconCompiledReviewItem[], currentItemId: st
   return pendingItems[0]?.id ?? null;
 }
 
+function batchCounts(items: LexiconCompiledReviewItem[]) {
+  const approved = items.filter((item) => item.review_status === "approved").length;
+  const rejected = items.filter((item) => item.review_status === "rejected").length;
+  return {
+    approved,
+    rejected,
+    pending: items.length - approved - rejected,
+  };
+}
+
 export default function LexiconCompiledReviewPage() {
   const [itemSearch, setItemSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
@@ -96,7 +107,7 @@ export default function LexiconCompiledReviewPage() {
   const [materializeOutputDir, setMaterializeOutputDir] = useState("");
   const [materializeResult, setMaterializeResult] = useState<LexiconCompiledReviewMaterializeResult | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
-  const [pendingDecision, setPendingDecision] = useState<ReviewDecisionStatus | null>(null);
+  const [pendingBulkDecision, setPendingBulkDecision] = useState<ReviewDecisionStatus | null>(null);
   const [confirmDeleteBatch, setConfirmDeleteBatch] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -208,7 +219,6 @@ export default function LexiconCompiledReviewPage() {
 
   useEffect(() => {
     setDecisionReason(selectedItem?.decision_reason ?? "");
-    setPendingDecision(null);
   }, [selectedItem?.decision_reason, selectedItem?.id]);
 
   useEffect(() => {
@@ -275,7 +285,6 @@ export default function LexiconCompiledReviewPage() {
       if (nextItemId && nextItemId !== updated.id) {
         setSelectedItemId(nextItemId);
       }
-      setPendingDecision(null);
       setMessage(`Updated ${updated.entry_id} to ${updated.review_status}.`);
     } catch (nextError) {
       setMessage(nextError instanceof Error ? nextError.message : "Failed to update review item.");
@@ -283,6 +292,27 @@ export default function LexiconCompiledReviewPage() {
       setSaveLoading(false);
     }
   }, [items, selectedBatchId, selectedItem, decisionReason]);
+
+  const handleBulkDecision = useCallback(async (reviewStatus: ReviewDecisionStatus) => {
+    if (!selectedBatch) return;
+    setSaveLoading(true);
+    setMessage(null);
+    try {
+      const result = await bulkUpdateLexiconCompiledReviewBatch(selectedBatch.id, {
+        review_status: reviewStatus,
+        decision_reason: decisionReason || null,
+      });
+      setBatches((current) => current.map((batch) => (batch.id === result.batch.id ? result.batch : batch)));
+      setItems(result.items);
+      setSelectedItemId(result.items.find((item) => item.review_status === "pending")?.id ?? result.items[0]?.id ?? "");
+      setPendingBulkDecision(null);
+      setMessage(`Updated ${result.items.length} rows to ${reviewStatus}.`);
+    } catch (nextError) {
+      setMessage(nextError instanceof Error ? nextError.message : "Failed to bulk update review items.");
+    } finally {
+      setSaveLoading(false);
+    }
+  }, [decisionReason, selectedBatch]);
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -297,19 +327,6 @@ export default function LexiconCompiledReviewPage() {
       }
 
       if (!filteredItems.length || saveLoading || loading || itemsLoading) return;
-
-      if (pendingDecision) {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          void handleDecision(pendingDecision);
-          return;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          setPendingDecision(null);
-          return;
-        }
-      }
 
       const currentIndex = filteredItems.findIndex((item) => item.id === selectedItem?.id);
       if (event.key === "j") {
@@ -327,19 +344,19 @@ export default function LexiconCompiledReviewPage() {
       if (!selectedItem) return;
       if (event.key === "a") {
         event.preventDefault();
-        setPendingDecision("approved");
+        void handleDecision("approved");
       } else if (event.key === "r") {
         event.preventDefault();
-        setPendingDecision("rejected");
+        void handleDecision("rejected");
       } else if (event.key === "p") {
         event.preventDefault();
-        setPendingDecision("pending");
+        void handleDecision("pending");
       }
     };
 
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [filteredItems, handleDecision, itemsLoading, loading, pendingDecision, saveLoading, selectedItem]);
+  }, [filteredItems, handleDecision, itemsLoading, loading, saveLoading, selectedItem]);
 
   const handleExport = async (kind: "approved" | "rejected" | "regenerate" | "decisions") => {
     if (!selectedBatch) return;
@@ -514,6 +531,9 @@ export default function LexiconCompiledReviewPage() {
             Write approved, decisions, rejected, and regenerate outputs into the shared reviewed/ directory.
           </div>
         </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Compiled Review keeps the decision ledger in review DB tables. There is no decision-ledger path input on this page because the file only exists after download or materialize.
+        </p>
         {importError ? <p className="mt-2 text-sm text-red-600">{importError}</p> : null}
         {message ? <p className="mt-2 text-sm text-green-700">{message}</p> : null}
         {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
@@ -614,6 +634,27 @@ export default function LexiconCompiledReviewPage() {
 
               <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
                 <div className="space-y-3" data-testid="compiled-review-items-list">
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    {(() => {
+                      const counts = batchCounts(items);
+                      return (
+                        <>
+                          <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Pending</p>
+                            <p className="mt-1 text-xl font-semibold text-amber-950">{counts.pending}</p>
+                          </div>
+                          <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Approved</p>
+                            <p className="mt-1 text-xl font-semibold text-emerald-950">{counts.approved}</p>
+                          </div>
+                          <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Rejected</p>
+                            <p className="mt-1 text-xl font-semibold text-rose-950">{counts.rejected}</p>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
                   <div className="grid gap-2">
                     <input
                       value={itemSearch}
@@ -678,50 +719,59 @@ export default function LexiconCompiledReviewPage() {
 
                       <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4">
                         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                          Shortcuts: <span className="font-semibold text-slate-900">j</span>/<span className="font-semibold text-slate-900">k</span> move, <span className="font-semibold text-emerald-700">a</span> approve, <span className="font-semibold text-rose-700">r</span> reject, <span className="font-semibold text-slate-700">p</span> reopen, <span className="font-semibold text-slate-900">enter</span> confirm, <span className="font-semibold text-slate-900">esc</span> cancel
+                          Shortcuts: <span className="font-semibold text-slate-900">j</span>/<span className="font-semibold text-slate-900">k</span> move, <span className="font-semibold text-emerald-700">a</span> approve, <span className="font-semibold text-rose-700">r</span> reject, <span className="font-semibold text-slate-700">p</span> reopen
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => setPendingDecision("approved")} disabled={saveLoading} className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" data-testid="compiled-review-approve-button">
+                          <button type="button" onClick={() => void handleDecision("approved")} disabled={saveLoading} className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" data-testid="compiled-review-approve-button">
                             Approve (A)
                           </button>
-                          <button type="button" onClick={() => setPendingDecision("rejected")} disabled={saveLoading} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" data-testid="compiled-review-reject-button">
+                          <button type="button" onClick={() => void handleDecision("rejected")} disabled={saveLoading} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" data-testid="compiled-review-reject-button">
                             Reject (R)
                           </button>
-                          <button type="button" onClick={() => setPendingDecision("pending")} disabled={saveLoading} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50" data-testid="compiled-review-reopen-button">
+                          <button type="button" onClick={() => void handleDecision("pending")} disabled={saveLoading} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50" data-testid="compiled-review-reopen-button">
                             Reopen (P)
                           </button>
                         </div>
-                        {pendingDecision ? (
+                        <div className="mt-3 border-t border-dashed border-slate-300 pt-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Snapshot actions</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setPendingBulkDecision("approved")} disabled={saveLoading} className="rounded-md border border-emerald-300 bg-white px-4 py-2 text-sm font-medium text-emerald-700 disabled:opacity-50" data-testid="compiled-review-approve-all-button">
+                              Approve All
+                            </button>
+                            <button type="button" onClick={() => setPendingBulkDecision("rejected")} disabled={saveLoading} className="rounded-md border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 disabled:opacity-50" data-testid="compiled-review-reject-all-button">
+                              Reject All
+                            </button>
+                            <button type="button" onClick={() => setPendingBulkDecision("pending")} disabled={saveLoading} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50" data-testid="compiled-review-reopen-all-button">
+                              Reopen All
+                            </button>
+                          </div>
+                        </div>
+                        {pendingBulkDecision ? (
                           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
                             <span className="font-medium">
-                              Confirm {pendingDecision === "approved" ? "approve" : pendingDecision === "rejected" ? "reject" : "reopen"} and move to the next pending row.
+                              Confirm {pendingBulkDecision === "approved" ? "approve" : pendingBulkDecision === "rejected" ? "reject" : "reopen"} every row in this snapshot.
                             </span>
                             <button
                               type="button"
-                              data-testid={`compiled-review-confirm-${pendingDecision}-button`}
+                              data-testid={`compiled-review-confirm-bulk-${pendingBulkDecision}-button`}
                               disabled={saveLoading}
-                              onClick={() => void handleDecision(pendingDecision)}
+                              onClick={() => void handleBulkDecision(pendingBulkDecision)}
                               className="rounded-md border border-sky-300 bg-white px-3 py-2 text-sm font-medium text-sky-800 disabled:opacity-50"
                             >
-                              Confirm {pendingDecision === "approved" ? "Approve" : pendingDecision === "rejected" ? "Reject" : "Reopen"}
+                              Confirm {pendingBulkDecision === "approved" ? "Approve All" : pendingBulkDecision === "rejected" ? "Reject All" : "Reopen All"}
                             </button>
                             <button
                               type="button"
                               disabled={saveLoading}
-                              onClick={() => setPendingDecision(null)}
+                              onClick={() => setPendingBulkDecision(null)}
                               className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
                             >
                               Cancel
                             </button>
                           </div>
                         ) : (
-                          <p className="mt-3 text-xs text-gray-500">Choose an action, then confirm it. The reviewer will move to the next pending row automatically.</p>
+                          <p className="mt-3 text-xs text-gray-500">Per-row actions save immediately and move to the next pending row. Snapshot actions require confirmation.</p>
                         )}
-                      </div>
-
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                        <p className="text-sm font-medium text-gray-900">Compiled payload</p>
-                        <pre className="mt-2 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words text-xs text-gray-700">{JSON.stringify(selectedItem.compiled_payload, null, 2)}</pre>
                       </div>
                     </div>
                   ) : (
@@ -729,6 +779,12 @@ export default function LexiconCompiledReviewPage() {
                   )}
                 </div>
               </div>
+              {selectedItem ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-sm font-medium text-gray-900">Raw compiled JSON</p>
+                  <pre className="mt-2 max-h-[38rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-4 text-xs text-slate-100">{JSON.stringify(selectedItem.compiled_payload, null, 2)}</pre>
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="text-sm text-gray-500">Select a compiled review batch.</p>
