@@ -127,7 +127,7 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   await page.getByLabel("Artifact path").fill(compiledBackendPath);
   await page.getByLabel("Decision ledger path").fill(decisionsBackendPath);
   await page.getByLabel("Output directory").fill(outputBackendDir);
-  await page.getByRole("button", { name: "Refresh" }).click();
+  await page.getByRole("button", { name: "Load Artifact" }).click();
 
   await expect(page.getByText(`Loaded ${path.basename(compiledBackendPath)}`)).toBeVisible();
   await expect(page.getByText("Risk first")).toBeVisible();
