@@ -58,5 +58,5 @@ secrets/
 # Playwright
 e2e/test-results/
 e2e/playwright-report/
-# Lexicon tool local outputs
-data/lexicon/
+# Local operational data
+data/
