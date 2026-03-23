@@ -171,7 +171,7 @@ class BatchLifecycleTests(unittest.TestCase):
 
             code, stdout, stderr = self.run_cli(["batch-submit", "--snapshot-dir", str(snapshot_dir)])
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             submit_payload = json.loads(stdout)
             self.assertEqual(submit_payload["command"], "batch-submit")
             self.assertEqual(submit_payload["job_count"], 2)
@@ -179,7 +179,7 @@ class BatchLifecycleTests(unittest.TestCase):
 
             code, stdout, stderr = self.run_cli(["batch-ingest", "--snapshot-dir", str(snapshot_dir), "--input", str(output_path)])
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             ingest_payload = json.loads(stdout)
             self.assertEqual(ingest_payload["command"], "batch-ingest")
             self.assertEqual(ingest_payload["result_count"], 2)
@@ -187,7 +187,7 @@ class BatchLifecycleTests(unittest.TestCase):
 
             code, stdout, stderr = self.run_cli(["batch-status", "--snapshot-dir", str(snapshot_dir)])
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             status_payload = json.loads(stdout)
             self.assertEqual(status_payload["jobs"]["total"], 2)
             self.assertEqual(status_payload["results"]["total"], 2)
@@ -196,7 +196,7 @@ class BatchLifecycleTests(unittest.TestCase):
 
             code, stdout, stderr = self.run_cli(["batch-retry", "--snapshot-dir", str(snapshot_dir), "--results", str(snapshot_dir / "batch_results.jsonl"), "--model", "gpt-5-mini", "--prompt-version", "v1"])
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             retry_payload = json.loads(stdout)
             self.assertEqual(retry_payload["command"], "batch-retry")
             self.assertEqual(retry_payload["retry_count"], 1)
@@ -212,7 +212,7 @@ class BatchLifecycleTests(unittest.TestCase):
                 str(overrides_path),
             ])
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             qc_payload = json.loads(stdout)
             self.assertEqual(qc_payload["command"], "batch-qc")
             self.assertEqual(qc_payload["verdict_count"], 2)

@@ -162,6 +162,7 @@ def build_base_records(
     adjudications: dict[str, dict[str, object]] | None = None,
     existing_canonical_words_lookup: ExistingCanonicalWordsLookup | None = None,
     excluded_canonical_words: set[str] | None = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> BaseBuildResult:
     lexeme_records: list[LexemeRecord] = []
     sense_records: list[SenseRecord] = []
@@ -262,7 +263,8 @@ def build_base_records(
     )
     skipped_existing_canonical_words: list[str] = []
 
-    for word in buildable_canonical_words:
+    total_words = len(buildable_canonical_words)
+    for word_index, word in enumerate(buildable_canonical_words, start=1):
         lexeme_id = make_lexeme_id(word)
         wordfreq_rank = resolve_frequency_rank(word, rank_provider)
         is_existing_in_db = word in existing_canonical_words
@@ -296,6 +298,15 @@ def build_base_records(
                     last_source_reference='db_existing_skip',
                 )
             )
+            if progress_callback is not None:
+                progress_callback(
+                    word=word,
+                    entry_id=lexeme_id,
+                    completed_items=word_index,
+                    total_items=total_words,
+                    status='skipped_existing_db',
+                    wordfreq_rank=wordfreq_rank,
+                )
             continue
 
         available_senses = get_senses(word)
@@ -424,6 +435,18 @@ def build_base_records(
                         created_at=created_at,
                     )
                 )
+
+        if progress_callback is not None:
+            progress_callback(
+                word=word,
+                entry_id=lexeme_id,
+                completed_items=word_index,
+                total_items=total_words,
+                status='built',
+                wordfreq_rank=wordfreq_rank,
+                sense_count=len(canonical_senses),
+                is_wordnet_backed=is_wordnet_backed,
+            )
 
 
     return BaseBuildResult(

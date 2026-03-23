@@ -1,8 +1,10 @@
 import json
+import io
 import subprocess
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stderr
 from unittest.mock import patch
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from tools.lexicon.config import LexiconSettings
 from tools.lexicon.enrich import (
     NodeOpenAICompatibleResponsesClient,
     OpenAICompatibleResponsesClient,
+    _generate_validated_phrase_payload_with_stats,
     _generate_validated_word_payload_with_stats,
     _single_sense_response_schema,
     build_openai_compatible_phrase_enrichment_provider,
@@ -29,9 +32,12 @@ from tools.lexicon.enrich import (
     _parse_json_payload_text,
     enrich_snapshot,
     read_snapshot_inputs,
+    run_enrichment,
 )
 from tools.lexicon.errors import LexiconDependencyError
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord
+from tools.lexicon.runtime_logging import RuntimeLogConfig, RuntimeLogger
+from tools.lexicon.schemas.phrase_enrichment_schema import normalize_phrase_enrichment_payload
 
 
 class _FakeResponsesAPI:
@@ -174,6 +180,119 @@ class EnrichSnapshotTests(unittest.TestCase):
         self.assertIn("Take off", prompt)
         self.assertIn("phrasal_verb", prompt)
         self.assertIn("phrase", prompt.lower())
+
+    def test_phrase_provider_respects_validation_retry_limit_override(self) -> None:
+        settings = LexiconSettings.from_env(
+            {
+                "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                "LEXICON_LLM_MODEL": "gpt-5.4-mini",
+                "LEXICON_LLM_API_KEY": "secret",
+            }
+        )
+        call_count = 0
+
+        def transport(url, payload, headers):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": json.dumps(
+                                        {
+                                            "phrase_kind": "idiom",
+                                            "confidence": 0.87,
+                                            "senses": [
+                                                {
+                                                    "definition": "to wish someone good luck",
+                                                    "part_of_speech": "phrase",
+                                                    "examples": [{"sentence": "Break a leg!", "difficulty": "B1"}],
+                                                    "grammar_patterns": ["say + phrase"],
+                                                    "usage_note": "Used before a performance.",
+                                                    "translations": {
+                                                        locale: {
+                                                            "definition": f"{locale}: definition",
+                                                            "usage_note": "",
+                                                            "examples": ["translated example"],
+                                                        }
+                                                        for locale in ("zh-Hans", "es", "ar", "pt-BR", "ja")
+                                                    },
+                                                }
+                                            ],
+                                        }
+                                    ),
+                                }
+                            ],
+                        }
+                    ]
+                }
+            return {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "phrase_kind": "idiom",
+                                        "confidence": 0.87,
+                                        "senses": [
+                                            {
+                                                "definition": "to wish someone good luck",
+                                                "part_of_speech": "phrase",
+                                                "examples": [{"sentence": "Break a leg!", "difficulty": "B1"}],
+                                                "grammar_patterns": ["say + phrase"],
+                                                "usage_note": "Used before a performance.",
+                                                "translations": _test_translations("Break a leg."),
+                                            }
+                                        ],
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        provider = build_openai_compatible_phrase_enrichment_provider(
+            settings=settings,
+            client=_client_from_transport(transport),
+            validation_retries=0,
+        )
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_break_a_leg",
+            lemma="break a leg",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_break_a_leg",
+            entry_type="phrase",
+            normalized_form="break a leg",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="idiom",
+            display_form="Break a leg",
+            seed_metadata={"raw_reviewed_as": "idiom"},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "missing_translated_usage_note_with_source_note_present"):
+            provider(
+                lexeme=lexeme,
+                senses=[],
+                settings=settings,
+                generated_at="2026-03-23T00:00:00Z",
+                generation_run_id="run-1",
+                prompt_version="v1",
+            )
+
+        self.assertEqual(call_count, 1)
 
     def test_openai_compatible_phrase_provider_uses_phrase_schema(self) -> None:
         settings = LexiconSettings.from_env(
@@ -878,6 +997,132 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(record.examples[0].sentence, "I run every morning.")
             self.assertEqual(record.model_name, "gpt-test")
             self.assertEqual(record.confidence, 0.91)
+
+    def test_real_provider_honors_retry_budgets_for_single_sense_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-test",
+                    "LEXICON_LLM_API_KEY": "secret-key",
+                }
+            )
+
+            call_count = 0
+
+            def transport(url, payload, headers):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return {
+                        "output": [{
+                            "type": "message",
+                            "content": [{
+                                "type": "output_text",
+                                "text": json.dumps({
+                                    "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                    "confidence": 0.91,
+                                })
+                            }]
+                        }]
+                    }
+                return {
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps({
+                                "definition": "to move quickly on foot",
+                                "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                                "cefr_level": "A1",
+                                "primary_domain": "general",
+                                "secondary_domains": [],
+                                "register": "neutral",
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": [],
+                                "usage_note": "Common everyday verb.",
+                                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                                "confusable_words": [],
+                                "confidence": 0.91,
+                                "translations": _test_translations("to move quickly on foot", "Common everyday verb.", ["I run every morning."]),
+                            })
+                        }]
+                    }]
+                }
+
+            provider = build_openai_compatible_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                transient_retries=0,
+                validation_retries=1,
+            )
+            records = provider(
+                lexeme=read_snapshot_inputs(snapshot_dir)[0][0],
+                sense=read_snapshot_inputs(snapshot_dir)[1][0],
+                settings=settings,
+                generated_at="2026-03-07T00:00:00Z",
+                generation_run_id="run-123",
+                prompt_version="v1",
+            )
+
+            self.assertEqual(call_count, 2)
+            self.assertEqual(records.sense_id, "sn_lx_run_1")
+
+    def test_enrich_snapshot_per_sense_forwards_retry_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-test",
+                    "LEXICON_LLM_API_KEY": "secret-key",
+                }
+            )
+            with patch("tools.lexicon.enrich.build_enrichment_provider") as mocked_builder:
+                mocked_builder.return_value = lambda **kwargs: EnrichmentRecord(
+                    snapshot_id=kwargs["sense"].snapshot_id,
+                    enrichment_id="en_sn_lx_run_1_v1",
+                    sense_id=kwargs["sense"].sense_id,
+                    definition="definition",
+                    examples=[{"sentence": "I run every morning.", "difficulty": "A1"}],
+                    cefr_level="A1",
+                    primary_domain="general",
+                    secondary_domains=[],
+                    register="neutral",
+                    synonyms=[],
+                    antonyms=[],
+                    collocations=[],
+                    grammar_patterns=[],
+                    usage_note="note",
+                    forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    confusable_words=[],
+                    translations=_test_translations(),
+                    model_name="test-provider",
+                    prompt_version="v1",
+                    generation_run_id="run-123",
+                    confidence=0.9,
+                    review_status="draft",
+                    generated_at="2026-03-07T00:00:00Z",
+                )
+
+                enrich_snapshot(
+                    snapshot_dir,
+                    mode="per_sense",
+                    provider_mode="openai_compatible",
+                    settings=settings,
+                    transient_retries=4,
+                    validation_retries=2,
+                    generated_at="2026-03-07T00:00:00Z",
+                    generation_run_id="run-123",
+                )
+
+            self.assertEqual(mocked_builder.call_args.kwargs["transient_retries"], 4)
+            self.assertEqual(mocked_builder.call_args.kwargs["validation_retries"], 2)
 
     def test_real_provider_rejects_missing_definition(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2315,7 +2560,11 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
+            provider = build_openai_compatible_word_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                validation_retries=2,
+            )
             records = provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2378,7 +2627,11 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
+            provider = build_openai_compatible_word_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                validation_retries=2,
+            )
             provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2418,7 +2671,11 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     })
                 return {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"phonetics": _test_phonetics(), "senses": rows})}]}]}
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
+            provider = build_openai_compatible_word_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                validation_retries=2,
+            )
             with self.assertRaisesRegex(RuntimeError, "at most 4 learner-friendly meanings"):
                 provider(
                     lexeme=low_priority,
@@ -2468,7 +2725,11 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
+            provider = build_openai_compatible_word_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                validation_retries=2,
+            )
             records = provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2566,7 +2827,11 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
+            provider = build_openai_compatible_word_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                validation_retries=2,
+            )
             records = provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2633,7 +2898,11 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
+            provider = build_openai_compatible_word_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                validation_retries=2,
+            )
             records = provider(
                 lexeme=low_priority,
                 senses=all_senses,
@@ -2708,7 +2977,11 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     }]
                 }
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
+            provider = build_openai_compatible_word_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                validation_retries=2,
+            )
             records = provider(
                 lexeme=run_lexeme,
                 senses=run_senses,
@@ -2743,7 +3016,11 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 call_count += 1
                 raise RuntimeError("OpenAI-compatible endpoint request failed with status 403: blocked")
 
-            provider = build_openai_compatible_word_enrichment_provider(settings=settings, client=_client_from_transport(transport))
+            provider = build_openai_compatible_word_enrichment_provider(
+                settings=settings,
+                client=_client_from_transport(transport),
+                validation_retries=2,
+            )
             with self.assertRaisesRegex(RuntimeError, "status 403"):
                 provider(
                     lexeme=run_lexeme,
@@ -3030,6 +3307,33 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
             ["opposite", "reverse"],
         )
 
+    def test_run_enrichment_forwards_retry_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            with patch("tools.lexicon.enrich.enrich_snapshot", return_value=[]) as mocked_enrich:
+                run_enrichment(
+                    snapshot_dir,
+                    transient_retries=7,
+                    validation_retries=3,
+                )
+
+        self.assertEqual(mocked_enrich.call_args.kwargs["transient_retries"], 7)
+        self.assertEqual(mocked_enrich.call_args.kwargs["validation_retries"], 3)
+
+    def test_run_enrichment_forwards_log_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            log_file = snapshot_dir / "runtime.log"
+            with patch("tools.lexicon.enrich.enrich_snapshot", return_value=[]) as mocked_enrich:
+                run_enrichment(
+                    snapshot_dir,
+                    log_level="debug",
+                    log_file=log_file,
+                )
+
+        self.assertEqual(mocked_enrich.call_args.kwargs["log_level"], "debug")
+        self.assertEqual(mocked_enrich.call_args.kwargs["log_file"], log_file)
+
     def test_generate_validated_word_payload_retries_after_validation_failure(self) -> None:
         lexeme, senses = self._build_lexeme_and_senses()
         sense_id = senses[0].sense_id
@@ -3051,6 +3355,7 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
             lexeme=lexeme,
             senses=senses,
             prompt_mode="word_only",
+            max_validation_retries=2,
         )
 
         self.assertEqual(rows["decision"], "keep_standard")
@@ -3075,6 +3380,563 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
                 senses=senses,
                 prompt_mode="word_only",
             )
+
+    def test_generate_validated_word_payload_escalates_reasoning_effort_for_validation_retry(self) -> None:
+        lexeme, senses = self._build_lexeme_and_senses()
+        sense_id = senses[0].sense_id
+        invalid = self._word_payload(sense_id)
+        invalid["senses"][0]["antonyms"] = [123]
+        valid = self._word_payload(sense_id)
+
+        class StubClient:
+            def __init__(self):
+                self.reasoning_effort = "none"
+                self.calls: list[str] = []
+
+            def generate_json(self, prompt: str):
+                del prompt
+                self.calls.append(str(self.reasoning_effort))
+                return invalid if len(self.calls) == 1 else valid
+
+        client = StubClient()
+        rows, stats = _generate_validated_word_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            senses=senses,
+            prompt_mode="word_only",
+            max_validation_retries=1,
+        )
+
+        self.assertEqual(rows["decision"], "keep_standard")
+        self.assertEqual(int(stats["repair_count"]), 1)
+        self.assertEqual(client.calls, ["none", "low"])
+
+    def test_phrase_translation_usage_note_can_be_blank_when_source_note_is_absent(self) -> None:
+        payload = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "say something to encourage success",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "Good luck!", "difficulty": "A1"}],
+                    "grammar_patterns": [],
+                    "usage_note": None,
+                    "translations": {
+                        locale: {
+                            "definition": f"{locale}: definition",
+                            "usage_note": "",
+                            "examples": ["translated example"],
+                        }
+                        for locale in ("zh-Hans", "es", "ar", "pt-BR", "ja")
+                    },
+                }
+            ],
+        }
+
+        normalized = normalize_phrase_enrichment_payload(payload)
+
+        self.assertEqual(normalized["senses"][0]["usage_note"], None)
+        self.assertEqual(
+            normalized["senses"][0]["translations"]["ar"]["usage_note"],
+            "",
+        )
+
+    def test_phrase_translation_usage_note_blank_is_retryable_when_source_note_exists(self) -> None:
+        payload = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "say something to encourage success",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "Good luck!", "difficulty": "A1"}],
+                    "grammar_patterns": [],
+                    "usage_note": "Used before a performance.",
+                    "translations": {
+                        locale: {
+                            "definition": f"{locale}: definition",
+                            "usage_note": "",
+                            "examples": ["translated example"],
+                        }
+                        for locale in ("zh-Hans", "es", "ar", "pt-BR", "ja")
+                    },
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "missing_translated_usage_note_with_source_note_present"):
+            normalize_phrase_enrichment_payload(payload)
+
+    def test_generate_validated_phrase_payload_emits_retry_runtime_event(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_break_a_leg",
+            lemma="break a leg",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_break_a_leg",
+            entry_type="phrase",
+            normalized_form="break a leg",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="idiom",
+            display_form="Break a leg",
+            seed_metadata={"raw_reviewed_as": "idiom"},
+        )
+        invalid = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                    "translations": {
+                        locale: {
+                            "definition": f"{locale}: definition",
+                            "usage_note": "",
+                            "examples": ["translated example"],
+                        }
+                        for locale in ("zh-Hans", "es", "ar", "pt-BR", "ja")
+                    },
+                }
+            ],
+        }
+        valid = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                    "translations": _test_translations("They told me to break a leg."),
+                }
+            ],
+        }
+
+        class StubClient:
+            def __init__(self):
+                self.calls = 0
+
+            def generate_json(self, prompt: str, response_schema=None):
+                del prompt, response_schema
+                self.calls += 1
+                return invalid if self.calls == 1 else valid
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_file = Path(tmpdir) / "runtime.log"
+            logger = RuntimeLogger(RuntimeLogConfig(level="debug", log_file=log_file), stream=io.StringIO())
+            rows, stats = _generate_validated_phrase_payload_with_stats(
+                client=StubClient(),
+                lexeme=lexeme,
+                max_validation_retries=1,
+                runtime_logger=logger,
+            )
+
+            self.assertEqual(rows["phrase_kind"], "idiom")
+            self.assertEqual(int(stats["validation_retry_count"]), 1)
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            retry_events = [row for row in log_rows if row["event"] == "retry-scheduled"]
+            self.assertEqual(len(retry_events), 1)
+            self.assertEqual(retry_events[0]["fields"]["retry_reason"], "missing_translated_usage_note_with_source_note_present")
+            self.assertEqual(retry_events[0]["fields"]["retries_remaining"], 0)
+            self.assertNotIn("They told me to break a leg.", log_file.read_text(encoding="utf-8"))
+            self.assertNotIn("translated example", log_file.read_text(encoding="utf-8"))
+
+    def test_generate_validated_phrase_payload_retries_after_retryable_validation_failure(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_break_a_leg",
+            lemma="break a leg",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_break_a_leg",
+            entry_type="phrase",
+            normalized_form="break a leg",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="idiom",
+            display_form="Break a leg",
+            seed_metadata={"raw_reviewed_as": "idiom"},
+        )
+        invalid = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                    "translations": {
+                        locale: {
+                            "definition": f"{locale}: definition",
+                            "usage_note": "",
+                            "examples": ["translated example"],
+                        }
+                        for locale in ("zh-Hans", "es", "ar", "pt-BR", "ja")
+                    },
+                }
+            ],
+        }
+        valid = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                    "translations": _test_translations("They told me to break a leg."),
+                }
+            ],
+        }
+
+        class StubClient:
+            def __init__(self):
+                self.calls = 0
+
+            def generate_json(self, prompt: str, response_schema=None):
+                del prompt, response_schema
+                self.calls += 1
+                return invalid if self.calls == 1 else valid
+
+        client = StubClient()
+        rows, stats = _generate_validated_phrase_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            max_validation_retries=1,
+        )
+
+        self.assertEqual(rows["phrase_kind"], "idiom")
+        self.assertEqual(client.calls, 2)
+        self.assertEqual(int(stats["validation_retry_count"]), 1)
+
+    def test_generate_validated_phrase_payload_escalates_reasoning_effort_for_validation_retry(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_break_a_leg",
+            lemma="break a leg",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_break_a_leg",
+            entry_type="phrase",
+            normalized_form="break a leg",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="idiom",
+            display_form="Break a leg",
+            seed_metadata={"raw_reviewed_as": "idiom"},
+        )
+        invalid = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                    "translations": {
+                        locale: {
+                            "definition": f"{locale}: definition",
+                            "usage_note": "",
+                            "examples": ["translated example"],
+                        }
+                        for locale in ("zh-Hans", "es", "ar", "pt-BR", "ja")
+                    },
+                }
+            ],
+        }
+        valid = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                    "translations": _test_translations("They told me to break a leg."),
+                }
+            ],
+        }
+
+        class StubClient:
+            def __init__(self):
+                self.reasoning_effort = "none"
+                self.calls: list[str] = []
+
+            def generate_json(self, prompt: str, response_schema=None):
+                del prompt, response_schema
+                self.calls.append(str(self.reasoning_effort))
+                return invalid if len(self.calls) == 1 else valid
+
+        client = StubClient()
+        rows, stats = _generate_validated_phrase_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            max_validation_retries=1,
+        )
+
+        self.assertEqual(rows["phrase_kind"], "idiom")
+        self.assertEqual(int(stats["validation_retry_count"]), 1)
+        self.assertEqual(client.calls, ["none", "low"])
+
+    def test_generate_validated_phrase_payload_fails_after_bounded_validation_retries(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_break_a_leg",
+            lemma="break a leg",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_break_a_leg",
+            entry_type="phrase",
+            normalized_form="break a leg",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="idiom",
+            display_form="Break a leg",
+            seed_metadata={"raw_reviewed_as": "idiom"},
+        )
+        invalid = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                    "translations": {
+                        locale: {
+                            "definition": f"{locale}: definition",
+                            "usage_note": "",
+                            "examples": ["translated example"],
+                        }
+                        for locale in ("zh-Hans", "es", "ar", "pt-BR", "ja")
+                    },
+                }
+            ],
+        }
+
+        class StubClient:
+            def __init__(self):
+                self.calls = 0
+
+            def generate_json(self, prompt: str, response_schema=None):
+                del prompt, response_schema
+                self.calls += 1
+                return invalid
+
+        client = StubClient()
+        with self.assertRaisesRegex(RuntimeError, "missing_translated_usage_note_with_source_note_present"):
+            _generate_validated_phrase_payload_with_stats(
+                client=client,
+                lexeme=lexeme,
+                max_validation_retries=1,
+            )
+        self.assertEqual(client.calls, 2)
+
+    def test_enrich_snapshot_emits_lexeme_progress_events_without_payload_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            (snapshot_dir / "lexemes.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "lexeme_id": "lx_alpha",
+                        "lemma": "alpha",
+                        "language": "en",
+                        "wordfreq_rank": 10,
+                        "is_wordnet_backed": True,
+                        "source_refs": ["wordnet", "wordfreq"],
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "lexeme_id": "lx_beta",
+                        "lemma": "beta",
+                        "language": "en",
+                        "wordfreq_rank": 20,
+                        "is_wordnet_backed": True,
+                        "source_refs": ["wordnet", "wordfreq"],
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            (snapshot_dir / "senses.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "sense_id": "sn_lx_alpha_1",
+                        "lexeme_id": "lx_alpha",
+                        "wn_synset_id": "alpha.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "alpha sense",
+                        "selection_reason": "common learner sense",
+                        "sense_order": 1,
+                        "is_high_polysemy": False,
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                    json.dumps({
+                        "snapshot_id": "snap-1",
+                        "sense_id": "sn_lx_beta_1",
+                        "lexeme_id": "lx_beta",
+                        "wn_synset_id": "beta.n.01",
+                        "part_of_speech": "noun",
+                        "canonical_gloss": "beta sense",
+                        "selection_reason": "common learner sense",
+                        "sense_order": 1,
+                        "is_high_polysemy": False,
+                        "created_at": "2026-03-07T00:00:00Z",
+                    }),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            log_file = snapshot_dir / "runtime.log"
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            failures_path = snapshot_dir / "enrich.failures.jsonl"
+
+            def make_record(lexeme, sense, generated_at, generation_run_id, prompt_version):
+                return EnrichmentRecord(
+                    snapshot_id=sense.snapshot_id,
+                    enrichment_id=f"en_{sense.sense_id}",
+                    sense_id=sense.sense_id,
+                    definition=f"definition for {lexeme.lemma}",
+                    examples=[{"sentence": f"{lexeme.lemma} example", "difficulty": "A1"}],
+                    cefr_level="A1",
+                    primary_domain="general",
+                    secondary_domains=[],
+                    register="neutral",
+                    synonyms=[],
+                    antonyms=[],
+                    collocations=[],
+                    grammar_patterns=[],
+                    usage_note=f"note for {lexeme.lemma}",
+                    forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    confusable_words=[],
+                    model_name="test-provider",
+                    prompt_version=prompt_version,
+                    generation_run_id=generation_run_id,
+                    confidence=0.9,
+                    review_status="draft",
+                    generated_at=generated_at,
+                    translations=_test_translations(f"definition for {lexeme.lemma}", f"note for {lexeme.lemma}", [f"{lexeme.lemma} example"]),
+                )
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                if lexeme.lemma == "beta":
+                    raise RuntimeError("gateway timeout")
+                return [make_record(lexeme, senses[0], generated_at, generation_run_id, prompt_version)]
+
+            with self.assertRaisesRegex(RuntimeError, "beta: gateway timeout"):
+                enrich_snapshot(
+                    snapshot_dir,
+                    mode="per_word",
+                    word_provider=word_provider,
+                    checkpoint_path=checkpoint_path,
+                    failures_output=failures_path,
+                    max_failures=1,
+                    log_level="debug",
+                    log_file=log_file,
+                )
+
+            compiled_rows = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            events = [row["event"] for row in log_rows]
+
+            self.assertEqual([row["entry_id"] for row in compiled_rows], ["lx_alpha"])
+            self.assertIn("lexeme-start", events)
+            self.assertIn("lexeme-complete", events)
+            self.assertIn("lexeme-failure", events)
+            self.assertNotIn("definition for alpha", log_file.read_text(encoding="utf-8"))
+            self.assertNotIn("definition for beta", log_file.read_text(encoding="utf-8"))
+
+    def test_enrich_snapshot_per_sense_emits_lexeme_lifecycle_events_without_payload_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            log_file = snapshot_dir / "runtime.log"
+
+            def provider(*, lexeme, sense, settings, generated_at, generation_run_id, prompt_version):
+                del settings
+                if sense.sense_id == "sn_lx_run_2":
+                    raise RuntimeError("gateway timeout")
+                return EnrichmentRecord(
+                    snapshot_id=sense.snapshot_id,
+                    enrichment_id=f"en_{sense.sense_id}",
+                    sense_id=sense.sense_id,
+                    definition=f"definition for {lexeme.lemma}",
+                    examples=[{"sentence": f"{lexeme.lemma} example", "difficulty": "A1"}],
+                    cefr_level="A1",
+                    primary_domain="general",
+                    secondary_domains=[],
+                    register="neutral",
+                    synonyms=[],
+                    antonyms=[],
+                    collocations=[],
+                    grammar_patterns=[],
+                    usage_note=f"note for {lexeme.lemma}",
+                    forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    confusable_words=[],
+                    model_name="test-provider",
+                    prompt_version=prompt_version,
+                    generation_run_id=generation_run_id,
+                    confidence=0.9,
+                    review_status="draft",
+                    generated_at=generated_at,
+                    translations=_test_translations(
+                        f"definition for {lexeme.lemma}",
+                        f"note for {lexeme.lemma}",
+                        [f"{lexeme.lemma} example"],
+                    ),
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "gateway timeout"):
+                enrich_snapshot(
+                    snapshot_dir,
+                    mode="per_sense",
+                    provider=provider,
+                    log_level="debug",
+                    log_file=log_file,
+                )
+
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            events = [row["event"] for row in log_rows]
+            start_rows = [row["fields"] for row in log_rows if row["event"] == "lexeme-start"]
+            complete_rows = [row["fields"] for row in log_rows if row["event"] == "lexeme-complete"]
+            failure_rows = [row["fields"] for row in log_rows if row["event"] == "lexeme-failure"]
+
+            self.assertIn("lexeme-start", events)
+            self.assertIn("lexeme-complete", events)
+            self.assertIn("lexeme-failure", events)
+            self.assertTrue(any(row["mode"] == "per_sense" and row["sense_id"] == "sn_lx_run_1" for row in start_rows))
+            self.assertTrue(any(row["accepted_sense_count"] == 1 and row["sense_id"] == "sn_lx_run_1" for row in complete_rows))
+            self.assertTrue(any(row["sense_id"] == "sn_lx_run_2" and row["error"] == "gateway timeout" for row in failure_rows))
+            self.assertNotIn("definition for run", log_file.read_text(encoding="utf-8"))
+            self.assertNotIn("definition for play", log_file.read_text(encoding="utf-8"))
 
     def test_generate_validated_word_payload_retries_after_bad_gateway_failure(self) -> None:
         lexeme, senses = self._build_lexeme_and_senses()
