@@ -7,6 +7,20 @@ from tools.lexicon.compile_export import compile_phrase_rows, compile_reference_
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 
 
+def _write_compiled_snapshot(
+    root: Path,
+    *,
+    lexemes: list[LexemeRecord],
+    senses: list[SenseRecord],
+    enrichments: list[EnrichmentRecord],
+) -> None:
+    compiled_rows = [row.to_dict() for row in compile_words(lexemes=lexemes, senses=senses, enrichments=enrichments)]
+    (root / "words.enriched.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in compiled_rows) + ("\n" if compiled_rows else ""),
+        encoding="utf-8",
+    )
+
+
 class CompileWordsTests(unittest.TestCase):
     def test_compile_words_uses_word_level_enrichments_without_wordnet_senses(self) -> None:
         lexeme = LexemeRecord(
@@ -320,7 +334,7 @@ class CompileWordsTests(unittest.TestCase):
             root = Path(tmpdir)
             (root / "lexemes.jsonl").write_text(json.dumps(lexeme.to_dict()) + "\n", encoding="utf-8")
             (root / "senses.jsonl").write_text(json.dumps(sense.to_dict()) + "\n", encoding="utf-8")
-            (root / "enrichments.jsonl").write_text(json.dumps(enrichment.to_dict()) + "\n", encoding="utf-8")
+            _write_compiled_snapshot(root, lexemes=[lexeme], senses=[sense], enrichments=[enrichment])
 
             out_path = root / "words.enriched.jsonl"
             compiled = compile_snapshot(root, out_path)
@@ -343,7 +357,7 @@ class CompileWordsTests(unittest.TestCase):
             root = Path(tmpdir)
             (root / "lexemes.jsonl").write_text("", encoding="utf-8")
             (root / "senses.jsonl").write_text("", encoding="utf-8")
-            (root / "enrichments.jsonl").write_text("", encoding="utf-8")
+            (root / "words.enriched.jsonl").write_text("", encoding="utf-8")
             (root / "phrases.jsonl").write_text("\n".join([
                 json.dumps({
                     "snapshot_id": "snap-1",
@@ -470,8 +484,58 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
                     "created_at": "2026-03-07T00:00:00Z",
                 }),
             ]) + "\n", encoding="utf-8")
-            (root / "enrichments.jsonl").write_text("\n".join([
-                json.dumps(EnrichmentRecord(
+            _write_compiled_snapshot(
+                root,
+                lexemes=[
+                    LexemeRecord(
+                        snapshot_id="snap-1",
+                        lexeme_id="lx_run",
+                        lemma="run",
+                        language="en",
+                        wordfreq_rank=5,
+                        is_wordnet_backed=True,
+                        source_refs=["wordnet", "wordfreq"],
+                        created_at="2026-03-07T00:00:00Z",
+                    ),
+                    LexemeRecord(
+                        snapshot_id="snap-1",
+                        lexeme_id="lx_bank",
+                        lemma="bank",
+                        language="en",
+                        wordfreq_rank=20,
+                        is_wordnet_backed=True,
+                        source_refs=["wordnet", "wordfreq"],
+                        created_at="2026-03-07T00:00:00Z",
+                    ),
+                ],
+                senses=[
+                    SenseRecord(
+                        snapshot_id="snap-1",
+                        sense_id="sn_lx_run_1",
+                        lexeme_id="lx_run",
+                        wn_synset_id="run.v.01",
+                        part_of_speech="verb",
+                        canonical_gloss="move fast by using your legs",
+                        selection_reason="core learner sense",
+                        sense_order=1,
+                        is_high_polysemy=False,
+                        created_at="2026-03-07T00:00:00Z",
+                    ),
+                    SenseRecord(
+                        snapshot_id="snap-1",
+                        sense_id="sn_lx_bank_1",
+                        lexeme_id="lx_bank",
+                        wn_synset_id="bank.n.01",
+                        part_of_speech="noun",
+                        canonical_gloss="financial institution",
+                        selection_reason="ambiguous high-risk sense",
+                        sense_order=1,
+                        is_high_polysemy=True,
+                        created_at="2026-03-07T00:00:00Z",
+                    ),
+                ],
+                enrichments=[
+                    EnrichmentRecord(
                     snapshot_id="snap-1",
                     enrichment_id="en_sn_lx_run_1_v1",
                     sense_id="sn_lx_run_1",
@@ -494,8 +558,8 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
                     confidence=0.9,
                     review_status="approved",
                     generated_at="2026-03-07T00:00:00Z",
-                ).to_dict()),
-                json.dumps(EnrichmentRecord(
+                ),
+                    EnrichmentRecord(
                     snapshot_id="snap-1",
                     enrichment_id="en_sn_lx_bank_1_v1",
                     sense_id="sn_lx_bank_1",
@@ -518,8 +582,9 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
                     confidence=0.9,
                     review_status="approved",
                     generated_at="2026-03-07T00:00:00Z",
-                ).to_dict()),
-            ]) + "\n", encoding="utf-8")
+                ),
+                ],
+            )
             decisions_path = root / "selection_decisions.jsonl"
             decisions_path.write_text("\n".join([
                 json.dumps({
@@ -569,7 +634,7 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
             root = Path(tmpdir)
             (root / "lexemes.jsonl").write_text("", encoding="utf-8")
             (root / "senses.jsonl").write_text("", encoding="utf-8")
-            (root / "enrichments.jsonl").write_text("", encoding="utf-8")
+            (root / "words.enriched.jsonl").write_text("", encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "requires --decisions"):
                 compile_snapshot(root, root / "out.jsonl", decision_filter="mode_c_safe")
@@ -579,7 +644,7 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
             root = Path(tmpdir)
             (root / "lexemes.jsonl").write_text("", encoding="utf-8")
             (root / "senses.jsonl").write_text("", encoding="utf-8")
-            (root / "enrichments.jsonl").write_text("", encoding="utf-8")
+            (root / "words.enriched.jsonl").write_text("", encoding="utf-8")
             decisions_path = root / "selection_decisions.jsonl"
             decisions_path.write_text("", encoding="utf-8")
 
@@ -637,8 +702,58 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
                     "created_at": "2026-03-07T00:00:00Z",
                 }),
             ]) + "\n", encoding="utf-8")
-            (root / "enrichments.jsonl").write_text("\n".join([
-                json.dumps(EnrichmentRecord(
+            _write_compiled_snapshot(
+                root,
+                lexemes=[
+                    LexemeRecord(
+                        snapshot_id="snap-1",
+                        lexeme_id="lx_run",
+                        lemma="run",
+                        language="en",
+                        wordfreq_rank=5,
+                        is_wordnet_backed=True,
+                        source_refs=["wordnet", "wordfreq"],
+                        created_at="2026-03-07T00:00:00Z",
+                    ),
+                    LexemeRecord(
+                        snapshot_id="snap-1",
+                        lexeme_id="lx_bank",
+                        lemma="bank",
+                        language="en",
+                        wordfreq_rank=20,
+                        is_wordnet_backed=True,
+                        source_refs=["wordnet", "wordfreq"],
+                        created_at="2026-03-07T00:00:00Z",
+                    ),
+                ],
+                senses=[
+                    SenseRecord(
+                        snapshot_id="snap-1",
+                        sense_id="sn_lx_run_1",
+                        lexeme_id="lx_run",
+                        wn_synset_id="run.v.01",
+                        part_of_speech="verb",
+                        canonical_gloss="move fast by using your legs",
+                        selection_reason="core learner sense",
+                        sense_order=1,
+                        is_high_polysemy=False,
+                        created_at="2026-03-07T00:00:00Z",
+                    ),
+                    SenseRecord(
+                        snapshot_id="snap-1",
+                        sense_id="sn_lx_bank_1",
+                        lexeme_id="lx_bank",
+                        wn_synset_id="bank.n.01",
+                        part_of_speech="noun",
+                        canonical_gloss="financial institution",
+                        selection_reason="ambiguous high-risk sense",
+                        sense_order=1,
+                        is_high_polysemy=True,
+                        created_at="2026-03-07T00:00:00Z",
+                    ),
+                ],
+                enrichments=[
+                    EnrichmentRecord(
                     snapshot_id="snap-1",
                     enrichment_id="en_sn_lx_run_1_v1",
                     sense_id="sn_lx_run_1",
@@ -661,8 +776,8 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
                     confidence=0.9,
                     review_status="approved",
                     generated_at="2026-03-07T00:00:00Z",
-                ).to_dict()),
-                json.dumps(EnrichmentRecord(
+                ),
+                    EnrichmentRecord(
                     snapshot_id="snap-1",
                     enrichment_id="en_sn_lx_bank_1_v1",
                     sense_id="sn_lx_bank_1",
@@ -685,8 +800,9 @@ class CompileSnapshotDecisionFilterTests(unittest.TestCase):
                     confidence=0.9,
                     review_status="approved",
                     generated_at="2026-03-07T00:00:00Z",
-                ).to_dict()),
-            ]) + "\n", encoding="utf-8")
+                ),
+                ],
+            )
             decisions_path = root / "selection_decisions.jsonl"
             decisions_path.write_text("\n".join([
                 json.dumps({
