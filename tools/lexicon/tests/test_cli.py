@@ -2,6 +2,7 @@ import io
 import csv
 import json
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -20,6 +21,16 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(stdout), redirect_stderr(stderr):
             try:
                 code = cli.main(argv)
+            except SystemExit as exc:
+                code = int(exc.code)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def run_cli_via_sys_argv(self, argv: list[str]) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with patch.object(sys, "argv", ["python -m tools.lexicon.cli", *argv]), redirect_stdout(stdout), redirect_stderr(stderr):
+            try:
+                code = cli.main()
             except SystemExit as exc:
                 code = int(exc.code)
         return code, stdout.getvalue(), stderr.getvalue()
@@ -371,6 +382,22 @@ class CliTests(unittest.TestCase):
 
         self.assertNotEqual(code, 0)
         self.assertIn("unrecognized arguments: --mode per_sense", stderr)
+
+    def test_enrich_command_rejects_removed_mode_flag_via_real_sys_argv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            with patch("tools.lexicon.cli.run_enrichment") as mocked_enrich:
+                code, _, stderr = self.run_cli_via_sys_argv([
+                    "enrich",
+                    "--snapshot-dir",
+                    str(snapshot_dir),
+                    "--mode",
+                    "per_word",
+                ])
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("unrecognized arguments: --mode per_word", stderr)
+        mocked_enrich.assert_not_called()
 
     def test_enrich_command_reports_provider_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
