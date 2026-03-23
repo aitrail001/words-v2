@@ -2,53 +2,164 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import HomePage from "@/app/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
+import {
+  getKnowledgeMapOverview,
+  getKnowledgeMapRange,
+  getKnowledgeMapSearchHistory,
+  searchKnowledgeMap,
+  updateKnowledgeEntryStatus,
+} from "@/lib/knowledge-map-client";
+import { getUserPreferences } from "@/lib/user-preferences-client";
 
-jest.mock("@/lib/api-client", () => ({
-  apiClient: {
-    get: jest.fn(),
-  },
-}));
+jest.mock("@/lib/knowledge-map-client");
+jest.mock("@/lib/user-preferences-client");
 
-describe("HomePage (Word Search)", () => {
-  const mockApiClient = require("@/lib/api-client").apiClient;
+describe("HomePage (Knowledge Map)", () => {
+  const mockGetKnowledgeMapOverview = getKnowledgeMapOverview as jest.MockedFunction<typeof getKnowledgeMapOverview>;
+  const mockGetKnowledgeMapRange = getKnowledgeMapRange as jest.MockedFunction<typeof getKnowledgeMapRange>;
+  const mockGetKnowledgeMapSearchHistory = getKnowledgeMapSearchHistory as jest.MockedFunction<typeof getKnowledgeMapSearchHistory>;
+  const mockSearchKnowledgeMap = searchKnowledgeMap as jest.MockedFunction<typeof searchKnowledgeMap>;
+  const mockUpdateKnowledgeEntryStatus = updateKnowledgeEntryStatus as jest.MockedFunction<typeof updateKnowledgeEntryStatus>;
+  const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-  });
-
-  it("renders search input", () => {
-    render(<HomePage />);
-    expect(screen.getByPlaceholderText(/search words/i)).toBeInTheDocument();
-  });
-
-  it("searches words and displays results", async () => {
-    const user = userEvent.setup();
-    mockApiClient.get.mockResolvedValue([
-      { id: "1", word: "bank", language: "en", frequency_rank: 100 },
-      { id: "2", word: "banker", language: "en", frequency_rank: 500 },
-    ]);
-
-    render(<HomePage />);
-
-    await user.type(screen.getByPlaceholderText(/search words/i), "bank");
-
-    await waitFor(() => {
-      expect(mockApiClient.get).toHaveBeenCalledWith("/words/search?q=bank");
-      expect(screen.getByText("bank")).toBeInTheDocument();
-      expect(screen.getByText("banker")).toBeInTheDocument();
+    mockGetUserPreferences.mockResolvedValue({
+      accent_preference: "uk",
+      translation_locale: "zh-Hans",
+      knowledge_view_preference: "cards",
+    });
+    mockGetKnowledgeMapOverview.mockResolvedValue({
+      bucket_size: 100,
+      total_entries: 2,
+      ranges: [
+        {
+          range_start: 1,
+          range_end: 100,
+          total_entries: 2,
+          counts: { undecided: 1, to_learn: 1, learning: 0, known: 0 },
+        },
+      ],
+    });
+    mockGetKnowledgeMapRange.mockResolvedValue({
+      range_start: 1,
+      range_end: 100,
+      previous_range_start: null,
+      next_range_start: null,
+      items: [
+        {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "Bank",
+          normalized_form: "bank",
+          browse_rank: 20,
+          status: "to_learn",
+          cefr_level: "A2",
+          pronunciation: "/baŋk/",
+          translation: "银行",
+          primary_definition: "A financial institution.",
+          part_of_speech: "noun",
+          phrase_kind: null,
+        },
+        {
+          entry_type: "phrase",
+          entry_id: "phrase-1",
+          display_text: "Bank on",
+          normalized_form: "bank on",
+          browse_rank: 21,
+          status: "undecided",
+          cefr_level: "B1",
+          pronunciation: null,
+          translation: "依靠",
+          primary_definition: "To rely on someone.",
+          part_of_speech: null,
+          phrase_kind: "phrasal_verb",
+        },
+      ],
+    });
+    mockGetKnowledgeMapSearchHistory.mockResolvedValue({
+      items: [
+        {
+          query: "bank",
+          entry_type: "word",
+          entry_id: "word-1",
+          last_searched_at: "2026-03-23T00:00:00Z",
+        },
+      ],
+    });
+    mockSearchKnowledgeMap.mockResolvedValue({
+      items: [
+        {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "Bank",
+          normalized_form: "bank",
+          browse_rank: 20,
+          status: "to_learn",
+          cefr_level: "A2",
+          pronunciation: "/baŋk/",
+          translation: "银行",
+          primary_definition: "A financial institution.",
+          part_of_speech: "noun",
+          phrase_kind: null,
+        },
+      ],
+    });
+    mockUpdateKnowledgeEntryStatus.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      status: "known",
     });
   });
 
-  it("shows no results message when empty", async () => {
-    const user = userEvent.setup();
-    mockApiClient.get.mockResolvedValue([]);
-
+  it("renders the overview and initial range cards", async () => {
     render(<HomePage />);
 
-    await user.type(screen.getByPlaceholderText(/search words/i), "xyz");
+    expect(await screen.findByText(/full knowledge map/i)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /1-100/i })).toBeInTheDocument();
+    expect(await screen.findByText("Bank")).toBeInTheDocument();
+    expect(screen.getByText("A financial institution.")).toBeInTheDocument();
+  });
+
+  it("switches between cards, tags, and list views", async () => {
+    const user = userEvent.setup();
+    render(<HomePage />);
+
+    await screen.findByText("Bank");
+    await user.click(screen.getByRole("button", { name: /tags view/i }));
+    expect(screen.getByTestId("knowledge-tags-view")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /list view/i }));
+    expect(screen.getByTestId("knowledge-list-view")).toBeInTheDocument();
+  });
+
+  it("updates learner status from the cards view", async () => {
+    const user = userEvent.setup();
+    render(<HomePage />);
+
+    await screen.findByText("Bank");
+    await user.click(screen.getByRole("button", { name: /known/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/no words found/i)).toBeInTheDocument();
+      expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "known");
+      expect(screen.getByText(/status: known/i)).toBeInTheDocument();
+    });
+  });
+
+  it("shows search history and search results", async () => {
+    const user = userEvent.setup();
+    render(<HomePage />);
+
+    expect(await screen.findByText(/recent searches/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("bank")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText(/search your knowledge map/i), "bank");
+
+    await waitFor(() => {
+      expect(mockSearchKnowledgeMap).toHaveBeenCalledWith("bank");
+      expect(screen.getAllByText("Bank")[0]).toBeInTheDocument();
     });
   });
 });

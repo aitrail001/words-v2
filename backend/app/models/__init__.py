@@ -10,14 +10,17 @@ from app.models.lexicon_job import LexiconJob
 from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
 from app.models.lexicon_review_batch import LexiconReviewBatch
 from app.models.lexicon_review_item import LexiconReviewItem
+from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.phrase_entry import PhraseEntry
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.reference_entry import ReferenceEntry
 from app.models.reference_localization import ReferenceLocalization
 from app.models.review import LearningQueueItem, ReviewCard, ReviewHistory, ReviewSession
+from app.models.search_history import SearchHistory
 from app.models.translation import Translation
 from app.models.user import User
+from app.models.user_preference import UserPreference
 from app.models.word import Word
 from app.models.word_list import WordList
 from app.models.word_list_item import WordListItem
@@ -46,9 +49,12 @@ __all__ = [
     "LexiconRegenerationRequest",
     "LexiconReviewBatch",
     "LexiconReviewItem",
+    "LearnerEntryStatus",
     "PhraseEntry",
     "ReferenceEntry",
     "ReferenceLocalization",
+    "SearchHistory",
     "LexiconEnrichmentJob",
     "LexiconEnrichmentRun",
+    "UserPreference",
 ]

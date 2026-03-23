@@ -1,1 +1,19 @@
 @import "tailwindcss";
+
+:root {
+  --page-ink: #172a33;
+  --page-bg: #f4efe4;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(25, 168, 134, 0.14), transparent 32%),
+    radial-gradient(circle at top right, rgba(227, 93, 91, 0.12), transparent 24%),
+    linear-gradient(180deg, #fbf7ee 0%, #f2eee4 100%);
+}
+
+body {
+  color: var(--page-ink);
+  font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+  background: transparent;
+}

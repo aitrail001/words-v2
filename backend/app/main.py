@@ -19,8 +19,10 @@ from app.api.lexicon_imports import router as lexicon_imports_router
 from app.api.lexicon_jobs import router as lexicon_jobs_router
 from app.api.lexicon_jsonl_reviews import router as lexicon_jsonl_reviews_router
 from app.api.lexicon_ops import router as lexicon_ops_router
+from app.api.knowledge_map import router as knowledge_map_router
 from app.api.imports import router as imports_router
 from app.api.reviews import router as reviews_router
+from app.api.user_preferences import router as user_preferences_router
 from app.api.word_lists import router as word_lists_router
 from app.api.words import router as words_router
 from app.core.config import get_settings
@@ -102,9 +104,11 @@ app.add_middleware(
 app.include_router(health_router, prefix="/api")
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(words_router, prefix="/api/words", tags=["words"])
+app.include_router(knowledge_map_router, prefix="/api/knowledge-map", tags=["knowledge-map"])
 app.include_router(reviews_router, prefix="/api/reviews", tags=["reviews"])
 app.include_router(imports_router, prefix="/api/imports", tags=["imports"])
 app.include_router(word_lists_router, prefix="/api/word-lists", tags=["word-lists"])
+app.include_router(user_preferences_router, prefix="/api/user-preferences", tags=["user-preferences"])
 app.include_router(import_jobs_router, prefix="/api/import-jobs", tags=["import-jobs"])
 app.include_router(lexicon_compiled_reviews_router, prefix="/api/lexicon-compiled-reviews", tags=["lexicon-compiled-reviews"])
 app.include_router(lexicon_jsonl_reviews_router, prefix="/api/lexicon-jsonl-reviews", tags=["lexicon-jsonl-reviews"])

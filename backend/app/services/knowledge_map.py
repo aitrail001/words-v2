@@ -1,0 +1,305 @@
+import uuid
+from collections import defaultdict
+from collections.abc import Sequence
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.learner_entry_status import LearnerEntryStatus
+from app.models.meaning import Meaning
+from app.models.meaning_example import MeaningExample
+from app.models.phrase_entry import PhraseEntry
+from app.models.search_history import SearchHistory
+from app.models.translation import Translation
+from app.models.user_preference import UserPreference
+from app.models.word import Word
+from app.models.word_relation import WordRelation
+
+DEFAULT_ACCENT = "us"
+DEFAULT_TRANSLATION_LOCALE = "zh-Hans"
+DEFAULT_VIEW = "cards"
+STATUS_VALUES = ("undecided", "to_learn", "learning", "known")
+ENTRY_TYPES = ("word", "phrase")
+BUCKET_SIZE = 100
+UNRANKED_BASE = 1_000_000
+
+
+def default_preferences() -> UserPreference:
+    return UserPreference(
+        user_id=uuid.uuid4(),
+        accent_preference=DEFAULT_ACCENT,
+        translation_locale=DEFAULT_TRANSLATION_LOCALE,
+        knowledge_view_preference=DEFAULT_VIEW,
+    )
+
+
+async def get_preferences(db: AsyncSession, user_id: uuid.UUID) -> UserPreference:
+    result = await db.execute(select(UserPreference).where(UserPreference.user_id == user_id))
+    return result.scalar_one_or_none() or default_preferences()
+
+
+async def load_status_map(db: AsyncSession, user_id: uuid.UUID) -> dict[tuple[str, uuid.UUID], str]:
+    result = await db.execute(select(LearnerEntryStatus).where(LearnerEntryStatus.user_id == user_id))
+    rows = result.scalars().all()
+    return {(row.entry_type, row.entry_id): row.status for row in rows}
+
+
+def bucket_start_for_rank(rank: int) -> int:
+    return ((rank - 1) // BUCKET_SIZE) * BUCKET_SIZE + 1
+
+
+def normalize_word_rank(word: Word, fallback_rank: int) -> int:
+    return word.frequency_rank if word.frequency_rank is not None else fallback_rank
+
+
+def extract_phrase_primary_definition(entry: PhraseEntry) -> str | None:
+    payload = entry.compiled_payload if isinstance(entry.compiled_payload, dict) else {}
+    senses = payload.get("senses") if isinstance(payload.get("senses"), list) else []
+    if not senses:
+        return None
+    first = senses[0] if isinstance(senses[0], dict) else {}
+    value = first.get("definition")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def extract_phrase_translation(entry: PhraseEntry, locale: str) -> str | None:
+    payload = entry.compiled_payload if isinstance(entry.compiled_payload, dict) else {}
+    senses = payload.get("senses") if isinstance(payload.get("senses"), list) else []
+    for raw_sense in senses:
+        sense = raw_sense if isinstance(raw_sense, dict) else {}
+        translations = sense.get("translations") if isinstance(sense.get("translations"), dict) else {}
+        locale_payload = translations.get(locale) if isinstance(translations.get(locale), dict) else {}
+        definition = locale_payload.get("definition")
+        if isinstance(definition, str) and definition.strip():
+            return definition.strip()
+    return None
+
+
+def select_pronunciation(word: Word, accent: str) -> str | None:
+    phonetics = word.phonetics if isinstance(word.phonetics, dict) else {}
+    candidates = [accent, DEFAULT_ACCENT, "uk", "au"]
+    seen: set[str] = set()
+    for key in candidates:
+        if key in seen:
+            continue
+        seen.add(key)
+        value = phonetics.get(key) if isinstance(phonetics.get(key), dict) else {}
+        ipa = value.get("ipa")
+        if isinstance(ipa, str) and ipa.strip():
+            return ipa.strip()
+    if isinstance(word.phonetic, str) and word.phonetic.strip():
+        return word.phonetic.strip()
+    return None
+
+
+def build_word_translation_map(translations: Sequence[Translation], locale: str) -> dict[uuid.UUID, str]:
+    translation_map: dict[uuid.UUID, str] = {}
+    for translation in translations:
+        if translation.language == locale and translation.meaning_id not in translation_map:
+            translation_map[translation.meaning_id] = translation.translation
+    return translation_map
+
+
+async def build_catalog(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    q: str | None = None,
+) -> list[dict]:
+    words_result = await db.execute(select(Word))
+    phrases_result = await db.execute(select(PhraseEntry))
+    status_map = await load_status_map(db, user_id)
+    return build_catalog_items(
+        words_result.scalars().all(),
+        phrases_result.scalars().all(),
+        status_map=status_map,
+        q=q,
+    )
+
+def build_catalog_items(
+    words: Sequence[Word],
+    phrases: Sequence[PhraseEntry],
+    *,
+    status_map: dict[tuple[str, uuid.UUID], str] | None = None,
+    q: str | None = None,
+) -> list[dict]:
+    status_map = status_map or {}
+    ranked_words = sorted(
+        words,
+        key=lambda word: (
+            word.frequency_rank if word.frequency_rank is not None else UNRANKED_BASE,
+            word.word.lower(),
+            str(word.id),
+        ),
+    )
+    next_rank = max((word.frequency_rank or 0) for word in ranked_words) + 1 if ranked_words else 1
+
+    items: list[dict] = []
+    for word in ranked_words:
+        browse_rank = normalize_word_rank(word, next_rank)
+        next_rank = max(next_rank, browse_rank + 1)
+        item = {
+            "entry_type": "word",
+            "entry_id": word.id,
+            "display_text": word.word,
+            "normalized_form": word.word,
+            "browse_rank": browse_rank,
+            "status": status_map.get(("word", word.id), "undecided"),
+            "cefr_level": word.cefr_level,
+            "pronunciation": word.phonetic,
+            "translation": None,
+            "primary_definition": None,
+            "part_of_speech": word.learner_part_of_speech[0] if isinstance(word.learner_part_of_speech, list) and word.learner_part_of_speech else None,
+            "phrase_kind": None,
+        }
+        items.append(item)
+
+    phrase_entries = sorted(
+        phrases,
+        key=lambda entry: (entry.normalized_form.lower(), str(entry.id)),
+    )
+    for entry in phrase_entries:
+        item = {
+            "entry_type": "phrase",
+            "entry_id": entry.id,
+            "display_text": entry.phrase_text,
+            "normalized_form": entry.normalized_form,
+            "browse_rank": next_rank,
+            "status": status_map.get(("phrase", entry.id), "undecided"),
+            "cefr_level": entry.cefr_level,
+            "pronunciation": None,
+            "translation": None,
+            "primary_definition": extract_phrase_primary_definition(entry),
+            "part_of_speech": None,
+            "phrase_kind": entry.phrase_kind,
+        }
+        next_rank += 1
+        items.append(item)
+
+    if q:
+        lowered = q.lower()
+        items = [
+            item
+            for item in items
+            if lowered in (item["display_text"] or "").lower()
+            or lowered in (item["normalized_form"] or "").lower()
+        ]
+
+    return sorted(items, key=lambda item: (item["browse_rank"], item["display_text"]))
+
+
+def build_overview(items: Sequence[dict]) -> dict:
+    buckets: dict[int, dict] = {}
+    for item in items:
+        start = bucket_start_for_rank(item["browse_rank"])
+        bucket = buckets.setdefault(
+            start,
+            {
+                "range_start": start,
+                "range_end": start + BUCKET_SIZE - 1,
+                "total_entries": 0,
+                "counts": {status: 0 for status in STATUS_VALUES},
+            },
+        )
+        bucket["total_entries"] += 1
+        bucket["counts"][item["status"]] += 1
+
+    return {
+        "bucket_size": BUCKET_SIZE,
+        "total_entries": len(items),
+        "ranges": [buckets[key] for key in sorted(buckets)],
+    }
+
+
+def build_range(items: Sequence[dict], range_start: int) -> dict:
+    filtered = [
+        item for item in items
+        if bucket_start_for_rank(item["browse_rank"]) == range_start
+    ]
+    ordered_range_starts = sorted({bucket_start_for_rank(item["browse_rank"]) for item in items})
+    current_index = ordered_range_starts.index(range_start) if range_start in ordered_range_starts else -1
+    previous_start = ordered_range_starts[current_index - 1] if current_index > 0 else None
+    next_start = ordered_range_starts[current_index + 1] if current_index >= 0 and current_index + 1 < len(ordered_range_starts) else None
+    return {
+        "range_start": range_start,
+        "range_end": range_start + BUCKET_SIZE - 1,
+        "previous_range_start": previous_start,
+        "next_range_start": next_start,
+        "items": filtered,
+    }
+
+
+async def load_word_primary_definitions(db: AsyncSession, word_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Meaning]:
+    if not word_ids:
+        return {}
+    result = await db.execute(
+        select(Meaning)
+        .where(Meaning.word_id.in_(word_ids))
+        .order_by(Meaning.word_id.asc(), Meaning.order_index.asc())
+    )
+    meaning_map: dict[uuid.UUID, Meaning] = {}
+    for meaning in result.scalars().all():
+        meaning_map.setdefault(meaning.word_id, meaning)
+    return meaning_map
+
+
+async def get_status_row(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    entry_type: str,
+    entry_id: uuid.UUID,
+) -> LearnerEntryStatus | None:
+    result = await db.execute(
+        select(LearnerEntryStatus).where(
+            LearnerEntryStatus.user_id == user_id,
+            LearnerEntryStatus.entry_type == entry_type,
+            LearnerEntryStatus.entry_id == entry_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def load_word_detail_relations(
+    db: AsyncSession,
+    meaning_ids: Sequence[uuid.UUID],
+) -> tuple[dict[uuid.UUID, list[MeaningExample]], dict[uuid.UUID, list[Translation]], dict[uuid.UUID, list[WordRelation]]]:
+    examples_by_meaning: dict[uuid.UUID, list[MeaningExample]] = defaultdict(list)
+    translations_by_meaning: dict[uuid.UUID, list[Translation]] = defaultdict(list)
+    relations_by_meaning: dict[uuid.UUID, list[WordRelation]] = defaultdict(list)
+    if not meaning_ids:
+        return examples_by_meaning, translations_by_meaning, relations_by_meaning
+
+    examples_result = await db.execute(
+        select(MeaningExample)
+        .where(MeaningExample.meaning_id.in_(meaning_ids))
+        .order_by(MeaningExample.meaning_id.asc(), MeaningExample.order_index.asc())
+    )
+    for example in examples_result.scalars().all():
+        examples_by_meaning[example.meaning_id].append(example)
+
+    translations_result = await db.execute(
+        select(Translation)
+        .where(Translation.meaning_id.in_(meaning_ids))
+        .order_by(Translation.meaning_id.asc(), Translation.language.asc())
+    )
+    for translation in translations_result.scalars().all():
+        translations_by_meaning[translation.meaning_id].append(translation)
+
+    relations_result = await db.execute(
+        select(WordRelation)
+        .where(WordRelation.meaning_id.in_(meaning_ids))
+        .order_by(WordRelation.meaning_id.asc(), WordRelation.related_word.asc())
+    )
+    for relation in relations_result.scalars().all():
+        relations_by_meaning[relation.meaning_id].append(relation)
+
+    return examples_by_meaning, translations_by_meaning, relations_by_meaning
+
+
+async def list_search_history(db: AsyncSession, user_id: uuid.UUID) -> list[SearchHistory]:
+    result = await db.execute(
+        select(SearchHistory)
+        .where(SearchHistory.user_id == user_id)
+        .order_by(SearchHistory.last_searched_at.desc())
+    )
+    return result.scalars().all()

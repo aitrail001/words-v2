@@ -1,0 +1,352 @@
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.core.database import get_db
+from app.core.redis import get_redis
+from app.core.security import create_access_token, hash_password
+from app.main import app
+from app.models.learner_entry_status import LearnerEntryStatus
+from app.models.meaning import Meaning
+from app.models.phrase_entry import PhraseEntry
+from app.models.search_history import SearchHistory
+from app.models.translation import Translation
+from app.models.user import User
+from app.models.user_preference import UserPreference
+from app.models.word import Word
+
+
+@pytest.fixture
+def mock_db():
+    session = AsyncMock()
+    session.execute = AsyncMock()
+    session.commit = AsyncMock()
+    session.add = MagicMock()
+    return session
+
+
+@pytest.fixture
+def mock_redis():
+    r = AsyncMock()
+    r.ping = AsyncMock(return_value=True)
+    return r
+
+
+@pytest.fixture
+async def client(mock_db, mock_redis):
+    async def override_get_db():
+        yield mock_db
+
+    def override_get_redis():
+        return mock_redis
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_redis] = override_get_redis
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def auth_token():
+    user_id = uuid.uuid4()
+    token = create_access_token(subject=str(user_id))
+    return token, user_id
+
+
+def make_user(user_id: uuid.UUID) -> User:
+    return User(
+        id=user_id,
+        email="test@example.com",
+        password_hash=hash_password("password123"),
+    )
+
+
+def scalar_one_or_none_result(value):
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = value
+    return result
+
+
+def scalars_all_result(values):
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = values
+    return result
+
+
+class TestKnowledgeMapOverview:
+    @pytest.mark.asyncio
+    async def test_overview_returns_bucket_counts(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word_one = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=20)
+        word_two = Word(id=uuid.uuid4(), word="branch", language="en", frequency_rank=130)
+        phrase = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="bank on",
+            normalized_form="bank on",
+            phrase_kind="phrasal_verb",
+            language="en",
+        )
+        statuses = [
+            LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_one.id, status="known"),
+            LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase.id, status="learning"),
+        ]
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalars_all_result([word_one, word_two]),
+            scalars_all_result([phrase]),
+            scalars_all_result(statuses),
+        ]
+
+        response = await client.get(
+            "/api/knowledge-map/overview",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["bucket_size"] == 100
+        assert data["total_entries"] == 3
+        assert len(data["ranges"]) == 2
+        assert data["ranges"][0]["range_start"] == 1
+        assert data["ranges"][0]["counts"]["known"] == 1
+        assert data["ranges"][1]["counts"]["learning"] == 1
+
+
+class TestKnowledgeMapRange:
+    @pytest.mark.asyncio
+    async def test_range_returns_mixed_entries(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=20, phonetic="/bæŋk/")
+        word_meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
+        phrase = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="bank on",
+            normalized_form="bank on",
+            phrase_kind="phrasal_verb",
+            language="en",
+            compiled_payload={
+                "senses": [
+                    {
+                        "definition": "To depend on someone.",
+                        "translations": {"zh-Hans": {"definition": "依靠", "examples": [], "usage_note": "common"}},
+                    }
+                ]
+            },
+        )
+        statuses = [LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="to_learn")]
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalars_all_result([word]),
+            scalars_all_result([phrase]),
+            scalars_all_result(statuses),
+            scalars_all_result([word_meaning]),
+        ]
+
+        response = await client.get(
+            "/api/knowledge-map/ranges/1",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["range_start"] == 1
+        assert len(data["items"]) == 2
+        assert data["items"][0]["entry_type"] == "word"
+        assert data["items"][0]["status"] == "to_learn"
+        assert data["items"][1]["entry_type"] == "phrase"
+
+
+class TestKnowledgeMapDetail:
+    @pytest.mark.asyncio
+    async def test_word_detail_uses_preferences(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        preferences = UserPreference(user_id=user_id, accent_preference="uk", translation_locale="es")
+        word = Word(
+            id=uuid.uuid4(),
+            word="bank",
+            language="en",
+            frequency_rank=20,
+            phonetic="/bæŋk/",
+            phonetics={
+                "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+                "uk": {"ipa": "/baŋk/", "confidence": 0.98},
+            },
+        )
+        meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
+        translation = Translation(id=uuid.uuid4(), meaning_id=meaning.id, language="es", translation="banco")
+        status = LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="learning")
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(preferences),
+            scalar_one_or_none_result(word),
+            scalars_all_result([meaning]),
+            scalars_all_result([]),
+            scalars_all_result([translation]),
+            scalars_all_result([]),
+            scalars_all_result([word]),
+            scalars_all_result([]),
+            scalar_one_or_none_result(status),
+        ]
+
+        response = await client.get(
+            f"/api/knowledge-map/entries/word/{word.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["entry_type"] == "word"
+        assert data["status"] == "learning"
+        assert data["pronunciation"] == "/baŋk/"
+        assert data["translation"] == "banco"
+
+    @pytest.mark.asyncio
+    async def test_phrase_detail_reads_compiled_payload(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        preferences = UserPreference(user_id=user_id, translation_locale="zh-Hans")
+        phrase = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="bank on",
+            normalized_form="bank on",
+            phrase_kind="phrasal_verb",
+            language="en",
+            compiled_payload={
+                "senses": [
+                    {
+                        "definition": "To rely on someone.",
+                        "examples": [{"sentence": "You can bank on me.", "difficulty": "B1"}],
+                        "translations": {"zh-Hans": {"definition": "依靠", "examples": ["你可以依靠我。"], "usage_note": "common"}},
+                    }
+                ]
+            },
+        )
+        status = LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase.id, status="known")
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(preferences),
+            scalar_one_or_none_result(phrase),
+            scalar_one_or_none_result(status),
+            scalars_all_result([]),
+            scalars_all_result([phrase]),
+        ]
+
+        response = await client.get(
+            f"/api/knowledge-map/entries/phrase/{phrase.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["entry_type"] == "phrase"
+        assert data["status"] == "known"
+        assert data["translation"] == "依靠"
+        assert data["senses"][0]["definition"] == "To rely on someone."
+
+
+class TestKnowledgeMapStatus:
+    @pytest.mark.asyncio
+    async def test_put_status_upserts_status(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=20)
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(word),
+            scalar_one_or_none_result(None),
+        ]
+
+        response = await client.put(
+            f"/api/knowledge-map/entries/word/{word.id}/status",
+            json={"status": "known"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["entry_type"] == "word"
+        assert data["entry_id"] == str(word.id)
+        assert data["status"] == "known"
+
+
+class TestKnowledgeMapSearchAndHistory:
+    @pytest.mark.asyncio
+    async def test_search_returns_mixed_entries(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=20)
+        phrase = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="bank on",
+            normalized_form="bank on",
+            phrase_kind="phrasal_verb",
+            language="en",
+        )
+        status = LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="learning")
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalars_all_result([word]),
+            scalars_all_result([phrase]),
+            scalars_all_result([status]),
+        ]
+
+        response = await client.get(
+            "/api/knowledge-map/search?q=bank",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 2
+        assert data["items"][0]["display_text"] == "bank"
+
+    @pytest.mark.asyncio
+    async def test_search_history_round_trip(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        history_row = SearchHistory(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            query="bank",
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            last_searched_at=datetime.now(timezone.utc),
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(None),
+            scalar_one_or_none_result(user),
+            scalars_all_result([history_row]),
+        ]
+
+        create_response = await client.post(
+            "/api/knowledge-map/search-history",
+            json={"query": "bank", "entry_type": "word", "entry_id": str(history_row.entry_id)},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert create_response.status_code == 201
+
+        list_response = await client.get(
+            "/api/knowledge-map/search-history",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert list_response.status_code == 200
+        data = list_response.json()
+        assert data["items"][0]["query"] == "bank"
