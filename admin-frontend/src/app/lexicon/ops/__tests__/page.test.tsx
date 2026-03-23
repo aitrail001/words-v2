@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LexiconOpsPage from "@/app/lexicon/ops/page";
 import { useRouter } from "next/navigation";
@@ -202,6 +202,12 @@ describe("LexiconOpsPage", () => {
     expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
       "rows: 48",
     );
+    expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
+      "Reviewed outputs",
+    );
+    expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
+      "Word",
+    );
   });
 
   it("refreshes snapshots from the refresh action", async () => {
@@ -387,5 +393,106 @@ describe("LexiconOpsPage", () => {
     expect(push).not.toHaveBeenCalledWith(expect.stringContaining("/lexicon/jsonl-review"));
     expect(push).not.toHaveBeenCalledWith(expect.stringContaining("/lexicon/compiled-review"));
     expect(push).not.toHaveBeenCalledWith(expect.stringContaining("/lexicon/import-db"));
+  });
+
+  it("paginates the snapshot list when lexicon operations grow beyond one page", async () => {
+    const user = userEvent.setup();
+    mockListLexiconOpsSnapshots.mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => ({
+        ...snapshots[0],
+        snapshot: `words-${index + 1}`,
+        snapshot_path: `/data/lexicon/snapshots/words-${index + 1}`,
+        snapshot_id: `snapshot-${index + 1}`,
+      })),
+    );
+    mockGetLexiconOpsSnapshot.mockResolvedValue({
+      ...detail,
+      snapshot: "words-1",
+      snapshot_path: "/data/lexicon/snapshots/words-1",
+      snapshot_id: "snapshot-1",
+    });
+
+    render(<LexiconOpsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-snapshots-list")).toHaveTextContent("words-1"),
+    );
+    expect(screen.getByTestId("lexicon-ops-snapshots-list")).toHaveTextContent("words-10");
+    expect(screen.getByTestId("lexicon-ops-snapshots-list")).not.toHaveTextContent("words-11");
+
+    await user.click(screen.getByTestId("lexicon-ops-snapshots-next-page"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-snapshots-list")).toHaveTextContent("words-11"),
+    );
+    expect(screen.getByTestId("lexicon-ops-snapshots-list")).toHaveTextContent("words-12");
+    expect(
+      within(screen.getByTestId("lexicon-ops-snapshots-list")).queryByTestId("lexicon-ops-snapshot-words-1"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("lexicon-ops-snapshots-page-1"));
+    await waitFor(() =>
+      expect(within(screen.getByTestId("lexicon-ops-snapshots-list")).getByTestId("lexicon-ops-snapshot-words-1")).toBeInTheDocument(),
+    );
+  });
+
+  it("filters snapshots by search before pagination", async () => {
+    const user = userEvent.setup();
+    mockListLexiconOpsSnapshots.mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => ({
+        ...snapshots[0],
+        snapshot: `words-${index + 1}`,
+        snapshot_path: `/data/lexicon/snapshots/words-${index + 1}`,
+        snapshot_id: index === 10 ? "target-snapshot" : `snapshot-${index + 1}`,
+      })),
+    );
+    render(<LexiconOpsPage />);
+
+    await waitFor(() =>
+      expect(within(screen.getByTestId("lexicon-ops-snapshots-list")).getByTestId("lexicon-ops-snapshot-words-1")).toBeInTheDocument(),
+    );
+
+    await user.type(screen.getByTestId("lexicon-ops-snapshots-search"), "target");
+
+    await waitFor(() =>
+      expect(within(screen.getByTestId("lexicon-ops-snapshots-list")).getByTestId("lexicon-ops-snapshot-words-11")).toBeInTheDocument(),
+    );
+    expect(within(screen.getByTestId("lexicon-ops-snapshots-list")).queryByTestId("lexicon-ops-snapshot-words-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("lexicon-ops-snapshots-page-2")).not.toBeInTheDocument();
+  });
+
+  it("restores search and page state from the url and keeps them updated", async () => {
+    const user = userEvent.setup();
+    mockListLexiconOpsSnapshots.mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => ({
+        ...snapshots[0],
+        snapshot: `words-${index + 1}`,
+        snapshot_path: `/data/lexicon/snapshots/words-${index + 1}`,
+        snapshot_id: `snapshot-${index + 1}`,
+      })),
+    );
+
+    window.history.pushState({}, "", "/lexicon/ops?q=words");
+    render(<LexiconOpsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-snapshots-search")).toHaveValue("words"),
+    );
+    expect(window.location.search).toContain("q=words");
+
+    await user.click(screen.getByTestId("lexicon-ops-snapshots-page-2"));
+
+    await waitFor(() =>
+      expect(within(screen.getByTestId("lexicon-ops-snapshots-list")).getByTestId("lexicon-ops-snapshot-words-11")).toBeInTheDocument(),
+    );
+    expect(window.location.search).toContain("page=2");
+
+    await user.clear(screen.getByTestId("lexicon-ops-snapshots-search"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("lexicon-ops-snapshots-search")).toHaveValue(""),
+    );
+    expect(window.location.search).not.toContain("q=");
+    expect(window.location.search).not.toContain("page=2");
   });
 });

@@ -53,7 +53,7 @@ describe("LexiconDbInspectorPage", () => {
       total: 2,
       family: "all",
       q: null,
-      limit: 25,
+      limit: 10,
       offset: 0,
       has_more: false,
     });
@@ -65,11 +65,37 @@ describe("LexiconDbInspectorPage", () => {
       language: "en",
       cefr_level: "B1",
       frequency_rank: 100,
+      phonetics: { au: { ipa: "/bɐŋk/", confidence: 0.97 }, us: { ipa: "/bæŋk/", confidence: 0.99 }, uk: { ipa: "/bæŋk/", confidence: 0.98 } },
       phonetic: "bæŋk",
       phonetic_source: "lexicon_snapshot",
+      phonetic_confidence: 0.98,
+      learner_part_of_speech: ["noun", "verb"],
+      confusable_words: [{ word: "bench", reason: "form" }],
+      word_forms: { plural_forms: ["banks"] },
+      source_type: "lexicon_snapshot",
       source_reference: "snapshot-001",
+      learner_generated_at: "2026-03-21T00:00:00Z",
       created_at: "2026-03-21T00:00:00Z",
-      meanings: [],
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "a financial institution",
+          part_of_speech: "noun",
+          primary_domain: "money",
+          secondary_domains: ["finance"],
+          register_label: "neutral",
+          grammar_patterns: ["countable noun"],
+          usage_note: "Common everyday sense.",
+          example_sentence: "She went to the bank.",
+          source: "compiled",
+          source_reference: "snapshot-001",
+          learner_generated_at: "2026-03-21T00:00:00Z",
+          order_index: 0,
+          examples: [{ id: "example-1", sentence: "She went to the bank.", difficulty: "A1", order_index: 0 }],
+          relations: [{ id: "relation-1", relation_type: "confusable", related_word: "bench" }],
+          translations: [{ id: "translation-1", language: "es", translation: "banco" }],
+        },
+      ],
       enrichment_runs: [],
     });
   });
@@ -85,7 +111,7 @@ describe("LexiconDbInspectorPage", () => {
       expect(mockBrowse).toHaveBeenCalledWith({
         family: "all",
         sort: "updated_desc",
-        limit: 25,
+        limit: 10,
         offset: 0,
         q: undefined,
       }),
@@ -97,7 +123,7 @@ describe("LexiconDbInspectorPage", () => {
       expect(mockBrowse).toHaveBeenLastCalledWith({
         family: "phrase",
         sort: "updated_desc",
-        limit: 25,
+        limit: 10,
         offset: 0,
         q: undefined,
       }),
@@ -108,10 +134,83 @@ describe("LexiconDbInspectorPage", () => {
       expect(mockBrowse).toHaveBeenLastCalledWith({
         family: "phrase",
         sort: "updated_desc",
-        limit: 25,
+        limit: 10,
         offset: 0,
         q: "bank",
       }),
     );
+
+    expect(screen.getByText("Stored phonetics")).toBeInTheDocument();
+    expect(screen.getByText(/AU: \/bɐŋk\//i)).toBeInTheDocument();
+    expect(screen.getByText(/US: \/bæŋk\//i)).toBeInTheDocument();
+    expect(screen.getByText(/UK: \/bæŋk\//i)).toBeInTheDocument();
+    expect(screen.getByText("a financial institution")).toBeInTheDocument();
+    expect(screen.getByText(/Common everyday sense\./i)).toBeInTheDocument();
+    expect(screen.getByText(/banco/i)).toBeInTheDocument();
+  });
+
+  it("renders phrase senses with grouped examples and translations", async () => {
+    const user = userEvent.setup();
+    mockDetail.mockResolvedValueOnce({
+      family: "word",
+      id: "word-1",
+      display_text: "bank",
+      normalized_form: "bank",
+      language: "en",
+      cefr_level: "B1",
+      frequency_rank: 100,
+      phonetics: { us: { ipa: "/bæŋk/" } },
+      phonetic: "bæŋk",
+      phonetic_source: "lexicon_snapshot",
+      phonetic_confidence: 0.98,
+      learner_part_of_speech: ["noun"],
+      confusable_words: [],
+      word_forms: null,
+      source_type: "lexicon_snapshot",
+      source_reference: "snapshot-001",
+      learner_generated_at: "2026-03-21T00:00:00Z",
+      created_at: "2026-03-21T00:00:00Z",
+      meanings: [],
+      enrichment_runs: [],
+    });
+    mockDetail.mockResolvedValueOnce({
+      family: "phrase",
+      id: "phrase-1",
+      display_text: "break a leg",
+      normalized_form: "break a leg",
+      language: "en",
+      cefr_level: "B2",
+      source_type: "lexicon_snapshot",
+      source_reference: "snapshot-001",
+      phrase_kind: "idiom",
+      register_label: "informal",
+      brief_usage_note: "used before performances",
+      confidence_score: 0.91,
+      generated_at: "2026-03-20T00:00:00Z",
+      seed_metadata: { raw_reviewed_as: "idiom" },
+      compiled_payload: { entry_id: "ph_break_a_leg" },
+      senses: [
+        {
+          sense_id: "phrase-1",
+          definition: "good luck",
+          part_of_speech: "phrase",
+          grammar_patterns: ["say + phrase"],
+          usage_note: "Used before a performance.",
+          examples: [{ id: "ex-1", sentence: "Break a leg tonight.", difficulty: "A1", order_index: 0 }],
+          translations: [{ locale: "es", definition: "buena suerte", usage_note: "antes de actuar", examples: ["Buena suerte esta noche."] }],
+        },
+      ],
+      created_at: "2026-03-20T00:00:00Z",
+    });
+
+    render(<LexiconDbInspectorPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^break a leg/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /^break a leg/i }));
+
+    await waitFor(() => expect(screen.getByText("good luck")).toBeInTheDocument());
+    expect(screen.getByText("Seed metadata")).toBeInTheDocument();
+    expect(screen.getByText("Break a leg tonight.")).toBeInTheDocument();
+    expect(screen.getByText(/es: buena suerte/i)).toBeInTheDocument();
+    expect(screen.getByText(/Used before a performance\./i)).toBeInTheDocument();
   });
 });

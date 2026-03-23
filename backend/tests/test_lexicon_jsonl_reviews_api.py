@@ -8,6 +8,7 @@ from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.main import app
 from app.models.user import User
+from app.services import lexicon_jsonl_reviews
 
 
 def make_user(user_id: uuid.UUID, role: str = "admin") -> User:
@@ -385,6 +386,46 @@ class TestLexiconJsonlReviewsApi:
         persisted_rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         assert len(persisted_rows) == 2
         assert {row["decision"] for row in persisted_rows} == {"approved"}
+
+    @pytest.mark.asyncio
+    async def test_bulk_patch_returns_actionable_error_when_decisions_path_is_not_writable(
+        self,
+        client,
+        mock_db,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        compiled_path = tmp_path / "words.enriched.jsonl"
+        decisions_path = tmp_path / "reviewed" / "review.decisions.jsonl"
+        _write_jsonl(compiled_path, _compiled_rows())
+
+        original_open = lexicon_jsonl_reviews.Path.open
+
+        def failing_open(path: Path, *args, **kwargs):
+            if path == decisions_path and kwargs.get("mode", args[0] if args else "r").startswith("w"):
+                raise OSError(30, "Read-only file system")
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(lexicon_jsonl_reviews.Path, "open", failing_open)
+
+        response = await client.post(
+            "/api/lexicon-jsonl-reviews/bulk-update",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "artifact_path": str(compiled_path),
+                "decisions_path": str(decisions_path),
+                "review_status": "approved",
+                "decision_reason": "bulk ready",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == f"Output path is not writable: {decisions_path}"
 
     @pytest.mark.asyncio
     async def test_materialize_writes_outputs_via_review_materialize(self, client, mock_db, tmp_path: Path):

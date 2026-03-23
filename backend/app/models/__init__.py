@@ -6,6 +6,7 @@ from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.lexicon_artifact_review_item_event import LexiconArtifactReviewItemEvent
 from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+from app.models.lexicon_job import LexiconJob
 from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
 from app.models.lexicon_review_batch import LexiconReviewBatch
 from app.models.lexicon_review_item import LexiconReviewItem
@@ -37,6 +38,7 @@ __all__ = [
     "LexiconArtifactReviewBatch",
     "LexiconArtifactReviewItem",
     "LexiconArtifactReviewItemEvent",
+    "LexiconJob",
     "ReviewSession",
     "ReviewCard",
     "LearningQueueItem",

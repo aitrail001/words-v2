@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi } from "../helpers/auth";
+import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
 test("@smoke admin auth guard redirects unauthenticated users to login", async ({ page }) => {
+  await waitForAppReady(page.request, adminUrl);
   await page.goto(`${adminUrl}/lexicon`);
 
   await expect(page).toHaveURL(/\/login\?next=%2Flexicon%2Fops$/);
@@ -24,6 +25,7 @@ test("@smoke admin session reaches lexicon review shell with a real admin accoun
   const me = (await meResponse.json()) as { role: string };
   expect(me.role).toBe("admin");
 
+  await waitForAppReady(request, adminUrl);
   await injectAdminToken(page, user.token, adminUrl);
   await page.goto(`${adminUrl}/`);
 

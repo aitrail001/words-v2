@@ -4,6 +4,7 @@ import uuid
 from app.models.user import User
 from app.models.word import Word
 from app.models.meaning import Meaning
+from app.models.lexicon_job import LexiconJob
 from app.models.translation import Translation
 from app.models.schema_names import LEXICON_SCHEMA
 
@@ -115,3 +116,24 @@ class TestTranslationModel:
     def test_meaning_and_translation_tables_use_lexicon_schema(self):
         assert Meaning.__table__.schema == LEXICON_SCHEMA
         assert Translation.__table__.schema == LEXICON_SCHEMA
+
+
+class TestLexiconJobModel:
+    def test_lexicon_job_defaults_and_schema(self):
+        user_id = uuid.uuid4()
+        job = LexiconJob(
+            created_by=user_id,
+            job_type="import_db",
+            target_key="import_db:/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+            request_payload={"input_path": "/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl"},
+        )
+
+        assert job.created_by == user_id
+        assert job.job_type == "import_db"
+        assert job.status == "queued"
+        assert job.progress_total == 0
+        assert job.progress_completed == 0
+        assert job.progress_current_label is None
+        assert job.result_payload is None
+        assert job.error_message is None
+        assert LexiconJob.__table__.schema == LEXICON_SCHEMA

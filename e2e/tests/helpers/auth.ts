@@ -174,6 +174,29 @@ export const injectAdminToken = async (
   });
 };
 
+export const waitForAppReady = async (
+  request: APIRequestContext,
+  baseUrl: string,
+  path = "/login",
+): Promise<void> => {
+  await expect
+    .poll(
+      async () => {
+        try {
+          const response = await request.get(`${baseUrl}${path}`);
+          return response.status();
+        } catch {
+          return 0;
+        }
+      },
+      {
+        timeout: 30_000,
+        intervals: [500, 1_000, 2_000],
+      },
+    )
+    .toBeGreaterThanOrEqual(200);
+};
+
 export const authHeaders = (token: string): Record<string, string> => ({
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",

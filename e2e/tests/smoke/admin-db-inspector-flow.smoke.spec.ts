@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { Client } from "pg";
 
-import { injectAdminToken, registerAdminViaApi } from "../helpers/auth";
+import { injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
@@ -71,6 +71,7 @@ test("@smoke admin can browse mixed-family final DB entries", async ({ page, req
     await client.end();
   }
 
+  await waitForAppReady(request, adminUrl);
   await injectAdminToken(page, user.token, adminUrl);
   await page.goto(`${adminUrl}/lexicon/db-inspector`);
   await expect(page.getByTestId("lexicon-db-inspector-page")).toBeVisible();

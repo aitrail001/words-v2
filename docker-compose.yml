@@ -53,7 +53,7 @@ services:
     volumes:
       - ./backend:/app
       - ./tools:/app/tools:ro
-      - ./data:/app/data:ro
+      - ./data:/app/data
       - backend_uploads:/app/uploads
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -81,7 +81,7 @@ services:
     volumes:
       - ./backend:/app
       - ./tools:/app/tools:ro
-      - ./data:/app/data:ro
+      - ./data:/app/data
       - backend_uploads:/app/uploads
     depends_on:
       postgres:

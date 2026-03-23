@@ -6,9 +6,12 @@ import {
   bulkUpdateLexiconJsonlReviewItems,
   downloadApprovedLexiconJsonlReviewOutput,
   loadLexiconJsonlReviewSession,
-  materializeLexiconJsonlReviewOutputs,
   updateLexiconJsonlReviewItem,
 } from "@/lib/lexicon-jsonl-reviews-client";
+import {
+  createJsonlMaterializeLexiconJob,
+  getLexiconJob,
+} from "@/lib/lexicon-jobs-client";
 
 jest.mock("@/lib/lexicon-jsonl-reviews-client", () => ({
   bulkUpdateLexiconJsonlReviewItems: jest.fn(),
@@ -17,8 +20,12 @@ jest.mock("@/lib/lexicon-jsonl-reviews-client", () => ({
   downloadRegenerateLexiconJsonlReviewOutput: jest.fn(),
   downloadRejectedLexiconJsonlReviewOutput: jest.fn(),
   loadLexiconJsonlReviewSession: jest.fn(),
-  materializeLexiconJsonlReviewOutputs: jest.fn(),
   updateLexiconJsonlReviewItem: jest.fn(),
+}));
+
+jest.mock("@/lib/lexicon-jobs-client", () => ({
+  createJsonlMaterializeLexiconJob: jest.fn(),
+  getLexiconJob: jest.fn(),
 }));
 
 jest.mock("@/lib/auth-session", () => ({
@@ -33,7 +40,8 @@ describe("LexiconJsonlReviewPage", () => {
   const mockLoadSession = loadLexiconJsonlReviewSession as jest.Mock;
   const mockUpdateItem = updateLexiconJsonlReviewItem as jest.Mock;
   const mockBulkUpdateItems = bulkUpdateLexiconJsonlReviewItems as jest.Mock;
-  const mockMaterialize = materializeLexiconJsonlReviewOutputs as jest.Mock;
+  const mockMaterialize = createJsonlMaterializeLexiconJob as jest.Mock;
+  const mockGetLexiconJob = getLexiconJob as jest.Mock;
   const mockDownloadApproved = downloadApprovedLexiconJsonlReviewOutput as jest.Mock;
 
   beforeEach(() => {
@@ -163,13 +171,52 @@ describe("LexiconJsonlReviewPage", () => {
       };
     });
     mockMaterialize.mockResolvedValue({
-      approved_count: 1,
-      rejected_count: 1,
-      regenerate_count: 1,
-      approved_output_path: "/tmp/reviewed/approved.jsonl",
-      rejected_output_path: "/tmp/reviewed/rejected.jsonl",
-      regenerate_output_path: "/tmp/reviewed/regenerate.jsonl",
-      decisions_output_path: "/tmp/reviewed/review.decisions.jsonl",
+      id: "job-1",
+      created_by: "user-1",
+      job_type: "jsonl_materialize",
+      status: "running",
+      target_key: "jsonl_materialize:/tmp/reviewed",
+      request_payload: {
+        artifact_path: "/tmp/words.enriched.jsonl",
+        decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+        output_dir: "/tmp/reviewed",
+      },
+      result_payload: null,
+      progress_total: 0,
+      progress_completed: 0,
+      progress_current_label: null,
+      error_message: null,
+      created_at: "2026-03-21T02:00:00Z",
+      started_at: "2026-03-21T02:00:01Z",
+      completed_at: null,
+    });
+    mockGetLexiconJob.mockResolvedValue({
+      id: "job-1",
+      created_by: "user-1",
+      job_type: "jsonl_materialize",
+      status: "completed",
+      target_key: "jsonl_materialize:/tmp/reviewed",
+      request_payload: {
+        artifact_path: "/tmp/words.enriched.jsonl",
+        decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+        output_dir: "/tmp/reviewed",
+      },
+      result_payload: {
+        approved_count: 1,
+        rejected_count: 1,
+        regenerate_count: 1,
+        approved_output_path: "/tmp/reviewed/approved.jsonl",
+        rejected_output_path: "/tmp/reviewed/rejected.jsonl",
+        regenerate_output_path: "/tmp/reviewed/regenerate.jsonl",
+        decisions_output_path: "/tmp/reviewed/review.decisions.jsonl",
+      },
+      progress_total: 0,
+      progress_completed: 0,
+      progress_current_label: null,
+      error_message: null,
+      created_at: "2026-03-21T02:00:00Z",
+      started_at: "2026-03-21T02:00:01Z",
+      completed_at: "2026-03-21T02:00:02Z",
     });
     mockDownloadApproved.mockResolvedValue("{\"entry_id\":\"word:bank\"}\n");
     mockBulkUpdateItems.mockResolvedValue({
@@ -326,6 +373,60 @@ describe("LexiconJsonlReviewPage", () => {
         outputDir: "/tmp/reviewed",
       }),
     );
+    await waitFor(() => expect(mockGetLexiconJob).toHaveBeenCalledWith("job-1"));
+  });
+
+  it("paginates the JSONL review entry rail to keep the detail workspace focused", async () => {
+    mockLoadSession.mockResolvedValueOnce({
+      artifact_filename: "words.enriched.jsonl",
+      artifact_path: "/tmp/words.enriched.jsonl",
+      decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+      output_dir: "/tmp/reviewed",
+      total_items: 12,
+      pending_count: 12,
+      approved_count: 0,
+      rejected_count: 0,
+      items: Array.from({ length: 12 }, (_, index) => ({
+        entry_id: `word:item-${index + 1}`,
+        entry_type: "word",
+        normalized_form: `item-${index + 1}`,
+        display_text: `item-${index + 1}`,
+        entity_category: "general",
+        language: "en",
+        frequency_rank: 100 + index,
+        cefr_level: "B1",
+        review_priority: "normal",
+        warning_count: 0,
+        warning_labels: [],
+        review_summary: {
+          sense_count: 1,
+          form_variant_count: 0,
+          confusable_count: 0,
+          provenance_sources: ["snapshot"],
+          primary_definition: `definition ${index + 1}`,
+          primary_example: `example ${index + 1}`,
+        },
+        review_status: "pending",
+        decision_reason: null,
+        reviewed_by: null,
+        reviewed_at: null,
+        compiled_payload: { entry_id: `word:item-${index + 1}`, word: `item-${index + 1}` },
+        compiled_payload_sha256: `${index + 1}`.repeat(64),
+      })),
+    });
+
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/lexicon/jsonl-review?artifactPath=%2Ftmp%2Fwords.enriched.jsonl&autostart=1");
+    render(<LexiconJsonlReviewPage />);
+
+    await waitFor(() => expect(screen.getByTestId("jsonl-review-items-list")).toBeInTheDocument());
+    expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-1")).toBeInTheDocument();
+    expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-5")).toBeInTheDocument();
+    expect(within(screen.getByTestId("jsonl-review-items-list")).queryByText("item-6")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("jsonl-review-items-list-next-page"));
+    expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-6")).toBeInTheDocument();
+    expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-10")).toBeInTheDocument();
   });
 
   it("confirms bulk approve all and refreshes the session counts", async () => {

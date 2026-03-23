@@ -25,7 +25,45 @@ function searchParam(name: string): string {
   return new URLSearchParams(window.location.search).get(name) ?? "";
 }
 
-const PAGE_LIMIT = 25;
+const PAGE_LIMIT = 10;
+
+function phoneticPreview(phonetics: Record<string, unknown> | null | undefined): string {
+  if (!phonetics) return "—";
+  for (const locale of ["us", "uk", "au"]) {
+    const entry = phonetics[locale];
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      const ipa = (entry as { ipa?: string }).ipa;
+      if (ipa) return ipa;
+    }
+  }
+  return "—";
+}
+
+function phoneticEntries(phonetics: Record<string, unknown> | null | undefined): Array<{
+  label: string;
+  ipa: string;
+  confidence: string | null;
+}> {
+  if (!phonetics) return [];
+  return [
+    ["au", "AU"],
+    ["us", "US"],
+    ["uk", "UK"],
+  ]
+    .map(([key, label]) => {
+      const entry = phonetics[key];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+      const ipa = typeof (entry as { ipa?: unknown }).ipa === "string" ? (entry as { ipa: string }).ipa : null;
+      if (!ipa) return null;
+      const confidenceValue = (entry as { confidence?: unknown }).confidence;
+      return {
+        label,
+        ipa,
+        confidence: typeof confidenceValue === "number" ? confidenceValue.toFixed(2) : null,
+      };
+    })
+    .filter((value): value is { label: string; ipa: string; confidence: string | null } => value !== null);
+}
 
 export default function LexiconDbInspectorPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -248,11 +286,66 @@ export default function LexiconDbInspectorPage() {
                   <p className="font-medium">{detail.phonetic ?? "—"}</p>
                 </div>
               </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Stored phonetics</p>
+                  <div className="mt-1 space-y-1 text-sm text-gray-900">
+                    {phoneticEntries(detail.phonetics).length ? phoneticEntries(detail.phonetics).map((entry) => (
+                      <p key={entry.label}>
+                        {entry.label}: {entry.ipa}
+                        {entry.confidence ? ` (${entry.confidence})` : ""}
+                      </p>
+                    )) : <p>{phoneticPreview(detail.phonetics)}</p>}
+                  </div>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Source</p>
+                  <p className="font-medium">{detail.source_type ?? "—"}</p>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Parts of speech</p>
+                  <p className="font-medium">{detail.learner_part_of_speech?.join(", ") || "—"}</p>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Generated</p>
+                  <p className="font-medium">{formatDateTime(detail.learner_generated_at)}</p>
+                </div>
+              </div>
               <div className="space-y-3">
                 {detail.meanings.map((meaning) => (
                   <article key={meaning.id} className="rounded-lg border border-gray-200 p-4">
                     <p className="font-medium text-gray-900">{meaning.definition}</p>
-                    <p className="mt-2 text-sm text-gray-600">example: {meaning.example_sentence ?? "—"}</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      {meaning.part_of_speech ?? "—"}
+                      {meaning.primary_domain ? ` · ${meaning.primary_domain}` : ""}
+                      {meaning.register_label ? ` · ${meaning.register_label}` : ""}
+                    </p>
+                    <p className="mt-2 text-sm text-gray-600">usage: {meaning.usage_note ?? "—"}</p>
+                    <p className="mt-1 text-sm text-gray-600">example: {meaning.example_sentence ?? "—"}</p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-3">
+                      <div className="rounded border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Grammar</p>
+                        <p className="mt-1 text-sm text-gray-900">{meaning.grammar_patterns?.join(", ") || "—"}</p>
+                      </div>
+                      <div className="rounded border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Examples</p>
+                        <div className="mt-1 space-y-1 text-sm text-gray-900">
+                          {meaning.examples.length ? meaning.examples.map((example) => (
+                            <p key={example.id}>{example.sentence}</p>
+                          )) : <p>—</p>}
+                        </div>
+                      </div>
+                      <div className="rounded border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Translations</p>
+                        <div className="mt-1 space-y-1 text-sm text-gray-900">
+                          {meaning.translations.length ? meaning.translations.map((translation) => (
+                            <p key={translation.id}>
+                              {translation.language}: {translation.translation}
+                            </p>
+                          )) : <p>—</p>}
+                        </div>
+                      </div>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -276,10 +369,79 @@ export default function LexiconDbInspectorPage() {
                   <p className="text-gray-500">CEFR</p>
                   <p className="font-medium">{detail.cefr_level ?? "—"}</p>
                 </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Source</p>
+                  <p className="font-medium">{detail.source_type ?? "—"}</p>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Generated</p>
+                  <p className="font-medium">{formatDateTime(detail.generated_at)}</p>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Confidence</p>
+                  <p className="font-medium">{detail.confidence_score ?? "—"}</p>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Register</p>
+                  <p className="font-medium">{detail.register_label ?? "—"}</p>
+                </div>
               </div>
               <div className="rounded border border-gray-200 p-3">
                 <p className="text-gray-500">Usage note</p>
                 <p className="font-medium">{detail.brief_usage_note ?? "—"}</p>
+              </div>
+              <div className="rounded border border-gray-200 p-3">
+                <p className="text-gray-500">Seed metadata</p>
+                <pre className="mt-2 overflow-x-auto text-xs text-gray-700">{JSON.stringify(detail.seed_metadata ?? {}, null, 2)}</pre>
+              </div>
+              <div className="space-y-3">
+                {detail.senses.length ? detail.senses.map((sense, index) => (
+                  <article key={sense.sense_id ?? `${detail.id}-sense-${index + 1}`} className="rounded-lg border border-gray-200 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-gray-900">{sense.definition}</p>
+                        <p className="mt-1 text-sm text-gray-500">
+                          {sense.part_of_speech ?? detail.phrase_kind}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">Sense {index + 1}</span>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <div className="rounded border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Usage</p>
+                        <p className="mt-1 text-sm text-gray-900">{sense.usage_note ?? "—"}</p>
+                      </div>
+                      <div className="rounded border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Grammar</p>
+                        <p className="mt-1 text-sm text-gray-900">{sense.grammar_patterns?.join(", ") || "—"}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <div className="rounded border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Examples</p>
+                        <div className="mt-1 space-y-1 text-sm text-gray-900">
+                          {sense.examples.length ? sense.examples.map((example) => (
+                            <p key={example.id}>{example.sentence}</p>
+                          )) : <p>—</p>}
+                        </div>
+                      </div>
+                      <div className="rounded border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Translations</p>
+                        <div className="mt-1 space-y-2 text-sm text-gray-900">
+                          {sense.translations.length ? sense.translations.map((translation) => (
+                            <div key={translation.locale}>
+                              <p className="font-medium">{translation.locale}: {translation.definition ?? "—"}</p>
+                              <p>{translation.usage_note ?? "—"}</p>
+                              {translation.examples.length ? <p>{translation.examples.join(" | ")}</p> : null}
+                            </div>
+                          )) : <p>—</p>}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                )) : (
+                  <p className="text-sm text-gray-500">No structured sense detail stored for this phrase.</p>
+                )}
               </div>
             </div>
           ) : null}
