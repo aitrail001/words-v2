@@ -6,6 +6,14 @@ test("@smoke auth guard redirects unauthenticated users to login with next", asy
   await expect(page).toHaveURL(/\/login\?next=%2F$/);
   await expect(page.getByTestId("login-form")).toBeVisible();
 
+  await page.goto("/knowledge-map");
+  await expect(page).toHaveURL(/\/login\?next=%2Fknowledge-map$/);
+  await expect(page.getByTestId("login-form")).toBeVisible();
+
+  await page.goto("/settings");
+  await expect(page).toHaveURL(/\/login\?next=%2Fsettings$/);
+  await expect(page.getByTestId("login-form")).toBeVisible();
+
   await page.goto("/review");
   await expect(page).toHaveURL(/\/login\?next=%2Freview$/);
   await expect(page.getByTestId("login-form")).toBeVisible();
@@ -22,7 +30,15 @@ test("@smoke auth guard allows authenticated users on protected routes", async (
 
   await page.goto("/");
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByText("Words Uncovered")).toBeVisible();
+
+  await page.goto("/knowledge-map");
+  await expect(page).toHaveURL(/\/knowledge-map$/);
+  await expect(page.getByRole("heading", { name: "Full Knowledge Map" })).toBeVisible();
+
+  await page.goto("/settings");
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
   await page.goto("/review");
   await expect(page).toHaveURL(/\/review$/);

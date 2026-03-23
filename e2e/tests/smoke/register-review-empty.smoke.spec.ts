@@ -12,7 +12,7 @@ test("@smoke register flow can start review and show no cards due", async ({ pag
   await page.getByTestId("register-submit-button").click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByText("Words Uncovered")).toBeVisible();
 
   await page.getByTestId("nav-review-link").click();
   await expect(page.getByTestId("review-start-button")).toBeVisible();
