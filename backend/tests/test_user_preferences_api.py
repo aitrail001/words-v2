@@ -9,7 +9,6 @@ from app.core.redis import get_redis
 from app.core.security import create_access_token, hash_password
 from app.main import app
 from app.models.user import User
-from app.models.user_preference import UserPreference
 
 
 @pytest.fixture
