@@ -8,11 +8,11 @@ The active pipeline is lexeme-first for words, with curated phrase inventory sup
 
 1. `build-base`
 2. optional `build-phrases`
-2. optional ambiguous-form adjudication
-3. `enrich`
-4. `validate`
-5. human review of `words.enriched.jsonl`
-6. `import-db` from reviewed `approved.jsonl`
+3. optional ambiguous-form adjudication
+4. `enrich`
+5. `validate`
+6. human review of `words.enriched.jsonl`
+7. `import-db` from reviewed `approved.jsonl`
 
 Realtime enrichment writes final compiled word and phrase rows directly to `words.enriched.jsonl`.
 Batch enrichment can still use intermediate request/result ledgers, but accepted word and phrase rows are materialized into the same `words.enriched.jsonl` contract.
@@ -21,32 +21,32 @@ Legacy sense-selection and staged-selection review flows are removed from the su
 
 ## Main commands
 
-- `python3 -m tools.lexicon.cli build-base ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli build-base ...`
   - builds a normalized lexeme snapshot
   - writes `lexemes.jsonl` plus canonicalization/operator sidecars
-- `python3 -m tools.lexicon.cli detect-ambiguous-forms ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli detect-ambiguous-forms ...`
   - emits only unresolved canonicalization tails
-- `python3 -m tools.lexicon.cli adjudicate-forms ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli adjudicate-forms ...`
   - resolves bounded ambiguous-form tails
-- `python3 -m tools.lexicon.cli build-phrases --input ... --output-dir ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli build-phrases ...`
   - builds curated phrase inventory rows from one or more reviewed CSVs
   - writes `phrases.jsonl`
-- `python3 -m tools.lexicon.cli enrich --snapshot-dir ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli enrich --snapshot-dir ...`
   - realtime per-entry enrichment
   - reads `lexemes.jsonl` and optional `phrases.jsonl`
   - writes `words.enriched.jsonl`
   - keeps `enrich.checkpoint.jsonl`, `enrich.decisions.jsonl`, `enrich.failures.jsonl`
-- `python3 -m tools.lexicon.cli validate --snapshot-dir ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli validate --snapshot-dir ...`
   - validates snapshot inputs and outputs
-- `python3 -m tools.lexicon.cli validate --compiled-input ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli validate --compiled-input ...`
   - validates compiled learner-facing JSONL rows
-- `python3 -m tools.lexicon.cli batch-prepare --snapshot-dir ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli batch-prepare --snapshot-dir ...`
   - writes batch request ledgers
-- `python3 -m tools.lexicon.cli batch-ingest --snapshot-dir ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli batch-ingest --snapshot-dir ...`
   - ingests completed batch output JSONL
   - writes accepted rows to `words.enriched.jsonl`
   - writes failed rows to `words.regenerate.jsonl`
-- `python3 -m tools.lexicon.cli import-db --input ...`
+- `.venv-lexicon/bin/python -m tools.lexicon.cli import-db --input ...`
   - dry-runs or imports reviewed learner-facing rows into the DB
 
 ## Snapshot artifacts
@@ -81,14 +81,14 @@ The active pipeline no longer relies on `senses.jsonl`, `concepts.jsonl`, `selec
 ## Operator flow
 
 ```bash
-python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/lexicon/snapshots/words-100
-python3 -m tools.lexicon.cli build-phrases --input data/lexicon/phrasals/reviewed_phrasal_verbs.csv --input data/lexicon/idioms/reviewed_idioms.csv --output-dir data/lexicon/snapshots/phrases-demo
-python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
-python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
-python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
-python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --resume
-python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
-python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --dry-run
+.venv-lexicon/bin/python -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/lexicon/snapshots/words-100
+.venv-lexicon/bin/python -m tools.lexicon.cli build-phrases data/lexicon/phrasals/reviewed_phrasal_verbs.csv data/lexicon/idioms/reviewed_idioms.csv --output-dir data/lexicon/snapshots/phrases-demo
+.venv-lexicon/bin/python -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
+.venv-lexicon/bin/python -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
+.venv-lexicon/bin/python -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
+.venv-lexicon/bin/python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --resume
+.venv-lexicon/bin/python -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
+.venv-lexicon/bin/python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --dry-run
 ```
 
 ## LLM configuration

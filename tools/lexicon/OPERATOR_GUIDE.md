@@ -5,8 +5,8 @@ This runbook covers the active lexicon workflow only: word snapshot generation, 
 ## 1. Setup
 
 ```bash
-python3 -m pip install -r tools/lexicon/requirements.txt
-python3 -m nltk.downloader wordnet omw-1.4
+.venv-lexicon/bin/python -m pip install -r tools/lexicon/requirements.txt
+.venv-lexicon/bin/python -m nltk.downloader wordnet omw-1.4
 cp tools/lexicon/.env.example tools/lexicon/.env.local
 set -a && source tools/lexicon/.env.local && set +a
 ```
@@ -60,7 +60,7 @@ The active snapshot contract no longer uses `senses.jsonl` or `concepts.jsonl`.
 Use this when you want phrasal verbs, idioms, or other reviewed phrase CSV rows to flow through the same enrichment and review path as words.
 
 ```bash
-python3 -m tools.lexicon.cli build-phrases --input data/lexicon/phrasals/reviewed_phrasal_verbs.csv --input data/lexicon/idioms/reviewed_idioms.csv --output-dir data/lexicon/snapshots/phrases-demo
+.venv-lexicon/bin/python -m tools.lexicon.cli build-phrases data/lexicon/phrasals/reviewed_phrasal_verbs.csv data/lexicon/idioms/reviewed_idioms.csv --output-dir data/lexicon/snapshots/phrases-demo
 ```
 
 Behavior:
@@ -76,15 +76,15 @@ Behavior:
 Use this only for bounded canonicalization tails.
 
 ```bash
-python3 -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
-python3 -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode auto
-python3 -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
+.venv-lexicon/bin/python -m tools.lexicon.cli detect-ambiguous-forms --output data/lexicon/snapshots/demo/ambiguous_forms.jsonl close light play
+.venv-lexicon/bin/python -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode auto
+.venv-lexicon/bin/python -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
 ```
 
 ## 6. Realtime enrichment
 
 ```bash
-python3 -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --resume
+.venv-lexicon/bin/python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --resume
 ```
 
 Behavior:
@@ -104,9 +104,9 @@ Behavior:
 Use batch when you want deferred file-based generation rather than inline calls.
 
 ```bash
-python3 -m tools.lexicon.cli batch-prepare --snapshot-dir data/lexicon/snapshots/demo
-python3 -m tools.lexicon.cli batch-status --snapshot-dir data/lexicon/snapshots/demo
-python3 -m tools.lexicon.cli batch-ingest --snapshot-dir data/lexicon/snapshots/demo --input data/lexicon/snapshots/demo/batches/output.jsonl
+.venv-lexicon/bin/python -m tools.lexicon.cli batch-prepare --snapshot-dir data/lexicon/snapshots/demo
+.venv-lexicon/bin/python -m tools.lexicon.cli batch-status --snapshot-dir data/lexicon/snapshots/demo
+.venv-lexicon/bin/python -m tools.lexicon.cli batch-ingest --snapshot-dir data/lexicon/snapshots/demo --input data/lexicon/snapshots/demo/batches/output.jsonl
 ```
 
 Behavior:
@@ -120,8 +120,8 @@ Behavior:
 ## 8. Validate
 
 ```bash
-python3 -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
-python3 -m tools.lexicon.cli validate --compiled-input data/lexicon/snapshots/demo/words.enriched.jsonl
+.venv-lexicon/bin/python -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
+.venv-lexicon/bin/python -m tools.lexicon.cli validate --compiled-input data/lexicon/snapshots/demo/words.enriched.jsonl
 ```
 
 ## 9. Review in admin
@@ -157,8 +157,8 @@ The admin portal no longer supports the old staged-selection review flow.
 ## 10. Import to DB
 
 ```bash
-python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --dry-run
-python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --source-type lexicon_snapshot --source-reference demo
+.venv-lexicon/bin/python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --dry-run
+.venv-lexicon/bin/python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --source-type lexicon_snapshot --source-reference demo
 ```
 
 `import-db` is the only final write path into lexicon DB tables, including approved phrase rows.
