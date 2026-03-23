@@ -249,7 +249,7 @@ class CliTests(unittest.TestCase):
     def test_enrich_command_writes_json_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
-            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()])) as mocked_enrich:
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")) as mocked_enrich:
                 code, stdout, _ = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir)])
 
             self.assertEqual(code, 0)
@@ -261,7 +261,7 @@ class CliTests(unittest.TestCase):
     def test_enrich_command_passes_provider_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
-            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()])) as mocked_enrich:
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")) as mocked_enrich:
                 code, stdout, _ = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir), "--provider-mode", "openai_compatible"])
 
             self.assertEqual(code, 0)
@@ -274,7 +274,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
             log_file = snapshot_dir / "runtime.log"
-            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()])) as mocked_enrich:
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")) as mocked_enrich:
                 code, stdout, _ = self.run_cli([
                     "enrich",
                     "--snapshot-dir",
@@ -294,7 +294,7 @@ class CliTests(unittest.TestCase):
     def test_enrich_command_uses_lower_retry_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
-            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()])) as mocked_enrich:
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")) as mocked_enrich:
                 code, _, _ = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir)])
 
         self.assertEqual(code, 0)
@@ -304,7 +304,7 @@ class CliTests(unittest.TestCase):
     def test_enrich_command_passes_retry_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
-            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()])) as mocked_enrich:
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")) as mocked_enrich:
                 code, _, _ = self.run_cli([
                     "enrich",
                     "--snapshot-dir",
@@ -320,18 +320,16 @@ class CliTests(unittest.TestCase):
         self.assertEqual(mocked_enrich.call_args.kwargs["validation_retries"], 3)
 
 
-    def test_enrich_command_passes_mode_concurrency_and_resume_controls(self) -> None:
+    def test_enrich_command_passes_concurrency_and_resume_controls(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
             checkpoint_path = snapshot_dir / "checkpoint.jsonl"
             failures_path = snapshot_dir / "failures.jsonl"
-            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()], lexeme_count=2, mode="per_word")) as mocked_enrich:
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[object()], lexeme_count=2, mode="per_word")) as mocked_enrich:
                 code, stdout, _ = self.run_cli([
                     "enrich",
                     "--snapshot-dir",
                     str(snapshot_dir),
-                    "--mode",
-                    "per_word",
                     "--max-concurrency",
                     "8",
                     "--resume",
@@ -351,7 +349,6 @@ class CliTests(unittest.TestCase):
             payload = json.loads(stdout)
             self.assertEqual(payload["mode"], "per_word")
             self.assertEqual(payload["lexeme_count"], 2)
-            self.assertEqual(mocked_enrich.call_args.kwargs["mode"], "per_word")
             self.assertEqual(mocked_enrich.call_args.kwargs["max_concurrency"], 8)
             self.assertTrue(mocked_enrich.call_args.kwargs["resume"])
             self.assertEqual(mocked_enrich.call_args.kwargs["checkpoint_path"], checkpoint_path)
@@ -359,6 +356,21 @@ class CliTests(unittest.TestCase):
             self.assertEqual(mocked_enrich.call_args.kwargs["max_failures"], 3)
             self.assertEqual(mocked_enrich.call_args.kwargs["request_delay_seconds"], 1.5)
             self.assertEqual(mocked_enrich.call_args.kwargs["max_new_completed_lexemes"], 250)
+
+    def test_enrich_command_rejects_removed_mode_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+
+            code, _, stderr = self.run_cli([
+                "enrich",
+                "--snapshot-dir",
+                str(snapshot_dir),
+                "--mode",
+                "per_sense",
+            ])
+
+        self.assertNotEqual(code, 0)
+        self.assertIn("unrecognized arguments: --mode per_sense", stderr)
 
     def test_enrich_command_reports_provider_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -551,7 +563,7 @@ class CliTests(unittest.TestCase):
     def test_enrich_command_passes_node_provider_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
-            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[])) as mocked_enrich:
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[], mode="per_word")) as mocked_enrich:
                 code, stdout, _ = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir), "--provider-mode", "openai_compatible_node"])
 
             self.assertEqual(code, 0)
@@ -569,9 +581,9 @@ class CliTests(unittest.TestCase):
             with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
                  patch("tools.lexicon.cli.build_base_records", return_value=fake_result) as mocked_build, \
                  patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
-                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object(), object()])), \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "words.enriched.jsonl", enrichments=[object(), object()], mode="per_word")), \
                  patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
-                 patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]) as mocked_compile:
+                 patch("tools.lexicon.cli.load_compiled_rows", return_value=[object()]) as mocked_load:
                 code, stdout, _ = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "--max-words", "2", "--max-senses", "1", "run", "set"])
 
             self.assertEqual(code, 0)
@@ -585,7 +597,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["max_senses"], 1)
             self.assertEqual(mocked_build.call_args.kwargs["words"], ["run", "set"])
             self.assertEqual(mocked_build.call_args.kwargs["max_senses"], 1)
-            mocked_compile.assert_called_once()
+            mocked_load.assert_called_once_with(output_dir / "words.enriched.jsonl")
 
     def test_openai_compatible_smoke_command_bounds_words_before_building(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -598,9 +610,9 @@ class CliTests(unittest.TestCase):
             with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
                  patch("tools.lexicon.cli.build_base_records", return_value=fake_result) as mocked_build, \
                  patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
-                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object()])), \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")), \
                  patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
-                 patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]):
+                 patch("tools.lexicon.cli.load_compiled_rows", return_value=[object()]):
                 code, stdout, _ = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "--max-words", "1", "run", "set", "lead"])
 
             self.assertEqual(code, 0)
@@ -657,9 +669,9 @@ class CliTests(unittest.TestCase):
             with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
                  patch("tools.lexicon.cli.build_base_records", return_value=fake_result), \
                  patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
-                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object()] )) as mocked_enrich, \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word" )) as mocked_enrich, \
                  patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
-                 patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]):
+                 patch("tools.lexicon.cli.load_compiled_rows", return_value=[object()]):
                 code, _, _ = self.run_cli(["smoke-openai-compatible", "--provider-mode", "openai_compatible_node", "--output-dir", str(output_dir), "run"])
 
             self.assertEqual(code, 0)
@@ -676,9 +688,9 @@ class CliTests(unittest.TestCase):
             with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
                  patch("tools.lexicon.cli.build_base_records", return_value=fake_result), \
                  patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
-                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object()] )) as mocked_enrich, \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word" )) as mocked_enrich, \
                  patch("tools.lexicon.cli.validate_snapshot_files", return_value=[]), \
-                 patch("tools.lexicon.cli.compile_snapshot", return_value=[object()]):
+                 patch("tools.lexicon.cli.load_compiled_rows", return_value=[object()]):
                 code, _, _ = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "--model", "gpt-5.4", "--reasoning-effort", "low", "run"])
 
             self.assertEqual(code, 0)
@@ -729,7 +741,7 @@ class CliTests(unittest.TestCase):
             with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
                  patch("tools.lexicon.cli.build_base_records", return_value=fake_result), \
                  patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}), \
-                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "enrichments.jsonl", enrichments=[object()])), \
+                 patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=output_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")), \
                  patch("tools.lexicon.cli.validate_snapshot_files", return_value=["bad enrichment"]):
                 code, stdout, stderr = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "run"])
 
@@ -920,49 +932,6 @@ class CliTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            (snapshot_dir / "enrichments.jsonl").write_text(
-                json.dumps(
-                    {
-                        "snapshot_id": "snap-1",
-                        "enrichment_id": "en_sn_lx_run_1_v1",
-                        "sense_id": "sn_lx_run_1",
-                        "definition": "to move quickly on foot",
-                        "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
-                        "cefr_level": "A1",
-                        "primary_domain": "general",
-                        "secondary_domains": [],
-                        "register": "neutral",
-                        "synonyms": ["jog"],
-                        "antonyms": ["walk"],
-                        "collocations": ["run fast"],
-                        "grammar_patterns": ["run + adverb"],
-                        "usage_note": "Common everyday verb.",
-                        "forms": {
-                            "plural_forms": [],
-                            "verb_forms": {
-                                "base": "run",
-                                "third_person_singular": "runs",
-                                "past": "ran",
-                                "past_participle": "run",
-                                "gerund": "running",
-                            },
-                            "comparative": None,
-                            "superlative": None,
-                            "derivations": ["runner"],
-                        },
-                        "confusable_words": [{"word": "ran", "note": "Past tense form."}],
-                        "model_name": "gpt-5.4",
-                        "prompt_version": "v1",
-                        "generation_run_id": "run-123",
-                        "confidence": 0.9,
-                        "review_status": "approved",
-                        "generated_at": "2026-03-07T00:00:00Z",
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
             code, stdout, _ = self.run_cli(["validate", "--snapshot-dir", str(snapshot_dir)])
 
             self.assertEqual(code, 0)

@@ -44,7 +44,6 @@ EnrichmentProvider = Callable[..., EnrichmentRecord]
 Transport = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
 NodeRunner = Callable[[dict[str, Any]], dict[str, Any]]
 _PROVIDER_MODES = {"auto", "placeholder", "openai_compatible", "openai_compatible_node"}
-_ENRICHMENT_MODES = {"per_sense", "per_word"}
 _WORD_PROMPT_MODES = {"grounded", "word_only"}
 _ALLOWED_CEFR_LEVELS = set(ALLOWED_CEFR_LEVELS)
 _ALLOWED_REGISTERS = set(ALLOWED_REGISTERS)
@@ -64,7 +63,7 @@ class EnrichmentRunResult:
     output_path: Path
     enrichments: list[EnrichmentRecord]
     lexeme_count: int = 0
-    mode: str = "per_sense"
+    mode: str = "per_word"
 
 
 @dataclass(frozen=True)
@@ -2169,25 +2168,10 @@ def _reconcile_resumable_output(
     write_jsonl(output_path, reconciled_rows)
 
 
-def _reconcile_failures_output(
-    failures_path: Path,
-    *,
-    completed_lexeme_ids: set[str],
-) -> None:
-    if not failures_path.exists():
-        return
-    reconciled_rows = [
-        row for row in read_jsonl(failures_path)
-        if str(row.get('lexeme_id') or '') not in completed_lexeme_ids
-    ]
-    write_jsonl(failures_path, reconciled_rows)
-
-
 def _append_completed_lexeme_records(
     output_path: Path,
     decisions_path: Path,
     checkpoint_path: Path,
-    failures_path: Path,
     *,
     lexeme: LexemeRecord,
     outcome: WordJobOutcome,
@@ -2213,7 +2197,6 @@ def _append_completed_lexeme_records(
         completed_at=completed_at,
     )
     completed_lexeme_ids.add(lexeme.lexeme_id)
-    _reconcile_failures_output(failures_path, completed_lexeme_ids=completed_lexeme_ids)
     _emit_lexeme_event(
         runtime_logger,
         'lexeme-complete',
@@ -2298,7 +2281,6 @@ def enrich_snapshot(
     snapshot_dir: Path,
     *,
     output_path: Path | None = None,
-    provider: EnrichmentProvider | None = None,
     word_provider: WordEnrichmentProvider | None = None,
     settings: LexiconSettings | None = None,
     model_name: str | None = None,
@@ -2308,7 +2290,7 @@ def enrich_snapshot(
     review_status: str = 'draft',
     provider_mode: str = 'auto',
     reasoning_effort: str | None = None,
-    mode: str = 'per_sense',
+    mode: str = 'per_word',
     max_concurrency: int = 1,
     resume: bool = False,
     checkpoint_path: Path | None = None,
@@ -2321,7 +2303,7 @@ def enrich_snapshot(
     request_delay_seconds: float = 0.0,
     max_new_completed_lexemes: int | None = None,
 ) -> list[EnrichmentRecord]:
-    if mode not in _ENRICHMENT_MODES:
+    if mode != 'per_word':
         raise ValueError(f'Unsupported enrichment mode: {mode}')
     effective_settings = settings or LexiconSettings.from_env()
     effective_generated_at = generated_at or _utc_now()
@@ -2333,69 +2315,7 @@ def enrich_snapshot(
     for sense in senses:
         senses_by_lexeme.setdefault(sense.lexeme_id, []).append(sense)
 
-    destination = output_path or snapshot_dir / ('enrichments.jsonl' if mode == 'per_sense' else 'words.enriched.jsonl')
-
-    if mode == 'per_sense':
-        enrichment_provider = provider or build_enrichment_provider(
-            settings=effective_settings,
-            provider_mode=provider_mode,
-            model_name=model_name,
-            reasoning_effort=reasoning_effort,
-            review_status=review_status,
-            client=None,
-            transient_retries=transient_retries,
-            validation_retries=validation_retries,
-            runtime_logger=runtime_logger,
-        )
-        enrichments: list[EnrichmentRecord] = []
-        for sense in sorted(senses, key=lambda item: (item.lexeme_id, item.sense_order)):
-            lexeme = lexemes_by_id.get(sense.lexeme_id)
-            if lexeme is None:
-                continue
-            _emit_lexeme_event(
-                runtime_logger,
-                'lexeme-start',
-                'Lexeme processing started',
-                lexeme=lexeme,
-                sense_id=sense.sense_id,
-                sense_order=sense.sense_order,
-                sense_count=1,
-                mode=mode,
-            )
-            try:
-                enrichment = enrichment_provider(
-                    lexeme=lexeme,
-                    sense=sense,
-                    settings=effective_settings,
-                    generated_at=effective_generated_at,
-                    generation_run_id=effective_generation_run_id,
-                    prompt_version=prompt_version,
-                )
-            except Exception as exc:
-                _emit_lexeme_event(
-                    runtime_logger,
-                    'lexeme-failure',
-                    'Lexeme failed',
-                    lexeme=lexeme,
-                    sense_id=sense.sense_id,
-                    sense_order=sense.sense_order,
-                    error=str(exc),
-                )
-                raise
-            enrichments.append(enrichment)
-            _emit_lexeme_event(
-                runtime_logger,
-                'lexeme-complete',
-                'Lexeme completed',
-                lexeme=lexeme,
-                sense_id=sense.sense_id,
-                sense_order=sense.sense_order,
-                status='completed',
-                accepted_sense_count=1,
-            )
-        write_jsonl(destination, [record.to_dict() for record in enrichments])
-        return enrichments
-
+    destination = output_path or snapshot_dir / 'words.enriched.jsonl'
     effective_max_concurrency = max(1, int(max_concurrency or 1))
     effective_request_delay_seconds = max(0.0, float(request_delay_seconds or 0.0))
     checkpoint_destination = checkpoint_path or snapshot_dir / 'enrich.checkpoint.jsonl'
@@ -2446,10 +2366,6 @@ def enrich_snapshot(
             completed_lexeme_ids=completed_lexeme_ids,
             lexeme_id_by_entry_id=lexeme_id_by_entry_id,
         )
-        _reconcile_failures_output(
-            failures_destination,
-            completed_lexeme_ids=completed_lexeme_ids,
-        )
         _reconcile_decisions_output(
             decisions_destination,
             completed_lexeme_ids=completed_lexeme_ids,
@@ -2462,11 +2378,7 @@ def enrich_snapshot(
         write_jsonl(decisions_destination, [])
         completed_count_before_run = 0
 
-    completed_results: dict[str, WordJobOutcome] = {}
     failures: list[str] = []
-    next_flush_index = 0
-    while next_flush_index < len(ordered_lexemes) and ordered_lexemes[next_flush_index].lexeme_id in completed_lexeme_ids:
-        next_flush_index += 1
     request_start_lock = Lock()
     last_request_started_at = [0.0]
 
@@ -2478,9 +2390,8 @@ def enrich_snapshot(
     def submission_capacity_remaining(future_map_size: int) -> bool:
         if effective_max_new_completed_lexemes is None:
             return True
-        in_progress_or_buffered = len(completed_results) + future_map_size
         completed_this_run = len(completed_lexeme_ids) - completed_count_before_run
-        return (completed_this_run + in_progress_or_buffered) < effective_max_new_completed_lexemes
+        return (completed_this_run + future_map_size) < effective_max_new_completed_lexemes
 
     def run_word_job(lexeme: LexemeRecord) -> WordJobOutcome:
         word_senses = ordered_sense_lists.get(lexeme.lexeme_id, [])
@@ -2516,49 +2427,19 @@ def enrich_snapshot(
             )
         )
 
-    def flush_completed() -> None:
-        nonlocal next_flush_index
-        while next_flush_index < len(ordered_lexemes):
-            lexeme = ordered_lexemes[next_flush_index]
-            if lexeme.lexeme_id in completed_lexeme_ids:
-                next_flush_index += 1
-                continue
-            outcome = completed_results.get(lexeme.lexeme_id)
-            if outcome is None:
-                break
-            _append_completed_lexeme_records(
-                destination,
-                decisions_destination,
-                checkpoint_destination,
-                failures_destination,
-                lexeme=lexeme,
-                outcome=outcome,
-                generation_run_id=effective_generation_run_id,
-                completed_lexeme_ids=completed_lexeme_ids,
-                runtime_logger=runtime_logger,
-            )
-            completed_results.pop(lexeme.lexeme_id, None)
-            next_flush_index += 1
-
-    def flush_remaining_completed() -> None:
-        for lexeme in ordered_lexemes:
-            if lexeme.lexeme_id in completed_lexeme_ids:
-                continue
-            outcome = completed_results.get(lexeme.lexeme_id)
-            if outcome is None:
-                continue
-            _append_completed_lexeme_records(
-                destination,
-                decisions_destination,
-                checkpoint_destination,
-                failures_destination,
-                lexeme=lexeme,
-                outcome=outcome,
-                generation_run_id=effective_generation_run_id,
-                completed_lexeme_ids=completed_lexeme_ids,
-                runtime_logger=runtime_logger,
-            )
-            completed_results.pop(lexeme.lexeme_id, None)
+    def persist_completed(lexeme: LexemeRecord, outcome: WordJobOutcome) -> None:
+        if lexeme.lexeme_id in completed_lexeme_ids:
+            return
+        _append_completed_lexeme_records(
+            destination,
+            decisions_destination,
+            checkpoint_destination,
+            lexeme=lexeme,
+            outcome=outcome,
+            generation_run_id=effective_generation_run_id,
+            completed_lexeme_ids=completed_lexeme_ids,
+            runtime_logger=runtime_logger,
+        )
 
     def handle_failure(lexeme: LexemeRecord, exc: Exception) -> None:
         message = f'{lexeme.lemma}: {exc}'
@@ -2583,8 +2464,8 @@ def enrich_snapshot(
             if reached_completion_cap():
                 break
             try:
-                completed_results[lexeme.lexeme_id] = run_word_job(lexeme)
-                flush_completed()
+                outcome = run_word_job(lexeme)
+                persist_completed(lexeme, outcome)
                 if reached_completion_cap():
                     break
             except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
@@ -2614,8 +2495,8 @@ def enrich_snapshot(
                 future = next(as_completed(list(future_map)))
                 lexeme = future_map.pop(future)
                 try:
-                    completed_results[lexeme.lexeme_id] = future.result()
-                    flush_completed()
+                    outcome = future.result()
+                    persist_completed(lexeme, outcome)
                     if reached_completion_cap():
                         stop_submitting = True
                 except Exception as exc:  # pragma: no cover - exercised via tests through raised summary
@@ -2628,7 +2509,6 @@ def enrich_snapshot(
                     pass
 
     if failures:
-        flush_remaining_completed()
         raise RuntimeError('Per-word enrichment failed for ' + '; '.join(sorted(failures)))
 
     if resume:
@@ -2641,7 +2521,6 @@ def run_enrichment(
     snapshot_dir: Path,
     *,
     output_path: Path | None = None,
-    provider: EnrichmentProvider | None = None,
     word_provider: WordEnrichmentProvider | None = None,
     settings: LexiconSettings | None = None,
     model_name: str | None = None,
@@ -2651,7 +2530,7 @@ def run_enrichment(
     review_status: str = 'draft',
     provider_mode: str = 'auto',
     reasoning_effort: str | None = None,
-    mode: str = 'per_sense',
+    mode: str = 'per_word',
     max_concurrency: int = 1,
     resume: bool = False,
     checkpoint_path: Path | None = None,
@@ -2664,12 +2543,13 @@ def run_enrichment(
     request_delay_seconds: float = 0.0,
     max_new_completed_lexemes: int | None = None,
 ) -> EnrichmentRunResult:
-    destination = output_path or snapshot_dir / ('enrichments.jsonl' if mode == 'per_sense' else 'words.enriched.jsonl')
+    if mode != 'per_word':
+        raise ValueError(f'Unsupported enrichment mode: {mode}')
+    destination = output_path or snapshot_dir / 'words.enriched.jsonl'
     lexemes, _ = read_snapshot_inputs(snapshot_dir)
     enrichments = enrich_snapshot(
         snapshot_dir,
         output_path=destination,
-        provider=provider,
         word_provider=word_provider,
         settings=settings,
         model_name=model_name,

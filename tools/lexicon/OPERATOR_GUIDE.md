@@ -84,7 +84,7 @@ Use this only for bounded canonicalization tails.
 ## 6. Realtime enrichment
 
 ```bash
-.venv-lexicon/bin/python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --mode per_word --max-concurrency 4 --resume
+.venv-lexicon/bin/python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --max-concurrency 4 --resume
 ```
 
 Behavior:
@@ -93,11 +93,11 @@ Behavior:
 - generates one strict payload per word or phrase entry
 - validates/QCs immediately
 - retries repairable failures
-- writes accepted rows directly to `words.enriched.jsonl`
+- writes accepted rows directly to `words.enriched.jsonl` as each lexeme finishes successfully
 - keeps resume sidecars:
-  - `enrich.checkpoint.jsonl`
-  - `enrich.decisions.jsonl`
-  - `enrich.failures.jsonl`
+  - `enrich.checkpoint.jsonl` = authoritative completed skip ledger for `--resume`
+  - `enrich.decisions.jsonl` = completed decision ledger
+  - `enrich.failures.jsonl` = append-only failure history across retries and resumes
 
 ## 7. Batch enrichment
 

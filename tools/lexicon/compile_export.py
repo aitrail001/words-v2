@@ -316,8 +316,8 @@ def compile_snapshot(
     decision_filter: str | None = None,
 ) -> list[CompiledWordRecord]:
     lexemes = _load_lexemes(snapshot_dir / "lexemes.jsonl")
-    senses = _load_senses(snapshot_dir / "senses.jsonl")
-    enrichments = _load_enrichments(snapshot_dir / "enrichments.jsonl")
+    compiled_source_path = snapshot_dir / "words.enriched.jsonl"
+    compiled = [CompiledWordRecord(**row) for row in read_jsonl(compiled_source_path)] if compiled_source_path.exists() else []
 
     if decisions_path is not None and decision_filter is None:
         raise ValueError("--decisions requires --decision-filter")
@@ -329,16 +329,12 @@ def compile_snapshot(
         allowed_lexeme_ids = _allowed_lexeme_ids_from_decisions(
             decisions,
             decision_filter=decision_filter,
-            snapshot_lexeme_ids={lexeme.lexeme_id for lexeme in lexemes},
+            snapshot_lexeme_ids={lexeme.lexeme_id for lexeme in lexemes} or {record.entry_id for record in compiled if record.entry_id},
         )
         if not allowed_lexeme_ids:
             raise ValueError(f"Decision filter '{decision_filter}' produced zero lexemes")
-        lexemes = [lexeme for lexeme in lexemes if lexeme.lexeme_id in allowed_lexeme_ids]
-        allowed_sense_ids = {sense.sense_id for sense in senses if sense.lexeme_id in allowed_lexeme_ids}
-        senses = [sense for sense in senses if sense.lexeme_id in allowed_lexeme_ids]
-        enrichments = [enrichment for enrichment in enrichments if enrichment.sense_id in allowed_sense_ids]
+        compiled = [record for record in compiled if record.entry_id in allowed_lexeme_ids]
 
-    compiled = compile_words(lexemes, senses, enrichments)
     compiled_word_rows = [record.to_dict() for record in compiled]
     write_jsonl(output_path, compiled_word_rows)
 

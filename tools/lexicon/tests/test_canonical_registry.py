@@ -133,35 +133,6 @@ class CanonicalRegistryTests(unittest.TestCase):
                 ],
             )
             self._write_lines(
-                root / "enrichments.jsonl",
-                [
-                    {
-                        "snapshot_id": "snap-1",
-                        "enrichment_id": "en_left_1",
-                        "sense_id": "sn_lx_left_1",
-                        "definition": "on the side opposite the right side",
-                        "examples": [{"sentence": "Turn left at the lights.", "difficulty": "A1"}],
-                        "cefr_level": "A1",
-                        "primary_domain": "general",
-                        "secondary_domains": [],
-                        "register": "neutral",
-                        "synonyms": [],
-                        "antonyms": ["right"],
-                        "collocations": [],
-                        "grammar_patterns": [],
-                        "usage_note": "",
-                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
-                        "confusable_words": [],
-                        "model_name": "gpt-5.1",
-                        "prompt_version": "v1",
-                        "generation_run_id": "run-left",
-                        "confidence": 0.9,
-                        "review_status": "draft",
-                        "generated_at": "2026-03-12T00:00:00Z",
-                    }
-                ],
-            )
-            self._write_lines(
                 root / "words.enriched.jsonl",
                 [
                     {

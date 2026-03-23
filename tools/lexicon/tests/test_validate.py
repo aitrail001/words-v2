@@ -163,7 +163,6 @@ class ValidateSnapshotTests(unittest.TestCase):
             root = Path(tmpdir)
             (root / "lexemes.jsonl").write_text(json.dumps(self.lexeme.to_dict()) + "\n", encoding="utf-8")
             (root / "senses.jsonl").write_text(json.dumps(self.sense.to_dict()) + "\n", encoding="utf-8")
-            (root / "enrichments.jsonl").write_text(json.dumps(self.enrichment.to_dict()) + "\n", encoding="utf-8")
 
             errors = validate_snapshot_files(root)
 

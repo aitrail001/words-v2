@@ -140,22 +140,17 @@ def status_entry(
     canonical_form = str(lookup["canonical_form"])
 
     lexemes_path = snapshot_dir / "lexemes.jsonl"
-    senses_path = snapshot_dir / "senses.jsonl"
-    enrichments_path = snapshot_dir / "enrichments.jsonl"
-
     lexemes = read_jsonl(lexemes_path) if lexemes_path.exists() else []
-    senses = read_jsonl(senses_path) if senses_path.exists() else []
-    enrichments = read_jsonl(enrichments_path) if enrichments_path.exists() else []
 
     lexeme = next((row for row in lexemes if row.get("lemma") == canonical_form), None)
-    lexeme_id = lexeme.get("lexeme_id") if lexeme else None
-    sense_ids = [row.get("sense_id") for row in senses if row.get("lexeme_id") == lexeme_id]
-    enriched = any(row.get("sense_id") in sense_ids for row in enrichments)
-
-    compiled = False
     compiled_path = compiled_input or (snapshot_dir / "words.enriched.jsonl")
+    compiled = False
     if compiled_path.exists():
-        compiled = any(row.get("word") == canonical_form for row in read_jsonl(compiled_path))
+        compiled = any(
+            row.get("word") == canonical_form or row.get("entry_id") == (lexeme or {}).get("entry_id")
+            for row in read_jsonl(compiled_path)
+        )
+    enriched = compiled
 
     db_word = db_lookup(canonical_form, language) if db_lookup is not None else None
 

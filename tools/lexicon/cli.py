@@ -272,7 +272,6 @@ def _enrich_command(args: argparse.Namespace) -> int:
             provider_mode=args.provider_mode,
             model_name=args.model,
             reasoning_effort=args.reasoning_effort,
-            mode=args.mode,
             max_concurrency=args.max_concurrency,
             resume=args.resume,
             checkpoint_path=Path(args.checkpoint_path) if args.checkpoint_path else None,
@@ -889,7 +888,6 @@ def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
             provider_mode=args.provider_mode,
             model_name=args.model,
             reasoning_effort=args.reasoning_effort,
-            mode='per_word',
         )
         errors = validate_snapshot_files(output_dir)
         if errors:
@@ -902,10 +900,7 @@ def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
             }))
             return 2
         compiled_output = output_dir / 'words.enriched.jsonl'
-        if enrichment_result.output_path.name == 'words.enriched.jsonl':
-            compiled = load_compiled_rows(enrichment_result.output_path)
-        else:
-            compiled = compile_snapshot(output_dir, compiled_output)
+        compiled = load_compiled_rows(enrichment_result.output_path)
     except (LexiconDependencyError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -981,7 +976,7 @@ def _import_db_command(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog='python -m tools.lexicon.cli')
+    parser = argparse.ArgumentParser(prog='python -m tools.lexicon.cli', allow_abbrev=False)
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     build_base = subparsers.add_parser('build-base', help='build normalized base records for a bounded word list')
@@ -999,23 +994,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     enrich = subparsers.add_parser('enrich', help='write learner-facing enrichment rows for a snapshot directory')
     enrich.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')
-    enrich.add_argument('--output', help='optional output path for realtime `words.enriched.jsonl` or legacy per-sense `enrichments.jsonl`')
+    enrich.add_argument('--output', help='optional output path for realtime `words.enriched.jsonl`')
     enrich.add_argument('--prompt-version', default='v1', help='prompt version tag for generated enrichment rows')
     enrich.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='enrichment provider mode')
     enrich.add_argument('--model', help='optional model override for this enrichment run')
     enrich.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for real endpoint runs')
-    enrich.add_argument('--mode', choices=['per_sense', 'per_word'], default='per_word', help='enrichment execution mode')
-    enrich.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel lexeme jobs for per_word enrichment mode')
-    enrich.add_argument('--resume', action='store_true', help='resume a prior per_word enrichment run using the checkpoint file')
-    enrich.add_argument('--checkpoint-path', help='optional override path for the per_word checkpoint JSONL file')
-    enrich.add_argument('--failures-output', help='optional override path for the per_word failures JSONL file')
-    enrich.add_argument('--max-failures', type=int, help='stop submitting new per_word jobs after this many lexeme failures')
+    enrich.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel lexeme jobs for enrichment')
+    enrich.add_argument('--resume', action='store_true', help='resume a prior enrichment run using the checkpoint file')
+    enrich.add_argument('--checkpoint-path', help='optional override path for the enrichment checkpoint JSONL file')
+    enrich.add_argument('--failures-output', help='optional override path for the enrichment failures JSONL file')
+    enrich.add_argument('--max-failures', type=int, help='stop submitting new enrichment jobs after this many lexeme failures')
     enrich.add_argument('--transient-retries', type=int, default=2, help='maximum transient transport/model retries per lexeme in realtime enrichment')
     enrich.add_argument('--validation-retries', type=int, default=1, help='maximum retryable validation retries per lexeme in realtime enrichment')
     enrich.add_argument('--log-level', choices=['quiet', 'info', 'debug'], default='info', help='runtime progress logging level for enrich')
     enrich.add_argument('--log-file', type=Path, help='optional runtime progress log file for enrich; defaults to snapshot_dir/enrich.log')
-    enrich.add_argument('--request-delay-seconds', type=float, default=1.0, help='delay between per_word request starts in seconds')
-    enrich.add_argument('--max-new-completed-lexemes', type=int, help='stop after this many newly completed per_word lexemes in the current invocation')
+    enrich.add_argument('--request-delay-seconds', type=float, default=1.0, help='delay between enrichment request starts in seconds')
+    enrich.add_argument('--max-new-completed-lexemes', type=int, help='stop after this many newly completed lexemes in the current invocation')
     enrich.set_defaults(handler=_enrich_command)
 
     smoke_openai = subparsers.add_parser('smoke-openai-compatible', help='run a tiny real OpenAI-compatible smoke flow locally')
@@ -1198,8 +1192,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    argv_list = list(argv) if argv is not None else None
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    if argv_list and argv_list[:1] == ['enrich'] and '--mode' in argv_list:
+        mode_index = argv_list.index('--mode')
+        rejected = argv_list[mode_index:mode_index + 2]
+        parser.error(f"unrecognized arguments: {' '.join(rejected)}")
+    args = parser.parse_args(argv_list)
     runtime_logger = _build_runtime_logger(args)
     setattr(args, 'runtime_logger', runtime_logger)
     _emit_command_event(

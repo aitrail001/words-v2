@@ -205,15 +205,7 @@ def validate_snapshot_files(snapshot_dir: Path) -> list[str]:
     lexemes = [LexemeRecord(**row) for row in read_jsonl(snapshot_dir / "lexemes.jsonl")]
     senses_path = snapshot_dir / "senses.jsonl"
     senses = [SenseRecord(**row) for row in read_jsonl(senses_path)] if senses_path.exists() else []
-    enrichments: list[EnrichmentRecord] = []
-    enrichments_path = snapshot_dir / "enrichments.jsonl"
-    if enrichments_path.exists():
-        for row in read_jsonl(enrichments_path):
-            row = dict(row)
-            row["examples"] = [SenseExample(**example) for example in row.get("examples", [])]
-            enrichments.append(EnrichmentRecord(**row))
-
-    errors = validate_snapshot(lexemes=lexemes, senses=senses, enrichments=enrichments)
+    errors = validate_snapshot(lexemes=lexemes, senses=senses, enrichments=[])
 
     variants_path = snapshot_dir / "canonical_variants.jsonl"
     ambiguous_path = snapshot_dir / "ambiguous_forms.jsonl"
