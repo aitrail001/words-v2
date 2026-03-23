@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from tools.lexicon.batch_ledger import append_jsonl_rows, build_batch_custom_id, build_batch_job_rows, load_jsonl_rows, parse_batch_custom_id, write_jsonl_rows
 from tools.lexicon.enrich import build_phrase_enrichment_prompt
@@ -42,9 +42,12 @@ def build_batch_request_rows(
     model: str,
     prompt_version: str,
     rows: Iterable[dict[str, Any]],
+    progress_callback: Callable[..., None] | None = None,
 ) -> list[dict[str, Any]]:
     request_rows: list[dict[str, Any]] = []
-    for row in rows:
+    source_rows = list(rows)
+    total_rows = len(source_rows)
+    for index, row in enumerate(source_rows, start=1):
         entry_kind = str(row.get("entry_kind") or "word").strip().lower()
         entry_id = str(row.get("entry_id") or "").strip()
         if not entry_id:
@@ -83,6 +86,15 @@ def build_batch_request_rows(
                 ),
             }
         )
+        if progress_callback is not None:
+            progress_callback(
+                entry_id=entry_id,
+                entry_kind=entry_kind,
+                custom_id=custom_id,
+                completed_items=index,
+                total_items=total_rows,
+                status="prepared",
+            )
     return request_rows
 
 

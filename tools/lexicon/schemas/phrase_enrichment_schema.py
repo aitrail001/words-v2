@@ -73,7 +73,12 @@ def _sense_schema() -> dict[str, Any]:
     }
 
 
-def _normalize_phrase_translation_payload(value: Any, *, example_count: int) -> dict[str, dict[str, Any]]:
+def _normalize_phrase_translation_payload(
+    value: Any,
+    *,
+    example_count: int,
+    source_usage_note: Any,
+) -> dict[str, dict[str, Any]]:
     if not isinstance(value, dict):
         raise RuntimeError("OpenAI-compatible enrichment payload field 'translations' must be an object keyed by locale")
 
@@ -85,7 +90,6 @@ def _normalize_phrase_translation_payload(value: Any, *, example_count: int) -> 
                 f"OpenAI-compatible enrichment payload field 'translations' must include required locale '{locale}'"
             )
         definition = require_non_empty_string(locale_payload.get("definition"), field=f"translations.{locale}.definition")
-        usage_note = require_non_empty_string(locale_payload.get("usage_note"), field=f"translations.{locale}.usage_note")
         examples = locale_payload.get("examples")
         if not isinstance(examples, list) or not examples:
             raise RuntimeError(
@@ -101,7 +105,11 @@ def _normalize_phrase_translation_payload(value: Any, *, example_count: int) -> 
             normalized_examples = normalized_examples[:example_count]
         normalized[locale] = {
             "definition": definition,
-            "usage_note": usage_note,
+            "usage_note": _normalize_phrase_translation_usage_note(
+                source_usage_note=source_usage_note,
+                translated_usage_note=locale_payload.get("usage_note"),
+                locale=locale,
+            ),
             "examples": normalized_examples,
         }
     return normalized
@@ -128,6 +136,25 @@ def build_phrase_enrichment_response_schema() -> dict[str, Any]:
     }
 
 
+def _normalize_phrase_translation_usage_note(*, source_usage_note: Any, translated_usage_note: Any, locale: str) -> str:
+    source_has_usage_note = isinstance(source_usage_note, str) and bool(source_usage_note.strip())
+    if not source_has_usage_note:
+        if translated_usage_note is None:
+            return ""
+        if isinstance(translated_usage_note, str):
+            return translated_usage_note.strip()
+        raise RuntimeError(
+            f"OpenAI-compatible enrichment payload field 'translations.{locale}.usage_note' must be a string or null"
+        )
+
+    if not isinstance(translated_usage_note, str) or not translated_usage_note.strip():
+        raise RuntimeError(
+            "OpenAI-compatible enrichment payload field "
+            f"'translations.{locale}.usage_note' missing_translated_usage_note_with_source_note_present"
+        )
+    return translated_usage_note.strip()
+
+
 def normalize_phrase_enrichment_payload(response: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(response, dict):
         raise RuntimeError("OpenAI-compatible endpoint returned a non-object phrase enrichment payload")
@@ -147,6 +174,7 @@ def normalize_phrase_enrichment_payload(response: dict[str, Any]) -> dict[str, A
         if not isinstance(sense, dict):
             raise RuntimeError(f"OpenAI-compatible enrichment payload field 'senses[{index}]' must be an object")
         examples = normalize_examples(sense.get("examples"))
+        source_usage_note = sense.get("usage_note")
         normalized_senses.append(
             {
                 "definition": require_non_empty_string(sense.get("definition"), field=f"senses[{index}].definition"),
@@ -164,6 +192,7 @@ def normalize_phrase_enrichment_payload(response: dict[str, Any]) -> dict[str, A
                 "translations": _normalize_phrase_translation_payload(
                     sense.get("translations"),
                     example_count=len(examples),
+                    source_usage_note=source_usage_note,
                 ),
             }
         )

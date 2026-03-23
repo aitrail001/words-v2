@@ -5,7 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from tools.lexicon.batch_ledger import append_jsonl_rows, load_jsonl_rows
 from tools.lexicon.compile_export import compile_word_result
@@ -192,6 +192,7 @@ def ingest_batch_outputs(
     batch_output_path: Path,
     ingested_at: str,
     failure_output_path: Path | None = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> list[dict[str, Any]]:
     request_rows = load_jsonl_rows(request_path or (snapshot_dir / "batch_requests.jsonl"))
     output_rows = load_jsonl_rows(batch_output_path)
@@ -205,16 +206,33 @@ def ingest_batch_outputs(
     finalized_result_rows: list[dict[str, Any]] = []
     failure_rows: list[dict[str, Any]] = []
     regenerate_rows: list[dict[str, Any]] = []
-    for row in result_rows:
+    total_rows = len(result_rows)
+    for index, row in enumerate(result_rows, start=1):
         entry_kind = str(row.get("entry_kind") or "word").strip().lower()
         if entry_kind not in {"word", "phrase"}:
             finalized_result_rows.append(dict(row))
             if str(row.get("status") or "").strip().lower() != "accepted":
                 failure_rows.append(dict(row))
+            if progress_callback is not None:
+                progress_callback(
+                    entry_id=row.get("entry_id"),
+                    entry_kind=entry_kind,
+                    completed_items=index,
+                    total_items=total_rows,
+                    status=str(row.get("status") or "").strip().lower() or "unknown",
+                )
             continue
         if str(row.get("status") or "").strip().lower() != "accepted":
             finalized_result_rows.append(dict(row))
             failure_rows.append(dict(row))
+            if progress_callback is not None:
+                progress_callback(
+                    entry_id=row.get("entry_id"),
+                    entry_kind=entry_kind,
+                    completed_items=index,
+                    total_items=total_rows,
+                    status=str(row.get("status") or "").strip().lower() or "failed",
+                )
             continue
         try:
             compiled_row = (
@@ -238,10 +256,27 @@ def ingest_batch_outputs(
                     "failure_reason": str(exc),
                 }
             )
+            if progress_callback is not None:
+                progress_callback(
+                    entry_id=failed_row.get("entry_id"),
+                    entry_kind=entry_kind,
+                    completed_items=index,
+                    total_items=total_rows,
+                    status="failed",
+                    error=str(exc),
+                )
             continue
         finalized_result_rows.append(dict(row))
         if compiled_row is not None:
             append_jsonl_rows(words_output_path, [compiled_row])
+        if progress_callback is not None:
+            progress_callback(
+                entry_id=row.get("entry_id"),
+                entry_kind=entry_kind,
+                completed_items=index,
+                total_items=total_rows,
+                status="accepted",
+            )
     if finalized_result_rows:
         append_jsonl_rows(output_path, finalized_result_rows)
     if failure_output_path is not None and failure_rows:

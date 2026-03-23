@@ -34,6 +34,7 @@ from tools.lexicon.phrase_pipeline import build_phrase_snapshot_rows, write_phra
 from tools.lexicon.reference_pipeline import build_reference_snapshot_rows, write_reference_snapshot
 from tools.lexicon.qc import run_batch_qc, run_review_apply
 from tools.lexicon.review_materialize import materialize_review_outputs
+from tools.lexicon.runtime_logging import RuntimeLogConfig, RuntimeLogger
 from tools.lexicon.validate import validate_compiled_record, validate_snapshot_files
 from tools.lexicon.policy_data import excluded_canonical_forms
 from tools.lexicon.wordfreq_provider import build_wordfreq_rank_provider
@@ -42,10 +43,81 @@ from tools.lexicon.wordnet_provider import LexiconDependencyError, build_wordnet
 from tools.lexicon.phrase_inventory import build_phrase_inventory_records
 
 _REASONING_EFFORT_CHOICES = ['none', 'low', 'medium', 'high']
+_RUNTIME_LOG_LEVEL_CHOICES = ['quiet', 'info', 'debug']
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+
+
+def _default_command_log_dir(args: argparse.Namespace) -> Path:
+    for field in ('snapshot_dir', 'output_dir'):
+        value = getattr(args, field, None)
+        if value:
+            return Path(value)
+    for field in (
+        'output',
+        'input',
+        'compiled_input',
+        'decisions_input',
+        'approved_output',
+        'rejected_output',
+        'regenerate_output',
+    ):
+        value = getattr(args, field, None)
+        if not value:
+            continue
+        path = Path(value)
+        return path if path.suffix == '' else path.parent
+    return Path.cwd()
+
+
+def _build_runtime_logger(args: argparse.Namespace) -> RuntimeLogger:
+    command_name = str(getattr(args, 'command', 'lexicon') or 'lexicon')
+    configured_log_file = getattr(args, 'log_file', None)
+    log_file = Path(configured_log_file) if configured_log_file else (_default_command_log_dir(args) / f'{command_name}.log')
+    return RuntimeLogger(
+        RuntimeLogConfig(
+            level=getattr(args, 'log_level', 'info'),
+            log_file=log_file,
+        ),
+        stream=sys.stderr,
+    )
+
+
+def _emit_command_event(
+    runtime_logger: RuntimeLogger | None,
+    event: str,
+    message: str,
+    *,
+    command: str,
+    **fields: object,
+) -> None:
+    if runtime_logger is None:
+        return
+    runtime_logger.info(event, message, command=command, **fields)
+
+
+def _emit_item_progress(
+    runtime_logger: RuntimeLogger | None,
+    *,
+    command: str,
+    item_type: str,
+    **fields: object,
+) -> None:
+    _emit_command_event(
+        runtime_logger,
+        'item-progress',
+        'Command item progress',
+        command=command,
+        item_type=item_type,
+        **fields,
+    )
+
+
+def _add_shared_logging_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument('--log-level', choices=_RUNTIME_LOG_LEVEL_CHOICES, default='info', help='runtime progress logging level')
+    parser.add_argument('--log-file', type=Path, help='optional runtime progress log file; defaults to <command-root>/<command>.log')
 
 
 def _resolve_existing_db_url(explicit_database_url: str | None) -> str | None:
@@ -95,6 +167,7 @@ def _load_word_inventory_provider():
 
 
 def _build_base_command(args: argparse.Namespace) -> int:
+    runtime_logger = getattr(args, 'runtime_logger', None)
     if args.top_words and args.rollout_stage:
         print('build-base accepts only one of --top-words or --rollout-stage', file=sys.stderr)
         return 2
@@ -156,6 +229,14 @@ def _build_base_command(args: argparse.Namespace) -> int:
             adjudications=adjudications,
             existing_canonical_words_lookup=existing_canonical_words_lookup,
             excluded_canonical_words=policy_tail_exclusions,
+            progress_callback=(
+                lambda **fields: _emit_item_progress(
+                    runtime_logger,
+                    command='build-base',
+                    item_type='word',
+                    **fields,
+                )
+            ),
         )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
@@ -197,6 +278,10 @@ def _enrich_command(args: argparse.Namespace) -> int:
             checkpoint_path=Path(args.checkpoint_path) if args.checkpoint_path else None,
             failures_output=Path(args.failures_output) if args.failures_output else None,
             max_failures=args.max_failures,
+            transient_retries=args.transient_retries,
+            validation_retries=args.validation_retries,
+            log_level=args.log_level,
+            log_file=Path(args.log_file) if args.log_file else None,
             request_delay_seconds=args.request_delay_seconds,
             max_new_completed_lexemes=args.max_new_completed_lexemes,
         )
@@ -406,6 +491,7 @@ def _compile_export_command(args: argparse.Namespace) -> int:
 
 
 def _phrase_build_base_command(args: argparse.Namespace) -> int:
+    runtime_logger = getattr(args, 'runtime_logger', None)
     input_path = Path(args.input)
     output_dir = Path(args.output_dir)
     try:
@@ -416,6 +502,14 @@ def _phrase_build_base_command(args: argparse.Namespace) -> int:
                 source_label='phrase-seeds',
             ),
             created_at=_utc_now(),
+            progress_callback=(
+                lambda **fields: _emit_item_progress(
+                    runtime_logger,
+                    command='phrase-build-base',
+                    item_type='phrase',
+                    **fields,
+                )
+            ),
         )
         output_path = write_phrase_snapshot(output_dir, rows)
     except (RuntimeError, ValueError, FileNotFoundError) as exc:
@@ -434,6 +528,7 @@ def _phrase_build_base_command(args: argparse.Namespace) -> int:
 
 
 def _build_phrases_command(args: argparse.Namespace) -> int:
+    runtime_logger = getattr(args, 'runtime_logger', None)
     output_dir = Path(args.output_dir)
     source_paths = [Path(item) for item in args.inputs]
     snapshot_id = args.snapshot_id or build_snapshot_id(
@@ -446,6 +541,14 @@ def _build_phrases_command(args: argparse.Namespace) -> int:
             phrases=phrase_rows,
             snapshot_id=snapshot_id,
             created_at=_utc_now(),
+            progress_callback=(
+                lambda **fields: _emit_item_progress(
+                    runtime_logger,
+                    command='build-phrases',
+                    item_type='phrase',
+                    **fields,
+                )
+            ),
         )
         output_path = write_phrase_snapshot(output_dir, output_rows)
     except (RuntimeError, ValueError, FileNotFoundError) as exc:
@@ -495,6 +598,7 @@ def _reference_build_base_command(args: argparse.Namespace) -> int:
 
 
 def _batch_prepare_command(args: argparse.Namespace) -> int:
+    runtime_logger = getattr(args, 'runtime_logger', None)
     input_path = Path(args.input)
     output_dir = Path(args.output_dir)
     try:
@@ -506,6 +610,14 @@ def _batch_prepare_command(args: argparse.Namespace) -> int:
             model=args.model,
             prompt_version=args.prompt_version,
             rows=load_seed_rows(input_path),
+            progress_callback=(
+                lambda **fields: _emit_item_progress(
+                    runtime_logger,
+                    command='batch-prepare',
+                    item_type='request',
+                    **fields,
+                )
+            ),
         )
         output_path = write_batch_request_rows(output_dir / "batch_requests.jsonl", rows)
     except (RuntimeError, ValueError, FileNotFoundError) as exc:
@@ -575,6 +687,7 @@ def _batch_status_command(args: argparse.Namespace) -> int:
 
 
 def _batch_ingest_command(args: argparse.Namespace) -> int:
+    runtime_logger = getattr(args, 'runtime_logger', None)
     snapshot_dir = Path(args.snapshot_dir)
     paths = BatchArtifactPaths.from_snapshot_dir(snapshot_dir)
     output_path = Path(args.input)
@@ -587,6 +700,14 @@ def _batch_ingest_command(args: argparse.Namespace) -> int:
         batch_output_path=output_path,
         ingested_at=_utc_now(),
         failure_output_path=failure_path,
+        progress_callback=(
+            lambda **fields: _emit_item_progress(
+                runtime_logger,
+                command='batch-ingest',
+                item_type='result',
+                **fields,
+            )
+        ),
     )
     if args.update_jobs:
         job_rows = load_jsonl_rows(paths.batch_jobs_path)
@@ -735,6 +856,7 @@ def _review_materialize_command(args: argparse.Namespace) -> int:
 
 
 def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
+    runtime_logger = getattr(args, 'runtime_logger', None)
     try:
         rank_provider, sense_provider = _load_build_base_providers()
         requested_words = normalize_seed_words(args.words)
@@ -750,6 +872,14 @@ def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
             rank_provider=rank_provider,
             sense_provider=sense_provider,
             max_senses=args.max_senses,
+            progress_callback=(
+                lambda **fields: _emit_item_progress(
+                    runtime_logger,
+                    command='smoke-openai-compatible',
+                    item_type='word',
+                    **fields,
+                )
+            ),
         )
         output_dir = Path(args.output_dir)
         written = write_base_snapshot(output_dir, result)
@@ -799,6 +929,7 @@ def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
 
 
 def _import_db_command(args: argparse.Namespace) -> int:
+    runtime_logger = getattr(args, 'runtime_logger', None)
     rows = load_compiled_rows(Path(args.input))
     if args.dry_run:
         counts = summarize_compiled_rows(rows)
@@ -831,6 +962,14 @@ def _import_db_command(args: argparse.Namespace) -> int:
         source_type=args.source_type,
         source_reference=args.source_reference,
         language=args.language,
+        progress_callback=(
+            lambda **fields: _emit_item_progress(
+                runtime_logger,
+                command='import-db',
+                item_type='row',
+                **fields,
+            )
+        ),
     )
     payload = {
         'command': 'import-db',
@@ -855,6 +994,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_base.add_argument('--database-url', help='optional sync database URL override for existing-word skip checks')
     build_base.add_argument('--rerun-existing', action='store_true', help='include canonical words even if they already exist in the DB')
     build_base.add_argument('--output-dir', help='optional output directory for normalized snapshot JSONL files')
+    _add_shared_logging_args(build_base)
     build_base.set_defaults(handler=_build_base_command)
 
     enrich = subparsers.add_parser('enrich', help='write learner-facing enrichment rows for a snapshot directory')
@@ -870,6 +1010,10 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument('--checkpoint-path', help='optional override path for the per_word checkpoint JSONL file')
     enrich.add_argument('--failures-output', help='optional override path for the per_word failures JSONL file')
     enrich.add_argument('--max-failures', type=int, help='stop submitting new per_word jobs after this many lexeme failures')
+    enrich.add_argument('--transient-retries', type=int, default=2, help='maximum transient transport/model retries per lexeme in realtime enrichment')
+    enrich.add_argument('--validation-retries', type=int, default=1, help='maximum retryable validation retries per lexeme in realtime enrichment')
+    enrich.add_argument('--log-level', choices=['quiet', 'info', 'debug'], default='info', help='runtime progress logging level for enrich')
+    enrich.add_argument('--log-file', type=Path, help='optional runtime progress log file for enrich; defaults to snapshot_dir/enrich.log')
     enrich.add_argument('--request-delay-seconds', type=float, default=1.0, help='delay between per_word request starts in seconds')
     enrich.add_argument('--max-new-completed-lexemes', type=int, help='stop after this many newly completed per_word lexemes in the current invocation')
     enrich.set_defaults(handler=_enrich_command)
@@ -884,6 +1028,7 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_openai.add_argument('--model', help='optional model override for this smoke run')
     smoke_openai.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for the smoke run')
     smoke_openai.add_argument('words', nargs='*', default=['run'], help='tiny seed words for the smoke run')
+    _add_shared_logging_args(smoke_openai)
     smoke_openai.set_defaults(handler=_smoke_openai_compatible_command)
 
     benchmark_selection = subparsers.add_parser('benchmark-selection', help='build tuning/holdout benchmark snapshots and optional rerank comparisons')
@@ -896,6 +1041,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_selection.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for rerank benchmark runs')
     benchmark_selection.add_argument('--candidate-limit', type=int, default=8, help='maximum WordNet candidates per lexeme for the `candidates` rerank mode')
     benchmark_selection.add_argument('--candidate-source', dest='candidate_sources', action='append', choices=RERANK_CANDIDATE_SOURCES, help='rerank candidate source to compare; repeat to run multiple modes')
+    _add_shared_logging_args(benchmark_selection)
     benchmark_selection.set_defaults(handler=_benchmark_selection_command)
 
     benchmark_enrichment = subparsers.add_parser('benchmark-enrichment', help='run live lexicon enrichment prompt/model benchmarks')
@@ -905,24 +1051,28 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_enrichment.add_argument('--model', dest='models', action='append', help='model to compare; repeat to run multiple models')
     benchmark_enrichment.add_argument('--provider-mode', choices=['openai_compatible', 'openai_compatible_node'], default='openai_compatible_node', help='enrichment provider mode for benchmark runs')
     benchmark_enrichment.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for models that support it')
+    _add_shared_logging_args(benchmark_enrichment)
     benchmark_enrichment.set_defaults(handler=_benchmark_enrichment_command)
 
     build_phrases = subparsers.add_parser('build-phrases', help='build normalized phrase snapshot rows from one or more reviewed CSV files')
     build_phrases.add_argument('--output-dir', required=True, help='directory to write phrase snapshot JSONL output')
     build_phrases.add_argument('--snapshot-id', help='optional snapshot identifier override')
     build_phrases.add_argument('inputs', nargs='+', help='reviewed CSV files containing phrase inventory rows')
+    _add_shared_logging_args(build_phrases)
     build_phrases.set_defaults(handler=_build_phrases_command)
 
     phrase_build_base = subparsers.add_parser('phrase-build-base', help='build normalized phrase snapshot rows from a JSONL seed file')
     phrase_build_base.add_argument('--input', required=True, help='JSONL seed file containing phrase rows')
     phrase_build_base.add_argument('--output-dir', required=True, help='directory to write phrase snapshot JSONL output')
     phrase_build_base.add_argument('--snapshot-id', help='optional snapshot identifier override')
+    _add_shared_logging_args(phrase_build_base)
     phrase_build_base.set_defaults(handler=_phrase_build_base_command)
 
     reference_build_base = subparsers.add_parser('reference-build-base', help='build normalized reference snapshot rows from a JSONL seed file')
     reference_build_base.add_argument('--input', required=True, help='JSONL seed file containing reference rows')
     reference_build_base.add_argument('--output-dir', required=True, help='directory to write reference snapshot JSONL output')
     reference_build_base.add_argument('--snapshot-id', help='optional snapshot identifier override')
+    _add_shared_logging_args(reference_build_base)
     reference_build_base.set_defaults(handler=_reference_build_base_command)
 
     batch_prepare = subparsers.add_parser('batch-prepare', help='build deterministic batch request rows from a JSONL seed file')
@@ -931,6 +1081,7 @@ def build_parser() -> argparse.ArgumentParser:
     batch_prepare.add_argument('--snapshot-id', help='optional snapshot identifier override')
     batch_prepare.add_argument('--model', default='gpt-5-mini', help='batch generation model to record in request bodies')
     batch_prepare.add_argument('--prompt-version', default='v1', help='prompt version tag to record in request bodies')
+    _add_shared_logging_args(batch_prepare)
     batch_prepare.set_defaults(handler=_batch_prepare_command)
 
     batch_submit = subparsers.add_parser('batch-submit', help='submit prepared batch requests')
@@ -938,11 +1089,13 @@ def build_parser() -> argparse.ArgumentParser:
     batch_submit.add_argument('--batch-id', help='optional batch job identifier override')
     batch_submit.add_argument('--input-file-id', help='optional input file identifier override')
     batch_submit.add_argument('--status', default='submitted', choices=['submitted', 'completed', 'failed', 'pending'], help='initial batch status to record')
+    _add_shared_logging_args(batch_submit)
     batch_submit.set_defaults(handler=_batch_submit_command)
 
     batch_status = subparsers.add_parser('batch-status', help='check prepared or submitted batch status')
     batch_status.add_argument('--snapshot-dir', required=True, help='snapshot directory containing batch ledgers')
     batch_status.add_argument('--batch-id', help='optional batch job identifier filter')
+    _add_shared_logging_args(batch_status)
     batch_status.set_defaults(handler=_batch_status_command)
 
     batch_ingest = subparsers.add_parser('batch-ingest', help='ingest completed batch outputs')
@@ -950,6 +1103,7 @@ def build_parser() -> argparse.ArgumentParser:
     batch_ingest.add_argument('--input', required=True, help='batch output JSONL file to ingest')
     batch_ingest.add_argument('--output', help='optional override path for batch_results.jsonl')
     batch_ingest.add_argument('--update-jobs', action='store_true', default=True, help='update batch_jobs.jsonl statuses after ingest')
+    _add_shared_logging_args(batch_ingest)
     batch_ingest.set_defaults(handler=_batch_ingest_command)
 
     batch_retry = subparsers.add_parser('batch-retry', help='prepare retry requests for failed batch items')
@@ -960,6 +1114,7 @@ def build_parser() -> argparse.ArgumentParser:
     batch_retry.add_argument('--model', default='gpt-5-mini', help='model to record in retry requests')
     batch_retry.add_argument('--prompt-version', default='v1', help='prompt version to record in retry requests')
     batch_retry.add_argument('--mode', choices=['repair', 'regenerate', 'escalate-model'], default='repair', help='retry mode to use when preparing requests')
+    _add_shared_logging_args(batch_retry)
     batch_retry.set_defaults(handler=_batch_retry_command)
 
     batch_qc = subparsers.add_parser('batch-qc', help='run QC over ingested batch outputs')
@@ -970,6 +1125,7 @@ def build_parser() -> argparse.ArgumentParser:
     batch_qc.add_argument('--overrides', help='optional manual overrides JSONL path')
     batch_qc.add_argument('--judge-model', default='gpt-5-mini', help='model name to record in QC rows')
     batch_qc.add_argument('--prompt-version', default='v1', help='prompt version to record in QC rows')
+    _add_shared_logging_args(batch_qc)
     batch_qc.set_defaults(handler=_batch_qc_command)
 
     review_apply = subparsers.add_parser('review-apply', help='apply manual overrides to an existing QC verdict file')
@@ -978,6 +1134,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_apply.add_argument('--output', help='optional override path for batch_qc.jsonl after overrides are applied')
     review_apply.add_argument('--review-queue-output', help='optional override path for enrichment_review_queue.jsonl')
     review_apply.add_argument('--overrides', help='optional manual overrides JSONL path')
+    _add_shared_logging_args(review_apply)
     review_apply.set_defaults(handler=_review_apply_command)
 
     review_materialize = subparsers.add_parser('review-materialize', help='materialize approved/rejected/regenerate artifacts from compiled learner JSONL and review decisions')
@@ -986,6 +1143,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_materialize.add_argument('--approved-output', required=True, help='path to write approved compiled rows')
     review_materialize.add_argument('--rejected-output', required=True, help='path to write rejected overlay rows')
     review_materialize.add_argument('--regenerate-output', required=True, help='path to write regeneration request rows')
+    _add_shared_logging_args(review_materialize)
     review_materialize.set_defaults(handler=_review_materialize_command)
 
     detect_ambiguous = subparsers.add_parser('detect-ambiguous-forms', help='emit ambiguous canonicalization cases for optional LLM adjudication')
@@ -993,6 +1151,7 @@ def build_parser() -> argparse.ArgumentParser:
     detect_ambiguous.add_argument('--snapshot-id', help='optional snapshot identifier for the detection run')
     detect_ambiguous.add_argument('--max-senses', type=int, default=8, help='maximum learner senses to preserve while building the temporary snapshot context')
     detect_ambiguous.add_argument('words', nargs='+', help='surface forms to analyze')
+    _add_shared_logging_args(detect_ambiguous)
     detect_ambiguous.set_defaults(handler=_detect_ambiguous_forms_command)
 
     adjudicate_forms_parser = subparsers.add_parser('adjudicate-forms', help='run bounded LLM adjudication over ambiguous surface-form rows')
@@ -1001,11 +1160,13 @@ def build_parser() -> argparse.ArgumentParser:
     adjudicate_forms_parser.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='adjudication provider mode')
     adjudicate_forms_parser.add_argument('--model', help='optional model override for adjudication')
     adjudicate_forms_parser.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for adjudication')
+    _add_shared_logging_args(adjudicate_forms_parser)
     adjudicate_forms_parser.set_defaults(handler=_adjudicate_forms_command)
 
     lookup_entry_parser = subparsers.add_parser('lookup-entry', help='resolve a surface form to its canonical lexicon entry within a snapshot')
     lookup_entry_parser.add_argument('--snapshot-dir', required=True, help='directory containing canonical snapshot JSONL files')
     lookup_entry_parser.add_argument('word', help='surface form or canonical word to look up')
+    _add_shared_logging_args(lookup_entry_parser)
     lookup_entry_parser.set_defaults(handler=_lookup_entry_command)
 
     status_entry_parser = subparsers.add_parser('status-entry', help='report canonical/build/enrich/compile status for a word within a snapshot and optionally the DB')
@@ -1014,12 +1175,14 @@ def build_parser() -> argparse.ArgumentParser:
     status_entry_parser.add_argument('--check-db', action='store_true', help='also query the configured local DB for the canonical word')
     status_entry_parser.add_argument('--language', default='en', help='language code for DB status checks')
     status_entry_parser.add_argument('word', help='surface form or canonical word to inspect')
+    _add_shared_logging_args(status_entry_parser)
     status_entry_parser.set_defaults(handler=_status_entry_command)
 
     validate = subparsers.add_parser('validate', help='validate normalized or compiled lexicon outputs')
     validate_group = validate.add_mutually_exclusive_group(required=True)
     validate_group.add_argument('--snapshot-dir', help='directory containing normalized snapshot JSONL files')
     validate_group.add_argument('--compiled-input', '--compiled-path', dest='compiled_input', help='compiled learner JSONL file to validate')
+    _add_shared_logging_args(validate)
     validate.set_defaults(handler=_validate_command)
 
     import_db = subparsers.add_parser('import-db', help='load compiled learner JSONL for local DB import workflows')
@@ -1028,6 +1191,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_db.add_argument('--source-type', default='lexicon_snapshot', help='source type to stamp onto imported rows')
     import_db.add_argument('--source-reference', help='source reference to stamp onto imported rows')
     import_db.add_argument('--language', default='en', help='language code for imported words')
+    _add_shared_logging_args(import_db)
     import_db.set_defaults(handler=_import_db_command)
 
     return parser
@@ -1036,7 +1200,25 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    return int(args.handler(args))
+    runtime_logger = _build_runtime_logger(args)
+    setattr(args, 'runtime_logger', runtime_logger)
+    _emit_command_event(
+        runtime_logger,
+        'command-start',
+        'Command started',
+        command=str(args.command),
+    )
+    code = int(args.handler(args))
+    terminal_event = 'command-complete' if code == 0 else 'command-failure'
+    terminal_message = 'Command completed' if code == 0 else 'Command failed'
+    _emit_command_event(
+        runtime_logger,
+        terminal_event,
+        terminal_message,
+        command=str(args.command),
+        exit_code=code,
+    )
+    return code
 
 
 if __name__ == '__main__':

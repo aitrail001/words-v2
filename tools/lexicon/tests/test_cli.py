@@ -73,7 +73,7 @@ class CliTests(unittest.TestCase):
             code, stdout, stderr = self.run_cli(["build-base", "--rerun-existing", "--top-words", "3"])
 
         self.assertEqual(code, 0)
-        self.assertEqual(stderr, "")
+        self.assertIn("command-complete", stderr)
         payload = json.loads(stdout)
         self.assertEqual(payload["inventory_mode"], "top_words")
         self.assertEqual(payload["requested_top_words"], 3)
@@ -186,6 +186,66 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["output_dir"], str(output_dir))
             self.assertTrue((output_dir / "lexemes.jsonl").exists())
 
+    def test_build_base_command_emits_runtime_progress_log_without_changing_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "snapshot"
+            log_file = output_dir / "build-base.runtime.log"
+            fake_result = type(
+                "FakeBaseResult",
+                (),
+                {
+                    "lexemes": [type("Lexeme", (), {"lemma": "run"})(), type("Lexeme", (), {"lemma": "set"})()],
+                    "ambiguous_forms": [],
+                    "skipped_existing_canonical_words": [],
+                    "excluded_tail_canonical_words": [],
+                },
+            )()
+
+            def fake_build_base_records(**kwargs):
+                kwargs["progress_callback"](
+                    word="run",
+                    entry_id="lx_run",
+                    completed_items=1,
+                    total_items=2,
+                    status="built",
+                )
+                kwargs["progress_callback"](
+                    word="set",
+                    entry_id="lx_set",
+                    completed_items=2,
+                    total_items=2,
+                    status="built",
+                )
+                return fake_result
+
+            with patch("tools.lexicon.cli._load_build_base_providers", return_value=(object(), object())), \
+                 patch("tools.lexicon.cli.build_base_records", side_effect=fake_build_base_records), \
+                 patch("tools.lexicon.cli.write_base_snapshot", return_value={"lexemes": output_dir / "lexemes.jsonl"}):
+                code, stdout, _ = self.run_cli([
+                    "build-base",
+                    "--rerun-existing",
+                    "--output-dir",
+                    str(output_dir),
+                    "--log-level",
+                    "debug",
+                    "--log-file",
+                    str(log_file),
+                    "run",
+                    "set",
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "build-base")
+            self.assertEqual(payload["words"], ["run", "set"])
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            events = [row["event"] for row in log_rows]
+            self.assertIn("command-start", events)
+            self.assertIn("item-progress", events)
+            self.assertIn("command-complete", events)
+            progress_rows = [row for row in log_rows if row["event"] == "item-progress"]
+            self.assertTrue(any(row["fields"]["item_type"] == "word" and row["fields"]["entry_id"] == "lx_run" for row in progress_rows))
+
     def test_enrich_command_writes_json_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -209,6 +269,55 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["command"], "enrich")
             mocked_enrich.assert_called_once()
             self.assertEqual(mocked_enrich.call_args.kwargs["provider_mode"], "openai_compatible")
+
+    def test_enrich_command_passes_log_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            log_file = snapshot_dir / "runtime.log"
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()])) as mocked_enrich:
+                code, stdout, _ = self.run_cli([
+                    "enrich",
+                    "--snapshot-dir",
+                    str(snapshot_dir),
+                    "--log-level",
+                    "debug",
+                    "--log-file",
+                    str(log_file),
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "enrich")
+            self.assertEqual(mocked_enrich.call_args.kwargs["log_level"], "debug")
+            self.assertEqual(mocked_enrich.call_args.kwargs["log_file"], log_file)
+
+    def test_enrich_command_uses_lower_retry_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()])) as mocked_enrich:
+                code, _, _ = self.run_cli(["enrich", "--snapshot-dir", str(snapshot_dir)])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(mocked_enrich.call_args.kwargs["transient_retries"], 2)
+        self.assertEqual(mocked_enrich.call_args.kwargs["validation_retries"], 1)
+
+    def test_enrich_command_passes_retry_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "enrichments.jsonl", enrichments=[object()])) as mocked_enrich:
+                code, _, _ = self.run_cli([
+                    "enrich",
+                    "--snapshot-dir",
+                    str(snapshot_dir),
+                    "--transient-retries",
+                    "6",
+                    "--validation-retries",
+                    "3",
+                ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(mocked_enrich.call_args.kwargs["transient_retries"], 6)
+        self.assertEqual(mocked_enrich.call_args.kwargs["validation_retries"], 3)
 
 
     def test_enrich_command_passes_mode_concurrency_and_resume_controls(self) -> None:
@@ -282,7 +391,7 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             payload = json.loads(stdout)
             self.assertEqual(payload["command"], "phrase-build-base")
             self.assertEqual(payload["phrase_count"], 1)
@@ -350,7 +459,7 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             payload = json.loads(stdout)
             self.assertEqual(payload["command"], "build-phrases")
             self.assertEqual(payload["source_count"], 2)
@@ -400,7 +509,7 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             payload = json.loads(stdout)
             self.assertEqual(payload["command"], "reference-build-base")
             self.assertEqual(payload["reference_count"], 1)
@@ -432,7 +541,7 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(code, 0)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-complete", stderr)
             payload = json.loads(stdout)
             self.assertEqual(payload["command"], "batch-prepare")
             self.assertEqual(payload["request_count"], 2)
@@ -625,7 +734,7 @@ class CliTests(unittest.TestCase):
                 code, stdout, stderr = self.run_cli(["smoke-openai-compatible", "--output-dir", str(output_dir), "run"])
 
             self.assertEqual(code, 2)
-            self.assertEqual(stderr, "")
+            self.assertIn("command-failure", stderr)
             payload = json.loads(stdout)
             self.assertEqual(payload["command"], "smoke-openai-compatible")
             self.assertEqual(payload["error_count"], 1)
@@ -638,6 +747,20 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(args.max_senses, 8)
         self.assertFalse(args.rerun_existing)
+
+    def test_shared_logging_flags_default_for_non_enrichment_commands(self) -> None:
+        parser = cli.build_parser()
+
+        build_base_args = parser.parse_args(["build-base", "run"])
+        batch_prepare_args = parser.parse_args(["batch-prepare", "--input", "/tmp/input.jsonl", "--output-dir", "/tmp/out"])
+        import_db_args = parser.parse_args(["import-db", "--input", "/tmp/compiled.jsonl"])
+
+        self.assertEqual(build_base_args.log_level, "info")
+        self.assertIsNone(build_base_args.log_file)
+        self.assertEqual(batch_prepare_args.log_level, "info")
+        self.assertIsNone(batch_prepare_args.log_file)
+        self.assertEqual(import_db_args.log_level, "info")
+        self.assertIsNone(import_db_args.log_file)
 
     def test_smoke_openai_compatible_command_defaults_to_bounded_values(self) -> None:
         parser = cli.build_parser()
@@ -1016,12 +1139,69 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["command"], "import-db")
             self.assertFalse(payload["dry_run"])
             self.assertEqual(payload["summary"]["created_words"], 1)
-            mocked_import.assert_called_once_with(
-                compiled_path,
-                source_type="lexicon_snapshot",
-                source_reference="snapshot-20260307",
-                language="en",
+            mocked_import.assert_called_once()
+            self.assertEqual(mocked_import.call_args.args[0], compiled_path)
+            self.assertEqual(mocked_import.call_args.kwargs["source_type"], "lexicon_snapshot")
+            self.assertEqual(mocked_import.call_args.kwargs["source_reference"], "snapshot-20260307")
+            self.assertEqual(mocked_import.call_args.kwargs["language"], "en")
+            self.assertTrue(callable(mocked_import.call_args.kwargs["progress_callback"]))
+
+    def test_import_db_command_emits_runtime_progress_log_without_changing_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compiled_path = Path(tmpdir) / "words.enriched.jsonl"
+            compiled_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordfreq"}],
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "A1",
+                        "frequency_rank": 5,
+                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        "senses": [],
+                        "confusable_words": [],
+                        "generated_at": "2026-03-07T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
             )
+            log_file = Path(tmpdir) / "import-db.runtime.log"
+
+            def fake_run_import_file(path, **kwargs):
+                kwargs["progress_callback"](
+                    row={"entry_id": "lx_run", "entry_type": "word"},
+                    completed_rows=1,
+                    total_rows=1,
+                )
+                return {"created_words": 1, "updated_words": 0}
+
+            with patch("tools.lexicon.cli.run_import_file", side_effect=fake_run_import_file):
+                code, stdout, _ = self.run_cli([
+                    "import-db",
+                    "--input",
+                    str(compiled_path),
+                    "--log-level",
+                    "debug",
+                    "--log-file",
+                    str(log_file),
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "import-db")
+            self.assertEqual(payload["summary"]["created_words"], 1)
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            events = [row["event"] for row in log_rows]
+            self.assertIn("command-start", events)
+            self.assertIn("item-progress", events)
+            self.assertIn("command-complete", events)
+            progress_rows = [row for row in log_rows if row["event"] == "item-progress"]
+            self.assertTrue(any(row["fields"]["item_type"] == "row" and row["fields"]["completed_rows"] == 1 for row in progress_rows))
 
     def test_import_db_command_supports_dry_run_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

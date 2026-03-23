@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from tools.lexicon.ids import make_entry_id
 from tools.lexicon.inventory import normalize_surface_text
@@ -20,16 +20,27 @@ def build_phrase_snapshot_rows(
     phrases: Iterable[dict[str, Any]],
     snapshot_id: str,
     created_at: str | None = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     timestamp = created_at or _utc_now()
-    for raw_row in phrases:
+    source_rows = list(phrases)
+    total_rows = len(source_rows)
+    for index, raw_row in enumerate(source_rows, start=1):
         if not isinstance(raw_row, dict):
             continue
         display_form = str(raw_row.get("phrase") or raw_row.get("display_form") or "").strip()
         normalized_form = normalize_surface_text(display_form)
         if not normalized_form or normalized_form in seen:
+            if progress_callback is not None and normalized_form:
+                progress_callback(
+                    normalized_form=normalized_form,
+                    display_form=display_form,
+                    completed_items=index,
+                    total_items=total_rows,
+                    status="deduped",
+                )
             continue
         phrase_kind = str(raw_row.get("phrase_kind") or "multiword_expression").strip() or "multiword_expression"
         seen.add(normalized_form)
@@ -48,6 +59,15 @@ def build_phrase_snapshot_rows(
                 "created_at": timestamp,
             }
         )
+        if progress_callback is not None:
+            progress_callback(
+                normalized_form=normalized_form,
+                display_form=display_form,
+                phrase_kind=phrase_kind,
+                completed_items=index,
+                total_items=total_rows,
+                status="built",
+            )
     return rows
 
 

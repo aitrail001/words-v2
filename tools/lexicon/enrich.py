@@ -13,6 +13,7 @@ import math
 import select
 import shutil
 import subprocess
+import sys
 import time
 
 from tools.lexicon.compile_export import compile_word_result
@@ -23,6 +24,7 @@ from tools.lexicon.ids import make_enrichment_id, make_sense_id
 from tools.lexicon.jsonl_io import append_jsonl, read_jsonl, write_jsonl
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 from tools.lexicon.review_prep import build_review_prep_rows
+from tools.lexicon.runtime_logging import RuntimeLogConfig, RuntimeLogger
 from tools.lexicon.schemas.word_enrichment_schema import (
     build_single_sense_response_schema as _build_single_sense_response_schema,
     build_word_enrichment_response_schema as _build_word_enrichment_response_schema,
@@ -49,11 +51,12 @@ _ALLOWED_REGISTERS = set(ALLOWED_REGISTERS)
 _STRING_LIST_FIELDS = ('secondary_domains', 'synonyms', 'antonyms', 'collocations', 'grammar_patterns')
 _REQUIRED_TRANSLATION_LOCALES = tuple(REQUIRED_TRANSLATION_LOCALES)
 _DEFAULT_LLM_TIMEOUT_SECONDS = 60
-_DEFAULT_WORD_TRANSIENT_RETRIES = 5
-_DEFAULT_WORD_REPAIR_ATTEMPTS = 4
+_DEFAULT_WORD_TRANSIENT_RETRIES = 2
+_DEFAULT_WORD_REPAIR_ATTEMPTS = 1
 _NODE_RUN_TIMEOUT_SECONDS = _DEFAULT_LLM_TIMEOUT_SECONDS
 _WORD_DECISIONS = {"discard", "keep_standard", "keep_derived_special"}
 _WORD_SENSE_KINDS = {"standard_meaning", "base_form_reference", "special_meaning"}
+_DEFAULT_RUNTIME_LOG_FILE = "enrich.log"
 
 
 @dataclass(frozen=True)
@@ -353,13 +356,32 @@ def _client_generate_json(
     prompt: str,
     *,
     response_schema: dict[str, Any] | None = None,
+    reasoning_effort_override: str | None = None,
 ) -> dict[str, Any]:
+    def call_client() -> dict[str, Any]:
+        try:
+            return client.generate_json(prompt, response_schema=response_schema)
+        except TypeError as exc:
+            if "response_schema" not in str(exc):
+                raise
+            return client.generate_json(prompt)
+
+    if reasoning_effort_override is None or not hasattr(client, "reasoning_effort"):
+        return call_client()
+
+    original_reasoning_effort = getattr(client, "reasoning_effort")
+    setattr(client, "reasoning_effort", reasoning_effort_override)
     try:
-        return client.generate_json(prompt, response_schema=response_schema)
-    except TypeError as exc:
-        if "response_schema" not in str(exc):
-            raise
-        return client.generate_json(prompt)
+        return call_client()
+    finally:
+        setattr(client, "reasoning_effort", original_reasoning_effort)
+
+
+def _validation_retry_reasoning_effort(client: Any) -> str | None:
+    current_effort = str(getattr(client, "reasoning_effort", "") or "").strip().lower()
+    if current_effort in {"", "none"}:
+        return "low"
+    return None
 
 
 def _utc_now() -> str:
@@ -977,36 +999,261 @@ def _transient_retry_backoff_seconds(retry_number: int) -> float:
     return min(0.5 * (2 ** max(retry_number - 1, 0)), 5.0)
 
 
+def _is_retryable_phrase_payload_error(error: RuntimeError) -> bool:
+    return 'missing_translated_usage_note_with_source_note_present' in str(error).lower()
+
+
+def _retry_reason_label(error: BaseException) -> str:
+    message = str(error)
+    phrase_marker = 'missing_translated_usage_note_with_source_note_present'
+    if phrase_marker in message.lower():
+        return phrase_marker
+    return message
+
+
+def _build_runtime_logger(*, snapshot_dir: Path, log_level: str, log_file: Path | None) -> RuntimeLogger:
+    effective_log_file = log_file or (snapshot_dir / _DEFAULT_RUNTIME_LOG_FILE)
+    return RuntimeLogger(
+        RuntimeLogConfig(level=log_level, log_file=effective_log_file),
+        stream=sys.stderr,
+    )
+
+
+def _lexeme_runtime_fields(lexeme: LexemeRecord) -> dict[str, Any]:
+    return {
+        'lexeme_id': lexeme.lexeme_id,
+        'entry_id': lexeme.entry_id,
+        'entry_type': lexeme.entry_type,
+        'lemma': lexeme.lemma,
+    }
+
+
+def _emit_lexeme_event(
+    runtime_logger: RuntimeLogger | None,
+    event: str,
+    message: str,
+    *,
+    lexeme: LexemeRecord,
+    **fields: Any,
+) -> None:
+    if runtime_logger is None:
+        return
+    runtime_logger.info(event, message, **_lexeme_runtime_fields(lexeme), **fields)
+
+
+def _emit_retry_events(
+    runtime_logger: RuntimeLogger | None,
+    *,
+    lexeme: LexemeRecord,
+    retry_kind: str,
+    retry_reason: str,
+    retries_remaining: int,
+    sense_id: str | None = None,
+) -> None:
+    if runtime_logger is None:
+        return
+    fields: dict[str, Any] = {
+        'retry_kind': retry_kind,
+        'retry_reason': retry_reason,
+        'retries_remaining': retries_remaining,
+    }
+    if sense_id is not None:
+        fields['sense_id'] = sense_id
+    _emit_lexeme_event(
+        runtime_logger,
+        'retry-reason',
+        'Retry reason recorded',
+        lexeme=lexeme,
+        **fields,
+    )
+    _emit_lexeme_event(
+        runtime_logger,
+        'retry-scheduled',
+        'Retry scheduled',
+        lexeme=lexeme,
+        **fields,
+    )
+
+
+def _generate_validated_phrase_payload_with_stats(
+    *,
+    client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
+    lexeme: LexemeRecord,
+    max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    prompt = build_phrase_enrichment_prompt(lexeme=lexeme)
+    response_schema = _phrase_enrichment_response_schema()
+    transient_retries = 0
+    validation_retries = 0
+
+    while True:
+        try:
+            response = _client_generate_json(
+                client,
+                prompt,
+                response_schema=response_schema,
+                reasoning_effort_override=(
+                    _validation_retry_reasoning_effort(client)
+                    if validation_retries > 0
+                    else None
+                ),
+            )
+        except RuntimeError as exc:
+            if _is_retryable_word_generation_error(exc) and transient_retries < max(0, int(max_transient_retries)):
+                transient_retries += 1
+                _emit_retry_events(
+                    runtime_logger,
+                    retry_kind='transient',
+                    retries_remaining=max(0, int(max_transient_retries) - transient_retries),
+                    retry_reason=_retry_reason_label(exc),
+                    lexeme=lexeme,
+                )
+                time.sleep(_transient_retry_backoff_seconds(transient_retries))
+                continue
+            raise
+
+        try:
+            return _validate_openai_compatible_phrase_payload(response), {
+                "validation_retry_count": validation_retries,
+                "transient_retry_count": transient_retries,
+            }
+        except RuntimeError as exc:
+            if _is_retryable_phrase_payload_error(exc) and validation_retries < max(0, int(max_validation_retries)):
+                validation_retries += 1
+                _emit_retry_events(
+                    runtime_logger,
+                    retry_kind='validation',
+                    retries_remaining=max(0, int(max_validation_retries) - validation_retries),
+                    retry_reason=_retry_reason_label(exc),
+                    lexeme=lexeme,
+                )
+                continue
+            raise
+
+
+def _generate_validated_single_sense_payload_with_stats(
+    *,
+    client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
+    lexeme: LexemeRecord,
+    sense: SenseRecord,
+    max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    prompt = build_enrichment_prompt(lexeme=lexeme, sense=sense)
+    response_schema = _single_sense_response_schema()
+    transient_retries = 0
+    validation_retries = 0
+    effective_max_transient_retries = max(0, int(max_transient_retries))
+    effective_max_validation_retries = max(0, int(max_validation_retries))
+
+    while True:
+        try:
+            response = _client_generate_json(
+                client,
+                prompt,
+                response_schema=response_schema,
+                reasoning_effort_override=(
+                    _validation_retry_reasoning_effort(client)
+                    if validation_retries > 0
+                    else None
+                ),
+            )
+        except RuntimeError as exc:
+            if _is_retryable_word_generation_error(exc) and transient_retries < effective_max_transient_retries:
+                transient_retries += 1
+                _emit_retry_events(
+                    runtime_logger,
+                    retry_kind='transient',
+                    retries_remaining=max(0, effective_max_transient_retries - transient_retries),
+                    retry_reason=_retry_reason_label(exc),
+                    lexeme=lexeme,
+                    sense_id=sense.sense_id,
+                )
+                time.sleep(_transient_retry_backoff_seconds(transient_retries))
+                continue
+            raise
+
+        try:
+            return _validate_openai_compatible_payload(response), {
+                "validation_retry_count": validation_retries,
+                "transient_retry_count": transient_retries,
+            }
+        except RuntimeError as exc:
+            if _is_repairable_word_payload_error(exc) and validation_retries < effective_max_validation_retries:
+                validation_retries += 1
+                _emit_retry_events(
+                    runtime_logger,
+                    retry_kind='validation',
+                    retries_remaining=max(0, effective_max_validation_retries - validation_retries),
+                    retry_reason=_retry_reason_label(exc),
+                    lexeme=lexeme,
+                    sense_id=sense.sense_id,
+                )
+                continue
+            raise
+
+
 def _generate_validated_word_payload_with_stats(
     *,
     client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
     lexeme: LexemeRecord,
     senses: list[SenseRecord],
     prompt_mode: str = "grounded",
+    max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     prompt = build_word_enrichment_prompt(lexeme=lexeme, senses=senses, prompt_mode=prompt_mode)
     response_schema = _word_enrichment_response_schema()
     last_error: RuntimeError | None = None
     repair_attempts = 0
     transient_retries = 0
+    effective_max_transient_retries = max(0, int(max_transient_retries))
+    effective_max_validation_retries = max(0, int(max_validation_retries))
 
     while True:
         try:
-            response = _client_generate_json(client, prompt, response_schema=response_schema)
+            response = _client_generate_json(
+                client,
+                prompt,
+                response_schema=response_schema,
+                reasoning_effort_override=(
+                    _validation_retry_reasoning_effort(client)
+                    if repair_attempts > 0
+                    else None
+                ),
+            )
             return _validate_openai_compatible_word_payload(response, lexeme=lexeme, senses=senses), {
                 "repair_count": repair_attempts,
                 "retry_count": transient_retries,
             }
         except RuntimeError as exc:
             last_error = exc
-            if _is_retryable_word_generation_error(exc) and transient_retries < _DEFAULT_WORD_TRANSIENT_RETRIES:
+            if _is_retryable_word_generation_error(exc) and transient_retries < effective_max_transient_retries:
                 transient_retries += 1
+                _emit_retry_events(
+                    runtime_logger,
+                    retry_kind='transient',
+                    retries_remaining=max(0, effective_max_transient_retries - transient_retries),
+                    retry_reason=_retry_reason_label(exc),
+                    lexeme=lexeme,
+                )
                 time.sleep(_transient_retry_backoff_seconds(transient_retries))
                 continue
-            if not _is_repairable_word_payload_error(exc) or repair_attempts >= _DEFAULT_WORD_REPAIR_ATTEMPTS:
+            if not _is_repairable_word_payload_error(exc) or repair_attempts >= effective_max_validation_retries:
                 raise
             repair_attempts += 1
             transient_retries = 0
+            _emit_retry_events(
+                runtime_logger,
+                retry_kind='validation',
+                retries_remaining=max(0, effective_max_validation_retries - repair_attempts),
+                retry_reason=_retry_reason_label(exc),
+                lexeme=lexeme,
+            )
             prompt = build_word_enrichment_repair_prompt(
                 lexeme=lexeme,
                 senses=senses,
@@ -1021,12 +1268,18 @@ def _generate_validated_word_payload(
     lexeme: LexemeRecord,
     senses: list[SenseRecord],
     prompt_mode: str = "grounded",
+    max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> dict[str, Any]:
     rows, _ = _generate_validated_word_payload_with_stats(
         client=client,
         lexeme=lexeme,
         senses=senses,
         prompt_mode=prompt_mode,
+        max_transient_retries=max_transient_retries,
+        max_validation_retries=max_validation_retries,
+        runtime_logger=runtime_logger,
     )
     return rows
 
@@ -1427,6 +1680,9 @@ def build_openai_compatible_node_enrichment_provider(
     reasoning_effort: str | None = None,
     review_status: str = 'draft',
     runner: NodeRunner | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> EnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible_node enrichment mode')
@@ -1447,12 +1703,13 @@ def build_openai_compatible_node_enrichment_provider(
     )
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
-        response = _validate_openai_compatible_payload(
-            _client_generate_json(
-                client,
-                build_enrichment_prompt(lexeme=lexeme, sense=sense),
-                response_schema=_single_sense_response_schema(),
-            )
+        response, _ = _generate_validated_single_sense_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            sense=sense,
+            max_transient_retries=transient_retries,
+            max_validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
         return _build_enrichment_record(
             lexeme=lexeme,
@@ -1475,6 +1732,9 @@ def build_openai_compatible_node_word_enrichment_provider(
     reasoning_effort: str | None = None,
     review_status: str = 'draft',
     runner: NodeRunner | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> WordEnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible_node enrichment mode')
@@ -1496,7 +1756,15 @@ def build_openai_compatible_node_word_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
         ordered_senses = sorted(senses, key=lambda item: item.sense_order)
-        response = _generate_validated_word_payload(client=client, lexeme=lexeme, senses=ordered_senses, prompt_mode="word_only")
+        response = _generate_validated_word_payload(
+            client=client,
+            lexeme=lexeme,
+            senses=ordered_senses,
+            prompt_mode="word_only",
+            max_transient_retries=transient_retries,
+            max_validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
+        )
         outcome = _build_word_job_outcome(
             lexeme=lexeme,
             response=response,
@@ -1519,6 +1787,9 @@ def build_openai_compatible_enrichment_provider(
     reasoning_effort: str | None = None,
     review_status: str = 'draft',
     client: Any | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> EnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
@@ -1539,12 +1810,13 @@ def build_openai_compatible_enrichment_provider(
     )
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
-        response = _validate_openai_compatible_payload(
-            _client_generate_json(
-                client,
-                build_enrichment_prompt(lexeme=lexeme, sense=sense),
-                response_schema=_single_sense_response_schema(),
-            )
+        response, _ = _generate_validated_single_sense_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            sense=sense,
+            max_transient_retries=transient_retries,
+            max_validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
         return _build_enrichment_record(
             lexeme=lexeme,
@@ -1567,6 +1839,9 @@ def build_openai_compatible_word_enrichment_provider(
     reasoning_effort: str | None = None,
     review_status: str = 'draft',
     client: Any | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> WordEnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
@@ -1588,7 +1863,15 @@ def build_openai_compatible_word_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
         ordered_senses = sorted(senses, key=lambda item: item.sense_order)
-        response = _generate_validated_word_payload(client=client, lexeme=lexeme, senses=ordered_senses, prompt_mode="word_only")
+        response = _generate_validated_word_payload(
+            client=client,
+            lexeme=lexeme,
+            senses=ordered_senses,
+            prompt_mode="word_only",
+            max_transient_retries=transient_retries,
+            max_validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
+        )
         outcome = _build_word_job_outcome(
             lexeme=lexeme,
             response=response,
@@ -1611,6 +1894,9 @@ def build_openai_compatible_phrase_enrichment_provider(
     reasoning_effort: str | None = None,
     review_status: str = 'draft',
     client: Any | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> WordEnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
@@ -1632,12 +1918,12 @@ def build_openai_compatible_phrase_enrichment_provider(
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> WordJobOutcome:
         del senses
-        response = _validate_openai_compatible_phrase_payload(
-            _client_generate_json(
-                client,
-                build_phrase_enrichment_prompt(lexeme=lexeme),
-                response_schema=_phrase_enrichment_response_schema(),
-            )
+        response, _ = _generate_validated_phrase_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            max_transient_retries=transient_retries,
+            max_validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
         return _build_phrase_job_outcome(
             lexeme=lexeme,
@@ -1661,6 +1947,9 @@ def build_enrichment_provider(
     review_status: str = 'draft',
     client: Any | None = None,
     runner: NodeRunner | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> EnrichmentProvider:
     if provider_mode not in _PROVIDER_MODES:
         raise ValueError(f'Unsupported provider mode: {provider_mode}')
@@ -1673,6 +1962,9 @@ def build_enrichment_provider(
             reasoning_effort=reasoning_effort,
             review_status=review_status,
             client=client,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
     if provider_mode == 'openai_compatible_node':
         return build_openai_compatible_node_enrichment_provider(
@@ -1681,6 +1973,9 @@ def build_enrichment_provider(
             reasoning_effort=reasoning_effort,
             review_status=review_status,
             runner=runner,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
     if settings.llm_base_url and settings.llm_model and settings.llm_api_key:
         if settings.llm_transport == 'node':
@@ -1690,6 +1985,9 @@ def build_enrichment_provider(
                 reasoning_effort=reasoning_effort,
                 review_status=review_status,
                 runner=runner,
+                transient_retries=transient_retries,
+                validation_retries=validation_retries,
+                runtime_logger=runtime_logger,
             )
         return build_openai_compatible_enrichment_provider(
             settings=settings,
@@ -1697,6 +1995,9 @@ def build_enrichment_provider(
             reasoning_effort=reasoning_effort,
             review_status=review_status,
             client=client,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
     return build_placeholder_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
 
@@ -1710,6 +2011,9 @@ def build_word_enrichment_provider(
     review_status: str = 'draft',
     client: Any | None = None,
     runner: NodeRunner | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> WordEnrichmentProvider:
     if provider_mode not in _PROVIDER_MODES:
         raise ValueError(f'Unsupported provider mode: {provider_mode}')
@@ -1722,6 +2026,9 @@ def build_word_enrichment_provider(
             reasoning_effort=reasoning_effort,
             review_status=review_status,
             client=client,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
     if provider_mode == 'openai_compatible_node':
         return build_openai_compatible_node_word_enrichment_provider(
@@ -1730,6 +2037,9 @@ def build_word_enrichment_provider(
             reasoning_effort=reasoning_effort,
             review_status=review_status,
             runner=runner,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
     if settings.llm_base_url and settings.llm_model and settings.llm_api_key:
         if settings.llm_transport == 'node':
@@ -1739,6 +2049,9 @@ def build_word_enrichment_provider(
                 reasoning_effort=reasoning_effort,
                 review_status=review_status,
                 runner=runner,
+                transient_retries=transient_retries,
+                validation_retries=validation_retries,
+                runtime_logger=runtime_logger,
             )
         return build_openai_compatible_word_enrichment_provider(
             settings=settings,
@@ -1746,6 +2059,9 @@ def build_word_enrichment_provider(
             reasoning_effort=reasoning_effort,
             review_status=review_status,
             client=client,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
     return build_placeholder_word_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
 
@@ -1877,6 +2193,7 @@ def _append_completed_lexeme_records(
     outcome: WordJobOutcome,
     generation_run_id: str,
     completed_lexeme_ids: set[str],
+    runtime_logger: RuntimeLogger | None = None,
 ) -> None:
     completed_at = _utc_now()
     compiled_row = _compiled_row_from_outcome(lexeme=lexeme, outcome=outcome)
@@ -1897,6 +2214,14 @@ def _append_completed_lexeme_records(
     )
     completed_lexeme_ids.add(lexeme.lexeme_id)
     _reconcile_failures_output(failures_path, completed_lexeme_ids=completed_lexeme_ids)
+    _emit_lexeme_event(
+        runtime_logger,
+        'lexeme-complete',
+        'Lexeme completed',
+        lexeme=lexeme,
+        status='completed',
+        accepted_sense_count=len(outcome.records),
+    )
 
 
 def _compiled_row_from_outcome(*, lexeme: LexemeRecord, outcome: WordJobOutcome) -> dict[str, Any] | None:
@@ -1989,6 +2314,10 @@ def enrich_snapshot(
     checkpoint_path: Path | None = None,
     failures_output: Path | None = None,
     max_failures: int | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    log_level: str = 'info',
+    log_file: Path | None = None,
     request_delay_seconds: float = 0.0,
     max_new_completed_lexemes: int | None = None,
 ) -> list[EnrichmentRecord]:
@@ -1997,6 +2326,7 @@ def enrich_snapshot(
     effective_settings = settings or LexiconSettings.from_env()
     effective_generated_at = generated_at or _utc_now()
     effective_generation_run_id = generation_run_id or f'enrich-{effective_generated_at}'
+    runtime_logger = _build_runtime_logger(snapshot_dir=snapshot_dir, log_level=log_level, log_file=log_file)
     lexemes, senses = read_snapshot_inputs(snapshot_dir)
     lexemes_by_id = {lexeme.lexeme_id: lexeme for lexeme in lexemes}
     senses_by_lexeme: dict[str, list[SenseRecord]] = {}
@@ -2013,14 +2343,27 @@ def enrich_snapshot(
             reasoning_effort=reasoning_effort,
             review_status=review_status,
             client=None,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
         enrichments: list[EnrichmentRecord] = []
         for sense in sorted(senses, key=lambda item: (item.lexeme_id, item.sense_order)):
             lexeme = lexemes_by_id.get(sense.lexeme_id)
             if lexeme is None:
                 continue
-            enrichments.append(
-                enrichment_provider(
+            _emit_lexeme_event(
+                runtime_logger,
+                'lexeme-start',
+                'Lexeme processing started',
+                lexeme=lexeme,
+                sense_id=sense.sense_id,
+                sense_order=sense.sense_order,
+                sense_count=1,
+                mode=mode,
+            )
+            try:
+                enrichment = enrichment_provider(
                     lexeme=lexeme,
                     sense=sense,
                     settings=effective_settings,
@@ -2028,6 +2371,27 @@ def enrich_snapshot(
                     generation_run_id=effective_generation_run_id,
                     prompt_version=prompt_version,
                 )
+            except Exception as exc:
+                _emit_lexeme_event(
+                    runtime_logger,
+                    'lexeme-failure',
+                    'Lexeme failed',
+                    lexeme=lexeme,
+                    sense_id=sense.sense_id,
+                    sense_order=sense.sense_order,
+                    error=str(exc),
+                )
+                raise
+            enrichments.append(enrichment)
+            _emit_lexeme_event(
+                runtime_logger,
+                'lexeme-complete',
+                'Lexeme completed',
+                lexeme=lexeme,
+                sense_id=sense.sense_id,
+                sense_order=sense.sense_order,
+                status='completed',
+                accepted_sense_count=1,
             )
         write_jsonl(destination, [record.to_dict() for record in enrichments])
         return enrichments
@@ -2050,6 +2414,9 @@ def enrich_snapshot(
         reasoning_effort=reasoning_effort,
         review_status=review_status,
         client=None,
+        transient_retries=transient_retries,
+        validation_retries=validation_retries,
+        runtime_logger=runtime_logger,
     )
     phrase_enrichment_provider = (
         build_openai_compatible_phrase_enrichment_provider(
@@ -2058,6 +2425,9 @@ def enrich_snapshot(
             reasoning_effort=reasoning_effort,
             review_status=review_status,
             client=None,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
         )
         if provider_mode == 'openai_compatible'
         else build_placeholder_word_enrichment_provider(settings=effective_settings, model_name=model_name, review_status=review_status)
@@ -2114,6 +2484,14 @@ def enrich_snapshot(
 
     def run_word_job(lexeme: LexemeRecord) -> WordJobOutcome:
         word_senses = ordered_sense_lists.get(lexeme.lexeme_id, [])
+        _emit_lexeme_event(
+            runtime_logger,
+            'lexeme-start',
+            'Lexeme processing started',
+            lexeme=lexeme,
+            sense_count=len(word_senses),
+            mode=mode,
+        )
         if effective_request_delay_seconds > 0:
             with request_start_lock:
                 now = time.monotonic()
@@ -2157,6 +2535,7 @@ def enrich_snapshot(
                 outcome=outcome,
                 generation_run_id=effective_generation_run_id,
                 completed_lexeme_ids=completed_lexeme_ids,
+                runtime_logger=runtime_logger,
             )
             completed_results.pop(lexeme.lexeme_id, None)
             next_flush_index += 1
@@ -2177,12 +2556,20 @@ def enrich_snapshot(
                 outcome=outcome,
                 generation_run_id=effective_generation_run_id,
                 completed_lexeme_ids=completed_lexeme_ids,
+                runtime_logger=runtime_logger,
             )
             completed_results.pop(lexeme.lexeme_id, None)
 
     def handle_failure(lexeme: LexemeRecord, exc: Exception) -> None:
         message = f'{lexeme.lemma}: {exc}'
         failures.append(message)
+        _emit_lexeme_event(
+            runtime_logger,
+            'lexeme-failure',
+            'Lexeme failed',
+            lexeme=lexeme,
+            error=str(exc),
+        )
         _write_per_word_failure(
             failures_destination,
             lexeme=lexeme,
@@ -2270,6 +2657,10 @@ def run_enrichment(
     checkpoint_path: Path | None = None,
     failures_output: Path | None = None,
     max_failures: int | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    log_level: str = 'info',
+    log_file: Path | None = None,
     request_delay_seconds: float = 0.0,
     max_new_completed_lexemes: int | None = None,
 ) -> EnrichmentRunResult:
@@ -2294,6 +2685,10 @@ def run_enrichment(
         checkpoint_path=checkpoint_path,
         failures_output=failures_output,
         max_failures=max_failures,
+        transient_retries=transient_retries,
+        validation_retries=validation_retries,
+        log_level=log_level,
+        log_file=log_file,
         request_delay_seconds=request_delay_seconds,
         max_new_completed_lexemes=max_new_completed_lexemes,
     )
