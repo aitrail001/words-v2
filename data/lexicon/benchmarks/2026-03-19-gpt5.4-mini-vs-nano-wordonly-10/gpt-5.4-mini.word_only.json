@@ -1,0 +1,4028 @@
+{
+  "model_name": "gpt-5.4-mini",
+  "prompt_mode": "word_only",
+  "lexeme_count": 10,
+  "selected_sense_count": 42,
+  "valid_response_count": 33,
+  "failed_lexeme_count": 0,
+  "repair_count": 0,
+  "retry_count": 0,
+  "response_schema_fallback_count": 0,
+  "batch_duration_seconds": 394.79,
+  "average_latency_seconds": 39.477,
+  "average_confidence": 0.934,
+  "average_definition_chars": 62.7,
+  "average_usage_note_chars": 69.2,
+  "cefr_distribution": {
+    "A1": 6,
+    "A2": 10,
+    "B1": 10,
+    "B2": 5,
+    "C1": 2
+  },
+  "failed_lexemes": [],
+  "failure_rows": [],
+  "rows": [
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_perk_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_perk_1",
+      "definition": "an extra benefit or advantage that you get in addition to the main thing, especially in a job",
+      "examples": [
+        {
+          "sentence": "Free meals are one of the perks of working at the hotel.",
+          "difficulty": "B2"
+        },
+        {
+          "sentence": "The job comes with several perks, including flexible hours.",
+          "difficulty": "B2"
+        }
+      ],
+      "cefr_level": "B2",
+      "primary_domain": "work",
+      "secondary_domains": [
+        "business",
+        "daily life"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "benefit",
+        "advantage",
+        "privilege"
+      ],
+      "antonyms": [
+        "disadvantage"
+      ],
+      "collocations": [
+        "job perk",
+        "employee perk",
+        "company perk",
+        "offer perks"
+      ],
+      "grammar_patterns": [
+        "a perk of something",
+        "a perk of doing something",
+        "come with perks"
+      ],
+      "usage_note": "Often used for non-salary advantages connected with a job.",
+      "forms": {
+        "plural_forms": [
+          "perks"
+        ],
+        "verb_forms": {
+          "base": "perk",
+          "gerund": "perking",
+          "past": "perked",
+          "past_participle": "perked",
+          "third_person_singular": "perks"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "perks"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "salary",
+          "note": "Usually means a regular salary or pay amount, not an extra benefit."
+        },
+        {
+          "word": "bonus",
+          "note": "A bonus is often extra money; a perk can be any extra advantage, not only money."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.96,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:12:41Z",
+      "lexeme_id": "lx_perk",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u9664\u4e3b\u8981\u5185\u5bb9\u4e4b\u5916\u83b7\u5f97\u7684\u989d\u5916\u597d\u5904\u6216\u5f85\u9047\uff0c\u5c24\u6307\u5de5\u4f5c\u4e2d\u7684\u798f\u5229",
+          "usage_note": "\u5e38\u6307\u5de5\u4f5c\u9644\u5e26\u7684\u989d\u5916\u798f\u5229\u6216\u597d\u5904\u3002",
+          "examples": [
+            "\u514d\u8d39\u9910\u98df\u662f\u5728\u90a3\u5bb6\u9152\u5e97\u5de5\u4f5c\u7684\u4e00\u9879\u798f\u5229\u3002",
+            "\u8fd9\u4efd\u5de5\u4f5c\u6709\u597d\u51e0\u9879\u798f\u5229\uff0c\u5305\u62ec\u5f39\u6027\u5de5\u4f5c\u65f6\u95f4\u3002"
+          ]
+        },
+        "es": {
+          "definition": "beneficio o ventaja extra que recibes adem\u00e1s de lo principal, especialmente en un trabajo",
+          "usage_note": "Suele usarse para beneficios adicionales de un empleo.",
+          "examples": [
+            "Las comidas gratis son una de las ventajas de trabajar en el hotel.",
+            "El trabajo ofrece varias ventajas, incluidas horas flexibles."
+          ]
+        },
+        "ar": {
+          "definition": "\u0645\u064a\u0632\u0629 \u0625\u0636\u0627\u0641\u064a\u0629 \u0623\u0648 \u0645\u0646\u0641\u0639\u0629 \u062a\u062d\u0635\u0644 \u0639\u0644\u064a\u0647\u0627 \u0625\u0644\u0649 \u062c\u0627\u0646\u0628 \u0627\u0644\u0634\u064a\u0621 \u0627\u0644\u0623\u0633\u0627\u0633\u064a\u060c \u062e\u0627\u0635\u0629 \u0641\u064a \u0627\u0644\u0639\u0645\u0644",
+          "usage_note": "\u062a\u0633\u062a\u0639\u0645\u0644 \u063a\u0627\u0644\u0628\u064b\u0627 \u0644\u0644\u0645\u0632\u0627\u064a\u0627 \u063a\u064a\u0631 \u0627\u0644\u0623\u0633\u0627\u0633\u064a\u0629 \u0627\u0644\u0645\u0631\u062a\u0628\u0637\u0629 \u0628\u0627\u0644\u0648\u0638\u064a\u0641\u0629.",
+          "examples": [
+            "\u0627\u0644\u0648\u062c\u0628\u0627\u062a \u0627\u0644\u0645\u062c\u0627\u0646\u064a\u0629 \u0645\u0646 \u0627\u0644\u0645\u0632\u0627\u064a\u0627 \u0627\u0644\u0625\u0636\u0627\u0641\u064a\u0629 \u0644\u0644\u0639\u0645\u0644 \u0641\u064a \u0627\u0644\u0641\u0646\u062f\u0642.",
+            "\u062a\u0623\u062a\u064a \u0627\u0644\u0648\u0638\u064a\u0641\u0629 \u0645\u0639 \u0639\u062f\u0629 \u0645\u0632\u0627\u064a\u0627 \u0625\u0636\u0627\u0641\u064a\u0629\u060c \u0645\u0646\u0647\u0627 \u0633\u0627\u0639\u0627\u062a \u0639\u0645\u0644 \u0645\u0631\u0646\u0629."
+          ]
+        },
+        "pt-BR": {
+          "definition": "benef\u00edcio ou vantagem extra que voc\u00ea recebe al\u00e9m do principal, especialmente em um trabalho",
+          "usage_note": "Usado com frequ\u00eancia para benef\u00edcios adicionais de um emprego.",
+          "examples": [
+            "Refei\u00e7\u00f5es gr\u00e1tis s\u00e3o uma das vantagens de trabalhar no hotel.",
+            "O emprego vem com v\u00e1rios benef\u00edcios, incluindo hor\u00e1rio flex\u00edvel."
+          ]
+        },
+        "ja": {
+          "definition": "\u4e3b\u306a\u3082\u306e\u306b\u52a0\u3048\u3066\u5f97\u3089\u308c\u308b\u8ffd\u52a0\u306e\u7279\u5178\u3084 \u0932\u093e\u092d\u3001\u7279\u306b\u4ed5\u4e8b\u306b\u95a2\u3059\u308b\u3082\u306e",
+          "usage_note": "\u7279\u306b\u4ed5\u4e8b\u306e\u798f\u5229\u539a\u751f\u3084\u4ed8\u52a0\u7684\u306a\u5229\u70b9\u306b\u3064\u3044\u3066\u4f7f\u3046\u3002",
+          "examples": [
+            "\u7121\u6599\u306e\u98df\u4e8b\u306f\u3001\u305d\u306e\u30db\u30c6\u30eb\u3067\u50cd\u304f\u7279\u5178\u306e\u4e00\u3064\u3067\u3059\u3002",
+            "\u305d\u306e\u4ed5\u4e8b\u306b\u306f\u3001\u67d4\u8edf\u306a\u52e4\u52d9\u6642\u9593\u3092\u542b\u3080\u3044\u304f\u3064\u304b\u306e\u7279\u5178\u304c\u3042\u308a\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_perk_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_perk_1",
+      "definition": "to become more lively, cheerful, or energetic, or to make someone feel this way",
+      "examples": [
+        {
+          "sentence": "She perked up after she had some coffee.",
+          "difficulty": "B2"
+        },
+        {
+          "sentence": "The good news perked everyone up.",
+          "difficulty": "C1"
+        }
+      ],
+      "cefr_level": "C1",
+      "primary_domain": "daily life",
+      "secondary_domains": [
+        "emotion"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "brighten",
+        "liven up",
+        "revive"
+      ],
+      "antonyms": [
+        "worsen",
+        "decline"
+      ],
+      "collocations": [
+        "perk up",
+        "perk somebody up",
+        "ears perk up"
+      ],
+      "grammar_patterns": [
+        "perk up",
+        "perk somebody up"
+      ],
+      "usage_note": "Very common as the phrasal verb perk up.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "perk",
+          "gerund": "perking",
+          "past": "perked",
+          "past_participle": "perked",
+          "third_person_singular": "perks"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "perked-up"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "cheer up",
+          "note": "Cheer up focuses on becoming happier; perk up can mean become more lively, energetic, or interested."
+        },
+        {
+          "word": "wake up",
+          "note": "Wake up means stop sleeping; perk up means become more active or alert."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.91,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:12:41Z",
+      "lexeme_id": "lx_perk",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u53d8\u5f97\u66f4\u6709\u7cbe\u795e\u3001\u66f4\u5f00\u6717\u6216\u66f4\u6709\u6d3b\u529b\uff1b\u4e5f\u53ef\u6307\u4f7f\u67d0\u4eba\u5982\u6b64",
+          "usage_note": "\u5e38\u7528\u4e8e\u77ed\u8bed perk up\u3002",
+          "examples": [
+            "\u5979\u559d\u4e86\u70b9\u5496\u5561\u540e\u7cbe\u795e\u8d77\u6765\u4e86\u3002",
+            "\u8fd9\u4e2a\u597d\u6d88\u606f\u8ba9\u5927\u5bb6\u90fd\u632f\u4f5c\u8d77\u6765\u4e86\u3002"
+          ]
+        },
+        "es": {
+          "definition": "volverse m\u00e1s animado, alegre o en\u00e9rgico, o hacer que alguien se sienta as\u00ed",
+          "usage_note": "Aparece con mucha frecuencia en la expresi\u00f3n perk up.",
+          "examples": [
+            "Se anim\u00f3 despu\u00e9s de tomar un poco de caf\u00e9.",
+            "La buena noticia anim\u00f3 a todos."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u0635\u0628\u062d \u0623\u0643\u062b\u0631 \u062d\u064a\u0648\u064a\u0629 \u0623\u0648 \u0645\u0631\u062d\u064b\u0627 \u0623\u0648 \u0646\u0634\u0627\u0637\u064b\u0627\u060c \u0623\u0648 \u064a\u062c\u0639\u0644 \u0634\u062e\u0635\u064b\u0627 \u0643\u0630\u0644\u0643",
+          "usage_note": "\u064a\u0634\u064a\u0639 \u0641\u064a \u0627\u0644\u062a\u0639\u0628\u064a\u0631 \u0627\u0644\u0645\u0631\u0643\u0628 perk up.",
+          "examples": [
+            "\u0627\u0633\u062a\u0639\u0627\u062f\u062a \u0646\u0634\u0627\u0637\u0647\u0627 \u0628\u0639\u062f \u0623\u0646 \u0634\u0631\u0628\u062a \u0628\u0639\u0636 \u0627\u0644\u0642\u0647\u0648\u0629.",
+            "\u0623\u062f\u062e\u0644 \u0627\u0644\u062e\u0628\u0631 \u0627\u0644\u0633\u0627\u0631 \u0627\u0644\u062d\u064a\u0648\u064a\u0629 \u0625\u0644\u0649 \u0627\u0644\u062c\u0645\u064a\u0639."
+          ]
+        },
+        "pt-BR": {
+          "definition": "ficar mais animado, alegre ou cheio de energia, ou fazer algu\u00e9m ficar assim",
+          "usage_note": "Muito comum na express\u00e3o perk up.",
+          "examples": [
+            "Ela ficou mais animada depois de tomar caf\u00e9.",
+            "A boa not\u00edcia animou todo mundo."
+          ]
+        },
+        "ja": {
+          "definition": "\u3088\u308a\u5143\u6c17\u306b\u3001\u660e\u308b\u304f\u3001\u751f\u304d\u751f\u304d\u3068\u306a\u308b\u3001\u307e\u305f\u306f\u305d\u3046\u3055\u305b\u308b",
+          "usage_note": "\u53e5\u52d5\u8a5e perk up \u3068\u3057\u3066\u3088\u304f\u4f7f\u3046\u3002",
+          "examples": [
+            "\u5f7c\u5973\u306f\u30b3\u30fc\u30d2\u30fc\u3092\u98f2\u3093\u3060\u3042\u3068\u5143\u6c17\u3092\u53d6\u308a\u623b\u3057\u305f\u3002",
+            "\u305d\u306e\u826f\u3044\u77e5\u3089\u305b\u3067\u307f\u3093\u306a\u5143\u6c17\u3065\u3044\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_perk_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_perk_1",
+      "definition": "to move into a more upright position, especially as a sign of interest or attention",
+      "examples": [
+        {
+          "sentence": "The dog's ears perked up when it heard the door open.",
+          "difficulty": "C1"
+        },
+        {
+          "sentence": "He perked up at the mention of his name.",
+          "difficulty": "C1"
+        }
+      ],
+      "cefr_level": "C1",
+      "primary_domain": "daily life",
+      "secondary_domains": [
+        "animals",
+        "body language"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "straighten",
+        "become alert"
+      ],
+      "antonyms": [
+        "droop",
+        "sag"
+      ],
+      "collocations": [
+        "perk up your ears",
+        "ears perk up"
+      ],
+      "grammar_patterns": [
+        "perk up",
+        "perk up at something"
+      ],
+      "usage_note": "Often used for ears, posture, or a quick sign of alert interest.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "perk",
+          "gerund": "perking",
+          "past": "perked",
+          "past_participle": "perked",
+          "third_person_singular": "perks"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": []
+      },
+      "confusable_words": [
+        {
+          "word": "sit up",
+          "note": "Sit up means move into a more upright position generally; perk up often suggests a quick alert movement."
+        },
+        {
+          "word": "prick up",
+          "note": "Prick up your ears specifically refers to listening carefully; perk up can be broader and more informal."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.84,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:12:41Z",
+      "lexeme_id": "lx_perk",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u633a\u76f4\u6216\u7ad6\u8d77\u6765\uff0c\u5c24\u6307\u8868\u73b0\u51fa\u5174\u8da3\u6216\u6ce8\u610f",
+          "usage_note": "\u5e38\u7528\u4e8e\u8033\u6735\u6216\u7a81\u7136\u8868\u73b0\u51fa\u6ce8\u610f\u7684\u52a8\u4f5c\u3002",
+          "examples": [
+            "\u72d7\u542c\u5230\u95e8\u5f00\u65f6\uff0c\u8033\u6735\u4e00\u4e0b\u5b50\u7ad6\u4e86\u8d77\u6765\u3002",
+            "\u4e00\u63d0\u5230\u4ed6\u7684\u540d\u5b57\uff0c\u4ed6\u7acb\u523b\u6765\u4e86\u7cbe\u795e\u5e76\u6ce8\u610f\u8d77\u6765\u3002"
+          ]
+        },
+        "es": {
+          "definition": "ponerse m\u00e1s erguido, especialmente como se\u00f1al de inter\u00e9s o atenci\u00f3n",
+          "usage_note": "Se usa mucho con orejas o con una reacci\u00f3n r\u00e1pida de atenci\u00f3n.",
+          "examples": [
+            "Las orejas del perro se levantaron cuando oy\u00f3 abrirse la puerta.",
+            "Se mostr\u00f3 alerta al o\u00edr mencionar su nombre."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u0646\u062a\u0635\u0628 \u0623\u0648 \u064a\u0631\u062a\u0641\u0639 \u0625\u0644\u0649 \u0648\u0636\u0639 \u0623\u0643\u062b\u0631 \u0627\u0639\u062a\u062f\u0627\u0644\u064b\u0627\u060c \u062e\u0627\u0635\u0629\u064b \u0639\u0644\u0627\u0645\u0629 \u0639\u0644\u0649 \u0627\u0644\u0627\u0647\u062a\u0645\u0627\u0645 \u0623\u0648 \u0627\u0644\u0627\u0646\u062a\u0628\u0627\u0647",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0643\u062b\u064a\u0631\u064b\u0627 \u0644\u0648\u0635\u0641 \u0627\u0644\u0623\u0630\u0646\u064a\u0646 \u0623\u0648 \u062a\u063a\u064a\u0651\u0631 \u0645\u0641\u0627\u062c\u0626 \u0641\u064a \u0627\u0644\u0627\u0646\u062a\u0628\u0627\u0647.",
+          "examples": [
+            "\u0627\u0646\u062a\u0635\u0628\u062a \u0623\u0630\u0646\u0627 \u0627\u0644\u0643\u0644\u0628 \u0639\u0646\u062f\u0645\u0627 \u0633\u0645\u0639 \u0627\u0644\u0628\u0627\u0628 \u064a\u064f\u0641\u062a\u062d.",
+            "\u0627\u0639\u062a\u062f\u0644 \u0645\u0646\u062a\u0628\u0647\u064b\u0627 \u0639\u0646\u062f \u0630\u0643\u0631 \u0627\u0633\u0645\u0647."
+          ]
+        },
+        "pt-BR": {
+          "definition": "ficar mais ereto, especialmente como sinal de interesse ou aten\u00e7\u00e3o",
+          "usage_note": "Usado com frequ\u00eancia para orelhas ou rea\u00e7\u00f5es r\u00e1pidas de aten\u00e7\u00e3o.",
+          "examples": [
+            "As orelhas do cachorro se levantaram quando ele ouviu a porta abrir.",
+            "Ele ficou atento ao ouvir seu nome."
+          ]
+        },
+        "ja": {
+          "definition": "\u7279\u306b\u8208\u5473\u3084\u6ce8\u610f\u3092\u793a\u3057\u3066\u3001\u3088\u308a\u3057\u3083\u3093\u3068\u3057\u305f\u59ff\u52e2\u306b\u306a\u308b",
+          "usage_note": "\u8033\u3084\u6ce8\u610f\u306e\u7d20\u65e9\u3044\u53cd\u5fdc\u306b\u3064\u3044\u3066\u3088\u304f\u4f7f\u3046\u3002",
+          "examples": [
+            "\u30c9\u30a2\u304c\u958b\u304f\u97f3\u3092\u805e\u3044\u3066\u3001\u305d\u306e\u72ac\u306e\u8033\u304c\u3074\u3093\u3068\u7acb\u3063\u305f\u3002",
+            "\u5f7c\u306f\u81ea\u5206\u306e\u540d\u524d\u304c\u51fa\u308b\u3068\u8eab\u3092\u4e57\u308a\u51fa\u3057\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_right_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_right_1",
+      "definition": "correct or true; not wrong",
+      "examples": [
+        {
+          "sentence": "Your answer is right.",
+          "difficulty": "A1"
+        },
+        {
+          "sentence": "I think you are right about the meeting time.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A1",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "correct",
+        "true"
+      ],
+      "antonyms": [
+        "wrong",
+        "incorrect"
+      ],
+      "collocations": [
+        "be right",
+        "get it right",
+        "right answer",
+        "right time"
+      ],
+      "grammar_patterns": [
+        "be right",
+        "be right about something",
+        "get something right"
+      ],
+      "usage_note": "A very common meaning for facts, answers, and opinions.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "right",
+          "gerund": "righting",
+          "past": "righted",
+          "past_participle": "righted",
+          "third_person_singular": "rights"
+        },
+        "comparative": "righter",
+        "superlative": "rightest",
+        "derivations": [
+          "rightly",
+          "rightness"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "just",
+          "note": "often means morally good or legally justified, not simply correct"
+        },
+        {
+          "word": "accurate",
+          "note": "means exact or accurate in measurement or detail"
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.97,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:13:33Z",
+      "lexeme_id": "lx_right",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u6b63\u786e\u7684\uff1b\u5bf9\u7684\uff1b\u6ca1\u6709\u9519\u7684",
+          "usage_note": "\u7528\u4e8e\u8868\u793a\u4e8b\u60c5\u6b63\u786e\u3001\u771f\u5b9e\u6216\u6ca1\u6709\u9519\u8bef\u3002",
+          "examples": [
+            "\u4f60\u7684\u7b54\u6848\u662f\u5bf9\u7684\u3002",
+            "\u6211\u89c9\u5f97\u4f60\u5173\u4e8e\u4f1a\u8bae\u65f6\u95f4\u7684\u770b\u6cd5\u662f\u5bf9\u7684\u3002"
+          ]
+        },
+        "es": {
+          "definition": "correcto o verdadero; no equivocado",
+          "usage_note": "Se usa para decir que algo es correcto o no est\u00e1 equivocado.",
+          "examples": [
+            "Tu respuesta es correcta.",
+            "Creo que tienes raz\u00f3n sobre la hora de la reuni\u00f3n."
+          ]
+        },
+        "ar": {
+          "definition": "\u0635\u062d\u064a\u062d \u0623\u0648 \u062d\u0642\u064a\u0642\u064a\u061b \u0644\u064a\u0633 \u062e\u0627\u0637\u0626\u064b\u0627",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0644\u0648\u0635\u0641 \u0634\u064a\u0621 \u0635\u062d\u064a\u062d \u0623\u0648 \u063a\u064a\u0631 \u062e\u0627\u0637\u0626.",
+          "examples": [
+            "\u0625\u062c\u0627\u0628\u062a\u0643 \u0635\u062d\u064a\u062d\u0629.",
+            "\u0623\u0639\u062a\u0642\u062f \u0623\u0646\u0643 \u0645\u062d\u0642 \u0628\u0634\u0623\u0646 \u0648\u0642\u062a \u0627\u0644\u0627\u062c\u062a\u0645\u0627\u0639."
+          ]
+        },
+        "pt-BR": {
+          "definition": "correto ou verdadeiro; n\u00e3o errado",
+          "usage_note": "Usado para dizer que algo est\u00e1 correto ou n\u00e3o est\u00e1 errado.",
+          "examples": [
+            "Sua resposta est\u00e1 certa.",
+            "Acho que voc\u00ea est\u00e1 certo sobre o hor\u00e1rio da reuni\u00e3o."
+          ]
+        },
+        "ja": {
+          "definition": "\u6b63\u3057\u3044\u3001\u6b63\u78ba\u306a\uff1b\u9593\u9055\u3063\u3066\u3044\u306a\u3044",
+          "usage_note": "\u7269\u4e8b\u304c\u6b63\u3057\u3044\u3001\u307e\u305f\u306f\u9593\u9055\u3063\u3066\u3044\u306a\u3044\u3053\u3068\u3092\u8868\u3059\u3002",
+          "examples": [
+            "\u3042\u306a\u305f\u306e\u7b54\u3048\u306f\u6b63\u3057\u3044\u3067\u3059\u3002",
+            "\u4f1a\u8b70\u306e\u6642\u9593\u306b\u3064\u3044\u3066\u3042\u306a\u305f\u306e\u8a00\u3046\u3053\u3068\u306f\u6b63\u3057\u3044\u3068\u601d\u3044\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_right_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_right_1",
+      "definition": "on or toward the side of the body that is east when a person faces north; opposite of left",
+      "examples": [
+        {
+          "sentence": "Turn right at the corner.",
+          "difficulty": "A1"
+        },
+        {
+          "sentence": "The bank is on your right.",
+          "difficulty": "A1"
+        }
+      ],
+      "cefr_level": "A1",
+      "primary_domain": "spatial relations",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "right-hand"
+      ],
+      "antonyms": [
+        "left"
+      ],
+      "collocations": [
+        "right hand",
+        "turn right",
+        "on the right",
+        "right side"
+      ],
+      "grammar_patterns": [
+        "turn right",
+        "on the right",
+        "to the right of something"
+      ],
+      "usage_note": "Used for direction and side. As an adverb, it also appears in phrases like turn right.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "right",
+          "gerund": "righting",
+          "past": "righted",
+          "past_participle": "righted",
+          "third_person_singular": "rights"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "right-hand",
+          "rightward"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "left",
+          "note": "the opposite direction or side"
+        },
+        {
+          "word": "straight",
+          "note": "means straight ahead, not to one side"
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.98,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:13:33Z",
+      "lexeme_id": "lx_right",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u53f3\u8fb9\u7684\uff1b\u5411\u53f3\u7684\uff1b\u53f3\u4fa7\u7684\uff1b\u4e0e\u5de6\u76f8\u53cd",
+          "usage_note": "\u7528\u4e8e\u8868\u793a\u65b9\u5411\u6216\u4f4d\u7f6e\uff0c\u548c\u5de6\u76f8\u53cd\u3002",
+          "examples": [
+            "\u5728\u62d0\u89d2\u5904\u53f3\u8f6c\u3002",
+            "\u94f6\u884c\u5728\u4f60\u7684\u53f3\u8fb9\u3002"
+          ]
+        },
+        "es": {
+          "definition": "en o hacia el lado derecho; opuesto a izquierdo",
+          "usage_note": "Se usa para indicar direcci\u00f3n o lado opuesto a la izquierda.",
+          "examples": [
+            "Gira a la derecha en la esquina.",
+            "El banco est\u00e1 a tu derecha."
+          ]
+        },
+        "ar": {
+          "definition": "\u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0629 \u0627\u0644\u064a\u0645\u0646\u0649 \u0623\u0648 \u0646\u062d\u0648\u0647\u0627\u061b \u0639\u0643\u0633 \u0627\u0644\u064a\u0633\u0627\u0631",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0644\u0644\u0627\u062a\u062c\u0627\u0647 \u0623\u0648 \u0627\u0644\u062c\u0647\u0629 \u0627\u0644\u0645\u0642\u0627\u0628\u0644\u0629 \u0644\u0644\u064a\u0633\u0627\u0631.",
+          "examples": [
+            "\u0627\u0646\u0639\u0637\u0641 \u064a\u0645\u064a\u0646\u064b\u0627 \u0639\u0646\u062f \u0627\u0644\u0632\u0627\u0648\u064a\u0629.",
+            "\u0627\u0644\u0645\u0635\u0631\u0641 \u0639\u0644\u0649 \u064a\u0645\u064a\u0646\u0643."
+          ]
+        },
+        "pt-BR": {
+          "definition": "\u00e0 direita; no lado direito; oposto de esquerdo",
+          "usage_note": "Usado para dire\u00e7\u00e3o ou lado oposto ao esquerdo.",
+          "examples": [
+            "Vire \u00e0 direita na esquina.",
+            "O banco fica \u00e0 sua direita."
+          ]
+        },
+        "ja": {
+          "definition": "\u53f3\u306e\u3001\u53f3\u3078\uff1b\u5de6\u306e\u53cd\u5bfe",
+          "usage_note": "\u65b9\u5411\u3084\u4f4d\u7f6e\u304c\u5de6\u306e\u53cd\u5bfe\u3067\u3042\u308b\u3053\u3068\u3092\u8868\u3059\u3002",
+          "examples": [
+            "\u89d2\u3092\u53f3\u306b\u66f2\u304c\u3063\u3066\u304f\u3060\u3055\u3044\u3002",
+            "\u9280\u884c\u306f\u3042\u306a\u305f\u306e\u53f3\u5074\u306b\u3042\u308a\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_right_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_right_1",
+      "definition": "suitable, proper, or best for a particular situation",
+      "examples": [
+        {
+          "sentence": "This is the right tool for the job.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "She was the right person to lead the team.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "suitable",
+        "proper",
+        "appropriate"
+      ],
+      "antonyms": [
+        "wrong",
+        "unsuitable"
+      ],
+      "collocations": [
+        "the right person",
+        "the right place",
+        "the right way",
+        "at the right moment"
+      ],
+      "grammar_patterns": [
+        "the right thing",
+        "the right person for something",
+        "it is right to do something"
+      ],
+      "usage_note": "Common in everyday choices: the right person, time, answer, or way.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "right",
+          "gerund": "righting",
+          "past": "righted",
+          "past_participle": "righted",
+          "third_person_singular": "rights"
+        },
+        "comparative": "righter",
+        "superlative": "rightest",
+        "derivations": [
+          "rightly"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "okay",
+          "note": "means acceptable or satisfactory, but not always the best choice"
+        },
+        {
+          "word": "appropriate",
+          "note": "means suitable or proper in a particular situation"
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.93,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:13:33Z",
+      "lexeme_id": "lx_right",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u5408\u9002\u7684\uff1b\u6070\u5f53\u7684\uff1b\u6700\u9002\u5408\u67d0\u79cd\u60c5\u51b5\u7684",
+          "usage_note": "\u7528\u4e8e\u8868\u793a\u67d0\u7269\u6216\u67d0\u4eba\u5728\u7279\u5b9a\u60c5\u5883\u4e0b\u662f\u5408\u9002\u6216\u6700\u4f73\u7684\u3002",
+          "examples": [
+            "\u8fd9\u662f\u505a\u8fd9\u9879\u5de5\u4f5c\u7684\u5408\u9002\u5de5\u5177\u3002",
+            "\u5979\u662f\u5e26\u9886\u8fd9\u4e2a\u56e2\u961f\u7684\u5408\u9002\u4eba\u9009\u3002"
+          ]
+        },
+        "es": {
+          "definition": "adecuado, apropiado o el mejor para una situaci\u00f3n",
+          "usage_note": "Se usa cuando algo o alguien es apropiado o el mejor para un fin concreto.",
+          "examples": [
+            "Esta es la herramienta adecuada para el trabajo.",
+            "Ella era la persona adecuada para dirigir el equipo."
+          ]
+        },
+        "ar": {
+          "definition": "\u0645\u0646\u0627\u0633\u0628 \u0623\u0648 \u0645\u0644\u0627\u0626\u0645 \u0623\u0648 \u0627\u0644\u0623\u0641\u0636\u0644 \u0641\u064a \u0645\u0648\u0642\u0641 \u0645\u0639\u064a\u0646",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0639\u0646\u062f\u0645\u0627 \u064a\u0643\u0648\u0646 \u0627\u0644\u0634\u064a\u0621 \u0623\u0648 \u0627\u0644\u0634\u062e\u0635 \u0645\u0646\u0627\u0633\u0628\u064b\u0627 \u0623\u0648 \u0627\u0644\u0623\u0641\u0636\u0644 \u0644\u063a\u0631\u0636 \u0645\u0639\u064a\u0646.",
+          "examples": [
+            "\u0647\u0630\u0647 \u0647\u064a \u0627\u0644\u0623\u062f\u0627\u0629 \u0627\u0644\u0645\u0646\u0627\u0633\u0628\u0629 \u0644\u0644\u0639\u0645\u0644.",
+            "\u0643\u0627\u0646\u062a \u0647\u064a \u0627\u0644\u0634\u062e\u0635 \u0627\u0644\u0645\u0646\u0627\u0633\u0628 \u0644\u0642\u064a\u0627\u062f\u0629 \u0627\u0644\u0641\u0631\u064a\u0642."
+          ]
+        },
+        "pt-BR": {
+          "definition": "adequado, apropriado ou melhor para uma situa\u00e7\u00e3o",
+          "usage_note": "Usado quando algo ou algu\u00e9m \u00e9 apropriado ou a melhor op\u00e7\u00e3o para um objetivo.",
+          "examples": [
+            "Esta \u00e9 a ferramenta certa para o trabalho.",
+            "Ela era a pessoa certa para liderar a equipe."
+          ]
+        },
+        "ja": {
+          "definition": "\u9069\u5207\u306a\u3001\u3075\u3055\u308f\u3057\u3044\u3001\u305d\u306e\u72b6\u6cc1\u306b\u6700\u3082\u3088\u3044",
+          "usage_note": "\u7279\u5b9a\u306e\u72b6\u6cc1\u3067\u9069\u5207\u30fb\u6700\u9069\u3067\u3042\u308b\u3053\u3068\u3092\u8868\u3059\u3002",
+          "examples": [
+            "\u3053\u308c\u306f\u305d\u306e\u4ed5\u4e8b\u306b\u9069\u3057\u305f\u9053\u5177\u3067\u3059\u3002",
+            "\u5f7c\u5973\u306f\u30c1\u30fc\u30e0\u3092\u7387\u3044\u308b\u306e\u306b\u3075\u3055\u308f\u3057\u3044\u4eba\u7269\u3067\u3057\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_right_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_right_1",
+      "definition": "a moral or legal claim or freedom that a person has",
+      "examples": [
+        {
+          "sentence": "Everyone has the right to speak freely.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "Education is a basic human right.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "law",
+      "secondary_domains": [
+        "politics",
+        "ethics"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "entitlement",
+        "freedom"
+      ],
+      "antonyms": [
+        "duty",
+        "obligation"
+      ],
+      "collocations": [
+        "human rights",
+        "have the right to",
+        "equal rights",
+        "civil rights"
+      ],
+      "grammar_patterns": [
+        "have the right to do something",
+        "a right to something",
+        "human rights"
+      ],
+      "usage_note": "Often used in plural too: rights.",
+      "forms": {
+        "plural_forms": [
+          "rights"
+        ],
+        "verb_forms": {
+          "base": "right",
+          "gerund": "righting",
+          "past": "righted",
+          "past_participle": "righted",
+          "third_person_singular": "rights"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "rights"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "law",
+          "note": "a law or rule made by authority"
+        },
+        {
+          "word": "responsibility",
+          "note": "something one must do, not something one is allowed to have or do"
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.94,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:13:33Z",
+      "lexeme_id": "lx_right",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u6743\u5229\uff1b\u4eba\u4f9d\u6cd5\u6216\u5728\u9053\u5fb7\u4e0a\u5e94\u4eab\u6709\u7684\u81ea\u7531\u6216\u4e3b\u5f20",
+          "usage_note": "\u7528\u4e8e\u6cd5\u5f8b\u3001\u9053\u5fb7\u548c\u793e\u4f1a\u8bed\u5883\u3002",
+          "examples": [
+            "\u6bcf\u4e2a\u4eba\u90fd\u6709\u81ea\u7531\u53d1\u8a00\u7684\u6743\u5229\u3002",
+            "\u6559\u80b2\u662f\u4e00\u9879\u57fa\u672c\u4eba\u6743\u3002"
+          ]
+        },
+        "es": {
+          "definition": "derecho o libertad moral o legal que tiene una persona",
+          "usage_note": "Se usa en contextos legales, morales y sociales.",
+          "examples": [
+            "Todos tienen derecho a hablar libremente.",
+            "La educaci\u00f3n es un derecho humano b\u00e1sico."
+          ]
+        },
+        "ar": {
+          "definition": "\u062d\u0642 \u0642\u0627\u0646\u0648\u0646\u064a \u0623\u0648 \u0623\u062e\u0644\u0627\u0642\u064a \u0623\u0648 \u062d\u0631\u064a\u0629 \u064a\u0645\u0644\u0643\u0647\u0627 \u0627\u0644\u0634\u062e\u0635",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0641\u064a \u0627\u0644\u0633\u064a\u0627\u0642\u0627\u062a \u0627\u0644\u0642\u0627\u0646\u0648\u0646\u064a\u0629 \u0648\u0627\u0644\u0623\u062e\u0644\u0627\u0642\u064a\u0629 \u0648\u0627\u0644\u0627\u062c\u062a\u0645\u0627\u0639\u064a\u0629.",
+          "examples": [
+            "\u0644\u0643\u0644 \u0634\u062e\u0635 \u0627\u0644\u062d\u0642 \u0641\u064a \u0627\u0644\u062a\u062d\u062f\u062b \u0628\u062d\u0631\u064a\u0629.",
+            "\u0627\u0644\u062a\u0639\u0644\u064a\u0645 \u062d\u0642 \u0623\u0633\u0627\u0633\u064a \u0645\u0646 \u062d\u0642\u0648\u0642 \u0627\u0644\u0625\u0646\u0633\u0627\u0646."
+          ]
+        },
+        "pt-BR": {
+          "definition": "direito ou liberdade moral ou legal que uma pessoa possui",
+          "usage_note": "Usado em contextos legais, morais e sociais.",
+          "examples": [
+            "Todos t\u00eam o direito de falar livremente.",
+            "A educa\u00e7\u00e3o \u00e9 um direito humano b\u00e1sico."
+          ]
+        },
+        "ja": {
+          "definition": "\u4eba\u304c\u6301\u3064\u6cd5\u7684\u307e\u305f\u306f\u9053\u5fb3\u7684\u306a\u6a29\u5229\u3001\u81ea\u7531",
+          "usage_note": "\u6cd5\u5f8b\u30fb\u502b\u7406\u30fb\u793e\u4f1a\u306e\u6587\u8108\u3067\u4f7f\u3046\u3002",
+          "examples": [
+            "\u8ab0\u306b\u3067\u3082\u81ea\u7531\u306b\u8a71\u3059\u6a29\u5229\u304c\u3042\u308a\u307e\u3059\u3002",
+            "\u6559\u80b2\u306f\u57fa\u672c\u7684\u306a\u4eba\u6a29\u3067\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_right_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_right_1",
+      "definition": "exactly, directly, or immediately",
+      "examples": [
+        {
+          "sentence": "She is standing right in front of me.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "I need an answer right now.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "exactly",
+        "directly",
+        "immediately"
+      ],
+      "antonyms": [
+        "left"
+      ],
+      "collocations": [
+        "right now",
+        "right here",
+        "right away",
+        "right in front of"
+      ],
+      "grammar_patterns": [
+        "right in front of",
+        "right now",
+        "right away",
+        "right here"
+      ],
+      "usage_note": "Learners often meet this in fixed phrases such as right now and right here.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "right",
+          "gerund": "righting",
+          "past": "righted",
+          "past_participle": "righted",
+          "third_person_singular": "rights"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": []
+      },
+      "confusable_words": [
+        {
+          "word": "just",
+          "note": "means very or fully in some contexts, but not always exact position or time"
+        },
+        {
+          "word": "exactly",
+          "note": "means exactly, especially for emphasis, and overlaps in some uses"
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.92,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:13:33Z",
+      "lexeme_id": "lx_right",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u6b63\u597d\uff1b\u6070\u597d\uff1b\u76f4\u63a5\u5730\uff1b\u7acb\u523b",
+          "usage_note": "\u7528\u4e8e\u5f3a\u8c03\u4f4d\u7f6e\u5f88\u51c6\u786e\u3001\u65f6\u95f4\u5f88\u7d27\u6216\u52a8\u4f5c\u7acb\u523b\u53d1\u751f\u3002",
+          "examples": [
+            "\u5979\u5c31\u7ad9\u5728\u6211\u6b63\u524d\u65b9\u3002",
+            "\u6211\u73b0\u5728\u9a6c\u4e0a\u9700\u8981\u4e00\u4e2a\u7b54\u590d\u3002"
+          ]
+        },
+        "es": {
+          "definition": "exactamente, directamente o inmediatamente",
+          "usage_note": "Se usa para enfatizar posici\u00f3n exacta, tiempo inmediato o acci\u00f3n sin demora.",
+          "examples": [
+            "Ella est\u00e1 justo delante de m\u00ed.",
+            "Necesito una respuesta ahora mismo."
+          ]
+        },
+        "ar": {
+          "definition": "\u062a\u0645\u0627\u0645\u064b\u0627 \u0623\u0648 \u0645\u0628\u0627\u0634\u0631\u0629\u064b \u0623\u0648 \u0641\u0648\u0631\u064b\u0627",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0644\u0644\u062a\u0623\u0643\u064a\u062f \u0639\u0644\u0649 \u0627\u0644\u062f\u0642\u0629 \u0641\u064a \u0627\u0644\u0645\u0643\u0627\u0646 \u0623\u0648 \u0627\u0644\u0632\u0645\u0646 \u0623\u0648 \u0627\u0644\u0633\u0631\u0639\u0629.",
+          "examples": [
+            "\u0625\u0646\u0647\u0627 \u062a\u0642\u0641 \u0623\u0645\u0627\u0645\u064a \u0645\u0628\u0627\u0634\u0631\u0629\u064b.",
+            "\u0623\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u0625\u062c\u0627\u0628\u0629 \u0641\u0648\u0631\u064b\u0627."
+          ]
+        },
+        "pt-BR": {
+          "definition": "exatamente, diretamente ou imediatamente",
+          "usage_note": "Usado para enfatizar posi\u00e7\u00e3o exata, tempo imediato ou a\u00e7\u00e3o sem demora.",
+          "examples": [
+            "Ela est\u00e1 bem na minha frente.",
+            "Preciso de uma resposta agora mesmo."
+          ]
+        },
+        "ja": {
+          "definition": "\u3061\u3087\u3046\u3069\u3001\u771f\u3063\u3059\u3050\u3001\u3059\u3050\u306b",
+          "usage_note": "\u4f4d\u7f6e\u30fb\u6642\u9593\u30fb\u5373\u6642\u6027\u3092\u5f37\u8abf\u3059\u308b\u3068\u304d\u306b\u4f7f\u3046\u3002",
+          "examples": [
+            "\u5f7c\u5973\u306f\u79c1\u306e\u3061\u3087\u3046\u3069\u76ee\u306e\u524d\u306b\u7acb\u3063\u3066\u3044\u307e\u3059\u3002",
+            "\u79c1\u306f\u4eca\u3059\u3050\u7b54\u3048\u304c\u5fc5\u8981\u3067\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_scientist_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_scientist_1",
+      "definition": "a person who studies science or works in scientific research",
+      "examples": [
+        {
+          "sentence": "The scientist studied the effects of pollution on fish.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "Many scientists are working on new medicines.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "science",
+      "secondary_domains": [
+        "education",
+        "research"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "researcher"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "research scientist",
+        "computer scientist",
+        "social scientist",
+        "scientist at a university"
+      ],
+      "grammar_patterns": [
+        "a scientist",
+        "scientist + verb",
+        "scientist in/at + place"
+      ],
+      "usage_note": "Scientist is a common countable noun for someone working in science; it is often used with a field name, such as medical scientist or climate scientist.",
+      "forms": {
+        "plural_forms": [
+          "scientists"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "science",
+          "scientific",
+          "scientifically"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "scholar",
+          "note": "A scientist studies science and does research; a scholar is a learned academic more broadly, often in the humanities."
+        },
+        {
+          "word": "technician",
+          "note": "A scientist usually does research; a technician mainly operates equipment or performs technical tasks."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.98,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:13:47Z",
+      "lexeme_id": "lx_scientist",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u79d1\u5b66\u5bb6\uff1b\u7814\u7a76\u79d1\u5b66\u6216\u4ece\u4e8b\u79d1\u5b66\u7814\u7a76\u7684\u4eba",
+          "usage_note": "\u901a\u5e38\u6307\u4ece\u4e8b\u79d1\u5b66\u7814\u7a76\u5de5\u4f5c\u7684\u4eba\u3002",
+          "examples": [
+            "\u8fd9\u4f4d\u79d1\u5b66\u5bb6\u7814\u7a76\u4e86\u6c61\u67d3\u5bf9\u9c7c\u7c7b\u7684\u5f71\u54cd\u3002",
+            "\u8bb8\u591a\u79d1\u5b66\u5bb6\u6b63\u5728\u7814\u53d1\u65b0\u836f\u3002"
+          ]
+        },
+        "es": {
+          "definition": "cient\u00edfico; persona que estudia ciencia o trabaja en investigaci\u00f3n cient\u00edfica",
+          "usage_note": "Se usa para personas dedicadas a la ciencia o la investigaci\u00f3n.",
+          "examples": [
+            "El cient\u00edfico estudi\u00f3 los efectos de la contaminaci\u00f3n en los peces.",
+            "Muchos cient\u00edficos est\u00e1n trabajando en nuevos medicamentos."
+          ]
+        },
+        "ar": {
+          "definition": "\u0639\u0627\u0644\u0650\u0645\u061b \u0634\u062e\u0635 \u064a\u062f\u0631\u0633 \u0627\u0644\u0639\u0644\u0648\u0645 \u0623\u0648 \u064a\u0639\u0645\u0644 \u0641\u064a \u0627\u0644\u0628\u062d\u062b \u0627\u0644\u0639\u0644\u0645\u064a",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u063a\u0627\u0644\u0628\u064b\u0627 \u0644\u0645\u0646 \u064a\u0639\u0645\u0644 \u0641\u064a \u0645\u062c\u0627\u0644 \u0639\u0644\u0645\u064a \u0623\u0648 \u0628\u062d\u062b\u064a.",
+          "examples": [
+            "\u062f\u0631\u0633 \u0627\u0644\u0639\u0627\u0644\u0650\u0645 \u0622\u062b\u0627\u0631 \u0627\u0644\u062a\u0644\u0648\u062b \u0639\u0644\u0649 \u0627\u0644\u0623\u0633\u0645\u0627\u0643.",
+            "\u064a\u0639\u0645\u0644 \u0627\u0644\u0639\u062f\u064a\u062f \u0645\u0646 \u0627\u0644\u0639\u0644\u0645\u0627\u0621 \u0639\u0644\u0649 \u0623\u062f\u0648\u064a\u0629 \u062c\u062f\u064a\u062f\u0629."
+          ]
+        },
+        "pt-BR": {
+          "definition": "cientista; pessoa que estuda ci\u00eancia ou trabalha com pesquisa cient\u00edfica",
+          "usage_note": "Usado para quem atua em ci\u00eancia ou pesquisa.",
+          "examples": [
+            "O cientista estudou os efeitos da polui\u00e7\u00e3o nos peixes.",
+            "Muitos cientistas est\u00e3o trabalhando em novos medicamentos."
+          ]
+        },
+        "ja": {
+          "definition": "\u79d1\u5b66\u8005\uff1b\u79d1\u5b66\u3092\u7814\u7a76\u3057\u305f\u308a\u3001\u79d1\u5b66\u7814\u7a76\u306e\u4ed5\u4e8b\u3092\u3057\u305f\u308a\u3059\u308b\u4eba",
+          "usage_note": "\u79d1\u5b66\u306e\u5206\u91ce\u3067\u7814\u7a76\u3059\u308b\u4eba\u306b\u3064\u3044\u3066\u4f7f\u3046\u3002",
+          "examples": [
+            "\u305d\u306e\u79d1\u5b66\u8005\u306f\u6c5a\u67d3\u304c\u9b5a\u306b\u4e0e\u3048\u308b\u5f71\u97ff\u3092\u8abf\u3079\u305f\u3002",
+            "\u591a\u304f\u306e\u79d1\u5b66\u8005\u304c\u65b0\u3057\u3044\u85ac\u306e\u958b\u767a\u306b\u53d6\u308a\u7d44\u3093\u3067\u3044\u308b\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_city_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_city_1",
+      "definition": "a large important town where many people live and work",
+      "examples": [
+        {
+          "sentence": "She lives in a big city.",
+          "difficulty": "A1"
+        },
+        {
+          "sentence": "The city is famous for its museums.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "Many people move to the city for work.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "A1",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "metropolis",
+        "urban area"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "big city",
+        "capital city",
+        "city center",
+        "city life",
+        "city council"
+      ],
+      "grammar_patterns": [
+        "in the city",
+        "live in a city",
+        "move to the city",
+        "the city of + name"
+      ],
+      "usage_note": "Usually refers to a large urban place; often contrasted with town or village.",
+      "forms": {
+        "plural_forms": [
+          "cities"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "cities",
+          "city center",
+          "city life",
+          "city hall",
+          "citywide"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "town",
+          "note": "A city is usually larger and more important than a town."
+        },
+        {
+          "word": "village",
+          "note": "A village is smaller than a town or city."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.99,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:14:02Z",
+      "lexeme_id": "lx_city",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u5f88\u591a\u4eba\u5c45\u4f4f\u548c\u5de5\u4f5c\u7684\u3001\u5927\u800c\u91cd\u8981\u7684\u57ce\u5e02",
+          "usage_note": "city \u7684\u57fa\u672c\u542b\u4e49\u3002",
+          "examples": [
+            "\u5979\u4f4f\u5728\u4e00\u4e2a\u5927\u57ce\u5e02\u3002",
+            "\u8fd9\u5ea7\u57ce\u5e02\u56e0\u535a\u7269\u9986\u800c\u95fb\u540d\u3002",
+            "\u5f88\u591a\u4eba\u4e3a\u4e86\u5de5\u4f5c\u642c\u5230\u57ce\u5e02\u3002"
+          ]
+        },
+        "es": {
+          "definition": "pueblo o \u00e1rea urbana grande e importante donde vive y trabaja mucha gente",
+          "usage_note": "Sentido general de city.",
+          "examples": [
+            "Ella vive en una ciudad grande.",
+            "La ciudad es famosa por sus museos.",
+            "Mucha gente se muda a la ciudad por trabajo."
+          ]
+        },
+        "ar": {
+          "definition": "\u0645\u062f\u064a\u0646\u0629 \u0643\u0628\u064a\u0631\u0629 \u0648\u0645\u0647\u0645\u0629 \u064a\u0639\u064a\u0634 \u0648\u064a\u0639\u0645\u0644 \u0641\u064a\u0647\u0627 \u0643\u062b\u064a\u0631 \u0645\u0646 \u0627\u0644\u0646\u0627\u0633",
+          "usage_note": "\u0627\u0644\u0645\u0639\u0646\u0649 \u0627\u0644\u0639\u0627\u0645 \u0644\u0643\u0644\u0645\u0629 city.",
+          "examples": [
+            "\u0647\u064a \u062a\u0639\u064a\u0634 \u0641\u064a \u0645\u062f\u064a\u0646\u0629 \u0643\u0628\u064a\u0631\u0629.",
+            "\u062a\u0634\u062a\u0647\u0631 \u0627\u0644\u0645\u062f\u064a\u0646\u0629 \u0628\u0645\u062a\u0627\u062d\u0641\u0647\u0627.",
+            "\u064a\u0646\u062a\u0642\u0644 \u0643\u062b\u064a\u0631 \u0645\u0646 \u0627\u0644\u0646\u0627\u0633 \u0625\u0644\u0649 \u0627\u0644\u0645\u062f\u064a\u0646\u0629 \u0645\u0646 \u0623\u062c\u0644 \u0627\u0644\u0639\u0645\u0644."
+          ]
+        },
+        "pt-BR": {
+          "definition": "cidade grande e importante onde muitas pessoas vivem e trabalham",
+          "usage_note": "Sentido geral de city.",
+          "examples": [
+            "Ela mora em uma cidade grande.",
+            "A cidade \u00e9 famosa por seus museus.",
+            "Muitas pessoas se mudam para a cidade por causa do trabalho."
+          ]
+        },
+        "ja": {
+          "definition": "\u591a\u304f\u306e\u4eba\u304c\u4f4f\u307f\u3001\u50cd\u304f\u5927\u304d\u304f\u3066\u91cd\u8981\u306a\u753a\u30fb\u90fd\u5e02",
+          "usage_note": "city \u306e\u57fa\u672c\u7684\u306a\u610f\u5473\u3002",
+          "examples": [
+            "\u5f7c\u5973\u306f\u5927\u304d\u306a\u90fd\u5e02\u306b\u4f4f\u3093\u3067\u3044\u307e\u3059\u3002",
+            "\u305d\u306e\u90fd\u5e02\u306f\u535a\u7269\u9928\u3067\u6709\u540d\u3067\u3059\u3002",
+            "\u591a\u304f\u306e\u4eba\u304c\u4ed5\u4e8b\u306e\u305f\u3081\u306b\u90fd\u5e02\u3078\u79fb\u308a\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_play_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_play_1",
+      "definition": "to take part in a sport, game, or fun activity",
+      "examples": [
+        {
+          "sentence": "The children are playing in the park.",
+          "difficulty": "A1"
+        },
+        {
+          "sentence": "We play football after school.",
+          "difficulty": "A1"
+        }
+      ],
+      "cefr_level": "A1",
+      "primary_domain": "general",
+      "secondary_domains": [
+        "sports",
+        "daily life"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "take part",
+        "have fun"
+      ],
+      "antonyms": [
+        "work"
+      ],
+      "collocations": [
+        "play football",
+        "play basketball",
+        "play tennis",
+        "play a game",
+        "play with friends"
+      ],
+      "grammar_patterns": [
+        "play + sport/game",
+        "play with + person/toy",
+        "play in + place"
+      ],
+      "usage_note": "Common verb for sports, games, and children\u2019s activities.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "play",
+          "gerund": "playing",
+          "past": "played",
+          "past_participle": "played",
+          "third_person_singular": "plays"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "player",
+          "playful",
+          "playground"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "do",
+          "note": "Often means do an activity for fun; less specific than play in sports/games."
+        },
+        {
+          "word": "practice",
+          "note": "Use for participating in sports, games, and many children\u2019s activities."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.98,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:14:56Z",
+      "lexeme_id": "lx_play",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u53c2\u52a0\u4f53\u80b2\u8fd0\u52a8\u3001\u6e38\u620f\u6216\u5a31\u4e50\u6d3b\u52a8\uff1b\u73a9",
+          "usage_note": "\u7528\u4e8e\u4f53\u80b2\u3001\u6e38\u620f\u548c\u5a31\u4e50\u6d3b\u52a8\u3002",
+          "examples": [
+            "\u5b69\u5b50\u4eec\u6b63\u5728\u516c\u56ed\u91cc\u73a9\u3002",
+            "\u6211\u4eec\u653e\u5b66\u540e\u8e22\u8db3\u7403\u3002"
+          ]
+        },
+        "es": {
+          "definition": "participar en un deporte, juego o actividad divertida",
+          "usage_note": "Se usa con deportes, juegos y actividades para divertirse.",
+          "examples": [
+            "Los ni\u00f1os est\u00e1n jugando en el parque.",
+            "Jugamos al f\u00fatbol despu\u00e9s de la escuela."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u0634\u0627\u0631\u0643 \u0641\u064a \u0631\u064a\u0627\u0636\u0629 \u0623\u0648 \u0644\u0639\u0628\u0629 \u0623\u0648 \u0646\u0634\u0627\u0637 \u0645\u0645\u062a\u0639",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0645\u0639 \u0627\u0644\u0631\u064a\u0627\u0636\u0627\u062a \u0648\u0627\u0644\u0623\u0644\u0639\u0627\u0628 \u0648\u0627\u0644\u0623\u0646\u0634\u0637\u0629 \u0627\u0644\u0645\u0645\u062a\u0639\u0629.",
+          "examples": [
+            "\u0627\u0644\u0623\u0637\u0641\u0627\u0644 \u064a\u0644\u0639\u0628\u0648\u0646 \u0641\u064a \u0627\u0644\u062d\u062f\u064a\u0642\u0629.",
+            "\u0646\u0644\u0639\u0628 \u0643\u0631\u0629 \u0627\u0644\u0642\u062f\u0645 \u0628\u0639\u062f \u0627\u0644\u0645\u062f\u0631\u0633\u0629."
+          ]
+        },
+        "pt-BR": {
+          "definition": "participar de um esporte, jogo ou atividade divertida",
+          "usage_note": "Usa-se com esportes, jogos e atividades por divers\u00e3o.",
+          "examples": [
+            "As crian\u00e7as est\u00e3o brincando no parque.",
+            "N\u00f3s jogamos futebol depois da escola."
+          ]
+        },
+        "ja": {
+          "definition": "\u30b9\u30dd\u30fc\u30c4\u3084\u30b2\u30fc\u30e0\u3001\u697d\u3057\u3044\u6d3b\u52d5\u3092\u3059\u308b",
+          "usage_note": "\u30b9\u30dd\u30fc\u30c4\u3001\u30b2\u30fc\u30e0\u3001\u904a\u3073\u306b\u53c2\u52a0\u3059\u308b\u6642\u306b\u4f7f\u3046\u3002",
+          "examples": [
+            "\u5b50\u3069\u3082\u305f\u3061\u306f\u516c\u5712\u3067\u904a\u3093\u3067\u3044\u307e\u3059\u3002",
+            "\u79c1\u305f\u3061\u306f\u653e\u8ab2\u5f8c\u306b\u30b5\u30c3\u30ab\u30fc\u3092\u3057\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_play_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_play_1",
+      "definition": "to make music with an instrument, or to perform music",
+      "examples": [
+        {
+          "sentence": "She plays the piano very well.",
+          "difficulty": "A1"
+        },
+        {
+          "sentence": "They played jazz at the party.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "music",
+      "secondary_domains": [
+        "arts"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "perform",
+        "make music"
+      ],
+      "antonyms": [
+        "listen"
+      ],
+      "collocations": [
+        "play music",
+        "play the guitar",
+        "play the piano",
+        "play a song",
+        "play in a band"
+      ],
+      "grammar_patterns": [
+        "play + instrument",
+        "play + music style/song",
+        "play in + band"
+      ],
+      "usage_note": "Usually use the before musical instruments: play the guitar, play the piano.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "play",
+          "gerund": "playing",
+          "past": "played",
+          "past_participle": "played",
+          "third_person_singular": "plays"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "player",
+          "playback"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "perform",
+          "note": "Perform usually focuses on presenting for an audience; play is used for instruments and music."
+        },
+        {
+          "word": "listen",
+          "note": "Use listen for receiving sound, not producing it."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.97,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:14:56Z",
+      "lexeme_id": "lx_play",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u6f14\u594f\u4e50\u5668\uff1b\u6f14\u594f\u97f3\u4e50",
+          "usage_note": "\u7528\u4e8e\u4e50\u5668\u6216\u97f3\u4e50\u6f14\u594f\u3002",
+          "examples": [
+            "\u5979\u94a2\u7434\u5f39\u5f97\u5f88\u597d\u3002",
+            "\u4ed6\u4eec\u5728\u805a\u4f1a\u4e0a\u6f14\u594f\u4e86\u7235\u58eb\u4e50\u3002"
+          ]
+        },
+        "es": {
+          "definition": "tocar un instrumento o interpretar m\u00fasica",
+          "usage_note": "Se usa con instrumentos musicales y estilos o piezas de m\u00fasica.",
+          "examples": [
+            "Ella toca el piano muy bien.",
+            "Tocaron jazz en la fiesta."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u0639\u0632\u0641 \u0639\u0644\u0649 \u0622\u0644\u0629 \u0645\u0648\u0633\u064a\u0642\u064a\u0629 \u0623\u0648 \u064a\u0624\u062f\u064a \u0645\u0648\u0633\u064a\u0642\u0649",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0645\u0639 \u0627\u0644\u0622\u0644\u0627\u062a \u0627\u0644\u0645\u0648\u0633\u064a\u0642\u064a\u0629 \u0648\u0623\u0646\u0648\u0627\u0639 \u0627\u0644\u0645\u0648\u0633\u064a\u0642\u0649.",
+          "examples": [
+            "\u0647\u064a \u062a\u0639\u0632\u0641 \u0627\u0644\u0628\u064a\u0627\u0646\u0648 \u062c\u064a\u062f\u064b\u0627 \u062c\u062f\u064b\u0627.",
+            "\u0639\u0632\u0641\u0648\u0627 \u0645\u0648\u0633\u064a\u0642\u0649 \u0627\u0644\u062c\u0627\u0632 \u0641\u064a \u0627\u0644\u062d\u0641\u0644\u0629."
+          ]
+        },
+        "pt-BR": {
+          "definition": "tocar um instrumento ou executar m\u00fasica",
+          "usage_note": "Usa-se com instrumentos musicais e estilos ou pe\u00e7as musicais.",
+          "examples": [
+            "Ela toca piano muito bem.",
+            "Eles tocaram jazz na festa."
+          ]
+        },
+        "ja": {
+          "definition": "\u697d\u5668\u3092\u6f14\u594f\u3059\u308b\u3001\u307e\u305f\u306f\u97f3\u697d\u3092\u6f14\u594f\u3059\u308b",
+          "usage_note": "\u697d\u5668\u3084\u97f3\u697d\u306e\u6f14\u594f\u306b\u3064\u3044\u3066\u4f7f\u3046\u3002",
+          "examples": [
+            "\u5f7c\u5973\u306f\u30d4\u30a2\u30ce\u3092\u3068\u3066\u3082\u4e0a\u624b\u306b\u5f3e\u304d\u307e\u3059\u3002",
+            "\u5f7c\u3089\u306f\u30d1\u30fc\u30c6\u30a3\u30fc\u3067\u30b8\u30e3\u30ba\u3092\u6f14\u594f\u3057\u307e\u3057\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_play_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_play_1",
+      "definition": "to cause recorded music, video, or other media to start and be heard or seen",
+      "examples": [
+        {
+          "sentence": "Can you play that song again?",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "He played the video for the class.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "technology",
+      "secondary_domains": [
+        "media"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "put on",
+        "start"
+      ],
+      "antonyms": [
+        "stop",
+        "pause"
+      ],
+      "collocations": [
+        "play a video",
+        "play a song",
+        "play a recording",
+        "press play"
+      ],
+      "grammar_patterns": [
+        "play + song/video/recording",
+        "play + object + for + person"
+      ],
+      "usage_note": "Common for devices and recordings: play music, play a video.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "play",
+          "gerund": "playing",
+          "past": "played",
+          "past_participle": "played",
+          "third_person_singular": "plays"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "playback",
+          "player"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "show",
+          "note": "Show is more common for visual presentation; play is common for audio, video, or recordings."
+        },
+        {
+          "word": "watch",
+          "note": "Watch means look at something being played; play means cause it to start."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.93,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:14:56Z",
+      "lexeme_id": "lx_play",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u64ad\u653e\u5f55\u5236\u7684\u97f3\u4e50\u3001\u89c6\u9891\u7b49",
+          "usage_note": "\u7528\u4e8e\u6b4c\u66f2\u3001\u89c6\u9891\u3001\u5f55\u97f3\u7b49\u5a92\u4f53\u5185\u5bb9\u3002",
+          "examples": [
+            "\u4f60\u80fd\u518d\u653e\u4e00\u904d\u90a3\u9996\u6b4c\u5417\uff1f",
+            "\u4ed6\u7ed9\u5168\u73ed\u64ad\u653e\u4e86\u90a3\u4e2a\u89c6\u9891\u3002"
+          ]
+        },
+        "es": {
+          "definition": "reproducir m\u00fasica, video u otro contenido grabado para que se oiga o se vea",
+          "usage_note": "Se usa con grabaciones y medios como canciones y videos.",
+          "examples": [
+            "\u00bfPuedes poner esa canci\u00f3n otra vez?",
+            "\u00c9l puso el video para la clase."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u0634\u063a\u0651\u0644 \u0645\u0648\u0633\u064a\u0642\u0649 \u0623\u0648 \u0641\u064a\u062f\u064a\u0648 \u0623\u0648 \u062a\u0633\u062c\u064a\u0644\u064b\u0627 \u0644\u064a\u064f\u0633\u0645\u0639 \u0623\u0648 \u064a\u064f\u0631\u0649",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0645\u0639 \u0627\u0644\u062a\u0633\u062c\u064a\u0644\u0627\u062a \u0648\u0627\u0644\u0648\u0633\u0627\u0626\u0637 \u0645\u062b\u0644 \u0627\u0644\u0623\u063a\u0627\u0646\u064a \u0648\u0627\u0644\u0641\u064a\u062f\u064a\u0648\u0647\u0627\u062a.",
+          "examples": [
+            "\u0647\u0644 \u064a\u0645\u0643\u0646\u0643 \u062a\u0634\u063a\u064a\u0644 \u062a\u0644\u0643 \u0627\u0644\u0623\u063a\u0646\u064a\u0629 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649\u061f",
+            "\u0634\u063a\u0651\u0644 \u0627\u0644\u0641\u064a\u062f\u064a\u0648 \u0644\u0644\u0635\u0641."
+          ]
+        },
+        "pt-BR": {
+          "definition": "reproduzir m\u00fasica, v\u00eddeo ou outra m\u00eddia gravada para que seja ouvida ou vista",
+          "usage_note": "Usa-se com grava\u00e7\u00f5es e m\u00eddias como m\u00fasicas e v\u00eddeos.",
+          "examples": [
+            "Voc\u00ea pode tocar essa m\u00fasica de novo?",
+            "Ele passou o v\u00eddeo para a turma."
+          ]
+        },
+        "ja": {
+          "definition": "\u9332\u97f3\u3055\u308c\u305f\u97f3\u697d\u3084\u52d5\u753b\u306a\u3069\u3092\u518d\u751f\u3059\u308b",
+          "usage_note": "\u66f2\u3001\u52d5\u753b\u3001\u9332\u97f3\u306a\u3069\u306e\u518d\u751f\u306b\u4f7f\u3046\u3002",
+          "examples": [
+            "\u305d\u306e\u6b4c\u3092\u3082\u3046\u4e00\u5ea6\u304b\u3051\u3066\u304f\u308c\u307e\u3059\u304b\u3002",
+            "\u5f7c\u306f\u30af\u30e9\u30b9\u306e\u305f\u3081\u306b\u305d\u306e\u52d5\u753b\u3092\u518d\u751f\u3057\u307e\u3057\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_play_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_play_1",
+      "definition": "to perform as a character in a play, film, or other show",
+      "examples": [
+        {
+          "sentence": "She played Juliet in the school play.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "He plays a doctor on TV.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "arts",
+      "secondary_domains": [
+        "theater",
+        "film"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "act",
+        "perform"
+      ],
+      "antonyms": [
+        "watch"
+      ],
+      "collocations": [
+        "play a role",
+        "play Hamlet",
+        "play the hero",
+        "play in a film"
+      ],
+      "grammar_patterns": [
+        "play + character",
+        "play + role + in + show",
+        "play in + film/show"
+      ],
+      "usage_note": "Use this sense for acting in theater, film, and television.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "play",
+          "gerund": "playing",
+          "past": "played",
+          "past_participle": "played",
+          "third_person_singular": "plays"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "player",
+          "playwright"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "act",
+          "note": "Act is broader; play often means perform a particular character."
+        },
+        {
+          "word": "pretend",
+          "note": "Pretend can mean behave as if something is true, often outside theater."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.9,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:14:56Z",
+      "lexeme_id": "lx_play",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u5728\u620f\u5267\u3001\u7535\u5f71\u7b49\u4e2d\u626e\u6f14\u89d2\u8272",
+          "usage_note": "\u7528\u4e8e\u626e\u6f14\u67d0\u4e2a\u5177\u4f53\u89d2\u8272\u3002",
+          "examples": [
+            "\u5979\u5728\u5b66\u6821\u7684\u8bdd\u5267\u4e2d\u626e\u6f14\u6731\u4e3d\u53f6\u3002",
+            "\u4ed6\u5728\u7535\u89c6\u4e0a\u6f14\u4e00\u540d\u533b\u751f\u3002"
+          ]
+        },
+        "es": {
+          "definition": "interpretar a un personaje en una obra, pel\u00edcula u otro espect\u00e1culo",
+          "usage_note": "Se usa cuando alguien representa un personaje espec\u00edfico.",
+          "examples": [
+            "Ella interpret\u00f3 a Julieta en la obra escolar.",
+            "\u00c9l hace de m\u00e9dico en la televisi\u00f3n."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u0645\u062b\u0644 \u062f\u0648\u0631 \u0634\u062e\u0635\u064a\u0629 \u0641\u064a \u0645\u0633\u0631\u062d\u064a\u0629 \u0623\u0648 \u0641\u064a\u0644\u0645 \u0623\u0648 \u0639\u0631\u0636",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0639\u0646\u062f \u0623\u062f\u0627\u0621 \u062f\u0648\u0631 \u0634\u062e\u0635\u064a\u0629 \u0645\u0639\u064a\u0646\u0629.",
+          "examples": [
+            "\u0645\u062b\u0651\u0644\u062a \u062f\u0648\u0631 \u062c\u0648\u0644\u064a\u064a\u062a \u0641\u064a \u0627\u0644\u0645\u0633\u0631\u062d\u064a\u0629 \u0627\u0644\u0645\u062f\u0631\u0633\u064a\u0629.",
+            "\u0647\u0648 \u064a\u0645\u062b\u0644 \u062f\u0648\u0631 \u0637\u0628\u064a\u0628 \u0639\u0644\u0649 \u0627\u0644\u062a\u0644\u0641\u0627\u0632."
+          ]
+        },
+        "pt-BR": {
+          "definition": "interpretar um personagem em uma pe\u00e7a, filme ou outro espet\u00e1culo",
+          "usage_note": "Usa-se quando algu\u00e9m representa um personagem espec\u00edfico.",
+          "examples": [
+            "Ela fez Julieta na pe\u00e7a da escola.",
+            "Ele faz um m\u00e9dico na TV."
+          ]
+        },
+        "ja": {
+          "definition": "\u5287\u3084\u6620\u753b\u306a\u3069\u3067\u3042\u308b\u5f79\u3092\u6f14\u3058\u308b",
+          "usage_note": "\u7279\u5b9a\u306e\u5f79\u3084\u4eba\u7269\u3092\u6f14\u3058\u308b\u6642\u306b\u4f7f\u3046\u3002",
+          "examples": [
+            "\u5f7c\u5973\u306f\u5b66\u6821\u306e\u5287\u3067\u30b8\u30e5\u30ea\u30a8\u30c3\u30c8\u3092\u6f14\u3058\u307e\u3057\u305f\u3002",
+            "\u5f7c\u306f\u30c6\u30ec\u30d3\u3067\u533b\u8005\u306e\u5f79\u3092\u6f14\u3058\u3066\u3044\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_play_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_play_1",
+      "definition": "a piece of writing for the theater, performed by actors on a stage",
+      "examples": [
+        {
+          "sentence": "We saw a play at the city theater.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "This play was written over a hundred years ago.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "arts",
+      "secondary_domains": [
+        "theater",
+        "literature"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "drama",
+        "stage work"
+      ],
+      "antonyms": [
+        "seriousness"
+      ],
+      "collocations": [
+        "a play by Shakespeare",
+        "go to a play",
+        "stage a play"
+      ],
+      "grammar_patterns": [
+        "a play by + writer",
+        "see/watch a play",
+        "write a play"
+      ],
+      "usage_note": "A common noun meaning a theater work.",
+      "forms": {
+        "plural_forms": [
+          "plays"
+        ],
+        "verb_forms": {
+          "base": "play",
+          "gerund": "playing",
+          "past": "played",
+          "past_participle": "played",
+          "third_person_singular": "plays"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "playwright",
+          "playhouse"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "movie",
+          "note": "Movie is filmed; play is performed live on stage."
+        },
+        {
+          "word": "game",
+          "note": "Game is an activity with rules; play as a noun here means a theater work."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.88,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:14:56Z",
+      "lexeme_id": "lx_play",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u620f\u5267\uff1b\u5267\u672c\uff1b\u821e\u53f0\u5267",
+          "usage_note": "\u8fd9\u662f\u540d\u8bcd\uff0c\u6307\u620f\u5267\u4f5c\u54c1\uff0c\u4e0d\u662f\u201c\u73a9\u201d\u7684\u52a8\u8bcd\u4e49\u3002",
+          "examples": [
+            "\u6211\u4eec\u5728\u5e02\u5267\u9662\u770b\u4e86\u4e00\u573a\u620f\u3002",
+            "\u8fd9\u90e8\u620f\u662f\u4e00\u767e\u591a\u5e74\u524d\u5199\u7684\u3002"
+          ]
+        },
+        "es": {
+          "definition": "obra escrita para el teatro, representada por actores en un escenario",
+          "usage_note": "Sustantivo que se refiere a una obra teatral, no al verbo jugar.",
+          "examples": [
+            "Vimos una obra de teatro en el teatro de la ciudad.",
+            "Esta obra fue escrita hace m\u00e1s de cien a\u00f1os."
+          ]
+        },
+        "ar": {
+          "definition": "\u0646\u0635 \u0645\u0633\u0631\u062d\u064a \u064a\u064f\u0639\u0631\u0636 \u0639\u0644\u0649 \u062e\u0634\u0628\u0629 \u0627\u0644\u0645\u0633\u0631\u062d \u0628\u0648\u0627\u0633\u0637\u0629 \u0645\u0645\u062b\u0644\u064a\u0646",
+          "usage_note": "\u0627\u0633\u0645 \u064a\u064f\u0633\u062a\u0639\u0645\u0644 \u0644\u0644\u0639\u0645\u0644 \u0627\u0644\u0645\u0633\u0631\u062d\u064a \u0646\u0641\u0633\u0647\u060c \u0644\u0627 \u0644\u0641\u0639\u0644 \u0627\u0644\u0644\u0639\u0628.",
+          "examples": [
+            "\u0634\u0627\u0647\u062f\u0646\u0627 \u0645\u0633\u0631\u062d\u064a\u0629 \u0641\u064a \u0645\u0633\u0631\u062d \u0627\u0644\u0645\u062f\u064a\u0646\u0629.",
+            "\u0643\u064f\u062a\u0628\u062a \u0647\u0630\u0647 \u0627\u0644\u0645\u0633\u0631\u062d\u064a\u0629 \u0642\u0628\u0644 \u0623\u0643\u062b\u0631 \u0645\u0646 \u0645\u0626\u0629 \u0639\u0627\u0645."
+          ]
+        },
+        "pt-BR": {
+          "definition": "obra escrita para o teatro, apresentada por atores em um palco",
+          "usage_note": "Substantivo que se refere a uma obra teatral, n\u00e3o ao verbo brincar/jogar.",
+          "examples": [
+            "N\u00f3s vimos uma pe\u00e7a no teatro da cidade.",
+            "Esta pe\u00e7a foi escrita h\u00e1 mais de cem anos."
+          ]
+        },
+        "ja": {
+          "definition": "\u821e\u53f0\u3067\u4ff3\u512a\u306b\u3088\u3063\u3066\u4e0a\u6f14\u3055\u308c\u308b\u5287\u3001\u622f\u66f2",
+          "usage_note": "\u540d\u8a5e\u3067\u3001\u904a\u3076\u3068\u3044\u3046\u52d5\u8a5e\u306e\u610f\u5473\u3067\u306f\u306a\u3044\u3002",
+          "examples": [
+            "\u79c1\u305f\u3061\u306f\u5e02\u7acb\u5287\u5834\u3067\u5287\u3092\u898b\u307e\u3057\u305f\u3002",
+            "\u3053\u306e\u5287\u306f\u767e\u5e74\u4ee5\u4e0a\u524d\u306b\u66f8\u304b\u308c\u307e\u3057\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_movement_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_movement_1",
+      "definition": "the act of changing position or place",
+      "examples": [
+        {
+          "sentence": "The doctor checked the movement of her arm after the accident.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "There was a lot of movement in the crowd after the concert ended.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "motion",
+        "moving"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "body movement",
+        "hand movement",
+        "eye movement",
+        "movement of people"
+      ],
+      "grammar_patterns": [
+        "movement of something",
+        "movement in something"
+      ],
+      "usage_note": "A common general noun for physical moving or visible activity.",
+      "forms": {
+        "plural_forms": [
+          "movements"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "move",
+          "movable",
+          "movement"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "motion",
+          "note": "General change of place; movement often emphasizes the act or pattern of moving."
+        },
+        {
+          "word": "travel",
+          "note": "Traveling from one place to another; movement can be smaller or more general."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.95,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:15:53Z",
+      "lexeme_id": "lx_movement",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u79fb\u52a8\uff1b\u52a8\u4f5c\uff1b\u53d8\u52a8\u4f4d\u7f6e\u7684\u884c\u4e3a",
+          "usage_note": "\u7528\u4e8e\u4eba\u3001\u8eab\u4f53\u90e8\u4f4d\u6216\u7269\u4f53\u7684\u5b9e\u9645\u79fb\u52a8\u3002",
+          "examples": [
+            "\u4e8b\u6545\u540e\uff0c\u533b\u751f\u68c0\u67e5\u4e86\u5979\u624b\u81c2\u7684\u6d3b\u52a8\u60c5\u51b5\u3002",
+            "\u97f3\u4e50\u4f1a\u7ed3\u675f\u540e\uff0c\u4eba\u7fa4\u4e2d\u6709\u5f88\u591a\u79fb\u52a8\u3002"
+          ]
+        },
+        "es": {
+          "definition": "acto de cambiar de posici\u00f3n o de lugar",
+          "usage_note": "Se usa para movimiento f\u00edsico de personas, partes del cuerpo o cosas.",
+          "examples": [
+            "El m\u00e9dico revis\u00f3 el movimiento de su brazo despu\u00e9s del accidente.",
+            "Hubo mucho movimiento en la multitud despu\u00e9s de que termin\u00f3 el concierto."
+          ]
+        },
+        "ar": {
+          "definition": "\u0641\u0639\u0644 \u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u0645\u0648\u0636\u0639 \u0623\u0648 \u0627\u0644\u0645\u0643\u0627\u0646",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0644\u0644\u062d\u0631\u0643\u0629 \u0627\u0644\u062c\u0633\u062f\u064a\u0629 \u0623\u0648 \u0627\u0646\u062a\u0642\u0627\u0644 \u0627\u0644\u0623\u0634\u062e\u0627\u0635 \u0648\u0627\u0644\u0623\u0634\u064a\u0627\u0621.",
+          "examples": [
+            "\u0641\u062d\u0635 \u0627\u0644\u0637\u0628\u064a\u0628 \u062d\u0631\u0643\u0629 \u0630\u0631\u0627\u0639\u0647\u0627 \u0628\u0639\u062f \u0627\u0644\u062d\u0627\u062f\u062b.",
+            "\u0643\u0627\u0646 \u0647\u0646\u0627\u0643 \u0627\u0644\u0643\u062b\u064a\u0631 \u0645\u0646 \u0627\u0644\u062d\u0631\u0643\u0629 \u0641\u064a \u0627\u0644\u062d\u0634\u062f \u0628\u0639\u062f \u0627\u0646\u062a\u0647\u0627\u0621 \u0627\u0644\u062d\u0641\u0644."
+          ]
+        },
+        "pt-BR": {
+          "definition": "ato de mudar de posi\u00e7\u00e3o ou de lugar",
+          "usage_note": "Usado para movimento f\u00edsico de pessoas, partes do corpo ou coisas.",
+          "examples": [
+            "O m\u00e9dico examinou o movimento do bra\u00e7o dela depois do acidente.",
+            "Houve muito movimento na multid\u00e3o depois que o show terminou."
+          ]
+        },
+        "ja": {
+          "definition": "\u4f4d\u7f6e\u3084\u5834\u6240\u3092\u5909\u3048\u308b\u3053\u3068\u3001\u52d5\u304d",
+          "usage_note": "\u4eba\u3084\u7269\u3001\u4f53\u306e\u4e00\u90e8\u306e\u7269\u7406\u7684\u306a\u52d5\u304d\u306b\u4f7f\u3046\u3002",
+          "examples": [
+            "\u4e8b\u6545\u306e\u3042\u3068\u3001\u533b\u5e2b\u306f\u5f7c\u5973\u306e\u8155\u306e\u52d5\u304d\u3092\u8abf\u3079\u305f\u3002",
+            "\u30b3\u30f3\u30b5\u30fc\u30c8\u304c\u7d42\u308f\u3063\u305f\u3042\u3068\u3001\u7fa4\u8846\u306b\u305f\u304f\u3055\u3093\u306e\u52d5\u304d\u304c\u3042\u3063\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_movement_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_movement_1",
+      "definition": "a group of people working together to achieve a social or political aim",
+      "examples": [
+        {
+          "sentence": "She became active in the environmental movement at university.",
+          "difficulty": "B2"
+        },
+        {
+          "sentence": "The movement called for equal rights and fair treatment.",
+          "difficulty": "B2"
+        }
+      ],
+      "cefr_level": "B2",
+      "primary_domain": "society",
+      "secondary_domains": [
+        "politics"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "cause",
+        "campaign"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "political movement",
+        "social movement",
+        "protest movement",
+        "independence movement"
+      ],
+      "grammar_patterns": [
+        "movement for something",
+        "movement against something"
+      ],
+      "usage_note": "Often used for broad organized efforts for change.",
+      "forms": {
+        "plural_forms": [
+          "movements"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "move",
+          "movement"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "campaign",
+          "note": "An organized group working for social or political change."
+        },
+        {
+          "word": "organization",
+          "note": "A formal institution with members and structure; a movement may be looser and broader."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.96,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:15:53Z",
+      "lexeme_id": "lx_movement",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u8fd0\u52a8\uff1b\u793e\u4f1a/\u653f\u6cbb\u8fd0\u52a8\uff1b\u4e3a\u5171\u540c\u76ee\u6807\u800c\u884c\u52a8\u7684\u4e00\u7fa4\u4eba",
+          "usage_note": "\u5e38\u7528\u4e8e\u793e\u4f1a\u3001\u653f\u6cbb\u6216\u6539\u9769\u65b9\u9762\u7684\u8fd0\u52a8\u3002",
+          "examples": [
+            "\u5979\u5728\u5927\u5b66\u65f6\u79ef\u6781\u53c2\u4e0e\u73af\u4fdd\u8fd0\u52a8\u3002",
+            "\u8fd9\u573a\u8fd0\u52a8\u8981\u6c42\u5e73\u7b49\u6743\u5229\u548c\u516c\u5e73\u5f85\u9047\u3002"
+          ]
+        },
+        "es": {
+          "definition": "grupo de personas que trabajan juntas para lograr un objetivo social o pol\u00edtico",
+          "usage_note": "Se usa para movimientos sociales o pol\u00edticos amplios.",
+          "examples": [
+            "Se volvi\u00f3 activa en el movimiento ecologista en la universidad.",
+            "El movimiento pidi\u00f3 igualdad de derechos y un trato justo."
+          ]
+        },
+        "ar": {
+          "definition": "\u062c\u0645\u0627\u0639\u0629 \u0645\u0646 \u0627\u0644\u0646\u0627\u0633 \u064a\u0639\u0645\u0644\u0648\u0646 \u0645\u0639\u064b\u0627 \u0644\u062a\u062d\u0642\u064a\u0642 \u0647\u062f\u0641 \u0627\u062c\u062a\u0645\u0627\u0639\u064a \u0623\u0648 \u0633\u064a\u0627\u0633\u064a",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0644\u0644\u062d\u0631\u0643\u0627\u062a \u0627\u0644\u0627\u062c\u062a\u0645\u0627\u0639\u064a\u0629 \u0623\u0648 \u0627\u0644\u0633\u064a\u0627\u0633\u064a\u0629 \u0627\u0644\u0645\u0646\u0638\u0645\u0629 \u0623\u0648 \u0627\u0644\u0648\u0627\u0633\u0639\u0629.",
+          "examples": [
+            "\u0623\u0635\u0628\u062d\u062a \u0646\u0627\u0634\u0637\u0629 \u0641\u064a \u0627\u0644\u062d\u0631\u0643\u0629 \u0627\u0644\u0628\u064a\u0626\u064a\u0629 \u0641\u064a \u0627\u0644\u062c\u0627\u0645\u0639\u0629.",
+            "\u062f\u0639\u062a \u0627\u0644\u062d\u0631\u0643\u0629 \u0625\u0644\u0649 \u0627\u0644\u0645\u0633\u0627\u0648\u0627\u0629 \u0641\u064a \u0627\u0644\u062d\u0642\u0648\u0642 \u0648\u0627\u0644\u0645\u0639\u0627\u0645\u0644\u0629 \u0627\u0644\u0639\u0627\u062f\u0644\u0629."
+          ]
+        },
+        "pt-BR": {
+          "definition": "grupo de pessoas que atua em conjunto para alcan\u00e7ar um objetivo social ou pol\u00edtico",
+          "usage_note": "Usado para movimentos sociais ou pol\u00edticos amplos.",
+          "examples": [
+            "Ela se tornou ativa no movimento ambiental na universidade.",
+            "O movimento pediu direitos iguais e tratamento justo."
+          ]
+        },
+        "ja": {
+          "definition": "\u793e\u4f1a\u7684\u30fb\u653f\u6cbb\u7684\u306a\u76ee\u7684\u3092\u9054\u6210\u3059\u308b\u305f\u3081\u306b\u5171\u306b\u6d3b\u52d5\u3059\u308b\u4eba\u3005\u306e\u96c6\u307e\u308a",
+          "usage_note": "\u793e\u4f1a\u904b\u52d5\u3001\u653f\u6cbb\u904b\u52d5\u306a\u3069\u306b\u4f7f\u3046\u3002",
+          "examples": [
+            "\u5f7c\u5973\u306f\u5927\u5b66\u3067\u74b0\u5883\u4fdd\u8b77\u904b\u52d5\u306b\u7a4d\u6975\u7684\u306b\u53c2\u52a0\u3057\u305f\u3002",
+            "\u305d\u306e\u904b\u52d5\u306f\u5e73\u7b49\u306a\u6a29\u5229\u3068\u516c\u6b63\u306a\u6271\u3044\u3092\u6c42\u3081\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_movement_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_movement_1",
+      "definition": "a change in position, value, or condition over time",
+      "examples": [
+        {
+          "sentence": "Small movements in oil prices can affect the whole economy.",
+          "difficulty": "B2"
+        },
+        {
+          "sentence": "The report tracks population movement from rural areas to cities.",
+          "difficulty": "B2"
+        }
+      ],
+      "cefr_level": "B2",
+      "primary_domain": "general",
+      "secondary_domains": [
+        "economics"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "change",
+        "shift"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "market movement",
+        "price movement",
+        "population movement",
+        "troop movement"
+      ],
+      "grammar_patterns": [
+        "movement in something",
+        "movement from A to B"
+      ],
+      "usage_note": "Useful in news and formal contexts for shifts in numbers, groups, or conditions.",
+      "forms": {
+        "plural_forms": [
+          "movements"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "move",
+          "movement"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "change",
+          "note": "A change or development; movement often suggests directional change over time."
+        },
+        {
+          "word": "trend",
+          "note": "A gradual tendency; movement can refer to actual measurable shifts."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.87,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:15:53Z",
+      "lexeme_id": "lx_movement",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u53d8\u5316\uff1b\u53d8\u52a8\uff1b\u968f\u65f6\u95f4\u53d1\u751f\u7684\u4f4d\u7f6e\u3001\u6570\u503c\u6216\u72b6\u6001\u53d8\u5316",
+          "usage_note": "\u53ef\u7528\u4e8e\u4ef7\u683c\u3001\u4eba\u53e3\u3001\u519b\u961f\u7b49\u53ef\u89c2\u5bdf\u7684\u53d8\u52a8\u3002",
+          "examples": [
+            "\u6cb9\u4ef7\u7684\u5c0f\u5e45\u6ce2\u52a8\u4e5f\u4f1a\u5f71\u54cd\u6574\u4e2a\u7ecf\u6d4e\u3002",
+            "\u8fd9\u4efd\u62a5\u544a\u8ffd\u8e2a\u4e86\u4eba\u53e3\u4ece\u519c\u6751\u5411\u57ce\u5e02\u7684\u8fc1\u79fb\u3002"
+          ]
+        },
+        "es": {
+          "definition": "cambio de posici\u00f3n, valor o condici\u00f3n con el tiempo",
+          "usage_note": "Se usa para cambios observables, por ejemplo en precios, poblaci\u00f3n o fuerzas militares.",
+          "examples": [
+            "Peque\u00f1os movimientos en los precios del petr\u00f3leo pueden afectar a toda la econom\u00eda.",
+            "El informe sigue el movimiento de poblaci\u00f3n de las zonas rurales a las ciudades."
+          ]
+        },
+        "ar": {
+          "definition": "\u062a\u063a\u064a\u0631 \u0641\u064a \u0627\u0644\u0645\u0648\u0636\u0639 \u0623\u0648 \u0627\u0644\u0642\u064a\u0645\u0629 \u0623\u0648 \u0627\u0644\u062d\u0627\u0644\u0629 \u0645\u0639 \u0645\u0631\u0648\u0631 \u0627\u0644\u0648\u0642\u062a",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0644\u0644\u062a\u063a\u064a\u0631\u0627\u062a \u0627\u0644\u0642\u0627\u0628\u0644\u0629 \u0644\u0644\u0645\u0644\u0627\u062d\u0638\u0629 \u0645\u062b\u0644 \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0623\u0648 \u0627\u0644\u0633\u0643\u0627\u0646 \u0623\u0648 \u0627\u0644\u0642\u0648\u0627\u062a.",
+          "examples": [
+            "\u064a\u0645\u0643\u0646 \u0644\u0644\u062a\u062d\u0631\u0643\u0627\u062a \u0627\u0644\u0635\u063a\u064a\u0631\u0629 \u0641\u064a \u0623\u0633\u0639\u0627\u0631 \u0627\u0644\u0646\u0641\u0637 \u0623\u0646 \u062a\u0624\u062b\u0631 \u0641\u064a \u0627\u0644\u0627\u0642\u062a\u0635\u0627\u062f \u0643\u0644\u0647.",
+            "\u064a\u062a\u062a\u0628\u0639 \u0627\u0644\u062a\u0642\u0631\u064a\u0631 \u0627\u0646\u062a\u0642\u0627\u0644 \u0627\u0644\u0633\u0643\u0627\u0646 \u0645\u0646 \u0627\u0644\u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0631\u064a\u0641\u064a\u0629 \u0625\u0644\u0649 \u0627\u0644\u0645\u062f\u0646."
+          ]
+        },
+        "pt-BR": {
+          "definition": "mudan\u00e7a de posi\u00e7\u00e3o, valor ou condi\u00e7\u00e3o ao longo do tempo",
+          "usage_note": "Usado para mudan\u00e7as observ\u00e1veis, como em pre\u00e7os, popula\u00e7\u00e3o ou tropas.",
+          "examples": [
+            "Pequenos movimentos nos pre\u00e7os do petr\u00f3leo podem afetar toda a economia.",
+            "O relat\u00f3rio acompanha o movimento populacional das \u00e1reas rurais para as cidades."
+          ]
+        },
+        "ja": {
+          "definition": "\u6642\u9593\u3068\u3068\u3082\u306b\u8d77\u3053\u308b\u4f4d\u7f6e\u30fb\u4fa1\u5024\u30fb\u72b6\u614b\u306e\u5909\u5316",
+          "usage_note": "\u4fa1\u683c\u3001\u4eba\u53e3\u3001\u8ecd\u968a\u306a\u3069\u306e\u5909\u5316\u3084\u79fb\u52d5\u306b\u4f7f\u3046\u3002",
+          "examples": [
+            "\u77f3\u6cb9\u4fa1\u683c\u306e\u5c0f\u3055\u306a\u5909\u52d5\u3067\u3082\u7d4c\u6e08\u5168\u4f53\u306b\u5f71\u97ff\u3059\u308b\u3053\u3068\u304c\u3042\u308b\u3002",
+            "\u305d\u306e\u5831\u544a\u66f8\u306f\u8fb2\u6751\u304b\u3089\u90fd\u5e02\u3078\u306e\u4eba\u53e3\u79fb\u52d5\u3092\u8ffd\u8de1\u3057\u3066\u3044\u308b\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_movement_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_movement_1",
+      "definition": "one of the main parts of a long piece of music",
+      "examples": [
+        {
+          "sentence": "The orchestra played the final movement beautifully.",
+          "difficulty": "B2"
+        },
+        {
+          "sentence": "Her favorite part of the symphony is the slow second movement.",
+          "difficulty": "B2"
+        }
+      ],
+      "cefr_level": "B2",
+      "primary_domain": "music",
+      "secondary_domains": [
+        "arts"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "section"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "first movement",
+        "second movement",
+        "musical movement"
+      ],
+      "grammar_patterns": [
+        "movement of a symphony",
+        "the first/second/final movement"
+      ],
+      "usage_note": "A music-specific sense common in classical music contexts.",
+      "forms": {
+        "plural_forms": [
+          "movements"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "move",
+          "movement"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "piece",
+          "note": "A complete musical work; a movement is one main section within it."
+        },
+        {
+          "word": "section",
+          "note": "A smaller part of music; movement usually refers to a large formal section."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.89,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:15:53Z",
+      "lexeme_id": "lx_movement",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u4e50\u7ae0\uff1b\u5927\u578b\u97f3\u4e50\u4f5c\u54c1\u4e2d\u7684\u4e00\u4e2a\u4e3b\u8981\u90e8\u5206",
+          "usage_note": "\u97f3\u4e50\u672f\u8bed\uff0c\u5e38\u7528\u4e8e\u4ea4\u54cd\u66f2\u3001\u594f\u9e23\u66f2\u7b49\u957f\u7bc7\u4f5c\u54c1\u3002",
+          "examples": [
+            "\u4e50\u56e2\u628a\u6700\u540e\u4e00\u4e2a\u4e50\u7ae0\u6f14\u594f\u5f97\u975e\u5e38\u4f18\u7f8e\u3002",
+            "\u5979\u6700\u559c\u6b22\u8fd9\u90e8\u4ea4\u54cd\u66f2\u4e2d\u7f13\u6162\u7684\u7b2c\u4e8c\u4e50\u7ae0\u3002"
+          ]
+        },
+        "es": {
+          "definition": "una de las partes principales de una obra musical larga",
+          "usage_note": "T\u00e9rmino musical usado en sinfon\u00edas, sonatas y obras largas.",
+          "examples": [
+            "La orquesta interpret\u00f3 maravillosamente el movimiento final.",
+            "Su parte favorita de la sinfon\u00eda es el segundo movimiento lento."
+          ]
+        },
+        "ar": {
+          "definition": "\u0623\u062d\u062f \u0627\u0644\u0623\u062c\u0632\u0627\u0621 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 \u0641\u064a \u0645\u0642\u0637\u0648\u0639\u0629 \u0645\u0648\u0633\u064a\u0642\u064a\u0629 \u0637\u0648\u064a\u0644\u0629",
+          "usage_note": "\u0645\u0635\u0637\u0644\u062d \u0645\u0648\u0633\u064a\u0642\u064a \u064a\u0633\u062a\u062e\u062f\u0645 \u0641\u064a \u0627\u0644\u0633\u064a\u0645\u0641\u0648\u0646\u064a\u0627\u062a \u0648\u0627\u0644\u0633\u0648\u0646\u0627\u062a\u0627\u062a \u0648\u0627\u0644\u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u0637\u0648\u064a\u0644\u0629.",
+          "examples": [
+            "\u0639\u0632\u0641\u062a \u0627\u0644\u0623\u0648\u0631\u0643\u0633\u062a\u0631\u0627 \u0627\u0644\u062d\u0631\u0643\u0629 \u0627\u0644\u0623\u062e\u064a\u0631\u0629 \u0628\u0634\u0643\u0644 \u062c\u0645\u064a\u0644.",
+            "\u0627\u0644\u062c\u0632\u0621 \u0627\u0644\u0645\u0641\u0636\u0644 \u0644\u062f\u064a\u0647\u0627 \u0645\u0646 \u0627\u0644\u0633\u064a\u0645\u0641\u0648\u0646\u064a\u0629 \u0647\u0648 \u0627\u0644\u062d\u0631\u0643\u0629 \u0627\u0644\u062b\u0627\u0646\u064a\u0629 \u0627\u0644\u0628\u0637\u064a\u0626\u0629."
+          ]
+        },
+        "pt-BR": {
+          "definition": "uma das partes principais de uma obra musical longa",
+          "usage_note": "Termo musical usado em sinfonias, sonatas e obras longas.",
+          "examples": [
+            "A orquestra tocou o movimento final lindamente.",
+            "A parte favorita dela na sinfonia \u00e9 o segundo movimento, mais lento."
+          ]
+        },
+        "ja": {
+          "definition": "\u9577\u3044\u697d\u66f2\u306e\u4e3b\u8981\u306a\u90e8\u5206\u306e\u4e00\u3064\u3001\u697d\u7ae0",
+          "usage_note": "\u4ea4\u97ff\u66f2\u3084\u30bd\u30ca\u30bf\u306a\u3069\u306e\u9577\u3044\u4f5c\u54c1\u3067\u4f7f\u3046\u97f3\u697d\u7528\u8a9e\u3002",
+          "examples": [
+            "\u30aa\u30fc\u30b1\u30b9\u30c8\u30e9\u306f\u7d42\u697d\u7ae0\u3092\u898b\u4e8b\u306b\u6f14\u594f\u3057\u305f\u3002",
+            "\u5f7c\u5973\u304c\u305d\u306e\u4ea4\u97ff\u66f2\u3067\u4e00\u756a\u597d\u304d\u306a\u306e\u306f\u3086\u3063\u304f\u308a\u3057\u305f\u7b2c2\u697d\u7ae0\u3060\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_family_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_family_1",
+      "definition": "a group of people related to each other, such as parents, children, and grandparents",
+      "examples": [
+        {
+          "sentence": "Her family lives in Madrid.",
+          "difficulty": "A1"
+        },
+        {
+          "sentence": "We visit our family every summer.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A1",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "relatives"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "close family",
+        "extended family",
+        "family member",
+        "start a family",
+        "family life"
+      ],
+      "grammar_patterns": [
+        "a family",
+        "my/your/his family",
+        "family + singular/plural verb"
+      ],
+      "usage_note": "In everyday English, family can be singular or plural depending on whether you think of the group as one unit or as individuals.",
+      "forms": {
+        "plural_forms": [
+          "families"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "familial",
+          "familiar",
+          "family-friendly"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "household",
+          "note": "Usually means people related to you by birth, marriage, or adoption; can also mean a household unit."
+        },
+        {
+          "word": "relative",
+          "note": "A relative is one member of your family, not the whole group."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.99,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:16:27Z",
+      "lexeme_id": "lx_family",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u6709\u4eb2\u5c5e\u5173\u7cfb\u7684\u4e00\u7fa4\u4eba\uff0c\u5982\u7236\u6bcd\u3001\u5b69\u5b50\u548c\u7956\u7236\u6bcd",
+          "usage_note": "family \u7684\u57fa\u672c\u542b\u4e49\u3002",
+          "examples": [
+            "\u5979\u7684\u5bb6\u4eba\u4f4f\u5728\u9a6c\u5fb7\u91cc\u3002",
+            "\u6211\u4eec\u6bcf\u5e74\u590f\u5929\u90fd\u4f1a\u53bb\u770b\u671b\u5bb6\u4eba\u3002"
+          ]
+        },
+        "es": {
+          "definition": "grupo de personas emparentadas, como padres, hijos y abuelos",
+          "usage_note": "Sentido b\u00e1sico de family.",
+          "examples": [
+            "Su familia vive en Madrid.",
+            "Visitamos a nuestra familia cada verano."
+          ]
+        },
+        "ar": {
+          "definition": "\u0645\u062c\u0645\u0648\u0639\u0629 \u0645\u0646 \u0627\u0644\u0623\u0634\u062e\u0627\u0635 \u062a\u062c\u0645\u0639\u0647\u0645 \u0635\u0644\u0629 \u0642\u0631\u0627\u0628\u0629 \u0645\u062b\u0644 \u0627\u0644\u0648\u0627\u0644\u062f\u064a\u0646 \u0648\u0627\u0644\u0623\u0637\u0641\u0627\u0644 \u0648\u0627\u0644\u0623\u062c\u062f\u0627\u062f",
+          "usage_note": "\u0627\u0644\u0645\u0639\u0646\u0649 \u0627\u0644\u0623\u0633\u0627\u0633\u064a \u0644\u0643\u0644\u0645\u0629 family.",
+          "examples": [
+            "\u062a\u0639\u064a\u0634 \u0639\u0627\u0626\u0644\u062a\u0647\u0627 \u0641\u064a \u0645\u062f\u0631\u064a\u062f.",
+            "\u0646\u0632\u0648\u0631 \u0639\u0627\u0626\u0644\u062a\u0646\u0627 \u0643\u0644 \u0635\u064a\u0641."
+          ]
+        },
+        "pt-BR": {
+          "definition": "grupo de pessoas com parentesco, como pais, filhos e av\u00f3s",
+          "usage_note": "Sentido b\u00e1sico de family.",
+          "examples": [
+            "A fam\u00edlia dela mora em Madri.",
+            "N\u00f3s visitamos nossa fam\u00edlia todo ver\u00e3o."
+          ]
+        },
+        "ja": {
+          "definition": "\u89aa\u3001\u5b50\u3069\u3082\u3001\u7956\u7236\u6bcd\u306a\u3069\u3001\u8840\u7e01\u3084\u5a5a\u59fb\u3067\u3064\u306a\u304c\u3063\u305f\u4eba\u3005\u306e\u96c6\u307e\u308a",
+          "usage_note": "family \u306e\u57fa\u672c\u7684\u306a\u610f\u5473\u3002",
+          "examples": [
+            "\u5f7c\u5973\u306e\u5bb6\u65cf\u306f\u30de\u30c9\u30ea\u30fc\u30c9\u306b\u4f4f\u3093\u3067\u3044\u307e\u3059\u3002",
+            "\u79c1\u305f\u3061\u306f\u6bce\u5e74\u590f\u306b\u5bb6\u65cf\u3092\u8a2a\u306d\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_family_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_family_1",
+      "definition": "children and parents living together, especially as a social unit",
+      "examples": [
+        {
+          "sentence": "They are raising a young family in the city.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "The hotel is perfect for a family with small children.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "society",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "household"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "family home",
+        "family business",
+        "family name",
+        "family tradition"
+      ],
+      "grammar_patterns": [
+        "a family of + number",
+        "for a family",
+        "raise a family"
+      ],
+      "usage_note": "Common in phrases about daily life, housing, and social policy.",
+      "forms": {
+        "plural_forms": [
+          "families"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "family-sized",
+          "family-run"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "home",
+          "note": "Home usually means the place where someone lives; family can mean the people in that home."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.94,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:16:27Z",
+      "lexeme_id": "lx_family",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u5171\u540c\u751f\u6d3b\u7684\u7236\u6bcd\u548c\u5b69\u5b50\uff0c\u5c24\u6307\u4f5c\u4e3a\u4e00\u4e2a\u5bb6\u5ead\u5355\u4f4d",
+          "usage_note": "\u8fd9\u4e2a\u610f\u601d\u5f3a\u8c03\u5171\u540c\u751f\u6d3b\u7684\u5bb6\u5ead\u5355\u4f4d\u3002",
+          "examples": [
+            "\u4ed6\u4eec\u5728\u57ce\u91cc\u629a\u517b\u7740\u4e00\u4e2a\u5e74\u8f7b\u7684\u5bb6\u5ead\u3002",
+            "\u8fd9\u5bb6\u9152\u5e97\u975e\u5e38\u9002\u5408\u6709\u5c0f\u5b69\u7684\u5bb6\u5ead\u3002"
+          ]
+        },
+        "es": {
+          "definition": "padres e hijos que viven juntos, especialmente como unidad social",
+          "usage_note": "Este sentido se centra en la familia como unidad de convivencia.",
+          "examples": [
+            "Est\u00e1n criando una familia joven en la ciudad.",
+            "El hotel es perfecto para una familia con ni\u00f1os peque\u00f1os."
+          ]
+        },
+        "ar": {
+          "definition": "\u0627\u0644\u0648\u0627\u0644\u062f\u0627\u0646 \u0648\u0627\u0644\u0623\u0637\u0641\u0627\u0644 \u0627\u0644\u0630\u064a\u0646 \u064a\u0639\u064a\u0634\u0648\u0646 \u0645\u0639\u064b\u0627\u060c \u062e\u0627\u0635\u0629 \u0628\u0648\u0635\u0641\u0647\u0645 \u0648\u062d\u062f\u0629 \u0627\u062c\u062a\u0645\u0627\u0639\u064a\u0629",
+          "usage_note": "\u064a\u0631\u0643\u0632 \u0647\u0630\u0627 \u0627\u0644\u0645\u0639\u0646\u0649 \u0639\u0644\u0649 \u0627\u0644\u0623\u0633\u0631\u0629 \u0643\u0648\u062d\u062f\u0629 \u0645\u0639\u064a\u0634\u064a\u0629.",
+          "examples": [
+            "\u0625\u0646\u0647\u0645 \u064a\u0631\u0628\u0648\u0646 \u0623\u0633\u0631\u0629 \u0634\u0627\u0628\u0629 \u0641\u064a \u0627\u0644\u0645\u062f\u064a\u0646\u0629.",
+            "\u0627\u0644\u0641\u0646\u062f\u0642 \u0645\u062b\u0627\u0644\u064a \u0644\u0623\u0633\u0631\u0629 \u0644\u062f\u064a\u0647\u0627 \u0623\u0637\u0641\u0627\u0644 \u0635\u063a\u0627\u0631."
+          ]
+        },
+        "pt-BR": {
+          "definition": "pais e filhos que vivem juntos, especialmente como unidade social",
+          "usage_note": "Esse sentido destaca a fam\u00edlia como unidade de conviv\u00eancia.",
+          "examples": [
+            "Eles est\u00e3o criando uma fam\u00edlia jovem na cidade.",
+            "O hotel \u00e9 perfeito para uma fam\u00edlia com crian\u00e7as pequenas."
+          ]
+        },
+        "ja": {
+          "definition": "\u7279\u306b\u4e00\u3064\u306e\u751f\u6d3b\u5358\u4f4d\u3068\u3057\u3066\u4e00\u7dd2\u306b\u66ae\u3089\u3059\u89aa\u3068\u5b50\u3069\u3082\u305f\u3061",
+          "usage_note": "\u540c\u5c45\u3059\u308b\u5bb6\u5ead\u3068\u3044\u3046\u610f\u5473\u306b\u91cd\u70b9\u304c\u3042\u308b\u3002",
+          "examples": [
+            "\u5f7c\u3089\u306f\u90fd\u4f1a\u3067\u5e7c\u3044\u5b50\u3069\u3082\u306e\u3044\u308b\u5bb6\u5ead\u3092\u7bc9\u3044\u3066\u3044\u307e\u3059\u3002",
+            "\u305d\u306e\u30db\u30c6\u30eb\u306f\u5c0f\u3055\u306a\u5b50\u3069\u3082\u306e\u3044\u308b\u5bb6\u65cf\u306b\u6700\u9069\u3067\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_family_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_family_1",
+      "definition": "a group of related things or people with similar features",
+      "examples": [
+        {
+          "sentence": "Spanish is part of the Romance language family.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "Lions and cats belong to the same animal family.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "classification",
+      "secondary_domains": [
+        "biology",
+        "linguistics"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "category",
+        "class",
+        "group"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "language family",
+        "plant family",
+        "belong to the same family"
+      ],
+      "grammar_patterns": [
+        "the family of + noun",
+        "belong to a family",
+        "in the same family"
+      ],
+      "usage_note": "Often used in science and classification, including language, biology, and products.",
+      "forms": {
+        "plural_forms": [
+          "families"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "subfamily"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "group",
+          "note": "A group is any collection; a family often means a scientific group with shared features."
+        },
+        {
+          "word": "category",
+          "note": "A category is a general class; family is often used in biology or classification."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.88,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:16:27Z",
+      "lexeme_id": "lx_family",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u5177\u6709\u76f8\u4f3c\u7279\u5f81\u3001\u5f7c\u6b64\u76f8\u5173\u7684\u4e00\u7ec4\u4e8b\u7269\u6216\u4eba",
+          "usage_note": "\u7528\u4e8e\u79d1\u5b66\u6216\u4e00\u822c\u5206\u7c7b\u3002",
+          "examples": [
+            "\u897f\u73ed\u7259\u8bed\u5c5e\u4e8e\u7f57\u66fc\u8bed\u65cf\u3002",
+            "\u72ee\u5b50\u548c\u732b\u5c5e\u4e8e\u540c\u4e00\u4e2a\u52a8\u7269\u79d1\u3002"
+          ]
+        },
+        "es": {
+          "definition": "grupo de cosas o personas relacionadas que comparten caracter\u00edsticas similares",
+          "usage_note": "Se usa en clasificaci\u00f3n cient\u00edfica o general.",
+          "examples": [
+            "El espa\u00f1ol forma parte de la familia de lenguas romances.",
+            "Los leones y los gatos pertenecen a la misma familia animal."
+          ]
+        },
+        "ar": {
+          "definition": "\u0645\u062c\u0645\u0648\u0639\u0629 \u0645\u0646 \u0627\u0644\u0623\u0634\u064a\u0627\u0621 \u0623\u0648 \u0627\u0644\u0623\u0634\u062e\u0627\u0635 \u0627\u0644\u0645\u0631\u062a\u0628\u0637\u064a\u0646 \u0648\u0644\u0647\u0645 \u0635\u0641\u0627\u062a \u0645\u062a\u0634\u0627\u0628\u0647\u0629",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0641\u064a \u0627\u0644\u062a\u0635\u0646\u064a\u0641 \u0627\u0644\u0639\u0644\u0645\u064a \u0623\u0648 \u0627\u0644\u0639\u0627\u0645.",
+          "examples": [
+            "\u0627\u0644\u0625\u0633\u0628\u0627\u0646\u064a\u0629 \u062c\u0632\u0621 \u0645\u0646 \u0639\u0627\u0626\u0644\u0629 \u0627\u0644\u0644\u063a\u0627\u062a \u0627\u0644\u0631\u0648\u0645\u0627\u0646\u0633\u064a\u0629.",
+            "\u062a\u0646\u062a\u0645\u064a \u0627\u0644\u0623\u0633\u0648\u062f \u0648\u0627\u0644\u0642\u0637\u0637 \u0625\u0644\u0649 \u0627\u0644\u0639\u0627\u0626\u0644\u0629 \u0627\u0644\u062d\u064a\u0648\u0627\u0646\u064a\u0629 \u0646\u0641\u0633\u0647\u0627."
+          ]
+        },
+        "pt-BR": {
+          "definition": "grupo de coisas ou pessoas relacionadas com caracter\u00edsticas semelhantes",
+          "usage_note": "Usado em classifica\u00e7\u00e3o cient\u00edfica ou geral.",
+          "examples": [
+            "O espanhol faz parte da fam\u00edlia das l\u00ednguas rom\u00e2nicas.",
+            "Le\u00f5es e gatos pertencem \u00e0 mesma fam\u00edlia animal."
+          ]
+        },
+        "ja": {
+          "definition": "\u5171\u901a\u3059\u308b\u7279\u5fb4\u3092\u3082\u3064\u3001\u95a2\u9023\u3057\u305f\u7269\u3084\u4eba\u306e\u96c6\u307e\u308a",
+          "usage_note": "\u79d1\u5b66\u7684\u5206\u985e\u3084\u4e00\u822c\u7684\u5206\u985e\u3067\u4f7f\u3046\u3002",
+          "examples": [
+            "\u30b9\u30da\u30a4\u30f3\u8a9e\u306f\u30ed\u30de\u30f3\u30b9\u8a9e\u65cf\u306e\u4e00\u90e8\u3067\u3059\u3002",
+            "\u30e9\u30a4\u30aa\u30f3\u3068\u732b\u306f\u540c\u3058\u52d5\u7269\u306e\u79d1\u306b\u5c5e\u3057\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_law_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_law_1",
+      "definition": "the system of official rules of a country or society, and the power to make people obey them",
+      "examples": [
+        {
+          "sentence": "Everyone must obey the law.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "The new law will start next year.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "government",
+      "secondary_domains": [
+        "society"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "legal system",
+        "legislation"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "break the law",
+        "obey the law",
+        "against the law",
+        "by law",
+        "law school"
+      ],
+      "grammar_patterns": [
+        "the law",
+        "a law",
+        "by law",
+        "against the law"
+      ],
+      "usage_note": "Often uncountable for the legal system in general; countable when referring to a specific rule passed by a government.",
+      "forms": {
+        "plural_forms": [
+          "laws"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "lawful",
+          "unlawful",
+          "lawyer",
+          "lawless"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "rule",
+          "note": "rules in general; can be official or unofficial"
+        },
+        {
+          "word": "justice",
+          "note": "what is morally right, not necessarily what is legal"
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.98,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:17:00Z",
+      "lexeme_id": "lx_law",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u4e00\u4e2a\u56fd\u5bb6\u6216\u793e\u4f1a\u7684\u5b98\u65b9\u89c4\u5219\u4f53\u7cfb\uff0c\u4ee5\u53ca\u4f7f\u4eba\u4eec\u9075\u5b88\u8fd9\u4e9b\u89c4\u5219\u7684\u6743\u529b",
+          "usage_note": "\u53ef\u6307\u6574\u4e2a\u6cd5\u5f8b\u4f53\u7cfb\uff0c\u4e5f\u53ef\u5728\u8bed\u5883\u4e2d\u6307\u5177\u4f53\u6cd5\u5f8b\u3002",
+          "examples": [
+            "\u6bcf\u4e2a\u4eba\u90fd\u5fc5\u987b\u9075\u5b88\u6cd5\u5f8b\u3002",
+            "\u8fd9\u9879\u65b0\u6cd5\u5f8b\u5c06\u4e8e\u660e\u5e74\u5f00\u59cb\u5b9e\u65bd\u3002"
+          ]
+        },
+        "es": {
+          "definition": "el sistema de reglas oficiales de un pa\u00eds o sociedad, y la autoridad para hacer que la gente las obedezca",
+          "usage_note": "Se usa para hablar del sistema legal en general o de una ley concreta seg\u00fan el contexto.",
+          "examples": [
+            "Todos deben obedecer la ley.",
+            "La nueva ley entrar\u00e1 en vigor el pr\u00f3ximo a\u00f1o."
+          ]
+        },
+        "ar": {
+          "definition": "\u0646\u0638\u0627\u0645 \u0627\u0644\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0631\u0633\u0645\u064a\u0629 \u0641\u064a \u0628\u0644\u062f \u0623\u0648 \u0645\u062c\u062a\u0645\u0639\u060c \u0648\u0633\u0644\u0637\u0629 \u0625\u0644\u0632\u0627\u0645 \u0627\u0644\u0646\u0627\u0633 \u0628\u0627\u062a\u0628\u0627\u0639\u0647\u0627",
+          "usage_note": "\u064a\u0634\u064a\u0631 \u0625\u0644\u0649 \u0627\u0644\u0642\u0627\u0646\u0648\u0646 \u0628\u0634\u0643\u0644 \u0639\u0627\u0645 \u0623\u0648 \u0625\u0644\u0649 \u0627\u0644\u0646\u0638\u0627\u0645 \u0627\u0644\u0642\u0627\u0646\u0648\u0646\u064a.",
+          "examples": [
+            "\u064a\u062c\u0628 \u0639\u0644\u0649 \u0627\u0644\u062c\u0645\u064a\u0639 \u0625\u0637\u0627\u0639\u0629 \u0627\u0644\u0642\u0627\u0646\u0648\u0646.",
+            "\u0633\u064a\u0628\u062f\u0623 \u0627\u0644\u0642\u0627\u0646\u0648\u0646 \u0627\u0644\u062c\u062f\u064a\u062f \u0627\u0644\u0639\u0627\u0645 \u0627\u0644\u0642\u0627\u062f\u0645."
+          ]
+        },
+        "pt-BR": {
+          "definition": "o sistema de regras oficiais de um pa\u00eds ou sociedade, e o poder de fazer as pessoas obedec\u00ea-las",
+          "usage_note": "Pode se referir ao sistema jur\u00eddico em geral ou a uma lei espec\u00edfica pelo contexto.",
+          "examples": [
+            "Todos devem obedecer \u00e0 lei.",
+            "A nova lei come\u00e7ar\u00e1 no pr\u00f3ximo ano."
+          ]
+        },
+        "ja": {
+          "definition": "\u56fd\u3084\u793e\u4f1a\u306e\u516c\u5f0f\u306a\u898f\u5247\u306e\u4f53\u7cfb\u3001\u307e\u305f\u4eba\u3005\u306b\u305d\u308c\u3092\u5b88\u3089\u305b\u308b\u529b",
+          "usage_note": "\u4e00\u822c\u7684\u306a\u300e\u6cd5\u5f8b\u30fb\u6cd5\u4f53\u7cfb\u300f\u3092\u8868\u3059\u3002",
+          "examples": [
+            "\u3060\u308c\u3082\u304c\u6cd5\u5f8b\u306b\u5f93\u308f\u306a\u3051\u308c\u3070\u306a\u3089\u306a\u3044\u3002",
+            "\u65b0\u3057\u3044\u6cd5\u5f8b\u306f\u6765\u5e74\u59cb\u307e\u308b\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_law_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_law_1",
+      "definition": "the subject of legal study, or the profession of working with the legal system",
+      "examples": [
+        {
+          "sentence": "She is studying law at university.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "After ten years, he left law to start a business.",
+          "difficulty": "B2"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "education",
+      "secondary_domains": [
+        "work"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "legal studies",
+        "legal profession"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "study law",
+        "practice law",
+        "law student",
+        "the law faculty"
+      ],
+      "grammar_patterns": [
+        "study law",
+        "go into law",
+        "leave law"
+      ],
+      "usage_note": "Common in phrases like study law and go into law.",
+      "forms": {
+        "plural_forms": [
+          "laws"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "lawyer",
+          "legal"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "politics",
+          "note": "the study of society and human behavior more broadly"
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.91,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:17:00Z",
+      "lexeme_id": "lx_law",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u6cd5\u5f8b\u8fd9\u95e8\u5b66\u79d1\uff0c\u6216\u4ece\u4e8b\u6cd5\u5f8b\u4f53\u7cfb\u76f8\u5173\u5de5\u4f5c\u7684\u804c\u4e1a\u9886\u57df",
+          "usage_note": "\u65e2\u53ef\u6307\u4e13\u4e1a\u5b66\u4e60\uff0c\u4e5f\u53ef\u6307\u804c\u4e1a\u9886\u57df\u3002",
+          "examples": [
+            "\u5979\u5728\u5927\u5b66\u5b66\u4e60\u6cd5\u5f8b\u3002",
+            "\u5341\u5e74\u540e\uff0c\u4ed6\u79bb\u5f00\u6cd5\u5f8b\u884c\u4e1a\u53bb\u521b\u4e1a\u4e86\u3002"
+          ]
+        },
+        "es": {
+          "definition": "la materia de estudios jur\u00eddicos o la profesi\u00f3n de trabajar con el sistema legal",
+          "usage_note": "Puede referirse tanto a la carrera universitaria como a la profesi\u00f3n.",
+          "examples": [
+            "Ella estudia derecho en la universidad.",
+            "Despu\u00e9s de diez a\u00f1os, dej\u00f3 el derecho para iniciar un negocio."
+          ]
+        },
+        "ar": {
+          "definition": "\u062f\u0631\u0627\u0633\u0629 \u0627\u0644\u0642\u0627\u0646\u0648\u0646 \u0623\u0648 \u0645\u0647\u0646\u0629 \u0627\u0644\u0639\u0645\u0644 \u0641\u064a \u0627\u0644\u0646\u0638\u0627\u0645 \u0627\u0644\u0642\u0627\u0646\u0648\u0646\u064a",
+          "usage_note": "\u0642\u062f \u064a\u0634\u064a\u0631 \u0625\u0644\u0649 \u0627\u0644\u062a\u062e\u0635\u0635 \u0627\u0644\u062f\u0631\u0627\u0633\u064a \u0623\u0648 \u0627\u0644\u0645\u062c\u0627\u0644 \u0627\u0644\u0645\u0647\u0646\u064a.",
+          "examples": [
+            "\u0625\u0646\u0647\u0627 \u062a\u062f\u0631\u0633 \u0627\u0644\u0642\u0627\u0646\u0648\u0646 \u0641\u064a \u0627\u0644\u062c\u0627\u0645\u0639\u0629.",
+            "\u0628\u0639\u062f \u0639\u0634\u0631 \u0633\u0646\u0648\u0627\u062a\u060c \u062a\u0631\u0643 \u0645\u0647\u0646\u0629 \u0627\u0644\u0642\u0627\u0646\u0648\u0646 \u0644\u064a\u0628\u062f\u0623 \u0645\u0634\u0631\u0648\u0639\u064b\u0627 \u062a\u062c\u0627\u0631\u064a\u064b\u0627."
+          ]
+        },
+        "pt-BR": {
+          "definition": "a \u00e1rea de estudo jur\u00eddico ou a profiss\u00e3o de trabalhar com o sistema legal",
+          "usage_note": "Pode indicar tanto o curso quanto a profiss\u00e3o.",
+          "examples": [
+            "Ela estuda direito na universidade.",
+            "Depois de dez anos, ele deixou o direito para abrir um neg\u00f3cio."
+          ]
+        },
+        "ja": {
+          "definition": "\u6cd5\u5f8b\u5b66\u3068\u3044\u3046\u5b66\u554f\u3001\u307e\u305f\u306f\u6cd5\u5236\u5ea6\u306b\u95a2\u308f\u308b\u8077\u696d\u5206\u91ce",
+          "usage_note": "\u5b66\u554f\u5206\u91ce\u306b\u3082\u8077\u696d\u5206\u91ce\u306b\u3082\u4f7f\u3046\u3002",
+          "examples": [
+            "\u5f7c\u5973\u306f\u5927\u5b66\u3067\u6cd5\u5f8b\u3092\u52c9\u5f37\u3057\u3066\u3044\u308b\u3002",
+            "10\u5e74\u5f8c\u3001\u5f7c\u306f\u6cd5\u66f9\u754c\u3092\u96e2\u308c\u3066\u4e8b\u696d\u3092\u59cb\u3081\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_law_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_law_1",
+      "definition": "a rule or principle that explains a natural or scientific fact",
+      "examples": [
+        {
+          "sentence": "Newton discovered important laws of motion.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "The law of gravity affects everything on Earth.",
+          "difficulty": "B2"
+        }
+      ],
+      "cefr_level": "B2",
+      "primary_domain": "science",
+      "secondary_domains": [
+        "education"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "principle",
+        "scientific rule"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "Newton's law",
+        "law of gravity",
+        "law of nature"
+      ],
+      "grammar_patterns": [
+        "law of nature",
+        "law of physics",
+        "the law of gravity"
+      ],
+      "usage_note": "Often used in science for fixed relationships, especially in phrases with of.",
+      "forms": {
+        "plural_forms": [
+          "laws"
+        ],
+        "verb_forms": {
+          "base": "",
+          "gerund": "",
+          "past": "",
+          "past_participle": "",
+          "third_person_singular": ""
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "lawlike"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "principle",
+          "note": "a general pattern, often less exact than a scientific law"
+        },
+        {
+          "word": "theory",
+          "note": "an observed tendency, not always a fixed rule"
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.9,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:17:00Z",
+      "lexeme_id": "lx_law",
+      "sense_order": 1,
+      "part_of_speech": "noun",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u89e3\u91ca\u81ea\u7136\u6216\u79d1\u5b66\u4e8b\u5b9e\u7684\u89c4\u5f8b\u6216\u539f\u7406",
+          "usage_note": "\u7528\u4e8e\u79d1\u5b66\u8bed\u5883\uff0c\u8868\u793a\u2018\u5b9a\u5f8b\u3001\u89c4\u5f8b\u2019\u3002",
+          "examples": [
+            "\u725b\u987f\u53d1\u73b0\u4e86\u91cd\u8981\u7684\u8fd0\u52a8\u5b9a\u5f8b\u3002",
+            "\u4e07\u6709\u5f15\u529b\u5b9a\u5f8b\u5f71\u54cd\u5730\u7403\u4e0a\u7684\u4e00\u5207\u3002"
+          ]
+        },
+        "es": {
+          "definition": "una regla o principio que explica un hecho natural o cient\u00edfico",
+          "usage_note": "Se usa en contextos cient\u00edficos.",
+          "examples": [
+            "Newton descubri\u00f3 importantes leyes del movimiento.",
+            "La ley de la gravedad afecta todo en la Tierra."
+          ]
+        },
+        "ar": {
+          "definition": "\u0642\u0627\u0639\u062f\u0629 \u0623\u0648 \u0645\u0628\u062f\u0623 \u064a\u0641\u0633\u0631 \u062d\u0642\u064a\u0642\u0629 \u0637\u0628\u064a\u0639\u064a\u0629 \u0623\u0648 \u0639\u0644\u0645\u064a\u0629",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0641\u064a \u0627\u0644\u0639\u0644\u0648\u0645 \u0644\u0644\u0637\u0628\u064a\u0639\u0629 \u0648\u0627\u0644\u0641\u064a\u0632\u064a\u0627\u0621 \u0648\u063a\u064a\u0631\u0647\u0627.",
+          "examples": [
+            "\u0627\u0643\u062a\u0634\u0641 \u0646\u064a\u0648\u062a\u0646 \u0642\u0648\u0627\u0646\u064a\u0646 \u0645\u0647\u0645\u0629 \u0644\u0644\u062d\u0631\u0643\u0629.",
+            "\u064a\u0624\u062b\u0631 \u0642\u0627\u0646\u0648\u0646 \u0627\u0644\u062c\u0627\u0630\u0628\u064a\u0629 \u0641\u064a \u0643\u0644 \u0634\u064a\u0621 \u0639\u0644\u0649 \u0627\u0644\u0623\u0631\u0636."
+          ]
+        },
+        "pt-BR": {
+          "definition": "uma regra ou princ\u00edpio que explica um fato natural ou cient\u00edfico",
+          "usage_note": "Usado em contextos cient\u00edficos.",
+          "examples": [
+            "Newton descobriu importantes leis do movimento.",
+            "A lei da gravidade afeta tudo na Terra."
+          ]
+        },
+        "ja": {
+          "definition": "\u81ea\u7136\u3084\u79d1\u5b66\u306e\u4e8b\u5b9f\u3092\u8aac\u660e\u3059\u308b\u6cd5\u5247\u30fb\u539f\u7406",
+          "usage_note": "\u79d1\u5b66\u5206\u91ce\u3067\u4f7f\u3046\u300e\u6cd5\u5247\u300f\u3002",
+          "examples": [
+            "\u30cb\u30e5\u30fc\u30c8\u30f3\u306f\u91cd\u8981\u306a\u904b\u52d5\u306e\u6cd5\u5247\u3092\u767a\u898b\u3057\u305f\u3002",
+            "\u91cd\u529b\u306e\u6cd5\u5247\u306f\u5730\u7403\u4e0a\u306e\u3042\u3089\u3086\u308b\u3082\u306e\u306b\u5f71\u97ff\u3059\u308b\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_change_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_change_1",
+      "definition": "to become different, or to make someone or something different",
+      "examples": [
+        {
+          "sentence": "People change as they get older.",
+          "difficulty": "A1"
+        },
+        {
+          "sentence": "We need to change our plans.",
+          "difficulty": "A1"
+        }
+      ],
+      "cefr_level": "A1",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "alter",
+        "modify"
+      ],
+      "antonyms": [
+        "stay the same",
+        "remain"
+      ],
+      "collocations": [
+        "change clothes",
+        "change your mind",
+        "change plans",
+        "change jobs"
+      ],
+      "grammar_patterns": [
+        "change",
+        "change something",
+        "change from A to B",
+        "change into something"
+      ],
+      "usage_note": "A very common verb for becoming different or making something different.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "change",
+          "gerund": "changing",
+          "past": "changed",
+          "past_participle": "changed",
+          "third_person_singular": "changes"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "changeable",
+          "unchanged",
+          "changed",
+          "changing",
+          "changeover"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "replace",
+          "note": "Usually means to exchange one thing for another, not simply make something different."
+        },
+        {
+          "word": "alter",
+          "note": "Means to become or make different over time; often broader than change."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.98,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:17:54Z",
+      "lexeme_id": "lx_change",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u53d8\u5f97\u4e0d\u540c\uff1b\u4f7f\u67d0\u4eba\u6216\u67d0\u7269\u53d1\u751f\u6539\u53d8",
+          "usage_note": "\u7528\u4e8e\u8868\u793a\u4e00\u822c\u6027\u7684\u53d8\u5316\uff0c\u6216\u4f7f\u67d0\u7269\u4e0d\u540c\u3002",
+          "examples": [
+            "\u4eba\u968f\u7740\u5e74\u9f84\u589e\u957f\u4f1a\u6539\u53d8\u3002",
+            "\u6211\u4eec\u9700\u8981\u6539\u53d8\u8ba1\u5212\u3002"
+          ]
+        },
+        "es": {
+          "definition": "volverse diferente o hacer que alguien o algo sea diferente",
+          "usage_note": "Se usa para un cambio general o para hacer algo diferente.",
+          "examples": [
+            "Las personas cambian a medida que envejecen.",
+            "Necesitamos cambiar nuestros planes."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u0635\u0628\u062d \u0645\u062e\u062a\u0644\u0641\u064b\u0627 \u0623\u0648 \u064a\u062c\u0639\u0644 \u0634\u062e\u0635\u064b\u0627 \u0623\u0648 \u0634\u064a\u0626\u064b\u0627 \u0645\u062e\u062a\u0644\u0641\u064b\u0627",
+          "usage_note": "\u064a\u064f\u0633\u062a\u062e\u062f\u0645 \u0644\u0644\u062a\u063a\u064a\u0631 \u0627\u0644\u0639\u0627\u0645 \u0623\u0648 \u0644\u062c\u0639\u0644 \u0634\u064a\u0621 \u0645\u062e\u062a\u0644\u0641\u064b\u0627.",
+          "examples": [
+            "\u064a\u062a\u063a\u064a\u0631 \u0627\u0644\u0646\u0627\u0633 \u0639\u0646\u062f\u0645\u0627 \u064a\u0643\u0628\u0631\u0648\u0646 \u0641\u064a \u0627\u0644\u0633\u0646.",
+            "\u0646\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u062a\u063a\u064a\u064a\u0631 \u062e\u0637\u0637\u0646\u0627."
+          ]
+        },
+        "pt-BR": {
+          "definition": "tornar-se diferente ou fazer algu\u00e9m ou algo ficar diferente",
+          "usage_note": "Usado para mudan\u00e7a geral ou para fazer algo ficar diferente.",
+          "examples": [
+            "As pessoas mudam \u00e0 medida que envelhecem.",
+            "Precisamos mudar nossos planos."
+          ]
+        },
+        "ja": {
+          "definition": "\u7570\u306a\u308b\u3088\u3046\u306b\u306a\u308b\u3001\u307e\u305f\u306f\u4eba\u3084\u7269\u3092\u7570\u306a\u308b\u3088\u3046\u306b\u3059\u308b",
+          "usage_note": "\u4e00\u822c\u7684\u306a\u5909\u5316\u3084\u3001\u4f55\u304b\u3092\u5909\u3048\u308b\u3053\u3068\u3092\u8868\u3059\u3002",
+          "examples": [
+            "\u4eba\u306f\u5e74\u3092\u53d6\u308b\u306b\u3064\u308c\u3066\u5909\u308f\u308a\u307e\u3059\u3002",
+            "\u79c1\u305f\u3061\u306f\u8a08\u753b\u3092\u5909\u3048\u308b\u5fc5\u8981\u304c\u3042\u308a\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_change_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_change_1",
+      "definition": "to stop using or having one thing and start using or having another",
+      "examples": [
+        {
+          "sentence": "I changed my shoes after the walk.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "You have to change trains in Paris.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "switch",
+        "replace"
+      ],
+      "antonyms": [
+        "keep",
+        "retain"
+      ],
+      "collocations": [
+        "change trains",
+        "change seats",
+        "change clothes",
+        "change hands"
+      ],
+      "grammar_patterns": [
+        "change something",
+        "change from A to B",
+        "change into something"
+      ],
+      "usage_note": "Often used for clothes, transport, jobs, or choices.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "change",
+          "gerund": "changing",
+          "past": "changed",
+          "past_participle": "changed",
+          "third_person_singular": "changes"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "changeable",
+          "changed",
+          "changing"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "switch",
+          "note": "Focuses on moving from one thing to another rather than simply becoming different."
+        },
+        {
+          "word": "replace",
+          "note": "Often means exchange one item for another similar item."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.93,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:17:54Z",
+      "lexeme_id": "lx_change",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u505c\u6b62\u4f7f\u7528\u6216\u62e5\u6709\u4e00\u79cd\u4e1c\u897f\uff0c\u5f00\u59cb\u4f7f\u7528\u6216\u62e5\u6709\u53e6\u4e00\u79cd",
+          "usage_note": "\u7528\u4e8e\u8868\u793a\u4ece\u4e00\u79cd\u4e1c\u897f\u6362\u5230\u53e6\u4e00\u79cd\u3002",
+          "examples": [
+            "\u6563\u6b65\u540e\u6211\u6362\u4e86\u978b\u3002",
+            "\u4f60\u5fc5\u987b\u5728\u5df4\u9ece\u6362\u4e58\u706b\u8f66\u3002"
+          ]
+        },
+        "es": {
+          "definition": "dejar de usar o tener una cosa y empezar a usar o tener otra",
+          "usage_note": "Se usa al pasar de una cosa a otra.",
+          "examples": [
+            "Me cambi\u00e9 los zapatos despu\u00e9s de la caminata.",
+            "Tienes que cambiar de tren en Par\u00eds."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u062a\u0648\u0642\u0641 \u0639\u0646 \u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0623\u0648 \u0627\u0645\u062a\u0644\u0627\u0643 \u0634\u064a\u0621 \u0648\u064a\u0628\u062f\u0623 \u0628\u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0623\u0648 \u0627\u0645\u062a\u0644\u0627\u0643 \u0634\u064a\u0621 \u0622\u062e\u0631",
+          "usage_note": "\u064a\u064f\u0633\u062a\u062e\u062f\u0645 \u0639\u0646\u062f \u0627\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0645\u0646 \u0634\u064a\u0621 \u0625\u0644\u0649 \u0622\u062e\u0631.",
+          "examples": [
+            "\u063a\u064a\u0651\u0631\u062a \u062d\u0630\u0627\u0626\u064a \u0628\u0639\u062f \u0627\u0644\u0645\u0634\u064a.",
+            "\u0639\u0644\u064a\u0643 \u0623\u0646 \u062a\u0628\u062f\u0651\u0644 \u0627\u0644\u0642\u0637\u0627\u0631 \u0641\u064a \u0628\u0627\u0631\u064a\u0633."
+          ]
+        },
+        "pt-BR": {
+          "definition": "deixar de usar ou ter uma coisa e passar a usar ou ter outra",
+          "usage_note": "Usado ao passar de uma coisa para outra.",
+          "examples": [
+            "Troquei de sapatos depois da caminhada.",
+            "Voc\u00ea tem que trocar de trem em Paris."
+          ]
+        },
+        "ja": {
+          "definition": "\u4e00\u3064\u306e\u3082\u306e\u306e\u4f7f\u7528\u30fb\u6240\u6709\u3092\u3084\u3081\u3066\u3001\u5225\u306e\u3082\u306e\u3092\u4f7f\u3046\u30fb\u6301\u3064\u3088\u3046\u306b\u306a\u308b",
+          "usage_note": "\u3042\u308b\u3082\u306e\u304b\u3089\u5225\u306e\u3082\u306e\u3078\u5207\u308a\u66ff\u3048\u308b\u3068\u304d\u306b\u4f7f\u3046\u3002",
+          "examples": [
+            "\u6563\u6b69\u306e\u3042\u3068\u3067\u9774\u3092\u66ff\u3048\u307e\u3057\u305f\u3002",
+            "\u30d1\u30ea\u3067\u5217\u8eca\u3092\u4e57\u308a\u63db\u3048\u306a\u3051\u308c\u3070\u306a\u308a\u307e\u305b\u3093\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_change_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_change_1",
+      "definition": "an act or process of becoming different, or the result of becoming different",
+      "examples": [
+        {
+          "sentence": "There has been a big change in the weather.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "The company went through many changes last year.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "alteration",
+        "difference"
+      ],
+      "antonyms": [
+        "constancy",
+        "stability"
+      ],
+      "collocations": [
+        "a big change",
+        "a change in weather",
+        "social change",
+        "change of plan"
+      ],
+      "grammar_patterns": [
+        "a change in something",
+        "changes to something",
+        "go through changes"
+      ],
+      "usage_note": "Common noun for a difference, development, or new situation.",
+      "forms": {
+        "plural_forms": [
+          "changes"
+        ],
+        "verb_forms": {
+          "base": "change",
+          "gerund": "changing",
+          "past": "changed",
+          "past_participle": "changed",
+          "third_person_singular": "changes"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "changed",
+          "changing",
+          "changeable"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "alteration",
+          "note": "A specific result of change, often in formal contexts."
+        },
+        {
+          "word": "transformation",
+          "note": "Often means a complete and important change."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.96,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:17:54Z",
+      "lexeme_id": "lx_change",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u53d8\u5f97\u4e0d\u540c\u7684\u884c\u4e3a\u6216\u8fc7\u7a0b\uff1b\u8fd9\u79cd\u53d8\u5316\u7684\u7ed3\u679c",
+          "usage_note": "\u8868\u793a\u53d8\u5316\u672c\u8eab\u6216\u5176\u7ed3\u679c\u7684\u5e38\u7528\u540d\u8bcd\u3002",
+          "examples": [
+            "\u5929\u6c14\u53d1\u751f\u4e86\u5f88\u5927\u53d8\u5316\u3002",
+            "\u8fd9\u5bb6\u516c\u53f8\u53bb\u5e74\u7ecf\u5386\u4e86\u8bb8\u591a\u53d8\u5316\u3002"
+          ]
+        },
+        "es": {
+          "definition": "acto o proceso de volverse diferente, o el resultado de ello",
+          "usage_note": "Nombre general para el cambio o su resultado.",
+          "examples": [
+            "Ha habido un gran cambio en el clima.",
+            "La empresa pas\u00f3 por muchos cambios el a\u00f1o pasado."
+          ]
+        },
+        "ar": {
+          "definition": "\u0641\u0639\u0644 \u0623\u0648 \u0639\u0645\u0644\u064a\u0629 \u0623\u0646 \u064a\u0635\u0628\u062d \u0627\u0644\u0634\u064a\u0621 \u0645\u062e\u062a\u0644\u0641\u064b\u0627\u060c \u0623\u0648 \u0646\u062a\u064a\u062c\u0629 \u0630\u0644\u0643",
+          "usage_note": "\u0627\u0633\u0645 \u0639\u0627\u0645 \u0644\u0644\u062a\u063a\u064a\u0631 \u0623\u0648 \u0646\u062a\u064a\u062c\u062a\u0647.",
+          "examples": [
+            "\u062d\u062f\u062b \u062a\u063a\u064a\u0631 \u0643\u0628\u064a\u0631 \u0641\u064a \u0627\u0644\u0637\u0642\u0633.",
+            "\u0645\u0631\u062a \u0627\u0644\u0634\u0631\u0643\u0629 \u0628\u0627\u0644\u0639\u062f\u064a\u062f \u0645\u0646 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a \u0627\u0644\u0639\u0627\u0645 \u0627\u0644\u0645\u0627\u0636\u064a."
+          ]
+        },
+        "pt-BR": {
+          "definition": "ato ou processo de se tornar diferente, ou o resultado disso",
+          "usage_note": "Substantivo geral para mudan\u00e7a ou seu resultado.",
+          "examples": [
+            "Houve uma grande mudan\u00e7a no tempo.",
+            "A empresa passou por muitas mudan\u00e7as no ano passado."
+          ]
+        },
+        "ja": {
+          "definition": "\u7570\u306a\u308b\u3088\u3046\u306b\u306a\u308b\u884c\u70ba\u30fb\u904e\u7a0b\u3001\u307e\u305f\u306f\u305d\u306e\u7d50\u679c",
+          "usage_note": "\u5909\u5316\u305d\u306e\u3082\u306e\u3084\u305d\u306e\u7d50\u679c\u3092\u8868\u3059\u4e00\u822c\u7684\u306a\u540d\u8a5e\u3002",
+          "examples": [
+            "\u5929\u6c17\u306b\u5927\u304d\u306a\u5909\u5316\u304c\u3042\u308a\u307e\u3057\u305f\u3002",
+            "\u305d\u306e\u4f1a\u793e\u306f\u53bb\u5e74\u591a\u304f\u306e\u5909\u5316\u3092\u7d4c\u9a13\u3057\u307e\u3057\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_change_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_change_1",
+      "definition": "a new opinion or decision after thinking differently",
+      "examples": [
+        {
+          "sentence": "At first she said no, but then she had a change of mind.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "I changed my mind and stayed home.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "reversal"
+      ],
+      "antonyms": [
+        "same opinion",
+        "consistency"
+      ],
+      "collocations": [
+        "a change of mind",
+        "change your mind"
+      ],
+      "grammar_patterns": [
+        "a change of mind",
+        "change your mind about something"
+      ],
+      "usage_note": "Often appears in the fixed phrase change your mind.",
+      "forms": {
+        "plural_forms": [
+          "changes"
+        ],
+        "verb_forms": {
+          "base": "change",
+          "gerund": "changing",
+          "past": "changed",
+          "past_participle": "changed",
+          "third_person_singular": "changes"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "changed",
+          "changing"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "reconsider",
+          "note": "Means to think carefully again, not necessarily decide differently."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.89,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:17:54Z",
+      "lexeme_id": "lx_change",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u7ecf\u8fc7\u91cd\u65b0\u601d\u8003\u540e\u4ea7\u751f\u7684\u65b0\u60f3\u6cd5\u6216\u51b3\u5b9a",
+          "usage_note": "\u5e38\u89c1\u4e8e\u77ed\u8bed change your mind\u3002",
+          "examples": [
+            "\u4e00\u5f00\u59cb\u5979\u8bf4\u4e0d\uff0c\u4f46\u540e\u6765\u5979\u6539\u53d8\u4e86\u4e3b\u610f\u3002",
+            "\u6211\u6539\u53d8\u4e86\u4e3b\u610f\uff0c\u7559\u5728\u5bb6\u91cc\u4e86\u3002"
+          ]
+        },
+        "es": {
+          "definition": "una nueva opini\u00f3n o decisi\u00f3n despu\u00e9s de pensar de otra manera",
+          "usage_note": "Aparece mucho en la expresi\u00f3n change your mind.",
+          "examples": [
+            "Al principio dijo que no, pero luego cambi\u00f3 de opini\u00f3n.",
+            "Cambi\u00e9 de opini\u00f3n y me qued\u00e9 en casa."
+          ]
+        },
+        "ar": {
+          "definition": "\u0631\u0623\u064a \u0623\u0648 \u0642\u0631\u0627\u0631 \u062c\u062f\u064a\u062f \u0628\u0639\u062f \u0627\u0644\u062a\u0641\u0643\u064a\u0631 \u0628\u0634\u0643\u0644 \u0645\u062e\u062a\u0644\u0641",
+          "usage_note": "\u064a\u0638\u0647\u0631 \u0643\u062b\u064a\u0631\u064b\u0627 \u0641\u064a \u0627\u0644\u062a\u0639\u0628\u064a\u0631 change your mind.",
+          "examples": [
+            "\u0641\u064a \u0627\u0644\u0628\u062f\u0627\u064a\u0629 \u0642\u0627\u0644\u062a \u0644\u0627\u060c \u062b\u0645 \u063a\u064a\u0631\u062a \u0631\u0623\u064a\u0647\u0627.",
+            "\u063a\u064a\u0631\u062a \u0631\u0623\u064a\u064a \u0648\u0628\u0642\u064a\u062a \u0641\u064a \u0627\u0644\u0645\u0646\u0632\u0644."
+          ]
+        },
+        "pt-BR": {
+          "definition": "uma nova opini\u00e3o ou decis\u00e3o depois de pensar de outro modo",
+          "usage_note": "Muito comum na express\u00e3o change your mind.",
+          "examples": [
+            "No come\u00e7o ela disse n\u00e3o, mas depois mudou de ideia.",
+            "Mudei de ideia e fiquei em casa."
+          ]
+        },
+        "ja": {
+          "definition": "\u8003\u3048\u65b9\u304c\u5909\u308f\u3063\u305f\u5f8c\u306e\u65b0\u3057\u3044\u610f\u898b\u3084\u6c7a\u5b9a",
+          "usage_note": "change your mind \u3068\u3044\u3046\u8868\u73fe\u3067\u3088\u304f\u4f7f\u3046\u3002",
+          "examples": [
+            "\u6700\u521d\u5f7c\u5973\u306f\u5acc\u3060\u3068\u8a00\u3044\u307e\u3057\u305f\u304c\u3001\u305d\u306e\u3042\u3068\u6c17\u304c\u5909\u308f\u308a\u307e\u3057\u305f\u3002",
+            "\u6c17\u304c\u5909\u308f\u3063\u3066\u5bb6\u306b\u3044\u307e\u3057\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_change_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_change_1",
+      "definition": "money that is returned when you pay more than the price, or coins of small value",
+      "examples": [
+        {
+          "sentence": "I paid with a ten-dollar bill and got change.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "Do you have any change for the bus?",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "money",
+      "secondary_domains": [
+        "shopping"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "coins",
+        "small money"
+      ],
+      "antonyms": [
+        "full amount"
+      ],
+      "collocations": [
+        "small change",
+        "loose change",
+        "keep the change"
+      ],
+      "grammar_patterns": [
+        "get change",
+        "have change",
+        "change for something",
+        "keep the change"
+      ],
+      "usage_note": "Uncountable in this meaning: some change, enough change.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "change",
+          "gerund": "changing",
+          "past": "changed",
+          "past_participle": "changed",
+          "third_person_singular": "changes"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "unchanged"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "money",
+          "note": "General term for money; change is specifically the money returned or coins of small value."
+        },
+        {
+          "word": "coins",
+          "note": "Usually refers only to metal money, while change can also mean the amount returned."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.95,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:17:54Z",
+      "lexeme_id": "lx_change",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u4ed8\u6b3e\u8d85\u8fc7\u4ef7\u683c\u540e\u627e\u56de\u7684\u94b1\uff1b\u5c0f\u989d\u786c\u5e01",
+          "usage_note": "\u7528\u4e8e\u8868\u793a\u627e\u96f6\u6216\u96f6\u5e01\u3002",
+          "examples": [
+            "\u6211\u4ed8\u4e86\u4e00\u5f20\u5341\u7f8e\u5143\u7684\u949e\u7968\uff0c\u62ff\u5230\u4e86\u627e\u96f6\u3002",
+            "\u4f60\u6709\u5750\u516c\u4ea4\u7528\u7684\u96f6\u94b1\u5417\uff1f"
+          ]
+        },
+        "es": {
+          "definition": "dinero que te devuelven cuando pagas m\u00e1s del precio, o monedas de poco valor",
+          "usage_note": "Se usa para el dinero devuelto o para monedas sueltas.",
+          "examples": [
+            "Pagu\u00e9 con un billete de diez d\u00f3lares y me dieron cambio.",
+            "\u00bfTienes cambio para el autob\u00fas?"
+          ]
+        },
+        "ar": {
+          "definition": "\u0627\u0644\u0645\u0627\u0644 \u0627\u0644\u0645\u064f\u0639\u0627\u062f \u0639\u0646\u062f\u0645\u0627 \u062a\u062f\u0641\u0639 \u0623\u0643\u062b\u0631 \u0645\u0646 \u0627\u0644\u0633\u0639\u0631\u060c \u0623\u0648 \u0627\u0644\u0639\u0645\u0644\u0627\u062a \u0627\u0644\u0645\u0639\u062f\u0646\u064a\u0629 \u0627\u0644\u0635\u063a\u064a\u0631\u0629",
+          "usage_note": "\u064a\u064f\u0633\u062a\u062e\u062f\u0645 \u0644\u0644\u0628\u0627\u0642\u064a \u0623\u0648 \u0644\u0644\u0641\u0643\u0629.",
+          "examples": [
+            "\u062f\u0641\u0639\u062a \u0628\u0648\u0631\u0642\u0629 \u0646\u0642\u062f\u064a\u0629 \u0645\u0646 \u0641\u0626\u0629 \u0639\u0634\u0631\u0629 \u062f\u0648\u0644\u0627\u0631\u0627\u062a \u0648\u0623\u062e\u0630\u062a \u0627\u0644\u0628\u0627\u0642\u064a.",
+            "\u0647\u0644 \u0644\u062f\u064a\u0643 \u0641\u0643\u0629 \u0644\u0644\u062d\u0627\u0641\u0644\u0629\u061f"
+          ]
+        },
+        "pt-BR": {
+          "definition": "dinheiro devolvido quando voc\u00ea paga mais do que o pre\u00e7o, ou moedas de pequeno valor",
+          "usage_note": "Usado para troco ou moedas mi\u00fadas.",
+          "examples": [
+            "Paguei com uma nota de dez d\u00f3lares e recebi troco.",
+            "Voc\u00ea tem troco para o \u00f4nibus?"
+          ]
+        },
+        "ja": {
+          "definition": "\u4ee3\u91d1\u3088\u308a\u591a\u304f\u6255\u3063\u305f\u3068\u304d\u306b\u8fd4\u3055\u308c\u308b\u304a\u91d1\u3001\u307e\u305f\u306f\u5c11\u984d\u306e\u786c\u8ca8",
+          "usage_note": "\u304a\u3064\u308a\u3084\u5c0f\u92ad\u306e\u610f\u5473\u3067\u4f7f\u3046\u3002",
+          "examples": [
+            "10\u30c9\u30eb\u672d\u3067\u6255\u3063\u3066\u3001\u304a\u3064\u308a\u3092\u3082\u3089\u3044\u307e\u3057\u305f\u3002",
+            "\u30d0\u30b9\u7528\u306e\u5c0f\u92ad\u3092\u6301\u3063\u3066\u3044\u307e\u3059\u304b\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_travel_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_travel_1",
+      "definition": "to go from one place to another, especially over a distance",
+      "examples": [
+        {
+          "sentence": "We plan to travel to Spain next summer.",
+          "difficulty": "A2"
+        },
+        {
+          "sentence": "She travels to work by bus every day.",
+          "difficulty": "A2"
+        }
+      ],
+      "cefr_level": "A2",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "go",
+        "journey"
+      ],
+      "antonyms": [
+        "stay",
+        "remain"
+      ],
+      "collocations": [
+        "travel abroad",
+        "travel around",
+        "travel by train",
+        "travel to work"
+      ],
+      "grammar_patterns": [
+        "travel to + place",
+        "travel by + transport",
+        "travel from + place to + place",
+        "travel for + reason"
+      ],
+      "usage_note": "Common for general movement between places, for work, study, or holidays.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "travel",
+          "gerund": "travelling",
+          "past": "travelled",
+          "past_participle": "travelled",
+          "third_person_singular": "travels"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "traveler",
+          "travelling",
+          "traveling",
+          "travelled",
+          "traveled",
+          "travel agency",
+          "travel bag"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "walk",
+          "note": "Usually means go on foot, not by any means of transport in general."
+        },
+        {
+          "word": "journey",
+          "note": "Often focuses on making a journey from one place to another, sometimes over a longer distance."
+        },
+        {
+          "word": "tour",
+          "note": "Often means travel for pleasure."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.98,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:18:32Z",
+      "lexeme_id": "lx_travel",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u65c5\u884c\uff1b\u4ece\u4e00\u4e2a\u5730\u65b9\u53bb\u53e6\u4e00\u4e2a\u5730\u65b9\uff0c\u5c24\u6307\u8f83\u8fdc\u8ddd\u79bb",
+          "usage_note": "\u53ef\u6307\u4e00\u822c\u6027\u7684\u51fa\u884c\u79fb\u52a8\uff0c\u5e38\u7528\u4e8e\u8f83\u957f\u8ddd\u79bb\u3002",
+          "examples": [
+            "\u6211\u4eec\u8ba1\u5212\u660e\u5e74\u590f\u5929\u53bb\u897f\u73ed\u7259\u65c5\u884c\u3002",
+            "\u5979\u6bcf\u5929\u5750\u516c\u4ea4\u8f66\u53bb\u4e0a\u73ed\u3002"
+          ]
+        },
+        "es": {
+          "definition": "viajar; ir de un lugar a otro, especialmente a cierta distancia",
+          "usage_note": "Se usa para desplazarse entre lugares, a menudo en distancias largas.",
+          "examples": [
+            "Planeamos viajar a Espa\u00f1a el pr\u00f3ximo verano.",
+            "Ella viaja al trabajo en autob\u00fas todos los d\u00edas."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u064e\u0633\u0627\u0641\u0650\u0631\u061b \u064a\u064e\u0646\u062a\u064e\u0642\u0650\u0644 \u0645\u0646 \u0645\u0643\u0627\u0646 \u0625\u0644\u0649 \u0622\u062e\u0631\u060c \u062e\u0627\u0635\u0629\u064b \u0644\u0645\u0633\u0627\u0641\u0629 \u0628\u0639\u064a\u062f\u0629",
+          "usage_note": "\u064a\u0633\u062a\u0639\u0645\u0644 \u0644\u0644\u062d\u0631\u0643\u0629 \u0628\u064a\u0646 \u0627\u0644\u0623\u0645\u0627\u0643\u0646 \u0639\u0645\u0648\u0645\u064b\u0627\u060c \u0648\u063a\u0627\u0644\u0628\u064b\u0627 \u0644\u0645\u0633\u0627\u0641\u0627\u062a \u0637\u0648\u064a\u0644\u0629.",
+          "examples": [
+            "\u0646\u062e\u0637\u0637 \u0644\u0644\u0633\u0641\u0631 \u0625\u0644\u0649 \u0625\u0633\u0628\u0627\u0646\u064a\u0627 \u0627\u0644\u0635\u064a\u0641 \u0627\u0644\u0642\u0627\u062f\u0645.",
+            "\u0647\u064a \u062a\u0633\u0627\u0641\u0631 \u0625\u0644\u0649 \u0627\u0644\u0639\u0645\u0644 \u0628\u0627\u0644\u062d\u0627\u0641\u0644\u0629 \u0643\u0644 \u064a\u0648\u0645."
+          ]
+        },
+        "pt-BR": {
+          "definition": "viajar; ir de um lugar a outro, especialmente por certa dist\u00e2ncia",
+          "usage_note": "Usa-se para deslocamento entre lugares, muitas vezes a longas dist\u00e2ncias.",
+          "examples": [
+            "Planejamos viajar para a Espanha no pr\u00f3ximo ver\u00e3o.",
+            "Ela vai para o trabalho de \u00f4nibus todos os dias."
+          ]
+        },
+        "ja": {
+          "definition": "\u65c5\u884c\u3059\u308b\u3001\u79fb\u52d5\u3059\u308b\uff1b\u7279\u306b\u3042\u308b\u8ddd\u96e2\u3092\u3078\u3066\u4e00\u3064\u306e\u5834\u6240\u304b\u3089\u5225\u306e\u5834\u6240\u3078\u884c\u304f",
+          "usage_note": "\u5834\u6240\u304b\u3089\u5834\u6240\u3078\u306e\u79fb\u52d5\u5168\u822c\u306b\u4f7f\u3048\u3001\u7279\u306b\u9577\u3081\u306e\u79fb\u52d5\u3092\u8868\u3059\u3053\u3068\u304c\u591a\u3044\u3067\u3059\u3002",
+          "examples": [
+            "\u79c1\u305f\u3061\u306f\u6765\u5e74\u306e\u590f\u306b\u30b9\u30da\u30a4\u30f3\u3078\u65c5\u884c\u3059\u308b\u4e88\u5b9a\u3067\u3059\u3002",
+            "\u5f7c\u5973\u306f\u6bce\u65e5\u30d0\u30b9\u3067\u901a\u52e4\u3057\u307e\u3059\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_travel_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_travel_1",
+      "definition": "to move or pass from one place to another",
+      "examples": [
+        {
+          "sentence": "Light travels faster than sound.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "News of the accident traveled quickly through the town.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "general",
+      "secondary_domains": [
+        "physics",
+        "communication"
+      ],
+      "register": "neutral",
+      "synonyms": [
+        "move",
+        "pass",
+        "spread"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "travel well",
+        "travel easily",
+        "sound travels",
+        "light travels"
+      ],
+      "grammar_patterns": [
+        "travel through + place",
+        "travel across + place",
+        "travel quickly/slowly"
+      ],
+      "usage_note": "Often used for things such as light, sound, information, or signals.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "travel",
+          "gerund": "travelling",
+          "past": "travelled",
+          "past_participle": "travelled",
+          "third_person_singular": "travels"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "traveler",
+          "travelling",
+          "traveling",
+          "travelled",
+          "traveled"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "move",
+          "note": "More general and often physical movement of a person or object from one place to another."
+        },
+        {
+          "word": "transport",
+          "note": "Usually emphasizes carrying or sending something to a destination."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.88,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:18:32Z",
+      "lexeme_id": "lx_travel",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u4f20\u64ad\uff1b\u79fb\u52a8\uff1b\u4ece\u4e00\u4e2a\u5730\u65b9\u5230\u53e6\u4e00\u4e2a\u5730\u65b9",
+          "usage_note": "\u4e0d\u4ec5\u53ef\u7528\u4e8e\u4eba\uff0c\u4e5f\u53ef\u7528\u4e8e\u5149\u3001\u58f0\u97f3\u3001\u6d88\u606f\u7b49\u3002",
+          "examples": [
+            "\u5149\u4f20\u64ad\u5f97\u6bd4\u58f0\u97f3\u5feb\u3002",
+            "\u4e8b\u6545\u7684\u6d88\u606f\u5f88\u5feb\u4f20\u904d\u4e86\u5168\u9547\u3002"
+          ]
+        },
+        "es": {
+          "definition": "moverse o pasar de un lugar a otro",
+          "usage_note": "Puede usarse con cosas, noticias u ondas, no solo con personas.",
+          "examples": [
+            "La luz viaja m\u00e1s r\u00e1pido que el sonido.",
+            "La noticia del accidente viaj\u00f3 r\u00e1pidamente por el pueblo."
+          ]
+        },
+        "ar": {
+          "definition": "\u064a\u064e\u0646\u062a\u064e\u0642\u0650\u0644 \u0623\u0648 \u064a\u064e\u0645\u064f\u0631\u0651 \u0645\u0646 \u0645\u0643\u0627\u0646 \u0625\u0644\u0649 \u0622\u062e\u0631",
+          "usage_note": "\u064a\u0645\u0643\u0646 \u0623\u0646 \u064a\u0633\u062a\u0639\u0645\u0644 \u0645\u0639 \u0627\u0644\u0623\u0634\u064a\u0627\u0621 \u0623\u0648 \u0627\u0644\u0623\u062e\u0628\u0627\u0631 \u0623\u0648 \u0627\u0644\u0645\u0648\u062c\u0627\u062a\u060c \u0648\u0644\u064a\u0633 \u0641\u0642\u0637 \u0645\u0639 \u0627\u0644\u0623\u0634\u062e\u0627\u0635.",
+          "examples": [
+            "\u064a\u0646\u062a\u0642\u0644 \u0627\u0644\u0636\u0648\u0621 \u0623\u0633\u0631\u0639 \u0645\u0646 \u0627\u0644\u0635\u0648\u062a.",
+            "\u0627\u0646\u062a\u0634\u0631 \u062e\u0628\u0631 \u0627\u0644\u062d\u0627\u062f\u062b \u0628\u0633\u0631\u0639\u0629 \u0641\u064a \u0623\u0646\u062d\u0627\u0621 \u0627\u0644\u0628\u0644\u062f\u0629."
+          ]
+        },
+        "pt-BR": {
+          "definition": "mover-se ou passar de um lugar para outro",
+          "usage_note": "Pode ser usado com coisas, not\u00edcias ou ondas, n\u00e3o s\u00f3 com pessoas.",
+          "examples": [
+            "A luz viaja mais r\u00e1pido que o som.",
+            "A not\u00edcia do acidente se espalhou rapidamente pela cidade."
+          ]
+        },
+        "ja": {
+          "definition": "\u79fb\u52d5\u3059\u308b\u3001\u4f1d\u308f\u308b\uff1b\u4e00\u3064\u306e\u5834\u6240\u304b\u3089\u5225\u306e\u5834\u6240\u3078\u9032\u3080",
+          "usage_note": "\u4eba\u3060\u3051\u3067\u306a\u304f\u3001\u5149\u30fb\u97f3\u30fb\u30cb\u30e5\u30fc\u30b9\u306a\u3069\u306b\u3082\u4f7f\u3048\u307e\u3059\u3002",
+          "examples": [
+            "\u5149\u306f\u97f3\u3088\u308a\u901f\u304f\u9032\u307f\u307e\u3059\u3002",
+            "\u305d\u306e\u4e8b\u6545\u306e\u77e5\u3089\u305b\u306f\u753a\u4e2d\u306b\u3059\u3050\u5e83\u307e\u308a\u307e\u3057\u305f\u3002"
+          ]
+        }
+      }
+    },
+    {
+      "snapshot_id": "benchmark-20260319-enrichment",
+      "enrichment_id": "en_sn_lx_travel_1_benchmark-word_only-v1",
+      "sense_id": "sn_lx_travel_1",
+      "definition": "the activity of going from place to place, especially to distant places",
+      "examples": [
+        {
+          "sentence": "Air travel has become cheaper in recent years.",
+          "difficulty": "B1"
+        },
+        {
+          "sentence": "Her job involves a lot of travel.",
+          "difficulty": "B1"
+        }
+      ],
+      "cefr_level": "B1",
+      "primary_domain": "general",
+      "secondary_domains": [],
+      "register": "neutral",
+      "synonyms": [
+        "journeying",
+        "tourism",
+        "movement"
+      ],
+      "antonyms": [],
+      "collocations": [
+        "travel book",
+        "travel company",
+        "travel insurance",
+        "travel industry"
+      ],
+      "grammar_patterns": [
+        "travel + noun",
+        "a lot of travel",
+        "travel between + places"
+      ],
+      "usage_note": "Usually uncountable when referring to travel in general rather than one specific trip.",
+      "forms": {
+        "plural_forms": [],
+        "verb_forms": {
+          "base": "travel",
+          "gerund": "travelling",
+          "past": "travelled",
+          "past_participle": "travelled",
+          "third_person_singular": "travels"
+        },
+        "comparative": null,
+        "superlative": null,
+        "derivations": [
+          "traveler",
+          "traveling",
+          "travelling",
+          "travel-related"
+        ]
+      },
+      "confusable_words": [
+        {
+          "word": "trip",
+          "note": "Broader word for a journey from one place to another."
+        },
+        {
+          "word": "voyage",
+          "note": "Often means a long journey, especially by water or in space."
+        },
+        {
+          "word": "journey",
+          "note": "Usually means a long trip from one place to another."
+        }
+      ],
+      "model_name": "gpt-5.4-mini",
+      "prompt_version": "benchmark-word_only-v1",
+      "generation_run_id": "benchmark-gpt-5.4-mini-word_only",
+      "confidence": 0.9,
+      "review_status": "draft",
+      "generated_at": "2026-03-19T04:18:32Z",
+      "lexeme_id": "lx_travel",
+      "sense_order": 1,
+      "part_of_speech": "verb",
+      "sense_kind": "standard_meaning",
+      "decision": "keep_standard",
+      "base_word": null,
+      "translations": {
+        "zh-Hans": {
+          "definition": "\u65c5\u884c\uff1b\u51fa\u884c\u6d3b\u52a8\uff0c\u5c24\u6307\u53bb\u8f83\u8fdc\u5730\u65b9",
+          "usage_note": "\u4f5c\u540d\u8bcd\u65f6\u901a\u5e38\u662f\u4e0d\u53ef\u6570\u540d\u8bcd\uff0c\u8868\u793a\u65c5\u884c\u8fd9\u4e00\u6d3b\u52a8\u7684\u603b\u4f53\u6982\u5ff5\u3002",
+          "examples": [
+            "\u8fd1\u5e74\u6765\u822a\u7a7a\u65c5\u884c\u53d8\u5f97\u66f4\u4fbf\u5b9c\u4e86\u3002",
+            "\u5979\u7684\u5de5\u4f5c\u9700\u8981\u7ecf\u5e38\u51fa\u5dee\u3002"
+          ]
+        },
+        "es": {
+          "definition": "viaje; la actividad de ir de un lugar a otro, especialmente a lugares lejanos",
+          "usage_note": "Suele usarse como nombre incontable para la actividad general de viajar.",
+          "examples": [
+            "Los viajes en avi\u00f3n se han vuelto m\u00e1s baratos en los \u00faltimos a\u00f1os.",
+            "Su trabajo implica muchos viajes."
+          ]
+        },
+        "ar": {
+          "definition": "\u0627\u0644\u0633\u0641\u0631\u061b \u0646\u0634\u0627\u0637 \u0627\u0644\u0627\u0646\u062a\u0642\u0627\u0644 \u0645\u0646 \u0645\u0643\u0627\u0646 \u0625\u0644\u0649 \u0622\u062e\u0631\u060c \u062e\u0627\u0635\u0629\u064b \u0625\u0644\u0649 \u0623\u0645\u0627\u0643\u0646 \u0628\u0639\u064a\u062f\u0629",
+          "usage_note": "\u0627\u0633\u0645 \u063a\u064a\u0631 \u0645\u0639\u062f\u0648\u062f \u063a\u0627\u0644\u0628\u064b\u0627 \u064a\u0634\u064a\u0631 \u0625\u0644\u0649 \u0641\u0639\u0644 \u0627\u0644\u0633\u0641\u0631 \u0623\u0648 \u0645\u062c\u0627\u0644\u0647 \u0628\u0634\u0643\u0644 \u0639\u0627\u0645.",
+          "examples": [
+            "\u0623\u0635\u0628\u062d \u0627\u0644\u0633\u0641\u0631 \u0627\u0644\u062c\u0648\u064a \u0623\u0631\u062e\u0635 \u0641\u064a \u0627\u0644\u0633\u0646\u0648\u0627\u062a \u0627\u0644\u0623\u062e\u064a\u0631\u0629.",
+            "\u062a\u062a\u0636\u0645\u0646 \u0648\u0638\u064a\u0641\u062a\u0647\u0627 \u0643\u062b\u064a\u0631\u064b\u0627 \u0645\u0646 \u0627\u0644\u0633\u0641\u0631."
+          ]
+        },
+        "pt-BR": {
+          "definition": "viagem; a atividade de ir de um lugar a outro, especialmente para lugares distantes",
+          "usage_note": "Geralmente \u00e9 usado como substantivo incont\u00e1vel para a atividade geral de viajar.",
+          "examples": [
+            "As viagens a\u00e9reas ficaram mais baratas nos \u00faltimos anos.",
+            "O trabalho dela envolve muitas viagens."
+          ]
+        },
+        "ja": {
+          "definition": "\u65c5\u884c\u3001\u79fb\u52d5\uff1b\u7279\u306b\u9060\u304f\u306e\u5834\u6240\u3078\u884c\u304f\u3053\u3068\u3068\u3044\u3046\u6d3b\u52d5",
+          "usage_note": "\u540d\u8a5e\u3068\u3057\u3066\u3001\u65c5\u884c\u3068\u3044\u3046\u6d3b\u52d5\u4e00\u822c\u3092\u8868\u3059\u3053\u3068\u304c\u591a\u3044\u3067\u3059\u3002",
+          "examples": [
+            "\u8fd1\u5e74\u3001\u822a\u7a7a\u65c5\u884c\u306f\u3088\u308a\u5b89\u304f\u306a\u308a\u307e\u3057\u305f\u3002",
+            "\u5f7c\u5973\u306e\u4ed5\u4e8b\u306f\u51fa\u5f35\u304c\u591a\u3044\u3067\u3059\u3002"
+          ]
+        }
+      }
+    }
+  ]
+}

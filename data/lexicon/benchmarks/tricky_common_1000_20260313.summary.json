@@ -1,0 +1,29 @@
+{
+  "selected_count": 1000,
+  "decision_counts": {
+    "keep_both_linked": 445,
+    "keep_separate": 555
+  },
+  "top_20": [
+    "going",
+    "best",
+    "better",
+    "left",
+    "looking",
+    "following",
+    "working",
+    "given",
+    "living",
+    "giving",
+    "lower",
+    "starting",
+    "pass",
+    "seeing",
+    "leading",
+    "growing",
+    "opening",
+    "telling",
+    "hearing",
+    "flying"
+  ]
+}

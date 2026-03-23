@@ -1,0 +1,51 @@
+expression,original_order,source,reviewed_as,difficulty,commonality,added,confidence
+with that,1,user_list,fixed/prepositional phrase,easy,very_common,no,high
+with a will,2,user_list,fixed/prepositional phrase,easy,very_common,no,high
+you know,3,user_list,formula/discourse,easy,very_common,no,high
+so... that,4,user_list,sentence frame/pattern,medium,common,no,low
+I know,5,user_list,formula/discourse,easy,very_common,no,high
+not that,6,user_list,fixed expression,medium,common,no,medium
+you know something/know what?,7,user_list,formula/discourse,easy,very_common,no,high
+start something,8,user_list,fixed expression,medium,common,no,medium
+not a...,9,user_list,sentence frame/pattern,medium,common,no,low
+that's that,10,user_list,formula/discourse,easy,very_common,no,high
+to go,11,user_list,fixed/prepositional phrase,easy,very_common,no,high
+kind of,12,user_list,fixed expression,medium,common,no,medium
+now what?,13,user_list,formula/discourse,easy,very_common,no,high
+tell me,14,user_list,formula/discourse,easy,very_common,no,high
+I mean,15,user_list,formula/discourse,easy,very_common,no,high
+your all,16,user_list,fixed expression,medium,common,no,medium
+something else,17,user_list,fixed expression,medium,common,no,medium
+I say,18,user_list,formula/discourse,easy,very_common,no,high
+you see,19,user_list,formula/discourse,easy,very_common,no,high
+make it,20,user_list,fixed expression,medium,common,no,medium
+I'm sorry,21,user_list,formula/discourse,easy,very_common,no,high
+or so,22,user_list,fixed expression,medium,common,no,medium
+you know who/what,23,user_list,formula/discourse,easy,very_common,no,high
+of course,24,user_list,formula/discourse,easy,very_common,no,high
+talk about...,25,user_list,sentence frame/pattern,medium,common,no,low
+right now,26,user_list,fixed expression,medium,common,no,medium
+hang something,27,user_list,fixed expression,medium,common,no,medium
+up to something,28,user_list,fixed expression,medium,common,no,medium
+sort of,29,user_list,fixed expression,medium,common,no,medium
+in the/somebody's way,30,user_list,fixed expression,medium,common,no,medium
+in the world,31,user_list,fixed/prepositional phrase,easy,very_common,no,high
+to come,32,user_list,fixed/prepositional phrase,easy,very_common,no,high
+how/what about...?,33,user_list,sentence frame/pattern,medium,common,no,low
+of all,34,user_list,fixed/prepositional phrase,easy,very_common,no,high
+to a T/tee,35,user_list,fixed/prepositional phrase,easy,very_common,no,high
+with it,36,user_list,fixed/prepositional phrase,easy,very_common,no,high
+let somebody go,37,user_list,formula/discourse,easy,very_common,no,high
+let somebody/something go,38,user_list,formula/discourse,easy,very_common,no,high
+let something go,39,user_list,formula/discourse,easy,very_common,no,high
+I tell you,40,user_list,formula/discourse,easy,very_common,no,high
+what about...?,41,user_list,formula/discourse,easy,very_common,no,high
+leave/let somebody/something be,42,user_list,fixed expression,medium,common,no,medium
+you win,43,user_list,formula/discourse,easy,very_common,no,high
+one day,44,user_list,fixed expression,medium,common,no,high
+in front,45,user_list,fixed/prepositional phrase,easy,very_common,no,high
+this and that,46,user_list,binomial phrase,medium,common,no,medium
+in front of,47,user_list,fixed/prepositional phrase,easy,very_common,no,high
+these days,48,user_list,fixed expression,medium,common,no,high
+out of here,49,user_list,fixed/prepositional phrase,easy,very_common,no,high
+that's it,50,user_list,formula/discourse,easy,very_common,no,high
