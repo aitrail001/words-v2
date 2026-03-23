@@ -9,6 +9,7 @@ from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.main import app
 from app.models.user import User
+from app.services import lexicon_import_jobs
 
 
 def make_user(user_id: uuid.UUID, role: str = "admin") -> User:
@@ -71,7 +72,7 @@ class TestLexiconImportsApi:
         assert data["row_summary"]["word_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_run_import_executes_import_file(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    async def test_run_import_executes_import_file_as_background_job(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
         mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
@@ -79,6 +80,11 @@ class TestLexiconImportsApi:
 
         compiled_path = tmp_path / "words.enriched.jsonl"
         _write_jsonl(compiled_path, _compiled_rows())
+
+        def run_inline(target, *, name):
+            target()
+
+        monkeypatch.setattr(lexicon_import_jobs, "_start_job_thread", run_inline)
         monkeypatch.setattr("app.api.lexicon_imports._import_db_module", lambda: SimpleNamespace(
             load_compiled_rows=lambda path: _compiled_rows(),
             summarize_compiled_rows=lambda rows: {
@@ -96,10 +102,71 @@ class TestLexiconImportsApi:
             json={"input_path": str(compiled_path), "source_type": "lexicon_snapshot"},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 202
         data = response.json()
         assert data["artifact_filename"] == "words.enriched.jsonl"
-        assert "import_summary" in data
+        assert data["status"] == "completed"
+        assert data["completed_rows"] == 1
+        assert data["remaining_rows"] == 0
+        assert data["import_summary"]["created_words"] == 1
+
+        status_response = await client.get(
+            f"/api/lexicon-imports/jobs/{data['id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert status_response.status_code == 200
+        assert status_response.json()["status"] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_run_import_job_reports_progress(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        compiled_path = tmp_path / "words.enriched.jsonl"
+        rows = _compiled_rows() + [
+            {
+                **_compiled_rows()[0],
+                "entry_id": "word:river-bank",
+                "word": "river bank",
+            }
+        ]
+        _write_jsonl(compiled_path, rows)
+
+        def run_inline(target, *, name):
+            target()
+
+        def fake_run_import_file(path, *, rows, progress_callback=None, **kwargs):
+            assert len(rows) == 2
+            if progress_callback is not None:
+                progress_callback(row=rows[0], completed_rows=1, total_rows=2)
+                progress_callback(row=rows[1], completed_rows=2, total_rows=2)
+            return {"created_words": 2, "updated_words": 0}
+
+        monkeypatch.setattr(lexicon_import_jobs, "_start_job_thread", run_inline)
+        monkeypatch.setattr("app.api.lexicon_imports._import_db_module", lambda: SimpleNamespace(
+            load_compiled_rows=lambda path: rows,
+            summarize_compiled_rows=lambda loaded_rows: {
+                "row_count": len(loaded_rows),
+                "word_count": len(loaded_rows),
+                "phrase_count": 0,
+                "reference_count": 0,
+            },
+            run_import_file=fake_run_import_file,
+        ))
+
+        response = await client.post(
+            "/api/lexicon-imports/run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"input_path": str(compiled_path), "source_type": "lexicon_snapshot"},
+        )
+
+        assert response.status_code == 202
+        data = response.json()
+        assert data["total_rows"] == 2
+        assert data["completed_rows"] == 2
+        assert data["current_entry"] == "river bank"
 
     @pytest.mark.asyncio
     async def test_import_rejects_paths_outside_allowed_roots(self, client, mock_db, tmp_path: Path):

@@ -2,6 +2,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -10,6 +11,7 @@ import pytest
 from app.core.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.main import app
+from app.api import lexicon_compiled_reviews
 from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
 from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
@@ -77,6 +79,11 @@ def make_item(batch_id: uuid.UUID, **overrides) -> LexiconArtifactReviewItem:
             "generated_at": "2026-03-21T00:00:00Z",
         },
     )
+    compiled_payload_sha256 = overrides.pop("compiled_payload_sha256", None)
+    if compiled_payload_sha256 is None:
+        compiled_payload_sha256 = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
     return LexiconArtifactReviewItem(
         id=overrides.pop("id", uuid.uuid4()),
         batch_id=batch_id,
@@ -101,10 +108,7 @@ def make_item(batch_id: uuid.UUID, **overrides) -> LexiconArtifactReviewItem:
         reviewed_by=overrides.pop("reviewed_by", None),
         reviewed_at=overrides.pop("reviewed_at", None),
         compiled_payload=payload,
-        compiled_payload_sha256=overrides.pop(
-            "compiled_payload_sha256",
-            hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
-        ),
+        compiled_payload_sha256=compiled_payload_sha256,
         search_text=overrides.pop("search_text", "bank financial institution"),
         created_at=overrides.pop("created_at", datetime.now(timezone.utc)),
         updated_at=overrides.pop("updated_at", datetime.now(timezone.utc)),
@@ -281,6 +285,91 @@ class TestLexiconCompiledReviewApi:
         assert (reviewed_dir / "approved.jsonl").exists()
         assert (reviewed_dir / "rejected.jsonl").exists()
         assert (reviewed_dir / "regenerate.jsonl").exists()
+
+    @pytest.mark.asyncio
+    async def test_materialize_normalizes_db_backed_payload_values_before_jsonl_write(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(created_by=user_id, source_reference="snapshot-001")
+        approved_item = make_item(
+            batch.id,
+            review_status="approved",
+            import_eligible=True,
+            compiled_payload_sha256="z" * 64,
+            compiled_payload={
+                **make_item(batch.id).compiled_payload,
+                "generated_at": datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+                "debug_uuid": uuid.UUID("12345678-1234-5678-1234-567812345678"),
+                "confidence_score": Decimal("0.75"),
+            },
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        items_result = MagicMock()
+        items_result.scalars.return_value.all.return_value = [approved_item]
+        mock_db.execute.side_effect = [user_result, batch_result, items_result]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+        (tmp_path / "snapshot-001").mkdir()
+
+        response = await client.post(
+            f"/api/lexicon-compiled-reviews/batches/{batch.id}/materialize",
+            headers={"Authorization": f"Bearer {token}"},
+            json={},
+        )
+
+        assert response.status_code == 200
+        reviewed_dir = tmp_path / "snapshot-001" / "reviewed"
+        approved_rows = [json.loads(line) for line in (reviewed_dir / "approved.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert approved_rows[0]["generated_at"] == "2026-03-21T00:00:00+00:00"
+        assert approved_rows[0]["debug_uuid"] == "12345678-1234-5678-1234-567812345678"
+        assert approved_rows[0]["confidence_score"] == 0.75
+
+    @pytest.mark.asyncio
+    async def test_materialize_returns_actionable_error_when_output_path_is_not_writable(
+        self,
+        client,
+        mock_db,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(created_by=user_id, source_reference="snapshot-001")
+        approved_item = make_item(batch.id, review_status="approved", import_eligible=True)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        items_result = MagicMock()
+        items_result.scalars.return_value.all.return_value = [approved_item]
+        mock_db.execute.side_effect = [user_result, batch_result, items_result]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+        reviewed_dir = tmp_path / "snapshot-001" / "reviewed"
+        (tmp_path / "snapshot-001").mkdir()
+
+        original_open = lexicon_compiled_reviews.Path.open
+
+        def failing_open(path: Path, *args, **kwargs):
+            if path == reviewed_dir / "review.decisions.jsonl" and kwargs.get("mode", args[0] if args else "r").startswith("w"):
+                raise OSError(30, "Read-only file system")
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(lexicon_compiled_reviews.Path, "open", failing_open)
+
+        response = await client.post(
+            f"/api/lexicon-compiled-reviews/batches/{batch.id}/materialize",
+            headers={"Authorization": f"Bearer {token}"},
+            json={},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == f"Output path is not writable: {reviewed_dir / 'review.decisions.jsonl'}"
 
     @pytest.mark.asyncio
     async def test_import_returns_existing_batch_for_duplicate_artifact_across_admins(self, client, mock_db):

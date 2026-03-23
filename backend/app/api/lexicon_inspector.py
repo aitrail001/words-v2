@@ -16,6 +16,7 @@ from app.models.meaning_example import MeaningExample
 from app.models.phrase_entry import PhraseEntry
 from app.models.reference_entry import ReferenceEntry
 from app.models.reference_localization import ReferenceLocalization
+from app.models.translation import Translation
 from app.models.user import User
 from app.models.word import Word
 from app.models.word_relation import WordRelation
@@ -63,6 +64,29 @@ class WordRelationResponse(BaseModel):
     related_word: str
 
 
+class MeaningTranslationResponse(BaseModel):
+    id: str
+    language: str
+    translation: str
+
+
+class InspectorPhraseTranslationResponse(BaseModel):
+    locale: str
+    definition: str | None
+    usage_note: str | None
+    examples: list[str]
+
+
+class InspectorPhraseSenseResponse(BaseModel):
+    sense_id: str | None
+    definition: str
+    part_of_speech: str | None
+    grammar_patterns: list[str] | None
+    usage_note: str | None
+    examples: list[MeaningExampleResponse]
+    translations: list[InspectorPhraseTranslationResponse]
+
+
 class LexiconEnrichmentRunResponse(BaseModel):
     id: str
     generator_model: str | None
@@ -76,10 +100,19 @@ class InspectorMeaningResponse(BaseModel):
     id: str
     definition: str
     part_of_speech: str | None
+    primary_domain: str | None
+    secondary_domains: list[str] | None
+    register_label: str | None
+    grammar_patterns: list[str] | None
+    usage_note: str | None
     example_sentence: str | None
+    source: str | None
+    source_reference: str | None
+    learner_generated_at: str | None
     order_index: int
     examples: list[MeaningExampleResponse]
     relations: list[WordRelationResponse]
+    translations: list[MeaningTranslationResponse]
 
 
 class LexiconInspectorWordDetail(BaseModel):
@@ -90,9 +123,16 @@ class LexiconInspectorWordDetail(BaseModel):
     language: str
     cefr_level: str | None
     frequency_rank: int | None
+    phonetics: dict | None
     phonetic: str | None
     phonetic_source: str | None
+    phonetic_confidence: float | None
+    learner_part_of_speech: list[str] | None
+    confusable_words: list[dict] | None
+    word_forms: dict | None
+    source_type: str | None
     source_reference: str | None
+    learner_generated_at: str | None
     created_at: str | None
     meanings: list[InspectorMeaningResponse]
     enrichment_runs: list[LexiconEnrichmentRunResponse]
@@ -105,10 +145,16 @@ class LexiconInspectorPhraseDetail(BaseModel):
     normalized_form: str
     language: str
     cefr_level: str | None
+    source_type: str | None
     source_reference: str | None
     phrase_kind: str
     register_label: str | None
     brief_usage_note: str | None
+    confidence_score: float | None
+    generated_at: str | None
+    seed_metadata: dict | None
+    compiled_payload: dict | None
+    senses: list[InspectorPhraseSenseResponse]
     created_at: str | None
 
 
@@ -138,6 +184,18 @@ class LexiconInspectorReferenceDetail(BaseModel):
 
 def _created_iso(value) -> str | None:
     return value.isoformat() if value else None
+
+
+def _as_object(value):
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value):
+    return value if isinstance(value, list) else []
+
+
+def _as_string(value) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _entry_matches(query: str | None, *values: str | None) -> bool:
@@ -298,6 +356,16 @@ async def get_word_inspector_detail(
         for example in examples_result.scalars().all():
             examples_by_meaning[example.meaning_id].append(example)
 
+    translations_by_meaning: dict[uuid.UUID, list[Translation]] = defaultdict(list)
+    if meaning_ids:
+        translations_result = await db.execute(
+            select(Translation)
+            .where(Translation.meaning_id.in_(meaning_ids))
+            .order_by(Translation.meaning_id.asc(), Translation.language.asc())
+        )
+        for translation in translations_result.scalars().all():
+            translations_by_meaning[translation.meaning_id].append(translation)
+
     relations_result = await db.execute(
         select(WordRelation)
         .where(WordRelation.word_id == entry_id)
@@ -331,16 +399,31 @@ async def get_word_inspector_detail(
         language=word.language,
         cefr_level=word.cefr_level,
         frequency_rank=word.frequency_rank,
+        phonetics=word.phonetics,
         phonetic=word.phonetic,
         phonetic_source=word.phonetic_source,
+        phonetic_confidence=word.phonetic_confidence,
+        learner_part_of_speech=word.learner_part_of_speech,
+        confusable_words=word.confusable_words,
+        word_forms=word.word_forms,
+        source_type=word.source_type,
         source_reference=word.source_reference,
+        learner_generated_at=_created_iso(word.learner_generated_at),
         created_at=_created_iso(word.created_at),
         meanings=[
             InspectorMeaningResponse(
                 id=str(meaning.id),
                 definition=meaning.definition,
                 part_of_speech=meaning.part_of_speech,
+                primary_domain=meaning.primary_domain,
+                secondary_domains=meaning.secondary_domains,
+                register_label=meaning.register_label,
+                grammar_patterns=meaning.grammar_patterns,
+                usage_note=meaning.usage_note,
                 example_sentence=meaning.example_sentence,
+                source=meaning.source,
+                source_reference=meaning.source_reference,
+                learner_generated_at=_created_iso(meaning.learner_generated_at),
                 order_index=meaning.order_index,
                 examples=[
                     MeaningExampleResponse(
@@ -358,6 +441,14 @@ async def get_word_inspector_detail(
                         related_word=relation.related_word,
                     )
                     for relation in relations_by_meaning.get(meaning.id, [])
+                ],
+                translations=[
+                    MeaningTranslationResponse(
+                        id=str(translation.id),
+                        language=translation.language,
+                        translation=translation.translation,
+                    )
+                    for translation in translations_by_meaning.get(meaning.id, [])
                 ],
             )
             for meaning in meanings
@@ -387,6 +478,42 @@ async def get_phrase_inspector_detail(
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lexicon inspector entry not found")
 
+    payload = _as_object(entry.compiled_payload)
+    senses: list[InspectorPhraseSenseResponse] = []
+    for sense_index, raw_sense in enumerate(_as_list(payload.get("senses")), start=1):
+        sense = _as_object(raw_sense)
+        translations: list[InspectorPhraseTranslationResponse] = []
+        for locale, raw_translation in sorted(_as_object(sense.get("translations")).items()):
+            translation = _as_object(raw_translation)
+            translations.append(
+                InspectorPhraseTranslationResponse(
+                    locale=str(locale),
+                    definition=_as_string(translation.get("definition")),
+                    usage_note=_as_string(translation.get("usage_note")),
+                    examples=[str(example) for example in _as_list(translation.get("examples")) if str(example).strip()],
+                )
+            )
+        senses.append(
+            InspectorPhraseSenseResponse(
+                sense_id=_as_string(sense.get("sense_id")),
+                definition=_as_string(sense.get("definition")) or f"Sense {sense_index}",
+                part_of_speech=_as_string(sense.get("part_of_speech")),
+                grammar_patterns=[str(pattern) for pattern in _as_list(sense.get("grammar_patterns")) if str(pattern).strip()] or None,
+                usage_note=_as_string(sense.get("usage_note")),
+                examples=[
+                    MeaningExampleResponse(
+                        id=f"{entry.id}-sense-{sense_index}-example-{example_index}",
+                        sentence=_as_string(_as_object(raw_example).get("sentence")) or str(raw_example),
+                        difficulty=_as_string(_as_object(raw_example).get("difficulty")),
+                        order_index=example_index - 1,
+                    )
+                    for example_index, raw_example in enumerate(_as_list(sense.get("examples")), start=1)
+                    if (_as_string(_as_object(raw_example).get("sentence")) or str(raw_example).strip())
+                ],
+                translations=translations,
+            )
+        )
+
     return LexiconInspectorPhraseDetail(
         family="phrase",
         id=str(entry.id),
@@ -394,10 +521,16 @@ async def get_phrase_inspector_detail(
         normalized_form=entry.normalized_form,
         language=entry.language,
         cefr_level=entry.cefr_level,
+        source_type=entry.source_type,
         source_reference=entry.source_reference,
         phrase_kind=entry.phrase_kind,
         register_label=entry.register_label,
         brief_usage_note=entry.brief_usage_note,
+        confidence_score=entry.confidence_score,
+        generated_at=_created_iso(entry.generated_at),
+        seed_metadata=entry.seed_metadata,
+        compiled_payload=entry.compiled_payload,
+        senses=senses,
         created_at=_created_iso(entry.created_at),
     )
 

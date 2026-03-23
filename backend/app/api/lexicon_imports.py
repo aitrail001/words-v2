@@ -11,6 +11,11 @@ from pydantic import BaseModel
 from app.api.auth import get_current_admin_user
 from app.core.config import Settings, get_settings
 from app.models.user import User
+from app.services.lexicon_import_jobs import (
+    create_lexicon_import_job,
+    get_lexicon_import_job,
+    serialize_lexicon_import_job,
+)
 from app.services.lexicon_jsonl_reviews import resolve_repo_local_path
 
 router = APIRouter()
@@ -30,13 +35,33 @@ class LexiconImportResponse(BaseModel):
     import_summary: dict[str, int] | None
 
 
+class LexiconImportJobResponse(BaseModel):
+    id: str
+    artifact_filename: str
+    input_path: str
+    source_type: str
+    source_reference: str | None
+    language: str
+    status: str
+    row_summary: dict[str, int]
+    import_summary: dict[str, int] | None
+    total_rows: int
+    completed_rows: int
+    remaining_rows: int
+    current_entry: str | None
+    error_message: str | None
+    created_at: str
+    started_at: str | None
+    completed_at: str | None
+
+
 def _import_db_module() -> Any:
     try:
         return import_module("tools.lexicon.import_db")
     except ModuleNotFoundError as exc:
         if not exc.name or not exc.name.startswith("tools"):
             raise
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = Path(__file__).resolve().parents[2]
         if str(repo_root) not in sys.path:
             sys.path.insert(0, str(repo_root))
         return import_module("tools.lexicon.import_db")
@@ -71,23 +96,36 @@ async def dry_run_lexicon_import(
     )
 
 
-@router.post("/run", response_model=LexiconImportResponse)
+@router.post("/run", response_model=LexiconImportJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def run_lexicon_import(
     request: LexiconImportRequest,
     _: User = Depends(get_current_admin_user),
     settings: Settings = Depends(get_settings),
-) -> LexiconImportResponse:
+) -> LexiconImportJobResponse:
     input_path = _resolve_import_input_path(request.input_path, settings=settings)
     import_db = _import_db_module()
     rows = import_db.load_compiled_rows(input_path)
-    return LexiconImportResponse(
-        artifact_filename=input_path.name,
-        input_path=str(input_path),
+    job = create_lexicon_import_job(
+        input_path=input_path,
+        source_type=request.source_type,
+        source_reference=request.source_reference,
+        language=request.language,
+        rows=rows,
+        import_runner=import_db.run_import_file,
         row_summary=import_db.summarize_compiled_rows(rows),
-        import_summary=import_db.run_import_file(
-            input_path,
-            source_type=request.source_type,
-            source_reference=request.source_reference,
-            language=request.language,
-        ),
     )
+    return LexiconImportJobResponse(**serialize_lexicon_import_job(job))
+
+
+@router.get("/jobs/{job_id}", response_model=LexiconImportJobResponse)
+async def get_lexicon_import_job_status(
+    job_id: str,
+    _: User = Depends(get_current_admin_user),
+) -> LexiconImportJobResponse:
+    job = get_lexicon_import_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lexicon import job not found",
+        )
+    return LexiconImportJobResponse(**serialize_lexicon_import_job(job))

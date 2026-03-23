@@ -8,7 +8,7 @@ celery_app = Celery(
     "words_codex",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.epub_processing"],
+    include=["app.tasks.epub_processing", "app.tasks.lexicon_jobs"],
 )
 
 celery_app.conf.update(

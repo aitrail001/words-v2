@@ -1,8 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   apiUrl,
   authHeaders,
   registerAdminViaApi,
+  waitForAppReady,
 } from "../helpers/auth";
 
 type CompiledReviewBatch = {
@@ -83,8 +86,16 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
   const normalized = `artifact${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const secondary = `${normalized}harbor`;
-  const sourceReference = `compiled-review-${uniqueSuffix}`;
+  const snapshotName = `compiled-review-${normalized}`;
+  const hostSnapshotDir = path.join(process.cwd(), "..", "data", "lexicon", "snapshots", snapshotName);
+  const reviewedHostDir = path.join(hostSnapshotDir, "reviewed");
+  const approvedHostPath = path.join(reviewedHostDir, "approved.jsonl");
+  const decisionsHostPath = path.join(reviewedHostDir, "review.decisions.jsonl");
   const jsonl = `${JSON.stringify(buildCompiledWordRow(uniqueSuffix, normalized))}\n${JSON.stringify(buildCompiledWordRow(`${uniqueSuffix}-2`, secondary))}\n`;
+
+  await rm(hostSnapshotDir, { recursive: true, force: true });
+  await mkdir(hostSnapshotDir, { recursive: true });
+  await writeFile(path.join(hostSnapshotDir, "words.enriched.jsonl"), jsonl, "utf-8");
 
   const importResponse = await request.post(`${apiUrl}/lexicon-compiled-reviews/batches/import`, {
     headers: { Authorization: `Bearer ${user.token}` },
@@ -94,7 +105,7 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
         mimeType: "application/x-ndjson",
         buffer: Buffer.from(jsonl, "utf-8"),
       },
-      source_reference: sourceReference,
+      source_reference: snapshotName,
     },
   });
   expect(importResponse.status()).toBe(201);
@@ -104,9 +115,10 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   });
   expect(batchesResponse.status()).toBe(200);
   const batches = (await batchesResponse.json()) as CompiledReviewBatch[];
-  const batch = batches.find((entry) => entry.source_reference === sourceReference);
+  const batch = batches.find((entry) => entry.source_reference === snapshotName);
   expect(batch).toBeTruthy();
 
+  await waitForAppReady(request, adminUrl);
   await page.goto(`${adminUrl}/login`);
   await page.getByTestId("login-email-input").fill(user.email);
   await page.getByTestId("login-password-input").fill(user.password);
@@ -174,7 +186,25 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
     }),
   ]);
 
+  await page.getByRole("button", { name: "Materialize Reviewed Outputs" }).click();
+  await expect(page.getByText(`/app/data/lexicon/snapshots/${snapshotName}/reviewed/approved.jsonl`)).toBeVisible();
+  const approvedMaterialized = (await readFile(approvedHostPath, "utf-8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { entry_id: string });
+  expect(approvedMaterialized).toEqual([
+    expect.objectContaining({ entry_id: `word:${normalized}:${uniqueSuffix}` }),
+  ]);
+  const decisionMaterialized = (await readFile(decisionsHostPath, "utf-8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { entry_id: string; decision: string });
+  expect(decisionMaterialized).toEqual([
+    expect.objectContaining({ entry_id: `word:${normalized}:${uniqueSuffix}`, decision: "approved" }),
+  ]);
+
   await page.getByRole("button", { name: "Delete Batch" }).click();
   await page.getByRole("button", { name: "Confirm Delete Batch" }).click();
   await expect(page.getByText("Deleted words.enriched.jsonl.")).toBeVisible();
+  await rm(hostSnapshotDir, { recursive: true, force: true });
 });

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional, Type
+from typing import Any, Callable, Iterable, Optional, Type
 import hashlib
 import json
 import sys
@@ -381,6 +381,7 @@ def import_compiled_rows(
     phrase_model: Optional[Type[Any]] = None,
     reference_model: Optional[Type[Any]] = None,
     reference_localization_model: Optional[Type[Any]] = None,
+    progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
 ) -> ImportSummary:
     if word_model is None or meaning_model is None:
         (
@@ -407,8 +408,10 @@ def import_compiled_rows(
     resolved_reference_localization_model = reference_localization_model
 
     summary = ImportSummary()
+    row_list = list(rows)
+    total_rows = len(row_list)
 
-    for row in rows:
+    for row_index, row in enumerate(row_list, start=1):
         entry_type = str(row.get("entry_type") or "word").strip().lower() or "word"
         if entry_type == "phrase":
             if resolved_phrase_model is None:
@@ -752,6 +755,9 @@ def import_compiled_rows(
                 continue
             session.delete(existing_meaning)
 
+        if progress_callback is not None:
+            progress_callback(row, row_index, total_rows)
+
     return summary
 
 
@@ -785,8 +791,10 @@ def run_import_file(
     source_type: str,
     source_reference: str | None = None,
     language: str = "en",
+    rows: list[dict[str, Any]] | None = None,
+    progress_callback: Optional[Callable[..., None]] = None,
 ) -> dict[str, int]:
-    rows = load_compiled_rows(path)
+    resolved_rows = rows if rows is not None else load_compiled_rows(path)
     _ensure_backend_path()
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
@@ -798,10 +806,19 @@ def run_import_file(
     with Session(engine) as session:
         summary = import_compiled_rows(
             session,
-            rows,
+            resolved_rows,
             source_type=source_type,
             source_reference=effective_source_reference,
             language=language,
+            progress_callback=(
+                (lambda row, completed_rows, total_rows: progress_callback(
+                    row=row,
+                    completed_rows=completed_rows,
+                    total_rows=total_rows,
+                ))
+                if progress_callback is not None
+                else None
+            ),
         )
         session.commit()
     return {

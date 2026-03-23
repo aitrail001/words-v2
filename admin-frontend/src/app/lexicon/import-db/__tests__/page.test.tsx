@@ -12,23 +12,69 @@ jest.mock("@/lib/auth-redirect", () => ({
 
 jest.mock("@/lib/lexicon-imports-client", () => ({
   dryRunLexiconImport: jest.fn(),
-  runLexiconImport: jest.fn(),
+}));
+
+jest.mock("@/lib/lexicon-jobs-client", () => ({
+  createImportDbLexiconJob: jest.fn(),
+  getLexiconJob: jest.fn(),
 }));
 
 describe("LexiconImportDbPage", () => {
-  const { dryRunLexiconImport, runLexiconImport } = require("@/lib/lexicon-imports-client");
+  const { dryRunLexiconImport } = require("@/lib/lexicon-imports-client");
+  const { createImportDbLexiconJob, getLexiconJob } = require("@/lib/lexicon-jobs-client");
 
   beforeEach(() => {
     jest.clearAllMocks();
+    window.localStorage.clear();
     dryRunLexiconImport.mockResolvedValue({
       artifact_filename: "words.enriched.jsonl",
+      input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
       row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
       import_summary: null,
     });
-    runLexiconImport.mockResolvedValue({
-      artifact_filename: "words.enriched.jsonl",
-      row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
-      import_summary: { created_words: 1 },
+    getLexiconJob.mockResolvedValue({
+      id: "job-1",
+      created_by: "user-1",
+      job_type: "import_db",
+      status: "completed",
+      target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+      request_payload: {
+        input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+        source_type: "lexicon_snapshot",
+        source_reference: "lexicon-20260321-wordfreq",
+        language: "en",
+        row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
+      },
+      result_payload: { created_words: 1 },
+      progress_total: 1,
+      progress_completed: 1,
+      progress_current_label: "bank",
+      error_message: null,
+      created_at: "2026-03-23T00:00:00Z",
+      started_at: "2026-03-23T00:00:01Z",
+      completed_at: "2026-03-23T00:00:02Z",
+    });
+    createImportDbLexiconJob.mockResolvedValue({
+      id: "job-1",
+      created_by: "user-1",
+      job_type: "import_db",
+      status: "running",
+      target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+      request_payload: {
+        input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+        source_type: "lexicon_snapshot",
+        source_reference: "lexicon-20260321-wordfreq",
+        language: "en",
+        row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
+      },
+      result_payload: null,
+      progress_total: 1,
+      progress_completed: 0,
+      progress_current_label: "bank",
+      error_message: null,
+      created_at: "2026-03-23T00:00:00Z",
+      started_at: "2026-03-23T00:00:01Z",
+      completed_at: null,
     });
   });
 
@@ -71,6 +117,22 @@ describe("LexiconImportDbPage", () => {
     await waitFor(() => expect(dryRunLexiconImport).toHaveBeenCalled());
     await user.click(screen.getByTestId("lexicon-import-db-run-button"));
 
-    await waitFor(() => expect(runLexiconImport).toHaveBeenCalled());
+    await waitFor(() => expect(createImportDbLexiconJob).toHaveBeenCalledWith({
+      inputPath: expect.stringContaining("/data/lexicon/snapshots/demo/reviewed/approved.jsonl"),
+      sourceType: "lexicon_snapshot",
+      sourceReference: "lexicon-20260321-wordfreq",
+      language: "en",
+    }));
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("To do1");
+  });
+
+  it("reconnects to the active import job from local storage", async () => {
+    window.localStorage.setItem("lexicon-import-db-active-job", "job-1");
+    render(<LexiconImportDbPage />);
+
+    await waitFor(() => expect(getLexiconJob).toHaveBeenCalledWith("job-1"));
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Done1"));
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
   });
 });

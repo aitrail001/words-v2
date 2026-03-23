@@ -27,7 +27,7 @@ def _import_review_prep_module() -> Any:
     except ModuleNotFoundError as exc:
         if not exc.name or not exc.name.startswith("tools"):
             raise
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = Path(__file__).resolve().parents[2]
         if str(repo_root) not in sys.path:
             sys.path.insert(0, str(repo_root))
         return import_module("tools.lexicon.review_prep")
@@ -65,10 +65,16 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Output path is not writable: {path}",
+        ) from exc
 
 
 def _snapshot_root(settings: Settings) -> Path:
@@ -445,7 +451,13 @@ def materialize_jsonl_review_outputs(
     decisions_path: Path,
     output_dir: Path,
 ) -> dict[str, Any]:
-    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Output directory is not writable: {output_dir}",
+        ) from exc
     approved_output_path = output_dir / APPROVED_FILENAME
     rejected_output_path = output_dir / REJECTED_FILENAME
     regenerate_output_path = output_dir / REGENERATE_FILENAME

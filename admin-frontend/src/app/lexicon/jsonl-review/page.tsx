@@ -3,60 +3,30 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
+import { PagedRecordList } from "@/components/lexicon/paged-record-list";
+import { ReviewerSummaryCard } from "@/components/lexicon/reviewer-summary-card";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
   bulkUpdateLexiconJsonlReviewItems,
+  type LexiconJsonlReviewMaterializeResult,
   downloadApprovedLexiconJsonlReviewOutput,
   downloadDecisionLexiconJsonlReviewOutput,
   downloadRegenerateLexiconJsonlReviewOutput,
   downloadRejectedLexiconJsonlReviewOutput,
   LexiconJsonlReviewItem,
-  LexiconJsonlReviewMaterializeResult,
   LexiconJsonlReviewSession,
   loadLexiconJsonlReviewSession,
-  materializeLexiconJsonlReviewOutputs,
   updateLexiconJsonlReviewItem,
 } from "@/lib/lexicon-jsonl-reviews-client";
+import {
+  createJsonlMaterializeLexiconJob,
+  getLexiconJob,
+  type LexiconJob,
+} from "@/lib/lexicon-jobs-client";
+import { derivePhraseDetails, deriveReviewSummary } from "@/lib/lexicon-review-summary";
 
 type ReviewDecisionStatus = "pending" | "approved" | "rejected";
-
-type JsonRecord = Record<string, unknown>;
-
-function asRecord(value: unknown): JsonRecord | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function firstString(values: unknown): string | null {
-  return Array.isArray(values) ? values.map(asString).find((value) => value !== null) ?? null : null;
-}
-
-function readPhraseDetails(entryType: string, payload: Record<string, unknown>): {
-  phraseKind: string | null;
-  definition: string | null;
-  example: string | null;
-  spanishDefinition: string | null;
-} | null {
-  if (entryType !== "phrase") return null;
-  const record = asRecord(payload);
-  const senses = Array.isArray(record?.senses) ? record.senses : [];
-  const firstSense = asRecord(senses[0]);
-  if (!firstSense) return null;
-
-  const translations = asRecord(firstSense.translations);
-  const spanish = asRecord(translations?.es);
-
-  return {
-    phraseKind: asString(record?.phrase_kind),
-    definition: asString(firstSense.definition),
-    example: firstString(firstSense.examples),
-    spanishDefinition: asString(spanish?.definition),
-  };
-}
 
 function downloadTextFile(filename: string, text: string): void {
   const blob = new Blob([text], { type: "application/x-ndjson" });
@@ -132,6 +102,7 @@ export default function LexiconJsonlReviewPage() {
   const [decisionReason, setDecisionReason] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [materializeResult, setMaterializeResult] = useState<LexiconJsonlReviewMaterializeResult | null>(null);
+  const [materializeJob, setMaterializeJob] = useState<LexiconJob | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingBulkDecision, setPendingBulkDecision] = useState<ReviewDecisionStatus | null>(null);
@@ -142,6 +113,22 @@ export default function LexiconJsonlReviewPage() {
   const contextArtifactPath = session?.artifact_path ?? artifactPath;
   const contextDecisionsPath = session?.decisions_path ?? decisionsPath;
   const contextOutputDir = session?.output_dir ?? outputDir;
+  const materializeResultFromJob = useCallback((job: LexiconJob): LexiconJsonlReviewMaterializeResult | null => {
+    if (!job.result_payload) {
+      return null;
+    }
+    return {
+      artifact_sha256: typeof job.result_payload.artifact_sha256 === "string" ? job.result_payload.artifact_sha256 : undefined,
+      decision_count: typeof job.result_payload.decision_count === "number" ? job.result_payload.decision_count : undefined,
+      approved_count: Number(job.result_payload.approved_count ?? 0),
+      rejected_count: Number(job.result_payload.rejected_count ?? 0),
+      regenerate_count: Number(job.result_payload.regenerate_count ?? 0),
+      decisions_output_path: String(job.result_payload.decisions_output_path ?? ""),
+      approved_output_path: String(job.result_payload.approved_output_path ?? ""),
+      rejected_output_path: String(job.result_payload.rejected_output_path ?? ""),
+      regenerate_output_path: String(job.result_payload.regenerate_output_path ?? ""),
+    };
+  }, []);
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -212,9 +199,22 @@ export default function LexiconJsonlReviewPage() {
     [filteredItems, selectedItemId],
   );
   const selectedPhraseDetails = useMemo(
-    () => (selectedItem ? readPhraseDetails(selectedItem.entry_type, selectedItem.compiled_payload) : null),
+    () => (selectedItem ? derivePhraseDetails(selectedItem.entry_type, selectedItem.compiled_payload) : null),
     [selectedItem],
   );
+  const selectedReviewSummary = useMemo(() => {
+    if (!selectedItem) return null;
+    const derived = deriveReviewSummary(selectedItem.compiled_payload);
+    return {
+      ...derived,
+      senseCount: selectedItem.review_summary?.sense_count ?? derived.senseCount,
+      formVariantCount: selectedItem.review_summary?.form_variant_count ?? derived.formVariantCount,
+      confusableCount: selectedItem.review_summary?.confusable_count ?? derived.confusableCount,
+      provenanceSources: selectedItem.review_summary?.provenance_sources ?? derived.provenanceSources,
+      primaryDefinition: selectedItem.review_summary?.primary_definition ?? derived.primaryDefinition,
+      primaryExample: selectedItem.review_summary?.primary_example ?? derived.primaryExample,
+    };
+  }, [selectedItem]);
 
   useEffect(() => {
     setSelectedItemId(selectedItem?.entry_id ?? "");
@@ -293,22 +293,42 @@ export default function LexiconJsonlReviewPage() {
 
   const materialize = async () => {
     if (!session) return;
-    setSaving(true);
     setMessage(null);
     try {
-      const result = await materializeLexiconJsonlReviewOutputs({
+      const job = await createJsonlMaterializeLexiconJob({
         artifactPath: session.artifact_path,
         decisionsPath: decisionsPath || session.decisions_path,
         outputDir: outputDir || undefined,
       });
-      setMaterializeResult(result);
-      setMessage("Materialized outputs.");
+      setMaterializeJob(job);
+      setMaterializeResult(materializeResultFromJob(job));
+      setMessage(job.status === "completed" ? "Materialized outputs." : "Materialize job started.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to materialize outputs.");
-    } finally {
-      setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (!materializeJob || materializeJob.status === "completed" || materializeJob.status === "failed") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void getLexiconJob(materializeJob.id)
+        .then((nextJob) => {
+          setMaterializeJob(nextJob);
+          if (nextJob.status === "completed") {
+            setMaterializeResult(materializeResultFromJob(nextJob));
+            setMessage("Materialized outputs.");
+          } else if (nextJob.status === "failed") {
+            setMessage(nextJob.error_message || "Materialize job failed.");
+          }
+        })
+        .catch((error) => {
+          setMessage(error instanceof Error ? error.message : "Failed to refresh materialize job.");
+        });
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [materializeJob, materializeResultFromJob]);
 
   const downloadOutput = async (kind: "approved" | "decisions" | "rejected" | "regenerate") => {
     if (!session) return;
@@ -562,27 +582,32 @@ export default function LexiconJsonlReviewPage() {
                 <option value="rejected">Rejected</option>
               </select>
             </div>
-            <div className="mt-4 max-h-[72vh] space-y-2 overflow-auto pr-1">
-              {filteredItems.map((item) => (
-                <button
-                  key={item.entry_id}
-                  type="button"
-                  onClick={() => setSelectedItemId(item.entry_id)}
-                  className={`w-full rounded-xl border p-3 text-left transition ${item.entry_id === selectedItem?.entry_id ? "border-sky-400 bg-sky-50 shadow-sm" : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"}`}
-                >
-                  <p className="font-medium text-gray-900">{item.display_text}</p>
-                  <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.entry_type}</span>
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.review_status}</span>
-                    {item.entity_category ? <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.entity_category}</span> : null}
-                    {(item.warning_labels ?? []).map((warning) => (
-                      <span key={warning} className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
-                        {warning}
-                      </span>
-                    ))}
+            <div className="mt-4">
+              <PagedRecordList
+                items={filteredItems}
+                selectedId={selectedItem?.entry_id ?? null}
+                getId={(item) => item.entry_id}
+                onSelect={setSelectedItemId}
+                title="Entries"
+                testId="jsonl-review-items-list"
+                pageSize={5}
+                emptyState={<p className="text-sm text-gray-500">No items match the current filter.</p>}
+                renderItem={(item) => (
+                  <div>
+                    <p className="font-medium text-gray-900">{item.display_text}</p>
+                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.entry_type}</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.review_status}</span>
+                      {item.entity_category ? <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.entity_category}</span> : null}
+                      {(item.warning_labels ?? []).map((warning) => (
+                        <span key={warning} className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
+                          {warning}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </button>
-              ))}
+                )}
+              />
             </div>
           </div>
 
@@ -602,54 +627,12 @@ export default function LexiconJsonlReviewPage() {
                         {selectedItem.frequency_rank ? <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">rank: {selectedItem.frequency_rank}</span> : null}
                       </div>
                     </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reviewer summary</p>
-                        {(selectedItem.warning_labels ?? []).map((warning) => (
-                          <span key={warning} className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-medium text-amber-800">
-                            {warning}
-                          </span>
-                        ))}
-                      </div>
-                      <div className="mt-3 grid gap-3 md:grid-cols-3">
-                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Senses</p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">{selectedItem.review_summary?.sense_count ?? 0}</p>
-                        </div>
-                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Form variants</p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">{selectedItem.review_summary?.form_variant_count ?? 0}</p>
-                        </div>
-                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Confusables</p>
-                          <p className="mt-1 text-lg font-semibold text-slate-900">{selectedItem.review_summary?.confusable_count ?? 0}</p>
-                        </div>
-                      </div>
-                      <div className="mt-3 space-y-2 text-sm text-slate-600">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Primary definition</p>
-                          <p className="mt-1 text-slate-900">{selectedItem.review_summary?.primary_definition ?? "—"}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Primary example</p>
-                          <p className="mt-1 text-slate-900">{selectedItem.review_summary?.primary_example ?? "—"}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Provenance</p>
-                          <div className="mt-1 flex flex-wrap gap-2">
-                            {(selectedItem.review_summary?.provenance_sources?.length ?? 0) > 0 ? (
-                              selectedItem.review_summary?.provenance_sources.map((source) => (
-                                <span key={source} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700">
-                                  {source}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-slate-900">—</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    {selectedReviewSummary ? (
+                      <ReviewerSummaryCard
+                        summary={selectedReviewSummary}
+                        warningLabels={selectedItem.warning_labels ?? []}
+                      />
+                    ) : null}
                     {selectedPhraseDetails ? (
                       <div className="rounded-lg border border-sky-200 bg-sky-50 p-4" data-testid="jsonl-review-phrase-details">
                         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Phrase details</p>

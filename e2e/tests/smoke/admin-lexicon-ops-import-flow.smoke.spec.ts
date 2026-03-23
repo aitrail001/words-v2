@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi } from "../helpers/auth";
+import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
@@ -65,6 +65,7 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   await writeFile(compiledHostPath, row, "utf-8");
   await writeFile(approvedHostPath, row, "utf-8");
 
+  await waitForAppReady(request, adminUrl);
   await injectAdminToken(page, user.token, adminUrl);
   await page.goto(`${adminUrl}/lexicon/ops`);
   await expect(page.getByTestId("lexicon-ops-page")).toBeVisible();
@@ -82,7 +83,15 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   await expect(page.getByTestId("lexicon-import-db-summary-rows")).toContainText("1");
 
   await page.getByTestId("lexicon-import-db-run-button").click();
-  await expect(page.getByText("Import completed.")).toBeVisible();
+  await expect(page.getByTestId("lexicon-import-db-progress")).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId("lexicon-import-db-progress")).toBeVisible();
+  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText("Done");
+  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText("To do");
+  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText("Total");
+  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText(normalized);
+  await expect(page.getByTestId("lexicon-import-db-summary-rows")).toContainText("Rows");
+  await expect(page.getByTestId("lexicon-import-db-summary-rows")).toContainText("1");
 
   await page.goto(`${adminUrl}/lexicon/db-inspector`);
   await page.getByTestId("lexicon-db-inspector-search-input").fill(normalized);

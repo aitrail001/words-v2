@@ -5,11 +5,16 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.security import create_access_token
+from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+from app.models.meaning import Meaning
+from app.models.meaning_example import MeaningExample
 from app.models.phrase_entry import PhraseEntry
 from app.models.reference_entry import ReferenceEntry
 from app.models.reference_localization import ReferenceLocalization
+from app.models.translation import Translation
 from app.models.user import User
 from app.models.word import Word
+from app.models.word_relation import WordRelation
 
 
 def make_user(user_id: uuid.UUID, role: str = "admin") -> User:
@@ -94,7 +99,34 @@ class TestLexiconInspectorApi:
           cefr_level="B2",
           register_label="informal",
           brief_usage_note="used before performances",
+          source_type="lexicon_snapshot",
           source_reference="snapshot-001",
+          confidence_score=0.91,
+          generated_at=datetime(2026, 3, 20, 0, 0, tzinfo=timezone.utc),
+          seed_metadata={"raw_reviewed_as": "idiom"},
+          compiled_payload={
+              "entry_id": "ph_break_a_leg",
+              "entry_type": "phrase",
+              "phrase_kind": "idiom",
+              "display_form": "break a leg",
+              "senses": [
+                  {
+                      "sense_id": "phrase-1",
+                      "definition": "good luck",
+                      "part_of_speech": "phrase",
+                      "grammar_patterns": ["say + phrase"],
+                      "usage_note": "Used before a performance.",
+                      "examples": [{"sentence": "Break a leg tonight.", "difficulty": "A1"}],
+                      "translations": {
+                          "es": {
+                              "definition": "buena suerte",
+                              "usage_note": "antes de actuar",
+                              "examples": ["Buena suerte esta noche."],
+                          }
+                      },
+                  }
+              ],
+          },
           created_at=datetime.now(timezone.utc),
         )
         phrase_result = MagicMock()
@@ -110,6 +142,136 @@ class TestLexiconInspectorApi:
         data = response.json()
         assert data["family"] == "phrase"
         assert data["phrase_kind"] == "idiom"
+        assert data["source_type"] == "lexicon_snapshot"
+        assert data["confidence_score"] == 0.91
+        assert data["seed_metadata"] == {"raw_reviewed_as": "idiom"}
+        assert data["generated_at"] == "2026-03-20T00:00:00+00:00"
+        assert data["senses"][0]["definition"] == "good luck"
+        assert data["senses"][0]["examples"][0]["sentence"] == "Break a leg tonight."
+        assert data["senses"][0]["translations"][0]["locale"] == "es"
+        assert data["senses"][0]["translations"][0]["definition"] == "buena suerte"
+
+    @pytest.mark.asyncio
+    async def test_word_detail_returns_rich_top_level_and_meaning_payload(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        word = Word(
+            id=uuid.uuid4(),
+            word="bank",
+            language="en",
+            phonetic="bæŋk",
+            phonetics={"us": {"ipa": "/bæŋk/"}, "uk": {"ipa": "/bæŋk/"}},
+            phonetic_source="lexicon_snapshot",
+            phonetic_confidence=0.98,
+            cefr_level="B1",
+            frequency_rank=100,
+            learner_part_of_speech=["noun", "verb"],
+            confusable_words=[{"word": "bench", "reason": "form"}],
+            word_forms={"plural_forms": ["banks"]},
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-001",
+            learner_generated_at=datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+            created_at=datetime.now(timezone.utc),
+        )
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = word
+
+        meaning = Meaning(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            definition="a financial institution",
+            part_of_speech="noun",
+            primary_domain="money",
+            secondary_domains=["finance"],
+            register_label="neutral",
+            grammar_patterns=["countable noun"],
+            usage_note="Common everyday sense.",
+            example_sentence="She went to the bank.",
+            source="compiled",
+            source_reference="snapshot-001",
+            learner_generated_at=datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
+            order_index=0,
+            created_at=datetime.now(timezone.utc),
+        )
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [meaning]
+
+        run = LexiconEnrichmentRun(
+            id=uuid.uuid4(),
+            generator_model="gpt-5-nano",
+            validator_model="gpt-5-nano",
+            prompt_version="word_only.v1",
+            verdict="accepted",
+            created_at=datetime.now(timezone.utc),
+        )
+        runs_result = MagicMock()
+        runs_result.scalars.return_value.all.return_value = [run]
+
+        example = MeaningExample(
+            id=uuid.uuid4(),
+            meaning_id=meaning.id,
+            sentence="She went to the bank.",
+            difficulty="A1",
+            enrichment_run_id=run.id,
+            order_index=0,
+        )
+        examples_result = MagicMock()
+        examples_result.scalars.return_value.all.return_value = [example]
+
+        relation = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type="confusable",
+            related_word="bench",
+        )
+        relations_result = MagicMock()
+        relations_result.scalars.return_value.all.return_value = [relation]
+
+        translation = Translation(
+            id=uuid.uuid4(),
+            meaning_id=meaning.id,
+            language="es",
+            translation="banco",
+        )
+        translations_result = MagicMock()
+        translations_result.scalars.return_value.all.return_value = [translation]
+
+        mock_db.execute.side_effect = [
+            user_result,
+            word_result,
+            meanings_result,
+            examples_result,
+            translations_result,
+            relations_result,
+            runs_result,
+        ]
+
+        response = await client.get(
+            f"/api/lexicon-inspector/entries/word/{word.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["family"] == "word"
+        assert data["phonetics"]["us"]["ipa"] == "/bæŋk/"
+        assert data["learner_part_of_speech"] == ["noun", "verb"]
+        assert data["confusable_words"][0]["word"] == "bench"
+        assert data["word_forms"]["plural_forms"] == ["banks"]
+        assert data["source_type"] == "lexicon_snapshot"
+        assert data["learner_generated_at"] == "2026-03-21T00:00:00+00:00"
+        assert len(data["meanings"]) == 1
+        assert data["meanings"][0]["primary_domain"] == "money"
+        assert data["meanings"][0]["secondary_domains"] == ["finance"]
+        assert data["meanings"][0]["grammar_patterns"] == ["countable noun"]
+        assert data["meanings"][0]["usage_note"] == "Common everyday sense."
+        assert data["meanings"][0]["translations"] == [{"id": str(translation.id), "language": "es", "translation": "banco"}]
+        assert len(data["enrichment_runs"]) == 1
 
     @pytest.mark.asyncio
     async def test_reference_detail_returns_localizations(self, client, mock_db):

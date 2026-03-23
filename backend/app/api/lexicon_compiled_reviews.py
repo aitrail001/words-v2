@@ -2,6 +2,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Sequence
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -249,6 +250,20 @@ def _artifact_sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, uuid.UUID, Path)):
+        return str(value) if not isinstance(value, datetime) else value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    return str(value)
+
+
 def _parse_compiled_rows(payload_bytes: bytes) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(payload_bytes.decode("utf-8").splitlines(), start=1):
@@ -456,42 +471,52 @@ def _materialized_rows(
         decision = _decision_response(batch, item).model_dump(mode="json")
         decision_rows.append(decision)
         if item.review_status == "approved" and item.import_eligible:
-            approved_rows.append(item.compiled_payload)
+            approved_rows.append(_json_safe(item.compiled_payload))
             continue
         if item.review_status == "rejected":
             rejected_rows.append(
-                {
-                    **item.compiled_payload,
-                    "entry_id": item.entry_id,
-                    "entry_type": item.entry_type,
-                    "artifact_sha256": batch.artifact_sha256,
-                    "decision": _decision_status(item),
-                    "decision_reason": item.decision_reason,
-                    "compiled_payload_sha256": item.compiled_payload_sha256,
-                    "reviewed_by": str(item.reviewed_by) if item.reviewed_by else None,
-                    "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
-                }
+                _json_safe(
+                    {
+                        **item.compiled_payload,
+                        "entry_id": item.entry_id,
+                        "entry_type": item.entry_type,
+                        "artifact_sha256": batch.artifact_sha256,
+                        "decision": _decision_status(item),
+                        "decision_reason": item.decision_reason,
+                        "compiled_payload_sha256": item.compiled_payload_sha256,
+                        "reviewed_by": str(item.reviewed_by) if item.reviewed_by else None,
+                        "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
+                    }
+                )
             )
             if item.regen_requested:
                 regenerate_rows.append(
-                    {
-                        "schema_version": "lexicon_review_decision.v1",
-                        "entry_id": item.entry_id,
-                        "entry_type": item.entry_type,
-                        "normalized_form": item.normalized_form,
-                        "artifact_sha256": batch.artifact_sha256,
-                        "compiled_payload_sha256": item.compiled_payload_sha256,
-                        "decision_reason": item.decision_reason,
-                    }
+                    _json_safe(
+                        {
+                            "schema_version": "lexicon_review_decision.v1",
+                            "entry_id": item.entry_id,
+                            "entry_type": item.entry_type,
+                            "normalized_form": item.normalized_form,
+                            "artifact_sha256": batch.artifact_sha256,
+                            "compiled_payload_sha256": item.compiled_payload_sha256,
+                            "decision_reason": item.decision_reason,
+                        }
+                    )
                 )
     return approved_rows, rejected_rows, regenerate_rows, decision_rows
 
 
 def _write_jsonl(path: Path, rows: Sequence[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Output path is not writable: {path}",
+        ) from exc
 
 
 async def _batch_or_404(batch_id: uuid.UUID, db: AsyncSession) -> LexiconArtifactReviewBatch:

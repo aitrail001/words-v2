@@ -1,14 +1,17 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { HorizontalRecordRail } from "@/components/lexicon/horizontal-record-rail";
 import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
+import { PagedRecordList } from "@/components/lexicon/paged-record-list";
+import { ReviewerSummaryCard } from "@/components/lexicon/reviewer-summary-card";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
   bulkUpdateLexiconCompiledReviewBatch,
   LexiconCompiledReviewBatch,
   LexiconCompiledReviewItem,
-  LexiconCompiledReviewMaterializeResult,
+  type LexiconCompiledReviewMaterializeResult,
   deleteLexiconCompiledReviewBatch,
   downloadCompiledReviewDecisionsExport,
   downloadApprovedCompiledReviewExport,
@@ -18,48 +21,16 @@ import {
   importLexiconCompiledReviewBatchByPath,
   listLexiconCompiledReviewBatches,
   listLexiconCompiledReviewItems,
-  materializeLexiconCompiledReviewOutputs,
   updateLexiconCompiledReviewItem,
 } from "@/lib/lexicon-compiled-reviews-client";
+import {
+  createCompiledMaterializeLexiconJob,
+  getLexiconJob,
+  type LexiconJob,
+} from "@/lib/lexicon-jobs-client";
+import { derivePhraseDetails, deriveReviewSummary } from "@/lib/lexicon-review-summary";
 
 type ReviewDecisionStatus = "pending" | "approved" | "rejected";
-
-type JsonRecord = Record<string, unknown>;
-
-function asRecord(value: unknown): JsonRecord | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function firstString(values: unknown): string | null {
-  return Array.isArray(values) ? values.map(asString).find((value) => value !== null) ?? null : null;
-}
-
-function readPhraseDetails(entryType: string, payload: Record<string, unknown>): {
-  phraseKind: string | null;
-  definition: string | null;
-  example: string | null;
-  spanishDefinition: string | null;
-} | null {
-  if (entryType !== "phrase") return null;
-  const record = asRecord(payload);
-  const senses = Array.isArray(record?.senses) ? record.senses : [];
-  const firstSense = asRecord(senses[0]);
-  if (!firstSense) return null;
-
-  const translations = asRecord(firstSense.translations);
-  const spanish = asRecord(translations?.es);
-
-  return {
-    phraseKind: asString(record?.phrase_kind),
-    definition: asString(firstSense.definition),
-    example: firstString(firstSense.examples),
-    spanishDefinition: asString(spanish?.definition),
-  };
-}
 
 function searchParam(name: string): string {
   if (typeof window === "undefined") return "";
@@ -143,6 +114,7 @@ export default function LexiconCompiledReviewPage() {
   const [importArtifactPath, setImportArtifactPath] = useState("");
   const [materializeOutputDir, setMaterializeOutputDir] = useState("");
   const [materializeResult, setMaterializeResult] = useState<LexiconCompiledReviewMaterializeResult | null>(null);
+  const [materializeJob, setMaterializeJob] = useState<LexiconJob | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
   const [pendingBulkDecision, setPendingBulkDecision] = useState<ReviewDecisionStatus | null>(null);
   const [confirmDeleteBatch, setConfirmDeleteBatch] = useState(false);
@@ -153,6 +125,21 @@ export default function LexiconCompiledReviewPage() {
   const sourceReferenceContext = searchParam("sourceReference");
   const artifactPathContext = searchParam("artifactPath");
   const autoStart = searchParam("autostart") === "1";
+  const materializeResultFromJob = useCallback((job: LexiconJob): LexiconCompiledReviewMaterializeResult | null => {
+    if (!job.result_payload) {
+      return null;
+    }
+    return {
+      decision_count: Number(job.result_payload.decision_count ?? 0),
+      approved_count: Number(job.result_payload.approved_count ?? 0),
+      rejected_count: Number(job.result_payload.rejected_count ?? 0),
+      regenerate_count: Number(job.result_payload.regenerate_count ?? 0),
+      decisions_output_path: String(job.result_payload.decisions_output_path ?? ""),
+      approved_output_path: String(job.result_payload.approved_output_path ?? ""),
+      rejected_output_path: String(job.result_payload.rejected_output_path ?? ""),
+      regenerate_output_path: String(job.result_payload.regenerate_output_path ?? ""),
+    };
+  }, []);
 
   const selectedBatch = useMemo(
     () => batches.find((batch) => batch.id === selectedBatchId) ?? null,
@@ -163,7 +150,11 @@ export default function LexiconCompiledReviewPage() {
     [items, selectedItemId],
   );
   const selectedPhraseDetails = useMemo(
-    () => (selectedItem ? readPhraseDetails(selectedItem.entry_type, selectedItem.compiled_payload) : null),
+    () => (selectedItem ? derivePhraseDetails(selectedItem.entry_type, selectedItem.compiled_payload) : null),
+    [selectedItem],
+  );
+  const selectedReviewSummary = useMemo(
+    () => (selectedItem ? deriveReviewSummary(selectedItem.compiled_payload) : null),
     [selectedItem],
   );
   const filteredItems = useMemo(() => {
@@ -176,6 +167,10 @@ export default function LexiconCompiledReviewPage() {
       );
     });
   }, [itemSearch, items, statusFilter]);
+  const batchRailSummary = useMemo(
+    () => `${batches.length} batch${batches.length === 1 ? "" : "es"}`,
+    [batches.length],
+  );
 
   const loadBatches = async (preferredBatchId?: string) => {
     setLoading(true);
@@ -420,15 +415,39 @@ export default function LexiconCompiledReviewPage() {
   const handleMaterialize = async () => {
     if (!selectedBatch) return;
     try {
-      const result = await materializeLexiconCompiledReviewOutputs(selectedBatch.id, {
+      const job = await createCompiledMaterializeLexiconJob({
+        batchId: selectedBatch.id,
         outputDir: materializeOutputDir || undefined,
       });
-      setMaterializeResult(result);
-      setMessage("Materialized reviewed outputs.");
+      setMaterializeJob(job);
+      setMaterializeResult(materializeResultFromJob(job));
+      setMessage(job.status === "completed" ? "Materialized reviewed outputs." : "Materialize job started.");
     } catch (nextError) {
       setMessage(nextError instanceof Error ? nextError.message : "Failed to materialize reviewed outputs.");
     }
   };
+
+  useEffect(() => {
+    if (!materializeJob || materializeJob.status === "completed" || materializeJob.status === "failed") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void getLexiconJob(materializeJob.id)
+        .then((nextJob) => {
+          setMaterializeJob(nextJob);
+          if (nextJob.status === "completed") {
+            setMaterializeResult(materializeResultFromJob(nextJob));
+            setMessage("Materialized reviewed outputs.");
+          } else if (nextJob.status === "failed") {
+            setMessage(nextJob.error_message || "Materialize job failed.");
+          }
+        })
+        .catch((nextError) => {
+          setMessage(nextError instanceof Error ? nextError.message : "Failed to refresh materialize job.");
+        });
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [materializeJob, materializeResultFromJob]);
 
   const handleDeleteBatch = async () => {
     if (!selectedBatch) return;
@@ -600,18 +619,17 @@ export default function LexiconCompiledReviewPage() {
         ) : null}
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="compiled-review-batches-list">
-          <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Batches</h4>
-          <div className="mt-4 space-y-2">
-            {!loading && batches.length === 0 ? <p className="text-sm text-gray-500">No compiled review batches yet.</p> : null}
-            {batches.map((batch) => (
-              <button
-                key={batch.id}
-                type="button"
-                onClick={() => setSelectedBatchId(batch.id)}
-                className={`w-full rounded-lg border p-3 text-left ${batch.id === selectedBatchId ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
-              >
+      <div className="space-y-6">
+        <div data-testid="compiled-review-batches-list">
+          <HorizontalRecordRail
+            items={batches}
+            selectedId={selectedBatchId || null}
+            getId={(batch) => batch.id}
+            onSelect={setSelectedBatchId}
+            title={`Batches · ${batchRailSummary}`}
+            testId="compiled-review-batch-rail"
+            renderItem={(batch) => (
+              <div>
                 <p className="font-medium text-gray-900">{batch.artifact_filename}</p>
                 <p className="text-xs text-gray-500">
                   {batch.source_reference ?? batch.snapshot_id ?? "unknown snapshot"} · {batch.artifact_family}
@@ -620,10 +638,10 @@ export default function LexiconCompiledReviewPage() {
                 <p className="mt-1 text-xs text-gray-500">
                   pending {batch.pending_count} · approved {batch.approved_count} · rejected {batch.rejected_count}
                 </p>
-              </button>
-            ))}
-          </div>
-        </section>
+              </div>
+            )}
+          />
+        </div>
 
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm" data-testid="compiled-review-detail-panel">
           {selectedBatch ? (
@@ -673,8 +691,8 @@ export default function LexiconCompiledReviewPage() {
               </div>
             </div>
 
-              <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                <div className="space-y-3" data-testid="compiled-review-items-list">
+              <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+                <div className="space-y-3" data-testid="compiled-review-items-pane">
                   <div className="grid grid-cols-3 gap-2 text-sm">
                     {(() => {
                       const counts = batchCounts(items);
@@ -715,19 +733,25 @@ export default function LexiconCompiledReviewPage() {
                     </select>
                   </div>
                   {itemsLoading ? <p className="text-sm text-gray-500">Loading items...</p> : null}
-                  {!itemsLoading && filteredItems.length === 0 ? <p className="text-sm text-gray-500">No items match the current filter.</p> : null}
-                  {filteredItems.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setSelectedItemId(item.id)}
-                      className={`w-full rounded-lg border p-3 text-left ${item.id === selectedItemId ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
-                    >
-                      <p className="font-medium text-gray-900">{item.display_text}</p>
-                      <p className="text-xs text-gray-500">{item.entry_type} · {item.review_status}</p>
-                      <p className="mt-1 text-xs text-gray-500">validator {item.validator_status ?? "—"} · qc {item.qc_status ?? "—"}</p>
-                    </button>
-                  ))}
+                  {!itemsLoading ? (
+                    <PagedRecordList
+                      items={filteredItems}
+                      selectedId={selectedItemId || null}
+                      getId={(item) => item.id}
+                      onSelect={setSelectedItemId}
+                      title="Entries"
+                      testId="compiled-review-items-list"
+                      pageSize={5}
+                      emptyState={<p className="text-sm text-gray-500">No items match the current filter.</p>}
+                      renderItem={(item) => (
+                        <div>
+                          <p className="font-medium text-gray-900">{item.display_text}</p>
+                          <p className="text-xs text-gray-500">{item.entry_type} · {item.review_status}</p>
+                          <p className="mt-1 text-xs text-gray-500">validator {item.validator_status ?? "—"} · qc {item.qc_status ?? "—"}</p>
+                        </div>
+                      )}
+                    />
+                  ) : null}
                 </div>
 
                 <div>
@@ -752,6 +776,16 @@ export default function LexiconCompiledReviewPage() {
                           <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-violet-900">{JSON.stringify(selectedItem.qc_issues ?? [], null, 2)}</pre>
                         </div>
                       </div>
+
+                      {selectedReviewSummary ? (
+                        <ReviewerSummaryCard
+                          summary={selectedReviewSummary}
+                          warningLabels={[
+                            selectedItem.validator_status ? `validator:${selectedItem.validator_status}` : "",
+                            selectedItem.qc_status ? `qc:${selectedItem.qc_status}` : "",
+                          ].filter((value) => value.length > 0)}
+                        />
+                      ) : null}
 
                       {selectedPhraseDetails ? (
                         <div className="rounded-lg border border-sky-200 bg-sky-50 p-4" data-testid="compiled-review-phrase-details">
