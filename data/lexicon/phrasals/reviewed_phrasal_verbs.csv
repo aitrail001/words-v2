@@ -1,0 +1,2235 @@
+expression,original_order,source,reviewed_as,difficulty,commonality,added,confidence
+listen up,1,user_list,phrasal verb,medium,common,no,high
+send in,2,user_list,phrasal verb,medium,less_common,no,high
+cry out,3,user_list,phrasal verb,medium,less_common,no,high
+mix up,4,user_list,phrasal verb,medium,less_common,no,high
+stick around,5,user_list,prepositional verb,medium,less_common,no,high
+lay over,6,user_list,prepositional verb,medium,less_common,no,high
+concentrate on,7,user_list,prepositional verb,medium,common,no,high
+sit back,8,user_list,phrasal verb,medium,common,no,high
+drop out,9,user_list,phrasal verb,medium,common,no,high
+help out,10,user_list,phrasal verb,easy,very_common,no,high
+occur to,11,user_list,prepositional verb,medium,common,no,high
+carry out,12,user_list,phrasal verb,medium,common,no,high
+smile on,13,user_list,prepositional verb,medium,less_common,no,high
+start over,14,user_list,prepositional verb,medium,common,no,high
+call up,15,user_list,phrasal verb,easy,very_common,no,high
+put into,16,user_list,prepositional verb,medium,common,no,high
+burn down,17,user_list,phrasal verb,medium,less_common,no,high
+sing up,18,user_list,phrasal verb,medium,less_common,no,high
+hand off,19,user_list,phrasal verb,medium,common,no,high
+sing of,20,user_list,prepositional verb,medium,less_common,no,high
+feed up,21,user_list,phrasal verb,medium,less_common,no,high
+live by,22,user_list,prepositional verb,medium,less_common,no,high
+drink in,23,user_list,phrasal verb,medium,less_common,no,high
+sit up,24,user_list,phrasal verb,medium,common,no,high
+run up,25,user_list,phrasal verb,medium,common,no,high
+rip off,26,user_list,phrasal verb,medium,less_common,no,high
+cut in,27,user_list,phrasal verb,medium,less_common,no,high
+sell out,28,user_list,phrasal verb,medium,less_common,no,high
+ride on,29,user_list,prepositional verb,medium,less_common,no,high
+go under,30,user_list,prepositional verb,medium,common,no,high
+meet up,31,user_list,phrasal verb,medium,less_common,no,high
+fill in,32,user_list,phrasal verb,easy,very_common,no,high
+go about,33,user_list,prepositional verb,medium,common,no,high
+gain in,34,user_list,prepositional verb,medium,less_common,no,high
+move into,35,user_list,prepositional verb,medium,common,no,high
+dig in,36,user_list,phrasal verb,medium,less_common,no,high
+hand over,37,user_list,phrasal verb,medium,common,no,high
+fill up,38,user_list,phrasal verb,medium,common,no,high
+roll over,39,user_list,phrasal verb,medium,less_common,no,high
+hand out,40,user_list,phrasal verb,medium,common,no,high
+hold out,41,user_list,phrasal verb,medium,common,no,high
+send out,42,user_list,phrasal verb,medium,less_common,no,high
+pack up,43,user_list,phrasal verb,medium,less_common,no,high
+rest on,44,user_list,prepositional verb,medium,less_common,no,high
+split up,45,user_list,phrasal verb,medium,less_common,no,high
+give away,46,user_list,phrasal verb,easy,very_common,no,high
+tack on,47,user_list,phrasal verb,medium,less_common,no,high
+go forward,48,user_list,phrasal verb,medium,common,no,high
+sign for,49,user_list,prepositional verb,medium,less_common,no,high
+play out,50,user_list,phrasal verb,medium,less_common,no,high
+report to,51,user_list,prepositional verb,medium,common,no,high
+do without,52,user_list,prepositional verb,easy,very_common,no,high
+pull off,53,user_list,phrasal verb,easy,very_common,no,high
+stick up,54,user_list,phrasal verb,medium,less_common,no,high
+bring on,55,user_list,phrasal verb,medium,common,no,high
+keep up with,56,user_list,phrasal-prepositional verb,medium,common,no,medium
+mess around,57,user_list,phrasal verb,medium,less_common,no,high
+stick together,58,user_list,phrasal verb,medium,less_common,no,high
+sign on,59,user_list,prepositional verb,medium,less_common,no,high
+send for,60,user_list,prepositional verb,medium,less_common,no,high
+sing out,61,user_list,phrasal verb,medium,less_common,no,high
+hold onto,62,user_list,prepositional verb,medium,common,no,high
+pick out,63,user_list,phrasal verb,easy,very_common,no,high
+knock out,64,user_list,phrasal verb,medium,less_common,no,high
+catch on,65,user_list,phrasal verb,easy,very_common,no,high
+burn out,66,user_list,phrasal verb,medium,less_common,no,high
+drop in,67,user_list,phrasal verb,easy,very_common,no,high
+subject to,68,user_list,prepositional verb,medium,less_common,no,high
+make up for,69,user_list,phrasal-prepositional verb,medium,common,no,medium
+shoot down,70,user_list,phrasal verb,medium,less_common,no,high
+insist on,71,user_list,prepositional verb,medium,common,no,high
+fall back,72,user_list,phrasal verb,medium,common,no,high
+catch up with,73,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+grow on,74,user_list,prepositional verb,medium,common,no,high
+set about,75,user_list,prepositional verb,medium,common,no,high
+read on,76,user_list,prepositional verb,medium,common,no,high
+side with,77,user_list,prepositional verb,medium,less_common,no,high
+take back,78,user_list,phrasal verb,easy,very_common,no,high
+cling to,79,user_list,prepositional verb,medium,less_common,no,high
+run by,80,user_list,prepositional verb,medium,common,no,high
+go before,81,user_list,prepositional verb,medium,common,no,high
+sign in,82,user_list,prepositional verb,medium,less_common,no,high
+take down,83,user_list,phrasal verb,easy,very_common,no,high
+fight back,84,user_list,phrasal verb,medium,less_common,no,high
+live together,85,user_list,phrasal verb,medium,less_common,no,high
+lean on,86,user_list,prepositional verb,medium,less_common,no,high
+drop off,87,user_list,phrasal verb,easy,very_common,no,high
+bump into,88,user_list,prepositional verb,medium,less_common,no,high
+leave out,89,user_list,phrasal verb,easy,very_common,no,high
+go without,90,user_list,prepositional verb,medium,common,no,high
+sing along,91,user_list,prepositional verb,medium,less_common,no,high
+go together,92,user_list,phrasal verb,medium,common,no,high
+speak up,93,user_list,phrasal verb,easy,very_common,no,high
+fool around,94,user_list,phrasal verb,medium,less_common,no,high
+hand down,95,user_list,phrasal verb,medium,common,no,high
+phone in,96,user_list,prepositional verb,medium,less_common,no,high
+buy in,97,user_list,prepositional verb,medium,less_common,no,high
+roll down,98,user_list,phrasal verb,medium,less_common,no,high
+break through,99,user_list,phrasal verb,medium,common,no,high
+round up,100,user_list,phrasal verb,medium,less_common,no,high
+identify with,101,user_list,prepositional verb,medium,less_common,no,high
+stick out,102,user_list,phrasal verb,medium,less_common,no,high
+feed on,103,user_list,prepositional verb,medium,less_common,no,high
+fit into,104,user_list,prepositional verb,medium,less_common,no,high
+stand back,105,user_list,phrasal verb,easy,very_common,no,high
+ring around,106,user_list,prepositional verb,medium,less_common,no,high
+pull in,107,user_list,prepositional verb,medium,less_common,no,high
+go against,108,user_list,prepositional verb,easy,very_common,no,high
+lie around,109,user_list,prepositional verb,medium,less_common,no,high
+clock in,110,user_list,phrasal verb,medium,less_common,no,high
+give back,111,user_list,phrasal verb,easy,very_common,no,high
+stop in,112,user_list,phrasal verb,medium,less_common,no,high
+disagree with,113,user_list,prepositional verb,medium,less_common,no,high
+shout out,114,user_list,phrasal verb,medium,less_common,no,high
+hide behind,115,user_list,prepositional verb,medium,less_common,no,high
+sink in,116,user_list,phrasal verb,medium,less_common,no,high
+set on,117,user_list,prepositional verb,medium,common,no,high
+finish with,118,user_list,prepositional verb,medium,less_common,no,high
+set off,119,user_list,phrasal verb,easy,very_common,no,high
+cut down,120,user_list,phrasal verb,easy,very_common,no,high
+hit with,121,user_list,prepositional verb,medium,less_common,no,high
+lead off,122,user_list,phrasal verb,medium,less_common,no,high
+sort out,123,user_list,phrasal verb,easy,very_common,no,high
+bring down,124,user_list,phrasal verb,medium,common,no,high
+limit to,125,user_list,prepositional verb,medium,less_common,no,high
+read out,126,user_list,phrasal verb,easy,very_common,no,high
+fall over,127,user_list,phrasal verb,easy,very_common,no,high
+roll out,128,user_list,phrasal verb,medium,less_common,no,high
+spy on,129,user_list,prepositional verb,medium,less_common,no,high
+step forward,130,user_list,phrasal verb,medium,less_common,no,high
+get behind,131,user_list,prepositional verb,medium,common,no,high
+join in,132,user_list,phrasal verb,medium,less_common,no,high
+gun down,133,user_list,phrasal verb,medium,less_common,no,high
+kick off,134,user_list,phrasal verb,medium,less_common,no,high
+fall through,135,user_list,phrasal verb,medium,common,no,high
+hold to,136,user_list,prepositional verb,medium,common,no,high
+come before,137,user_list,prepositional verb,medium,common,no,high
+deal in,138,user_list,prepositional verb,medium,common,no,high
+draw on,139,user_list,phrasal verb,medium,less_common,no,high
+hang on to,140,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+settle for,141,user_list,prepositional verb,medium,less_common,no,high
+settle in,142,user_list,phrasal verb,medium,less_common,no,high
+hook up with,143,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+ply with,144,user_list,prepositional verb,medium,less_common,no,high
+fill out,145,user_list,phrasal verb,easy,very_common,no,high
+shoot for,146,user_list,prepositional verb,medium,less_common,no,high
+breathe in,147,user_list,phrasal verb,medium,less_common,no,high
+enter into,148,user_list,prepositional verb,medium,less_common,no,high
+bring about,149,user_list,phrasal verb,easy,very_common,no,high
+call back,150,user_list,phrasal verb,easy,very_common,no,high
+go along with,151,user_list,phrasal-prepositional verb,medium,common,no,medium
+lay into,152,user_list,prepositional verb,medium,less_common,no,high
+cut through,153,user_list,phrasal verb,medium,less_common,no,high
+speak out,154,user_list,phrasal verb,medium,less_common,no,high
+let out,155,user_list,phrasal verb,medium,common,no,high
+tap in,156,user_list,prepositional verb,medium,less_common,no,high
+date to,157,user_list,prepositional verb,medium,less_common,no,high
+fuck around,158,user_list,phrasal verb,hard,rare,no,high
+come about,159,user_list,prepositional verb,medium,common,no,high
+hit for,160,user_list,prepositional verb,medium,less_common,no,high
+come away,161,user_list,phrasal verb,medium,common,no,high
+get ahead,162,user_list,phrasal verb,medium,common,no,high
+finish up,163,user_list,phrasal verb,medium,less_common,no,high
+follow up,164,user_list,phrasal verb,medium,less_common,no,high
+chance on,165,user_list,phrasal verb,medium,less_common,no,high
+dig up,166,user_list,phrasal verb,medium,less_common,no,high
+give out,167,user_list,phrasal verb,medium,common,no,high
+grow out,168,user_list,phrasal verb,medium,common,no,high
+see about,169,user_list,prepositional verb,medium,less_common,no,high
+tear apart,170,user_list,phrasal verb,medium,less_common,no,high
+come forward,171,user_list,phrasal verb,medium,common,no,high
+burn up,172,user_list,phrasal verb,medium,less_common,no,high
+pull on,173,user_list,prepositional verb,medium,less_common,no,high
+tear down,174,user_list,phrasal verb,medium,less_common,no,high
+pull back,175,user_list,phrasal verb,medium,less_common,no,high
+grow into,176,user_list,prepositional verb,easy,very_common,no,high
+sit by,177,user_list,prepositional verb,medium,common,no,high
+close in,178,user_list,phrasal verb,medium,less_common,no,high
+flirt with,179,user_list,prepositional verb,medium,less_common,no,high
+go beyond,180,user_list,prepositional verb,medium,common,no,high
+move over,181,user_list,prepositional verb,medium,common,no,high
+sit out,182,user_list,phrasal verb,medium,common,no,high
+shoot up,183,user_list,phrasal verb,medium,less_common,no,high
+box in,184,user_list,phrasal verb,medium,less_common,no,high
+draw in,185,user_list,phrasal verb,medium,less_common,no,high
+revolve around,186,user_list,prepositional verb,medium,less_common,no,high
+draw from,187,user_list,prepositional verb,medium,less_common,no,high
+eat into,188,user_list,prepositional verb,medium,less_common,no,high
+jerk off,189,user_list,phrasal verb,hard,rare,no,high
+pull down,190,user_list,phrasal verb,medium,less_common,no,high
+keep to,191,user_list,prepositional verb,medium,common,no,high
+dream on,192,user_list,prepositional verb,medium,less_common,no,high
+fire up,193,user_list,phrasal verb,medium,less_common,no,high
+let on,194,user_list,phrasal verb,medium,common,no,high
+lock out,195,user_list,phrasal verb,medium,less_common,no,high
+drop by,196,user_list,phrasal verb,easy,very_common,no,high
+stand down,197,user_list,phrasal verb,medium,common,no,high
+keep from,198,user_list,prepositional verb,medium,common,no,high
+drive on,199,user_list,phrasal verb,medium,less_common,no,high
+push for,200,user_list,prepositional verb,medium,less_common,no,high
+factor in,201,user_list,prepositional verb,medium,less_common,no,high
+hang up on,202,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+lean to,203,user_list,prepositional verb,medium,less_common,no,high
+man up,204,user_list,phrasal verb,medium,less_common,no,high
+break for,205,user_list,prepositional verb,medium,common,no,high
+come round,206,user_list,prepositional verb,medium,common,no,high
+provide for,207,user_list,prepositional verb,medium,less_common,no,high
+clean out,208,user_list,phrasal verb,medium,less_common,no,high
+heat up,209,user_list,phrasal verb,medium,less_common,no,high
+lock away,210,user_list,phrasal verb,medium,less_common,no,high
+pay in,211,user_list,prepositional verb,medium,less_common,no,high
+root for,212,user_list,prepositional verb,medium,less_common,no,high
+interfere with,213,user_list,prepositional verb,medium,less_common,no,high
+move in with,214,user_list,phrasal-prepositional verb,medium,common,no,medium
+cheer up,215,user_list,phrasal verb,medium,less_common,no,high
+spread out,216,user_list,phrasal verb,medium,less_common,no,high
+fall away,217,user_list,phrasal verb,medium,common,no,high
+grow out of,218,user_list,phrasal-prepositional verb,medium,common,no,medium
+move along,219,user_list,prepositional verb,medium,common,no,high
+hang over,220,user_list,prepositional verb,medium,less_common,no,high
+put away,221,user_list,phrasal verb,easy,very_common,no,high
+press on,222,user_list,phrasal verb,medium,less_common,no,high
+step down,223,user_list,phrasal verb,medium,less_common,no,high
+clear out,224,user_list,phrasal verb,medium,less_common,no,high
+let down,225,user_list,phrasal verb,easy,very_common,no,high
+pick up on,226,user_list,phrasal-prepositional verb,medium,very_common,no,high
+speed up,227,user_list,phrasal verb,easy,very_common,no,high
+dry up,228,user_list,phrasal verb,medium,less_common,no,high
+cut up,229,user_list,phrasal verb,medium,less_common,no,high
+major in,230,user_list,prepositional verb,medium,less_common,no,high
+rise above,231,user_list,prepositional verb,medium,less_common,no,high
+face down,232,user_list,phrasal verb,medium,less_common,no,high
+follow through,233,user_list,phrasal verb,medium,less_common,no,high
+call at,234,user_list,prepositional verb,medium,common,no,high
+cross over,235,user_list,phrasal verb,medium,less_common,no,high
+tell on,236,user_list,phrasal verb,medium,less_common,no,high
+cash in,237,user_list,phrasal verb,medium,less_common,no,high
+drive away,238,user_list,phrasal verb,medium,less_common,no,high
+land with,239,user_list,prepositional verb,medium,less_common,no,high
+suck in,240,user_list,phrasal verb,medium,less_common,no,high
+burst into,241,user_list,prepositional verb,medium,less_common,no,high
+seek out,242,user_list,phrasal verb,medium,less_common,no,high
+raise to,243,user_list,prepositional verb,medium,less_common,no,high
+gain on,244,user_list,prepositional verb,medium,less_common,no,high
+run at,245,user_list,prepositional verb,medium,common,no,high
+leave off,246,user_list,phrasal verb,medium,common,no,high
+cool down,247,user_list,phrasal verb,medium,less_common,no,high
+rack up,248,user_list,phrasal verb,hard,rare,no,high
+draw up,249,user_list,phrasal verb,medium,less_common,no,high
+drive off,250,user_list,phrasal verb,medium,less_common,no,high
+ice up,251,user_list,phrasal verb,medium,less_common,no,high
+roll around,252,user_list,phrasal verb,medium,less_common,no,high
+stay over,253,user_list,phrasal verb,medium,less_common,no,high
+buy into,254,user_list,prepositional verb,medium,less_common,no,high
+pour out,255,user_list,phrasal verb,medium,less_common,no,high
+sleep together,256,user_list,phrasal verb,medium,less_common,no,high
+fall behind,257,user_list,prepositional verb,easy,very_common,no,high
+suit to,258,user_list,prepositional verb,medium,less_common,no,high
+check into,259,user_list,prepositional verb,medium,common,no,high
+decide on,260,user_list,phrasal verb,medium,less_common,no,high
+keep out,261,user_list,phrasal verb,easy,very_common,no,high
+surrender to,262,user_list,prepositional verb,medium,less_common,no,high
+sit for,263,user_list,prepositional verb,medium,common,no,high
+shake up,264,user_list,phrasal verb,medium,less_common,no,high
+creep in,265,user_list,phrasal verb,medium,less_common,no,high
+close down,266,user_list,phrasal verb,medium,less_common,no,high
+punch in,267,user_list,prepositional verb,medium,less_common,no,high
+clear up,268,user_list,phrasal verb,medium,less_common,no,high
+jack off,269,user_list,phrasal verb,hard,rare,no,high
+sign off,270,user_list,phrasal verb,medium,less_common,no,high
+tell of,271,user_list,prepositional verb,medium,less_common,no,high
+rag on,272,user_list,phrasal verb,medium,less_common,no,high
+talk at,273,user_list,prepositional verb,medium,less_common,no,high
+play along,274,user_list,prepositional verb,medium,less_common,no,high
+get across,275,user_list,phrasal verb,easy,very_common,no,high
+pin on,276,user_list,phrasal verb,medium,less_common,no,high
+talk back,277,user_list,phrasal verb,medium,less_common,no,high
+face off,278,user_list,phrasal verb,medium,less_common,no,high
+step aside,279,user_list,phrasal verb,medium,less_common,no,high
+listen for,280,user_list,prepositional verb,medium,common,no,high
+part with,281,user_list,prepositional verb,medium,less_common,no,high
+pay up,282,user_list,phrasal verb,medium,less_common,no,high
+sneak up,283,user_list,phrasal verb,medium,less_common,no,high
+drink up,284,user_list,phrasal verb,medium,less_common,no,high
+put off,285,user_list,phrasal verb,easy,very_common,no,high
+stem from,286,user_list,prepositional verb,medium,less_common,no,high
+stretch out,287,user_list,phrasal verb,medium,less_common,no,high
+switch off,288,user_list,phrasal verb,medium,less_common,no,high
+keep away,289,user_list,phrasal verb,easy,very_common,no,high
+drive up,290,user_list,phrasal verb,medium,less_common,no,high
+scream out,291,user_list,phrasal verb,medium,less_common,no,high
+dawn on,292,user_list,phrasal verb,medium,less_common,no,high
+drive down,293,user_list,phrasal verb,medium,less_common,no,high
+dwell on,294,user_list,prepositional verb,medium,less_common,no,high
+come upon,295,user_list,prepositional verb,medium,common,no,high
+hold off,296,user_list,phrasal verb,medium,common,no,high
+dream away,297,user_list,phrasal verb,medium,less_common,no,high
+loosen up,298,user_list,phrasal verb,medium,less_common,no,high
+bow to,299,user_list,prepositional verb,medium,less_common,no,high
+call off,300,user_list,phrasal verb,easy,very_common,no,high
+curl up,301,user_list,phrasal verb,medium,less_common,no,high
+push back,302,user_list,phrasal verb,medium,less_common,no,high
+run across,303,user_list,prepositional verb,medium,common,no,high
+call upon,304,user_list,prepositional verb,medium,common,no,high
+reduce to,305,user_list,prepositional verb,medium,less_common,no,high
+tart up,306,user_list,phrasal verb,hard,rare,no,high
+slip out,307,user_list,phrasal verb,medium,less_common,no,high
+lighten up,308,user_list,phrasal verb,medium,less_common,no,high
+switch on,309,user_list,prepositional verb,medium,less_common,no,high
+mix in,310,user_list,phrasal verb,medium,less_common,no,high
+dispose of,311,user_list,prepositional verb,medium,less_common,no,high
+push in,312,user_list,phrasal verb,medium,less_common,no,high
+read through,313,user_list,prepositional verb,medium,common,no,high
+drive out,314,user_list,phrasal verb,medium,less_common,no,high
+march on,315,user_list,phrasal verb,medium,less_common,no,high
+feed off,316,user_list,phrasal verb,medium,less_common,no,high
+feel up,317,user_list,phrasal verb,medium,less_common,no,high
+finish off,318,user_list,phrasal verb,medium,less_common,no,high
+listen in,319,user_list,prepositional verb,medium,common,no,high
+embark on,320,user_list,prepositional verb,medium,less_common,no,high
+fish for,321,user_list,prepositional verb,medium,less_common,no,high
+catch up on,322,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+force on,323,user_list,prepositional verb,medium,less_common,no,high
+keep at,324,user_list,prepositional verb,medium,common,no,high
+push on,325,user_list,phrasal verb,medium,less_common,no,high
+see out,326,user_list,phrasal verb,medium,less_common,no,high
+take it out on,327,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+mess around with,328,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+put yourself out,329,user_list,phrasal verb,medium,common,no,medium
+crack on,330,user_list,phrasal verb,medium,less_common,no,high
+let up,331,user_list,phrasal verb,medium,common,no,high
+lose yourself in,332,user_list,prepositional verb,medium,less_common,no,medium
+remind of,333,user_list,prepositional verb,medium,less_common,no,high
+team up,334,user_list,phrasal verb,medium,less_common,no,high
+dig into,335,user_list,prepositional verb,medium,less_common,no,high
+dive into,336,user_list,prepositional verb,medium,less_common,no,high
+sleep over,337,user_list,prepositional verb,medium,less_common,no,high
+chip in,338,user_list,phrasal verb,medium,less_common,no,high
+lash out,339,user_list,phrasal verb,medium,less_common,no,high
+melt away,340,user_list,phrasal verb,medium,less_common,no,high
+count in,341,user_list,prepositional verb,medium,less_common,no,high
+fade in,342,user_list,phrasal verb,medium,less_common,no,high
+gravitate to,343,user_list,prepositional verb,medium,less_common,no,high
+dry out,344,user_list,phrasal verb,medium,less_common,no,high
+hot up,345,user_list,phrasal verb,medium,less_common,no,high
+ice over,346,user_list,phrasal verb,medium,less_common,no,high
+knock off,347,user_list,phrasal verb,medium,less_common,no,high
+make into,348,user_list,prepositional verb,medium,common,no,high
+break off,349,user_list,phrasal verb,medium,common,no,high
+crack up,350,user_list,phrasal verb,medium,less_common,no,high
+rest with,351,user_list,prepositional verb,medium,less_common,no,high
+send on,352,user_list,phrasal verb,medium,less_common,no,high
+cater to,353,user_list,prepositional verb,medium,less_common,no,high
+glass in,354,user_list,phrasal verb,medium,less_common,no,high
+pack in,355,user_list,phrasal verb,medium,less_common,no,high
+suck up,356,user_list,phrasal verb,medium,less_common,no,high
+pull yourself together,357,user_list,phrasal verb,medium,less_common,no,medium
+fix up,358,user_list,phrasal verb,medium,less_common,no,high
+horn in,359,user_list,phrasal verb,medium,less_common,no,high
+lift off,360,user_list,phrasal verb,medium,less_common,no,high
+tag along,361,user_list,prepositional verb,medium,less_common,no,high
+cut back,362,user_list,phrasal verb,medium,less_common,no,high
+put back,363,user_list,phrasal verb,easy,very_common,no,high
+swing by,364,user_list,prepositional verb,medium,less_common,no,high
+float around,365,user_list,phrasal verb,medium,less_common,no,high
+hoe in,366,user_list,phrasal verb,hard,rare,no,high
+pass for,367,user_list,prepositional verb,medium,less_common,no,high
+rip up,368,user_list,phrasal verb,medium,less_common,no,high
+pitch in,369,user_list,phrasal verb,medium,less_common,no,high
+build into,370,user_list,prepositional verb,medium,less_common,no,high
+fear for,371,user_list,prepositional verb,medium,less_common,no,high
+jump at,372,user_list,prepositional verb,medium,less_common,no,high
+pull away,373,user_list,phrasal verb,medium,less_common,no,high
+run after,374,user_list,prepositional verb,medium,common,no,high
+settle on,375,user_list,phrasal verb,medium,less_common,no,high
+stamp on,376,user_list,prepositional verb,medium,less_common,no,high
+bounce back,377,user_list,phrasal verb,medium,less_common,no,high
+chop off,378,user_list,phrasal verb,medium,less_common,no,high
+cook up,379,user_list,phrasal verb,medium,less_common,no,high
+eye up,380,user_list,phrasal verb,medium,less_common,no,high
+hold together,381,user_list,phrasal verb,medium,common,no,high
+row back,382,user_list,phrasal verb,medium,less_common,no,high
+rule out,383,user_list,phrasal verb,medium,less_common,no,high
+count down,384,user_list,phrasal verb,medium,less_common,no,high
+fold in,385,user_list,phrasal verb,medium,less_common,no,high
+lie behind,386,user_list,prepositional verb,medium,less_common,no,high
+pass down,387,user_list,phrasal verb,medium,less_common,no,high
+do over,388,user_list,phrasal verb,medium,less_common,no,high
+fall back on,389,user_list,phrasal-prepositional verb,medium,common,no,medium
+shy away,390,user_list,phrasal verb,medium,less_common,no,high
+check up on,391,user_list,phrasal-prepositional verb,medium,common,no,medium
+die out,392,user_list,phrasal verb,medium,less_common,no,high
+shut off,393,user_list,phrasal verb,medium,less_common,no,high
+enter on,394,user_list,prepositional verb,medium,less_common,no,high
+hang around with,395,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+hunt down,396,user_list,phrasal verb,medium,less_common,no,high
+kick up,397,user_list,phrasal verb,medium,less_common,no,high
+pile up,398,user_list,phrasal verb,medium,less_common,no,high
+rub off,399,user_list,phrasal verb,medium,less_common,no,high
+subscribe to,400,user_list,prepositional verb,medium,less_common,no,high
+drag in,401,user_list,phrasal verb,medium,less_common,no,high
+pay back,402,user_list,phrasal verb,easy,very_common,no,high
+stir up,403,user_list,phrasal verb,medium,less_common,no,high
+shoot off,404,user_list,phrasal verb,medium,less_common,no,high
+butt in,405,user_list,phrasal verb,medium,less_common,no,high
+creep up,406,user_list,phrasal verb,medium,less_common,no,high
+eat away,407,user_list,phrasal verb,medium,less_common,no,high
+have out,408,user_list,phrasal verb,medium,less_common,no,high
+hold down,409,user_list,phrasal verb,medium,common,no,high
+match up,410,user_list,phrasal verb,medium,less_common,no,high
+shine through,411,user_list,prepositional verb,medium,less_common,no,high
+confide in,412,user_list,prepositional verb,medium,less_common,no,high
+level with,413,user_list,prepositional verb,medium,less_common,no,high
+power on,414,user_list,prepositional verb,medium,less_common,no,high
+rat on,415,user_list,prepositional verb,medium,less_common,no,high
+resort to,416,user_list,prepositional verb,medium,less_common,no,high
+talk out,417,user_list,phrasal verb,medium,less_common,no,high
+change over,418,user_list,phrasal verb,medium,less_common,no,high
+pick yourself up,419,user_list,phrasal verb,medium,common,no,medium
+rope in,420,user_list,phrasal verb,medium,less_common,no,high
+sell on,421,user_list,phrasal verb,medium,less_common,no,high
+send off,422,user_list,phrasal verb,medium,less_common,no,high
+stick at,423,user_list,prepositional verb,medium,less_common,no,high
+fly at,424,user_list,prepositional verb,medium,less_common,no,high
+run along,425,user_list,prepositional verb,medium,common,no,high
+stay around,426,user_list,phrasal verb,medium,less_common,no,high
+pan out,427,user_list,phrasal verb,medium,less_common,no,high
+have up,428,user_list,phrasal verb,medium,less_common,no,high
+kill off,429,user_list,phrasal verb,medium,less_common,no,high
+knock over,430,user_list,phrasal verb,medium,less_common,no,high
+ream out,431,user_list,phrasal verb,medium,less_common,no,high
+ride out,432,user_list,phrasal verb,medium,less_common,no,high
+shoot through,433,user_list,prepositional verb,medium,less_common,no,high
+soldier on,434,user_list,phrasal verb,hard,rare,no,high
+clock on,435,user_list,phrasal verb,medium,less_common,no,high
+fall upon,436,user_list,prepositional verb,medium,common,no,high
+knock up,437,user_list,phrasal verb,medium,less_common,no,high
+cry out for,438,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+have back,439,user_list,phrasal verb,medium,less_common,no,high
+hole up,440,user_list,phrasal verb,medium,less_common,no,high
+look ahead,441,user_list,phrasal verb,medium,common,no,high
+piece together,442,user_list,phrasal verb,medium,less_common,no,high
+ride up,443,user_list,phrasal verb,medium,less_common,no,high
+take after,444,user_list,prepositional verb,easy,very_common,no,high
+bottle up,445,user_list,phrasal verb,medium,less_common,no,high
+drag on,446,user_list,phrasal verb,medium,less_common,no,high
+egg on,447,user_list,phrasal verb,medium,less_common,no,high
+pump up,448,user_list,phrasal verb,medium,less_common,no,high
+put aside,449,user_list,phrasal verb,medium,common,no,high
+ease up,450,user_list,phrasal verb,medium,less_common,no,high
+fix on,451,user_list,phrasal verb,medium,less_common,no,high
+keep out of,452,user_list,phrasal-prepositional verb,medium,common,no,medium
+keep to yourself,453,user_list,prepositional verb,medium,common,no,medium
+pin down,454,user_list,phrasal verb,medium,less_common,no,high
+press for,455,user_list,prepositional verb,medium,less_common,no,high
+tear at,456,user_list,prepositional verb,medium,less_common,no,high
+come under,457,user_list,prepositional verb,medium,common,no,high
+double back,458,user_list,phrasal verb,medium,less_common,no,high
+fade out,459,user_list,phrasal verb,medium,less_common,no,high
+gravitate toward,460,user_list,prepositional verb,medium,less_common,no,high
+hunger for,461,user_list,prepositional verb,medium,less_common,no,high
+pass over,462,user_list,prepositional verb,medium,less_common,no,high
+set aside,463,user_list,phrasal verb,medium,common,no,high
+fan out,464,user_list,phrasal verb,medium,less_common,no,high
+strike out,465,user_list,phrasal verb,medium,less_common,no,high
+rub it in,466,user_list,phrasal verb,medium,less_common,no,high
+send up,467,user_list,phrasal verb,medium,less_common,no,high
+squeeze in,468,user_list,phrasal verb,medium,less_common,no,high
+break with,469,user_list,prepositional verb,medium,common,no,high
+dream up,470,user_list,phrasal verb,medium,less_common,no,high
+plan out,471,user_list,phrasal verb,medium,less_common,no,high
+die down,472,user_list,phrasal verb,medium,less_common,no,high
+lose out,473,user_list,phrasal verb,medium,less_common,no,high
+roll back,474,user_list,phrasal verb,medium,less_common,no,high
+sit through,475,user_list,prepositional verb,medium,common,no,high
+breathe out,476,user_list,phrasal verb,medium,less_common,no,high
+butt out,477,user_list,phrasal verb,medium,less_common,no,high
+soak up,478,user_list,phrasal verb,medium,less_common,no,high
+cool off,479,user_list,phrasal verb,medium,less_common,no,high
+grind on,480,user_list,phrasal verb,medium,less_common,no,high
+grow back,481,user_list,phrasal verb,medium,common,no,high
+snap out,482,user_list,phrasal verb,medium,less_common,no,high
+stumble upon,483,user_list,prepositional verb,medium,less_common,no,high
+sum up,484,user_list,phrasal verb,medium,less_common,no,high
+deal out,485,user_list,phrasal verb,medium,common,no,high
+jack up,486,user_list,phrasal verb,hard,rare,no,high
+suck into,487,user_list,prepositional verb,medium,less_common,no,high
+camp out,488,user_list,phrasal verb,medium,less_common,no,high
+hit back,489,user_list,phrasal verb,medium,less_common,no,high
+hold out for,490,user_list,phrasal-prepositional verb,medium,common,no,medium
+poke about,491,user_list,prepositional verb,medium,less_common,no,high
+reside in,492,user_list,prepositional verb,medium,less_common,no,high
+stack up,493,user_list,phrasal verb,medium,less_common,no,high
+date back,494,user_list,phrasal verb,medium,less_common,no,high
+draw out,495,user_list,phrasal verb,medium,less_common,no,high
+flow from,496,user_list,prepositional verb,medium,less_common,no,high
+latch on,497,user_list,prepositional verb,medium,less_common,no,high
+play up,498,user_list,phrasal verb,medium,less_common,no,high
+sweep away,499,user_list,phrasal verb,medium,less_common,no,high
+drop into,500,user_list,prepositional verb,medium,common,no,high
+map out,501,user_list,phrasal verb,medium,less_common,no,high
+pull together,502,user_list,phrasal verb,medium,less_common,no,high
+follow on,503,user_list,phrasal verb,medium,less_common,no,high
+get round,504,user_list,phrasal verb,medium,common,no,high
+join up,505,user_list,phrasal verb,medium,less_common,no,high
+slip up,506,user_list,phrasal verb,medium,less_common,no,high
+buckle up,507,user_list,phrasal verb,medium,less_common,no,high
+cast on,508,user_list,phrasal verb,medium,less_common,no,high
+log on,509,user_list,phrasal verb,medium,less_common,no,high
+fight off,510,user_list,phrasal verb,medium,less_common,no,high
+log in,511,user_list,phrasal verb,medium,less_common,no,high
+lust for,512,user_list,prepositional verb,medium,less_common,no,high
+read up,513,user_list,phrasal verb,medium,common,no,high
+reason with,514,user_list,prepositional verb,medium,less_common,no,high
+see over,515,user_list,prepositional verb,medium,less_common,no,high
+shut out,516,user_list,phrasal verb,medium,less_common,no,high
+build around,517,user_list,prepositional verb,medium,less_common,no,high
+draw into,518,user_list,prepositional verb,medium,less_common,no,high
+find for,519,user_list,prepositional verb,medium,common,no,high
+give off,520,user_list,phrasal verb,medium,common,no,high
+kid around,521,user_list,prepositional verb,medium,less_common,no,high
+pass up,522,user_list,phrasal verb,medium,less_common,no,high
+stick it out,523,user_list,phrasal verb,medium,less_common,no,high
+sweep up,524,user_list,phrasal verb,medium,less_common,no,high
+dig out,525,user_list,phrasal verb,medium,less_common,no,high
+mark for,526,user_list,prepositional verb,medium,less_common,no,high
+mix to,527,user_list,prepositional verb,medium,less_common,no,high
+set down,528,user_list,phrasal verb,medium,common,no,high
+swear by,529,user_list,prepositional verb,medium,less_common,no,high
+branch out,530,user_list,phrasal verb,medium,less_common,no,high
+crowd in,531,user_list,phrasal verb,medium,less_common,no,high
+go towards,532,user_list,prepositional verb,medium,common,no,high
+let off,533,user_list,phrasal verb,medium,common,no,high
+match with,534,user_list,prepositional verb,medium,less_common,no,high
+pride yourself on,535,user_list,prepositional verb,medium,less_common,no,medium
+rock out,536,user_list,phrasal verb,medium,less_common,no,high
+sink into,537,user_list,prepositional verb,medium,less_common,no,high
+stick by,538,user_list,prepositional verb,medium,less_common,no,high
+straighten out,539,user_list,phrasal verb,medium,less_common,no,high
+talk down,540,user_list,phrasal verb,medium,less_common,no,high
+delight in,541,user_list,phrasal verb,medium,less_common,no,high
+frown upon,542,user_list,prepositional verb,medium,less_common,no,high
+pop off,543,user_list,phrasal verb,medium,less_common,no,high
+push forward,544,user_list,phrasal verb,medium,less_common,no,high
+push out,545,user_list,phrasal verb,medium,less_common,no,high
+stop off,546,user_list,phrasal verb,medium,less_common,no,high
+tear away,547,user_list,phrasal verb,medium,less_common,no,high
+spell out,548,user_list,phrasal verb,medium,less_common,no,high
+burst out,549,user_list,phrasal verb,medium,less_common,no,high
+kick around,550,user_list,phrasal verb,medium,less_common,no,high
+rip through,551,user_list,phrasal verb,medium,less_common,no,high
+kick back,552,user_list,phrasal verb,medium,less_common,no,high
+plug into,553,user_list,prepositional verb,medium,less_common,no,high
+screw around,554,user_list,phrasal verb,medium,less_common,no,high
+slap on,555,user_list,phrasal verb,medium,less_common,no,high
+swear in,556,user_list,prepositional verb,medium,less_common,no,high
+depend upon,557,user_list,prepositional verb,medium,common,no,high
+lean toward,558,user_list,prepositional verb,medium,less_common,no,high
+sign off on,559,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+smash in,560,user_list,phrasal verb,medium,less_common,no,high
+smash up,561,user_list,phrasal verb,medium,less_common,no,high
+even out,562,user_list,phrasal verb,medium,less_common,no,high
+look round,563,user_list,prepositional verb,medium,common,no,high
+pour into,564,user_list,prepositional verb,medium,less_common,no,high
+power up,565,user_list,phrasal verb,medium,less_common,no,high
+sleep around,566,user_list,prepositional verb,medium,less_common,no,high
+cast off,567,user_list,phrasal verb,medium,less_common,no,high
+hand around,568,user_list,phrasal verb,medium,common,no,high
+take aback,569,user_list,phrasal verb,medium,common,no,high
+border on,570,user_list,prepositional verb,medium,less_common,no,high
+bring forth,571,user_list,phrasal verb,medium,common,no,high
+burn off,572,user_list,phrasal verb,medium,less_common,no,high
+cast out,573,user_list,phrasal verb,medium,less_common,no,high
+colour in,574,user_list,phrasal verb,medium,less_common,no,high
+creep into,575,user_list,prepositional verb,medium,less_common,no,high
+feed into,576,user_list,prepositional verb,medium,less_common,no,high
+play about,577,user_list,prepositional verb,medium,less_common,no,high
+sniff around,578,user_list,prepositional verb,medium,less_common,no,high
+straighten up,579,user_list,phrasal verb,medium,less_common,no,high
+cough up,580,user_list,phrasal verb,medium,less_common,no,high
+make over,581,user_list,phrasal verb,medium,common,no,high
+measure up,582,user_list,phrasal verb,medium,less_common,no,high
+pile on,583,user_list,phrasal verb,medium,less_common,no,high
+puff up,584,user_list,phrasal verb,medium,less_common,no,high
+sign out,585,user_list,phrasal verb,medium,less_common,no,high
+sober up,586,user_list,phrasal verb,hard,rare,no,high
+spill out,587,user_list,phrasal verb,medium,less_common,no,high
+jack in,588,user_list,phrasal verb,hard,rare,no,high
+muscle in,589,user_list,phrasal verb,medium,less_common,no,high
+paint over,590,user_list,phrasal verb,medium,less_common,no,high
+read into,591,user_list,prepositional verb,medium,common,no,high
+start back,592,user_list,phrasal verb,medium,common,no,high
+conjure up,593,user_list,phrasal verb,medium,less_common,no,high
+count out,594,user_list,phrasal verb,medium,less_common,no,high
+flip over,595,user_list,phrasal verb,medium,less_common,no,high
+function as,596,user_list,prepositional verb,medium,less_common,no,high
+hold against,597,user_list,prepositional verb,medium,common,no,high
+prey on,598,user_list,prepositional verb,medium,less_common,no,high
+print out,599,user_list,phrasal verb,medium,less_common,no,high
+spin out,600,user_list,phrasal verb,medium,less_common,no,high
+rush out,601,user_list,phrasal verb,medium,less_common,no,high
+see to it that,602,user_list,prepositional verb,hard,less_common,no,medium
+stumble on,603,user_list,phrasal verb,medium,less_common,no,high
+cave in,604,user_list,phrasal verb,medium,less_common,no,high
+chat up,605,user_list,phrasal verb,medium,less_common,no,high
+glory in,606,user_list,prepositional verb,medium,less_common,no,high
+hang about,607,user_list,prepositional verb,medium,less_common,no,high
+leak out,608,user_list,phrasal verb,medium,less_common,no,high
+pop on,609,user_list,phrasal verb,medium,less_common,no,high
+push around,610,user_list,phrasal verb,medium,less_common,no,high
+reckon with,611,user_list,prepositional verb,medium,less_common,no,high
+spring from,612,user_list,prepositional verb,medium,less_common,no,high
+stand aside,613,user_list,phrasal verb,medium,common,no,high
+tag on,614,user_list,prepositional verb,medium,less_common,no,high
+clean off,615,user_list,phrasal verb,medium,less_common,no,high
+improve on,616,user_list,prepositional verb,medium,less_common,no,high
+minor in,617,user_list,phrasal verb,medium,less_common,no,high
+read over,618,user_list,prepositional verb,medium,common,no,high
+serve up,619,user_list,phrasal verb,medium,less_common,no,high
+talk over,620,user_list,prepositional verb,medium,less_common,no,high
+buy up,621,user_list,phrasal verb,medium,less_common,no,high
+cock up,622,user_list,phrasal verb,medium,less_common,no,high
+cut across,623,user_list,phrasal verb,medium,less_common,no,high
+drop back,624,user_list,phrasal verb,medium,common,no,high
+link up,625,user_list,phrasal verb,medium,less_common,no,high
+mop up,626,user_list,phrasal verb,medium,less_common,no,high
+pertain to,627,user_list,prepositional verb,medium,less_common,no,high
+report back,628,user_list,phrasal verb,medium,common,no,high
+revel in,629,user_list,prepositional verb,medium,less_common,no,high
+seal off,630,user_list,phrasal verb,medium,less_common,no,high
+stock up,631,user_list,phrasal verb,medium,less_common,no,high
+change up,632,user_list,phrasal verb,medium,less_common,no,high
+choke up,633,user_list,phrasal verb,medium,less_common,no,high
+drift apart,634,user_list,phrasal verb,medium,less_common,no,high
+fish out,635,user_list,phrasal verb,medium,less_common,no,high
+hold with,636,user_list,prepositional verb,medium,common,no,high
+look around for,637,user_list,phrasal-prepositional verb,medium,very_common,no,high
+rush through,638,user_list,phrasal verb,medium,less_common,no,high
+saddle up,639,user_list,phrasal verb,medium,less_common,no,high
+stumble into,640,user_list,prepositional verb,medium,less_common,no,high
+consist of,641,user_list,prepositional verb,medium,less_common,no,high
+delve into,642,user_list,prepositional verb,medium,less_common,no,high
+lend itself to,643,user_list,prepositional verb,medium,less_common,no,medium
+talk down to,644,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+carry over,645,user_list,phrasal verb,medium,common,no,high
+front for,646,user_list,prepositional verb,medium,less_common,no,high
+mess about,647,user_list,phrasal verb,medium,less_common,no,high
+strike at,648,user_list,prepositional verb,medium,less_common,no,high
+strike down,649,user_list,phrasal verb,medium,less_common,no,high
+strike up,650,user_list,phrasal verb,medium,less_common,no,high
+burn away,651,user_list,phrasal verb,medium,less_common,no,high
+descend to,652,user_list,prepositional verb,medium,less_common,no,high
+drag out,653,user_list,phrasal verb,medium,less_common,no,high
+mouth off,654,user_list,phrasal verb,medium,less_common,no,high
+pass into,655,user_list,prepositional verb,medium,less_common,no,high
+pipe down,656,user_list,phrasal verb,medium,less_common,no,high
+play back,657,user_list,phrasal verb,medium,less_common,no,high
+put forth,658,user_list,phrasal verb,medium,common,no,high
+put through,659,user_list,prepositional verb,medium,common,no,high
+sell off,660,user_list,phrasal verb,medium,less_common,no,high
+strike back,661,user_list,phrasal verb,medium,less_common,no,high
+cop out,662,user_list,phrasal verb,hard,rare,no,high
+do up,663,user_list,phrasal verb,medium,less_common,no,high
+flip through,664,user_list,phrasal verb,medium,less_common,no,high
+get over yourself,665,user_list,phrasal verb,medium,common,no,medium
+put forward,666,user_list,phrasal verb,easy,very_common,no,high
+sew up,667,user_list,phrasal verb,medium,less_common,no,high
+capitalize on,668,user_list,phrasal verb,medium,less_common,no,high
+come apart,669,user_list,phrasal verb,medium,common,no,high
+dump on,670,user_list,phrasal verb,medium,less_common,no,high
+fight out,671,user_list,phrasal verb,medium,less_common,no,high
+figure on,672,user_list,prepositional verb,medium,less_common,no,high
+goof off,673,user_list,phrasal verb,hard,rare,no,high
+tear into,674,user_list,prepositional verb,medium,less_common,no,high
+bug out,675,user_list,phrasal verb,hard,rare,no,high
+bust up,676,user_list,phrasal verb,medium,less_common,no,high
+double up,677,user_list,phrasal verb,medium,less_common,no,high
+drift off,678,user_list,phrasal verb,medium,less_common,no,high
+even up,679,user_list,phrasal verb,medium,less_common,no,high
+guard against,680,user_list,prepositional verb,medium,less_common,no,high
+melt into,681,user_list,prepositional verb,medium,less_common,no,high
+model on,682,user_list,phrasal verb,medium,less_common,no,high
+move off,683,user_list,phrasal verb,medium,common,no,high
+pick at,684,user_list,prepositional verb,medium,common,no,high
+plunge in,685,user_list,prepositional verb,medium,less_common,no,high
+pull apart,686,user_list,phrasal verb,medium,less_common,no,high
+ram into,687,user_list,prepositional verb,medium,less_common,no,high
+rob of,688,user_list,prepositional verb,medium,less_common,no,high
+seal in,689,user_list,phrasal verb,medium,less_common,no,high
+brush up,690,user_list,phrasal verb,medium,less_common,no,high
+cross out,691,user_list,phrasal verb,medium,less_common,no,high
+hang back,692,user_list,phrasal verb,medium,less_common,no,high
+settle into,693,user_list,prepositional verb,medium,less_common,no,high
+ship off,694,user_list,phrasal verb,medium,less_common,no,high
+buy out,695,user_list,phrasal verb,medium,less_common,no,high
+dust off,696,user_list,phrasal verb,medium,less_common,no,high
+hinge on,697,user_list,prepositional verb,medium,less_common,no,high
+inflict on,698,user_list,prepositional verb,medium,less_common,no,high
+make off,699,user_list,phrasal verb,medium,common,no,high
+minister to,700,user_list,prepositional verb,medium,less_common,no,high
+not agree with,701,user_list,verb phrase,hard,less_common,no,low
+pay out,702,user_list,phrasal verb,medium,less_common,no,high
+cuddle up,703,user_list,phrasal verb,medium,less_common,no,high
+date from,704,user_list,prepositional verb,medium,less_common,no,high
+fend for yourself,705,user_list,prepositional verb,medium,less_common,no,medium
+fire away,706,user_list,phrasal verb,medium,less_common,no,high
+have against,707,user_list,prepositional verb,medium,less_common,no,high
+peel off,708,user_list,phrasal verb,medium,less_common,no,high
+push aside,709,user_list,phrasal verb,medium,less_common,no,high
+put at,710,user_list,prepositional verb,medium,common,no,high
+shake off,711,user_list,phrasal verb,medium,less_common,no,high
+chime in,712,user_list,phrasal verb,medium,less_common,no,high
+depart from,713,user_list,prepositional verb,medium,less_common,no,high
+hail from,714,user_list,prepositional verb,medium,less_common,no,high
+let into,715,user_list,prepositional verb,medium,common,no,high
+phase in,716,user_list,phrasal verb,medium,less_common,no,high
+bow down to,717,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+brick in,718,user_list,phrasal verb,medium,less_common,no,high
+crank up,719,user_list,phrasal verb,medium,less_common,no,high
+fence in,720,user_list,phrasal verb,medium,less_common,no,high
+lean towards,721,user_list,prepositional verb,medium,less_common,no,high
+melt down,722,user_list,phrasal verb,medium,less_common,no,high
+pass as,723,user_list,prepositional verb,medium,less_common,no,high
+poke at,724,user_list,prepositional verb,medium,less_common,no,high
+pull at,725,user_list,prepositional verb,medium,less_common,no,high
+quarrel with,726,user_list,prepositional verb,medium,less_common,no,high
+send down,727,user_list,phrasal verb,medium,less_common,no,high
+take apart,728,user_list,phrasal verb,medium,common,no,high
+change around,729,user_list,phrasal verb,medium,less_common,no,high
+crack down,730,user_list,phrasal verb,medium,less_common,no,high
+marry into,731,user_list,prepositional verb,medium,less_common,no,high
+pick off,732,user_list,phrasal verb,medium,common,no,high
+plunge into,733,user_list,prepositional verb,medium,less_common,no,high
+prop up,734,user_list,phrasal verb,medium,less_common,no,high
+rig up,735,user_list,phrasal verb,medium,less_common,no,high
+rub in,736,user_list,phrasal verb,medium,less_common,no,high
+tap out,737,user_list,phrasal verb,medium,less_common,no,high
+buckle down,738,user_list,phrasal verb,medium,less_common,no,high
+drag into,739,user_list,prepositional verb,medium,less_common,no,high
+goof around,740,user_list,phrasal verb,hard,rare,no,high
+grow apart,741,user_list,phrasal verb,medium,common,no,high
+narrow down,742,user_list,phrasal verb,medium,less_common,no,high
+patch up,743,user_list,phrasal verb,medium,less_common,no,high
+pattern on,744,user_list,phrasal verb,medium,less_common,no,high
+rabbit on,745,user_list,prepositional verb,medium,less_common,no,high
+revert to,746,user_list,prepositional verb,medium,less_common,no,high
+run away with you,747,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+sniff out,748,user_list,phrasal verb,medium,less_common,no,high
+spring for,749,user_list,prepositional verb,medium,less_common,no,high
+testify to,750,user_list,prepositional verb,medium,less_common,no,high
+level at,751,user_list,prepositional verb,medium,less_common,no,high
+rail in,752,user_list,prepositional verb,medium,less_common,no,high
+read up on,753,user_list,phrasal-prepositional verb,medium,common,no,medium
+sail through,754,user_list,prepositional verb,medium,less_common,no,high
+skip out,755,user_list,phrasal verb,medium,less_common,no,high
+creep up on,756,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+dip into,757,user_list,prepositional verb,medium,less_common,no,high
+do away with,758,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+drag down,759,user_list,phrasal verb,medium,less_common,no,high
+pencil in,760,user_list,phrasal verb,medium,less_common,no,high
+pipe up,761,user_list,phrasal verb,medium,less_common,no,high
+proceed from,762,user_list,prepositional verb,medium,less_common,no,high
+send away,763,user_list,phrasal verb,medium,less_common,no,high
+draw back,764,user_list,phrasal verb,medium,less_common,no,high
+eat away at,765,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+endow with,766,user_list,prepositional verb,medium,less_common,no,high
+invite in,767,user_list,prepositional verb,medium,less_common,no,high
+pace out,768,user_list,phrasal verb,medium,less_common,no,high
+pine for,769,user_list,prepositional verb,medium,less_common,no,high
+pump out,770,user_list,phrasal verb,medium,less_common,no,high
+punch out,771,user_list,phrasal verb,medium,less_common,no,high
+push off,772,user_list,phrasal verb,medium,less_common,no,high
+sign over,773,user_list,prepositional verb,medium,less_common,no,high
+spill over,774,user_list,phrasal verb,medium,less_common,no,high
+squeeze out,775,user_list,phrasal verb,medium,less_common,no,high
+teem with,776,user_list,prepositional verb,medium,less_common,no,high
+build up to,777,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+contract in,778,user_list,phrasal verb,medium,less_common,no,high
+ease into,779,user_list,prepositional verb,medium,less_common,no,high
+fight it out,780,user_list,phrasal verb,medium,less_common,no,high
+keep under,781,user_list,prepositional verb,medium,common,no,high
+nail down,782,user_list,phrasal verb,medium,less_common,no,high
+piss about,783,user_list,phrasal verb,hard,rare,no,high
+power down,784,user_list,phrasal verb,medium,less_common,no,high
+space out,785,user_list,phrasal verb,medium,less_common,no,high
+stumble across,786,user_list,phrasal verb,medium,less_common,no,high
+switch over,787,user_list,prepositional verb,medium,less_common,no,high
+bow out,788,user_list,phrasal verb,medium,less_common,no,high
+descend on,789,user_list,prepositional verb,medium,less_common,no,high
+flare up,790,user_list,phrasal verb,medium,less_common,no,high
+flunk out,791,user_list,phrasal verb,medium,less_common,no,high
+pair up,792,user_list,phrasal verb,medium,less_common,no,high
+rip at,793,user_list,prepositional verb,medium,less_common,no,high
+sit in on,794,user_list,phrasal-prepositional verb,medium,common,no,medium
+sound out,795,user_list,phrasal verb,medium,less_common,no,high
+stoop to,796,user_list,prepositional verb,medium,less_common,no,high
+talk into,797,user_list,prepositional verb,medium,less_common,no,high
+bump up,798,user_list,phrasal verb,medium,less_common,no,high
+cater for,799,user_list,prepositional verb,medium,less_common,no,high
+change back,800,user_list,phrasal verb,medium,less_common,no,high
+clear away,801,user_list,phrasal verb,medium,less_common,no,high
+clear off,802,user_list,phrasal verb,medium,less_common,no,high
+defer to,803,user_list,prepositional verb,medium,less_common,no,high
+dictate to,804,user_list,prepositional verb,medium,less_common,no,high
+dispense with,805,user_list,prepositional verb,medium,less_common,no,high
+fish out of,806,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+flash by,807,user_list,phrasal verb,medium,less_common,no,high
+gamble on,808,user_list,prepositional verb,medium,less_common,no,high
+inform on,809,user_list,prepositional verb,medium,less_common,no,high
+lay about you,810,user_list,prepositional verb,medium,less_common,no,high
+make up to,811,user_list,phrasal-prepositional verb,medium,common,no,medium
+mark up,812,user_list,phrasal verb,medium,less_common,no,high
+nose out,813,user_list,phrasal verb,medium,less_common,no,high
+set into,814,user_list,prepositional verb,medium,common,no,high
+shake down,815,user_list,phrasal verb,medium,less_common,no,high
+spring up,816,user_list,phrasal verb,medium,less_common,no,high
+stamp out,817,user_list,phrasal verb,medium,less_common,no,high
+descend into,818,user_list,prepositional verb,medium,less_common,no,high
+feel up to,819,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+hand back,820,user_list,phrasal verb,medium,common,no,high
+kiss away,821,user_list,phrasal verb,medium,less_common,no,high
+level up,822,user_list,phrasal verb,medium,less_common,no,high
+nod off,823,user_list,phrasal verb,medium,less_common,no,high
+opt out,824,user_list,phrasal verb,medium,less_common,no,high
+play down,825,user_list,phrasal verb,medium,less_common,no,high
+pump in,826,user_list,phrasal verb,medium,less_common,no,high
+punch up,827,user_list,phrasal verb,medium,less_common,no,high
+rely upon,828,user_list,prepositional verb,medium,less_common,no,high
+rid yourself of,829,user_list,prepositional verb,medium,less_common,no,medium
+run past,830,user_list,prepositional verb,medium,common,no,high
+shave off,831,user_list,phrasal verb,medium,less_common,no,high
+tamper with,832,user_list,prepositional verb,medium,less_common,no,high
+catch out,833,user_list,phrasal verb,medium,less_common,no,high
+chip away at,834,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+chop down,835,user_list,phrasal verb,medium,less_common,no,high
+crank out,836,user_list,phrasal verb,medium,less_common,no,high
+issue from,837,user_list,prepositional verb,medium,less_common,no,high
+launch into,838,user_list,prepositional verb,medium,less_common,no,high
+point up,839,user_list,phrasal verb,medium,less_common,no,high
+rest upon,840,user_list,prepositional verb,medium,less_common,no,high
+search out,841,user_list,phrasal verb,medium,less_common,no,high
+stick down,842,user_list,phrasal verb,medium,less_common,no,high
+carry off,843,user_list,phrasal verb,medium,common,no,high
+cool out,844,user_list,phrasal verb,medium,less_common,no,high
+double as,845,user_list,prepositional verb,medium,less_common,no,high
+dress down,846,user_list,phrasal verb,medium,less_common,no,high
+drill into,847,user_list,prepositional verb,medium,less_common,no,high
+opt in,848,user_list,prepositional verb,medium,less_common,no,high
+pant for,849,user_list,prepositional verb,medium,less_common,no,high
+poke around,850,user_list,prepositional verb,medium,less_common,no,high
+round off,851,user_list,phrasal verb,medium,less_common,no,high
+shake out,852,user_list,phrasal verb,medium,less_common,no,high
+sort through,853,user_list,phrasal verb,medium,less_common,no,high
+chip off,854,user_list,phrasal verb,medium,less_common,no,high
+churn out,855,user_list,phrasal verb,medium,less_common,no,high
+cut away,856,user_list,phrasal verb,medium,less_common,no,high
+die off,857,user_list,phrasal verb,medium,less_common,no,high
+ease out,858,user_list,phrasal verb,medium,less_common,no,high
+flash on,859,user_list,phrasal verb,medium,less_common,no,high
+keel over,860,user_list,phrasal verb,medium,less_common,no,high
+lap up,861,user_list,phrasal verb,medium,less_common,no,high
+luck out,862,user_list,phrasal verb,medium,less_common,no,high
+mind out,863,user_list,phrasal verb,medium,less_common,no,high
+mistake for,864,user_list,prepositional verb,medium,less_common,no,high
+park up,865,user_list,phrasal verb,medium,less_common,no,high
+ravel out,866,user_list,phrasal verb,medium,less_common,no,high
+scare away,867,user_list,phrasal verb,medium,less_common,no,high
+sort itself out,868,user_list,phrasal verb,medium,less_common,no,medium
+buck up,869,user_list,phrasal verb,medium,less_common,no,high
+call away,870,user_list,phrasal verb,medium,common,no,high
+carry through,871,user_list,phrasal verb,medium,common,no,high
+crop up,872,user_list,phrasal verb,medium,less_common,no,high
+devote yourself to,873,user_list,prepositional verb,medium,less_common,no,medium
+fire off,874,user_list,phrasal verb,medium,less_common,no,high
+freeze over,875,user_list,phrasal verb,medium,less_common,no,high
+give over,876,user_list,phrasal verb,medium,common,no,high
+hold out on,877,user_list,phrasal-prepositional verb,medium,common,no,medium
+mark out,878,user_list,phrasal verb,medium,less_common,no,high
+ruck up,879,user_list,phrasal verb,medium,less_common,no,high
+scare off,880,user_list,phrasal verb,medium,less_common,no,high
+stare out,881,user_list,phrasal verb,medium,less_common,no,high
+buzz around,882,user_list,phrasal verb,hard,rare,no,high
+chicken out,883,user_list,phrasal verb,medium,less_common,no,high
+crowd out,884,user_list,phrasal verb,medium,less_common,no,high
+iron out,885,user_list,phrasal verb,medium,less_common,no,high
+relieve of,886,user_list,prepositional verb,medium,less_common,no,high
+rip into,887,user_list,prepositional verb,medium,less_common,no,high
+spin off,888,user_list,phrasal verb,medium,less_common,no,high
+stake out,889,user_list,phrasal verb,medium,less_common,no,high
+summon up,890,user_list,phrasal verb,medium,less_common,no,high
+cancel out,891,user_list,phrasal verb,medium,less_common,no,high
+copy in,892,user_list,phrasal verb,medium,less_common,no,high
+do down,893,user_list,phrasal verb,medium,less_common,no,high
+emanate from,894,user_list,prepositional verb,medium,less_common,no,high
+fit out,895,user_list,phrasal verb,medium,less_common,no,high
+frown on,896,user_list,prepositional verb,medium,less_common,no,high
+gloss over,897,user_list,phrasal verb,medium,less_common,no,high
+hark at,898,user_list,prepositional verb,medium,less_common,no,high
+hold over,899,user_list,prepositional verb,medium,common,no,high
+rally around,900,user_list,phrasal verb,medium,less_common,no,high
+shrink from,901,user_list,prepositional verb,medium,less_common,no,high
+split on,902,user_list,phrasal verb,medium,less_common,no,high
+stitch up,903,user_list,phrasal verb,medium,less_common,no,high
+sweat it out,904,user_list,phrasal verb,medium,less_common,no,high
+burst on,905,user_list,phrasal verb,medium,less_common,no,high
+buy off,906,user_list,phrasal verb,medium,less_common,no,high
+check off,907,user_list,phrasal verb,medium,common,no,high
+clue in,908,user_list,phrasal verb,medium,less_common,no,high
+drum up,909,user_list,phrasal verb,medium,less_common,no,high
+grasp at,910,user_list,prepositional verb,medium,less_common,no,high
+keep down,911,user_list,phrasal verb,medium,common,no,high
+knock back,912,user_list,phrasal verb,medium,less_common,no,high
+latch onto,913,user_list,prepositional verb,medium,less_common,no,high
+print off,914,user_list,phrasal verb,medium,less_common,no,high
+shop around,915,user_list,phrasal verb,medium,less_common,no,high
+sod off,916,user_list,phrasal verb,hard,rare,no,high
+tail off,917,user_list,phrasal verb,medium,less_common,no,high
+tangle with,918,user_list,prepositional verb,medium,less_common,no,high
+cover over,919,user_list,phrasal verb,medium,less_common,no,high
+grind down,920,user_list,phrasal verb,medium,less_common,no,high
+hollow out,921,user_list,phrasal verb,medium,less_common,no,high
+measure out,922,user_list,phrasal verb,medium,less_common,no,high
+moon over,923,user_list,phrasal verb,medium,less_common,no,high
+sit yourself down,924,user_list,phrasal verb,medium,common,no,medium
+skip out on,925,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+slot in,926,user_list,phrasal verb,medium,less_common,no,high
+spit up,927,user_list,phrasal verb,hard,rare,no,high
+brush off,928,user_list,phrasal verb,medium,less_common,no,high
+cast aside,929,user_list,phrasal verb,medium,less_common,no,high
+doze off,930,user_list,phrasal verb,medium,less_common,no,high
+dry off,931,user_list,phrasal verb,medium,less_common,no,high
+fiddle with,932,user_list,prepositional verb,medium,less_common,no,high
+filter out,933,user_list,phrasal verb,medium,less_common,no,high
+flick through,934,user_list,phrasal verb,medium,less_common,no,high
+harp on,935,user_list,phrasal verb,medium,less_common,no,high
+improve upon,936,user_list,prepositional verb,medium,less_common,no,high
+insist upon,937,user_list,prepositional verb,medium,common,no,high
+match against,938,user_list,prepositional verb,medium,less_common,no,high
+mount up,939,user_list,phrasal verb,medium,less_common,no,high
+phase out,940,user_list,phrasal verb,medium,less_common,no,high
+plod on,941,user_list,phrasal verb,medium,less_common,no,high
+resign yourself to,942,user_list,prepositional verb,medium,less_common,no,medium
+saddle with,943,user_list,prepositional verb,medium,less_common,no,high
+shape up,944,user_list,phrasal verb,medium,less_common,no,high
+single out,945,user_list,phrasal verb,medium,less_common,no,high
+spiral down,946,user_list,phrasal verb,medium,less_common,no,high
+dine on,947,user_list,phrasal verb,medium,less_common,no,high
+draw upon,948,user_list,prepositional verb,medium,less_common,no,high
+ease off,949,user_list,phrasal verb,medium,less_common,no,high
+gear up,950,user_list,phrasal verb,medium,less_common,no,high
+open out,951,user_list,phrasal verb,medium,less_common,no,high
+ramp up,952,user_list,phrasal verb,medium,less_common,no,high
+scan in,953,user_list,prepositional verb,medium,less_common,no,high
+seize up,954,user_list,phrasal verb,medium,less_common,no,high
+shout down,955,user_list,phrasal verb,medium,less_common,no,high
+slack off,956,user_list,phrasal verb,medium,less_common,no,high
+sound off,957,user_list,phrasal verb,medium,less_common,no,high
+square with,958,user_list,prepositional verb,medium,less_common,no,high
+brush up on,959,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+buzz off,960,user_list,phrasal verb,hard,rare,no,high
+chuck out,961,user_list,phrasal verb,medium,less_common,no,high
+come off it,962,user_list,phrasal verb,medium,common,no,high
+coop up,963,user_list,phrasal verb,medium,less_common,no,high
+crash out,964,user_list,phrasal verb,medium,less_common,no,high
+dial in,965,user_list,phrasal verb,medium,less_common,no,high
+feed back,966,user_list,phrasal verb,medium,less_common,no,high
+gobble up,967,user_list,phrasal verb,hard,rare,no,high
+hike up,968,user_list,phrasal verb,medium,less_common,no,high
+keep back,969,user_list,phrasal verb,medium,common,no,high
+lock onto,970,user_list,prepositional verb,medium,less_common,no,high
+pig out,971,user_list,phrasal verb,hard,rare,no,high
+reel in,972,user_list,phrasal verb,medium,less_common,no,high
+set back,973,user_list,phrasal verb,medium,common,no,high
+set forth,974,user_list,phrasal verb,medium,common,no,high
+snuff out,975,user_list,phrasal verb,medium,less_common,no,high
+style on,976,user_list,phrasal verb,medium,less_common,no,high
+talk up,977,user_list,phrasal verb,medium,less_common,no,high
+clock out,978,user_list,phrasal verb,medium,less_common,no,high
+farm out,979,user_list,phrasal verb,medium,less_common,no,high
+fend off,980,user_list,phrasal verb,medium,less_common,no,high
+fuss over,981,user_list,phrasal verb,medium,less_common,no,high
+invest with,982,user_list,prepositional verb,medium,less_common,no,high
+map on,983,user_list,phrasal verb,medium,less_common,no,high
+not care for,984,user_list,verb phrase,hard,less_common,no,low
+nut out,985,user_list,phrasal verb,medium,less_common,no,high
+pack into,986,user_list,prepositional verb,medium,less_common,no,high
+partake of,987,user_list,prepositional verb,medium,less_common,no,high
+repair to,988,user_list,prepositional verb,medium,less_common,no,high
+see off,989,user_list,phrasal verb,medium,less_common,no,high
+shove up,990,user_list,phrasal verb,medium,less_common,no,high
+shut in,991,user_list,phrasal verb,medium,less_common,no,high
+sketch in,992,user_list,phrasal verb,medium,less_common,no,high
+smoke out,993,user_list,phrasal verb,medium,less_common,no,high
+clutch at,994,user_list,prepositional verb,medium,less_common,no,high
+descend upon,995,user_list,prepositional verb,medium,less_common,no,high
+ease up on,996,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+fess up,997,user_list,phrasal verb,hard,rare,no,high
+fiddle about,998,user_list,phrasal verb,medium,less_common,no,high
+gang up,999,user_list,phrasal verb,medium,less_common,no,high
+gear to,1000,user_list,prepositional verb,medium,less_common,no,high
+gross out,1001,user_list,phrasal verb,medium,less_common,no,high
+keep off,1002,user_list,phrasal verb,medium,common,no,high
+level out,1003,user_list,phrasal verb,medium,less_common,no,high
+muddle through,1004,user_list,phrasal verb,medium,less_common,no,high
+pay into,1005,user_list,prepositional verb,medium,less_common,no,high
+plug away,1006,user_list,phrasal verb,medium,less_common,no,high
+rein in,1007,user_list,phrasal verb,medium,less_common,no,high
+serve out,1008,user_list,phrasal verb,medium,less_common,no,high
+set against,1009,user_list,prepositional verb,medium,common,no,high
+shove off,1010,user_list,phrasal verb,medium,less_common,no,high
+sweep out,1011,user_list,phrasal verb,medium,less_common,no,high
+carve up,1012,user_list,phrasal verb,medium,less_common,no,high
+cheer on,1013,user_list,phrasal verb,medium,less_common,no,high
+die away,1014,user_list,phrasal verb,medium,less_common,no,high
+flag down,1015,user_list,phrasal verb,medium,less_common,no,high
+flag up,1016,user_list,phrasal verb,medium,less_common,no,high
+flash back,1017,user_list,phrasal verb,medium,less_common,no,high
+knock around,1018,user_list,phrasal verb,medium,less_common,no,high
+measure against,1019,user_list,prepositional verb,medium,less_common,no,high
+pass off,1020,user_list,phrasal verb,medium,less_common,no,high
+perk up,1021,user_list,phrasal verb,medium,less_common,no,high
+rough out,1022,user_list,phrasal verb,medium,less_common,no,high
+scratch out,1023,user_list,phrasal verb,medium,less_common,no,high
+shell out,1024,user_list,phrasal verb,medium,less_common,no,high
+shore up,1025,user_list,phrasal verb,medium,less_common,no,high
+show around,1026,user_list,phrasal verb,easy,very_common,no,high
+simmer down,1027,user_list,phrasal verb,medium,less_common,no,high
+soften up,1028,user_list,phrasal verb,medium,less_common,no,high
+surrender yourself to,1029,user_list,prepositional verb,medium,less_common,no,medium
+bundle up,1030,user_list,phrasal verb,medium,less_common,no,high
+buzz about,1031,user_list,phrasal verb,hard,rare,no,high
+call forth,1032,user_list,phrasal verb,medium,common,no,high
+creep out,1033,user_list,phrasal verb,medium,less_common,no,high
+dash off,1034,user_list,phrasal verb,medium,less_common,no,high
+derive from,1035,user_list,prepositional verb,medium,less_common,no,high
+drop away,1036,user_list,phrasal verb,medium,common,no,high
+glass over,1037,user_list,phrasal verb,medium,less_common,no,high
+make off with,1038,user_list,phrasal-prepositional verb,medium,common,no,medium
+poop out,1039,user_list,phrasal verb,hard,rare,no,high
+pounce on,1040,user_list,prepositional verb,medium,less_common,no,high
+pump into,1041,user_list,prepositional verb,medium,less_common,no,high
+rat out,1042,user_list,phrasal verb,medium,less_common,no,high
+root out,1043,user_list,phrasal verb,medium,less_common,no,high
+sell up,1044,user_list,phrasal verb,medium,less_common,no,high
+slice off,1045,user_list,phrasal verb,medium,less_common,no,high
+stop out,1046,user_list,phrasal verb,medium,less_common,no,high
+swarm with,1047,user_list,prepositional verb,medium,less_common,no,high
+talk around,1048,user_list,prepositional verb,medium,less_common,no,high
+tell off,1049,user_list,phrasal verb,medium,less_common,no,high
+chalk up,1050,user_list,phrasal verb,medium,less_common,no,high
+consist in,1051,user_list,prepositional verb,medium,less_common,no,high
+cotton to,1052,user_list,prepositional verb,medium,less_common,no,high
+crowd around,1053,user_list,phrasal verb,medium,less_common,no,high
+dish out,1054,user_list,phrasal verb,medium,less_common,no,high
+expand on,1055,user_list,phrasal verb,medium,less_common,no,high
+explain away,1056,user_list,phrasal verb,medium,less_common,no,high
+firm up,1057,user_list,phrasal verb,medium,less_common,no,high
+follow around,1058,user_list,phrasal verb,medium,less_common,no,high
+force upon,1059,user_list,prepositional verb,medium,less_common,no,high
+hear out,1060,user_list,phrasal verb,medium,less_common,no,high
+identify yourself with,1061,user_list,prepositional verb,medium,less_common,no,medium
+order around,1062,user_list,prepositional verb,medium,less_common,no,high
+paint out,1063,user_list,phrasal verb,medium,less_common,no,high
+rope into,1064,user_list,prepositional verb,medium,less_common,no,high
+rustle up,1065,user_list,phrasal verb,medium,less_common,no,high
+sign away,1066,user_list,phrasal verb,medium,less_common,no,high
+smell out,1067,user_list,phrasal verb,medium,less_common,no,high
+taper off,1068,user_list,phrasal verb,medium,less_common,no,high
+bulk up,1069,user_list,phrasal verb,medium,less_common,no,high
+bum around,1070,user_list,phrasal verb,hard,rare,no,high
+cash up,1071,user_list,phrasal verb,medium,less_common,no,high
+catch at,1072,user_list,prepositional verb,medium,less_common,no,high
+cross off,1073,user_list,phrasal verb,medium,less_common,no,high
+crunch up,1074,user_list,phrasal verb,medium,less_common,no,high
+drill down,1075,user_list,phrasal verb,medium,less_common,no,high
+hammer out,1076,user_list,phrasal verb,medium,less_common,no,high
+hurry on,1077,user_list,phrasal verb,medium,less_common,no,high
+lapse into,1078,user_list,prepositional verb,medium,less_common,no,high
+lop off,1079,user_list,phrasal verb,medium,less_common,no,high
+plant out,1080,user_list,phrasal verb,medium,less_common,no,high
+power off,1081,user_list,phrasal verb,medium,less_common,no,high
+rake in,1082,user_list,phrasal verb,medium,less_common,no,high
+rub out,1083,user_list,phrasal verb,medium,less_common,no,high
+set apart,1084,user_list,phrasal verb,medium,common,no,high
+smooth out,1085,user_list,phrasal verb,medium,less_common,no,high
+stop over,1086,user_list,phrasal verb,medium,less_common,no,high
+stop up,1087,user_list,phrasal verb,medium,less_common,no,high
+string along,1088,user_list,phrasal verb,medium,less_common,no,high
+bowl over,1089,user_list,phrasal verb,medium,less_common,no,high
+branch off,1090,user_list,phrasal verb,medium,less_common,no,high
+breeze through,1091,user_list,phrasal verb,medium,less_common,no,high
+bring before,1092,user_list,prepositional verb,medium,common,no,high
+bum about,1093,user_list,phrasal verb,hard,rare,no,high
+carry forward,1094,user_list,phrasal verb,medium,common,no,high
+cheat of,1095,user_list,prepositional verb,medium,less_common,no,high
+cop off,1096,user_list,phrasal verb,hard,rare,no,high
+drag out of,1097,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+edge out,1098,user_list,phrasal verb,medium,less_common,no,high
+embark upon,1099,user_list,prepositional verb,medium,less_common,no,high
+fill up on,1100,user_list,phrasal-prepositional verb,medium,common,no,medium
+flesh out,1101,user_list,phrasal verb,medium,less_common,no,high
+flood out,1102,user_list,phrasal verb,medium,less_common,no,high
+give yourself up to,1103,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+grind out,1104,user_list,phrasal verb,medium,less_common,no,high
+hush up,1105,user_list,phrasal verb,hard,rare,no,high
+mark off,1106,user_list,phrasal verb,medium,less_common,no,high
+model after,1107,user_list,prepositional verb,medium,less_common,no,high
+pit against,1108,user_list,prepositional verb,medium,less_common,no,high
+push over,1109,user_list,phrasal verb,medium,less_common,no,high
+put about,1110,user_list,prepositional verb,medium,common,no,high
+put before,1111,user_list,prepositional verb,medium,common,no,high
+put over,1112,user_list,prepositional verb,medium,common,no,high
+rail off,1113,user_list,phrasal verb,medium,less_common,no,high
+scale down,1114,user_list,phrasal verb,medium,less_common,no,high
+send out for,1115,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+snap up,1116,user_list,phrasal verb,medium,less_common,no,high
+square up,1117,user_list,phrasal verb,medium,less_common,no,high
+boot out,1118,user_list,phrasal verb,medium,less_common,no,high
+burn itself out,1119,user_list,phrasal verb,medium,less_common,no,medium
+check over,1120,user_list,prepositional verb,medium,common,no,high
+cobble together,1121,user_list,phrasal verb,medium,less_common,no,high
+fizzle out,1122,user_list,phrasal verb,medium,less_common,no,high
+fold into,1123,user_list,prepositional verb,medium,less_common,no,high
+insist on doing,1124,user_list,prepositional verb,medium,common,no,high
+louse up,1125,user_list,phrasal verb,hard,rare,no,high
+mix into,1126,user_list,prepositional verb,medium,less_common,no,high
+mow down,1127,user_list,phrasal verb,medium,less_common,no,high
+muck around,1128,user_list,phrasal verb,hard,rare,no,high
+nip off,1129,user_list,phrasal verb,medium,less_common,no,high
+not hear of,1130,user_list,verb phrase,hard,less_common,no,low
+pack away,1131,user_list,phrasal verb,medium,less_common,no,high
+pick through,1132,user_list,phrasal verb,medium,common,no,high
+pine away,1133,user_list,phrasal verb,medium,less_common,no,high
+rough up,1134,user_list,phrasal verb,medium,less_common,no,high
+sleep off,1135,user_list,phrasal verb,medium,less_common,no,high
+sniff at,1136,user_list,prepositional verb,medium,less_common,no,high
+stow away,1137,user_list,phrasal verb,medium,less_common,no,high
+take against,1138,user_list,prepositional verb,medium,common,no,high
+tank up,1139,user_list,phrasal verb,medium,less_common,no,high
+bring around,1140,user_list,phrasal verb,medium,common,no,high
+bring forward,1141,user_list,phrasal verb,medium,common,no,high
+brush down,1142,user_list,phrasal verb,medium,less_common,no,high
+conk out,1143,user_list,phrasal verb,medium,less_common,no,high
+cross through,1144,user_list,phrasal verb,medium,less_common,no,high
+drag up,1145,user_list,phrasal verb,medium,less_common,no,high
+fork out,1146,user_list,phrasal verb,medium,less_common,no,high
+freeze out,1147,user_list,phrasal verb,medium,less_common,no,high
+hit upon,1148,user_list,prepositional verb,medium,less_common,no,high
+juice up,1149,user_list,phrasal verb,medium,less_common,no,high
+knuckle down,1150,user_list,phrasal verb,medium,less_common,no,high
+level off,1151,user_list,phrasal verb,medium,less_common,no,high
+look on as,1152,user_list,phrasal-prepositional verb,medium,common,no,medium
+pander to,1153,user_list,prepositional verb,medium,less_common,no,high
+pound out,1154,user_list,phrasal verb,medium,less_common,no,high
+scale up,1155,user_list,phrasal verb,medium,less_common,no,high
+smack of,1156,user_list,prepositional verb,medium,less_common,no,high
+smooth over,1157,user_list,phrasal verb,medium,less_common,no,high
+square away,1158,user_list,phrasal verb,medium,less_common,no,high
+tee off,1159,user_list,phrasal verb,hard,rare,no,high
+butter up,1160,user_list,phrasal verb,medium,less_common,no,high
+choke out,1161,user_list,phrasal verb,medium,less_common,no,high
+clam up,1162,user_list,phrasal verb,medium,less_common,no,high
+cling on to,1163,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+cream off,1164,user_list,phrasal verb,medium,less_common,no,high
+devote to,1165,user_list,prepositional verb,medium,less_common,no,high
+dredge up,1166,user_list,phrasal verb,medium,less_common,no,high
+force down,1167,user_list,phrasal verb,medium,less_common,no,high
+horse around,1168,user_list,phrasal verb,medium,less_common,no,high
+invite back,1169,user_list,phrasal verb,medium,less_common,no,high
+jog on,1170,user_list,phrasal verb,medium,less_common,no,high
+log out,1171,user_list,phrasal verb,medium,less_common,no,high
+marry off,1172,user_list,phrasal verb,medium,less_common,no,high
+marry up,1173,user_list,phrasal verb,medium,less_common,no,high
+mellow out,1174,user_list,phrasal verb,hard,rare,no,high
+note down,1175,user_list,phrasal verb,medium,less_common,no,high
+pair off,1176,user_list,phrasal verb,medium,less_common,no,high
+play upon,1177,user_list,prepositional verb,medium,less_common,no,high
+puff out,1178,user_list,phrasal verb,medium,less_common,no,high
+pull ahead,1179,user_list,phrasal verb,medium,less_common,no,high
+reside with,1180,user_list,prepositional verb,medium,less_common,no,high
+seize on,1181,user_list,phrasal verb,medium,less_common,no,high
+sit about,1182,user_list,prepositional verb,medium,common,no,high
+slim down,1183,user_list,phrasal verb,medium,less_common,no,high
+spark up,1184,user_list,phrasal verb,medium,less_common,no,high
+splash out,1185,user_list,phrasal verb,medium,less_common,no,high
+split off,1186,user_list,phrasal verb,medium,less_common,no,high
+swear off,1187,user_list,phrasal verb,medium,less_common,no,high
+bunch up,1188,user_list,phrasal verb,medium,less_common,no,high
+chew out,1189,user_list,phrasal verb,medium,less_common,no,high
+clamp down,1190,user_list,phrasal verb,medium,less_common,no,high
+commune with,1191,user_list,prepositional verb,medium,less_common,no,high
+cover yourself up,1192,user_list,phrasal verb,medium,less_common,no,medium
+do out of,1193,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+enter upon,1194,user_list,prepositional verb,medium,less_common,no,high
+fit up,1195,user_list,phrasal verb,medium,less_common,no,high
+flatten out,1196,user_list,phrasal verb,medium,less_common,no,high
+forge ahead,1197,user_list,phrasal verb,medium,less_common,no,high
+give yourself over to,1198,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+hark back,1199,user_list,phrasal verb,medium,less_common,no,high
+hire out,1200,user_list,phrasal verb,medium,less_common,no,high
+jot down,1201,user_list,phrasal verb,medium,less_common,no,high
+open into,1202,user_list,prepositional verb,medium,less_common,no,high
+pay down,1203,user_list,phrasal verb,medium,less_common,no,high
+prey upon,1204,user_list,prepositional verb,medium,less_common,no,high
+read back,1205,user_list,phrasal verb,medium,common,no,high
+rinse out,1206,user_list,phrasal verb,medium,less_common,no,high
+rub down,1207,user_list,phrasal verb,medium,less_common,no,high
+scrub up,1208,user_list,phrasal verb,medium,less_common,no,high
+send forth,1209,user_list,phrasal verb,medium,less_common,no,high
+spruce up,1210,user_list,phrasal verb,medium,less_common,no,high
+square off,1211,user_list,phrasal verb,medium,less_common,no,high
+steam up,1212,user_list,phrasal verb,medium,less_common,no,high
+string up,1213,user_list,phrasal verb,medium,less_common,no,high
+bring out in,1214,user_list,phrasal verb,medium,common,no,high
+bump off,1215,user_list,phrasal verb,medium,less_common,no,high
+chase up,1216,user_list,phrasal verb,medium,less_common,no,high
+cheat out of,1217,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+clamp on,1218,user_list,phrasal verb,medium,less_common,no,high
+club together,1219,user_list,phrasal verb,medium,less_common,no,high
+decide upon,1220,user_list,prepositional verb,medium,less_common,no,high
+dial up,1221,user_list,phrasal verb,medium,less_common,no,high
+dig yourself in,1222,user_list,phrasal verb,medium,less_common,no,medium
+dwell upon,1223,user_list,prepositional verb,medium,less_common,no,high
+edit out,1224,user_list,phrasal verb,medium,less_common,no,high
+give over to,1225,user_list,phrasal-prepositional verb,medium,common,no,medium
+laugh off,1226,user_list,phrasal verb,medium,less_common,no,high
+lay aside,1227,user_list,phrasal verb,medium,less_common,no,high
+lust after,1228,user_list,prepositional verb,medium,less_common,no,high
+nail up,1229,user_list,phrasal verb,medium,less_common,no,high
+pack out,1230,user_list,phrasal verb,medium,less_common,no,high
+paper over,1231,user_list,phrasal verb,medium,less_common,no,high
+play itself out,1232,user_list,phrasal verb,medium,less_common,no,medium
+play yourself out,1233,user_list,phrasal verb,medium,less_common,no,medium
+plough through,1234,user_list,phrasal verb,medium,less_common,no,high
+scrape through,1235,user_list,phrasal verb,medium,less_common,no,high
+scrape up,1236,user_list,phrasal verb,medium,less_common,no,high
+seize upon,1237,user_list,prepositional verb,medium,less_common,no,high
+stave off,1238,user_list,phrasal verb,medium,less_common,no,high
+store up,1239,user_list,phrasal verb,medium,less_common,no,high
+sweat off,1240,user_list,phrasal verb,medium,less_common,no,high
+tap for,1241,user_list,prepositional verb,medium,less_common,no,high
+tease out,1242,user_list,phrasal verb,medium,less_common,no,high
+bottle out,1243,user_list,phrasal verb,medium,less_common,no,high
+bring round,1244,user_list,phrasal verb,medium,common,no,high
+bury yourself in,1245,user_list,phrasal verb,medium,less_common,no,medium
+clean from,1246,user_list,prepositional verb,medium,less_common,no,high
+clip off,1247,user_list,phrasal verb,medium,less_common,no,high
+fall about,1248,user_list,phrasal verb,medium,common,no,high
+fart around,1249,user_list,phrasal verb,hard,rare,no,high
+gnaw at,1250,user_list,prepositional verb,medium,less_common,no,high
+hang together,1251,user_list,phrasal verb,medium,less_common,no,high
+major on,1252,user_list,prepositional verb,medium,less_common,no,high
+model yourself on,1253,user_list,phrasal verb,medium,less_common,no,medium
+pad out,1254,user_list,phrasal verb,medium,less_common,no,high
+pal around,1255,user_list,phrasal verb,hard,rare,no,high
+pepper with,1256,user_list,prepositional verb,medium,less_common,no,high
+pitch up,1257,user_list,phrasal verb,medium,less_common,no,high
+pony up,1258,user_list,phrasal verb,hard,rare,no,high
+project onto,1259,user_list,prepositional verb,medium,less_common,no,high
+push ahead,1260,user_list,phrasal verb,medium,less_common,no,high
+rattle around,1261,user_list,phrasal verb,medium,less_common,no,high
+separate out,1262,user_list,phrasal verb,medium,less_common,no,high
+shrug off,1263,user_list,phrasal verb,medium,less_common,no,high
+shut yourself off,1264,user_list,phrasal verb,medium,less_common,no,medium
+sit down and do,1265,user_list,phrasal verb,hard,less_common,no,medium
+size up,1266,user_list,phrasal verb,medium,less_common,no,high
+skin up,1267,user_list,phrasal verb,medium,less_common,no,high
+splash down,1268,user_list,phrasal verb,medium,less_common,no,high
+starve of,1269,user_list,prepositional verb,medium,less_common,no,high
+sweep along,1270,user_list,phrasal verb,medium,less_common,no,high
+brick up,1271,user_list,phrasal verb,medium,less_common,no,high
+bung up,1272,user_list,phrasal verb,medium,less_common,no,high
+claw back,1273,user_list,phrasal verb,medium,less_common,no,high
+connect up,1274,user_list,phrasal verb,medium,less_common,no,high
+contract out,1275,user_list,phrasal verb,medium,less_common,no,high
+detract from,1276,user_list,prepositional verb,medium,less_common,no,high
+dial down,1277,user_list,phrasal verb,medium,less_common,no,high
+dole out,1278,user_list,phrasal verb,medium,less_common,no,high
+eke out,1279,user_list,phrasal verb,medium,less_common,no,high
+expand upon,1280,user_list,prepositional verb,medium,less_common,no,high
+feed through,1281,user_list,prepositional verb,medium,less_common,no,high
+fight down,1282,user_list,phrasal verb,medium,less_common,no,high
+flake out,1283,user_list,phrasal verb,medium,less_common,no,high
+force back,1284,user_list,phrasal verb,medium,less_common,no,high
+invite over,1285,user_list,prepositional verb,medium,less_common,no,high
+kick against,1286,user_list,prepositional verb,medium,less_common,no,high
+launch yourself into,1287,user_list,prepositional verb,medium,less_common,no,medium
+log off,1288,user_list,phrasal verb,medium,less_common,no,high
+mill around,1289,user_list,phrasal verb,medium,less_common,no,high
+peck at,1290,user_list,prepositional verb,medium,less_common,no,high
+peel out,1291,user_list,phrasal verb,medium,less_common,no,high
+plumb in,1292,user_list,phrasal verb,medium,less_common,no,high
+rattle off,1293,user_list,phrasal verb,medium,less_common,no,high
+rattle on,1294,user_list,phrasal verb,medium,less_common,no,high
+rig out,1295,user_list,phrasal verb,medium,less_common,no,high
+sex up,1296,user_list,phrasal verb,medium,less_common,no,high
+slap down,1297,user_list,phrasal verb,medium,less_common,no,high
+string out,1298,user_list,phrasal verb,medium,less_common,no,high
+sweep aside,1299,user_list,phrasal verb,medium,less_common,no,high
+flinch from,1300,user_list,prepositional verb,medium,less_common,no,high
+gamble away,1301,user_list,phrasal verb,medium,less_common,no,high
+hedge in,1302,user_list,phrasal verb,medium,less_common,no,high
+jazz up,1303,user_list,phrasal verb,hard,rare,no,high
+kit out,1304,user_list,phrasal verb,hard,rare,no,high
+knock around with,1305,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+labour under,1306,user_list,phrasal verb,medium,less_common,no,high
+level against,1307,user_list,prepositional verb,medium,less_common,no,high
+lull into,1308,user_list,prepositional verb,medium,less_common,no,high
+mope around,1309,user_list,phrasal verb,hard,rare,no,high
+muck about,1310,user_list,phrasal verb,hard,rare,no,high
+muck around with,1311,user_list,phrasal-prepositional verb,hard,rare,no,medium
+page through,1312,user_list,phrasal verb,medium,less_common,no,high
+parcel out,1313,user_list,phrasal verb,medium,less_common,no,high
+piss down,1314,user_list,phrasal verb,hard,rare,no,high
+plough up,1315,user_list,phrasal verb,medium,less_common,no,high
+pore over,1316,user_list,phrasal verb,medium,less_common,no,high
+puzzle over,1317,user_list,phrasal verb,medium,less_common,no,high
+range over,1318,user_list,prepositional verb,medium,less_common,no,high
+ratchet up,1319,user_list,phrasal verb,medium,less_common,no,high
+romp through,1320,user_list,phrasal verb,medium,less_common,no,high
+scrape by,1321,user_list,phrasal verb,medium,less_common,no,high
+scrape out,1322,user_list,phrasal verb,medium,less_common,no,high
+shack up with,1323,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+slop out,1324,user_list,phrasal verb,hard,rare,no,high
+snip off,1325,user_list,phrasal verb,medium,less_common,no,high
+splash across,1326,user_list,phrasal verb,medium,less_common,no,high
+squeeze out of,1327,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+squeeze up,1328,user_list,phrasal verb,medium,less_common,no,high
+bone up on,1329,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+carry back,1330,user_list,phrasal verb,medium,common,no,high
+chop at,1331,user_list,prepositional verb,medium,less_common,no,high
+crouch over,1332,user_list,phrasal verb,medium,less_common,no,high
+discourse on,1333,user_list,prepositional verb,medium,less_common,no,high
+double up as,1334,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+fence off,1335,user_list,phrasal verb,medium,less_common,no,high
+flag off,1336,user_list,phrasal verb,medium,less_common,no,high
+flash around,1337,user_list,phrasal verb,medium,less_common,no,high
+flash past,1338,user_list,phrasal verb,medium,less_common,no,high
+fritter away,1339,user_list,phrasal verb,medium,less_common,no,high
+grow away from,1340,user_list,phrasal-prepositional verb,medium,common,no,medium
+gum up,1341,user_list,phrasal verb,medium,less_common,no,high
+hammer home,1342,user_list,phrasal verb,medium,less_common,no,high
+howl down,1343,user_list,phrasal verb,medium,less_common,no,high
+kick about,1344,user_list,phrasal verb,medium,less_common,no,high
+leaf through,1345,user_list,phrasal verb,medium,less_common,no,high
+leap at,1346,user_list,prepositional verb,medium,less_common,no,high
+level down,1347,user_list,phrasal verb,medium,less_common,no,high
+lose out to,1348,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+luxuriate in,1349,user_list,phrasal verb,medium,less_common,no,high
+mull over,1350,user_list,phrasal verb,medium,less_common,no,high
+peg out,1351,user_list,phrasal verb,medium,less_common,no,high
+pinch off,1352,user_list,phrasal verb,medium,less_common,no,high
+pivot on,1353,user_list,phrasal verb,medium,less_common,no,high
+pluck at,1354,user_list,prepositional verb,medium,less_common,no,high
+pounce upon,1355,user_list,prepositional verb,medium,less_common,no,high
+prise from,1356,user_list,prepositional verb,medium,less_common,no,high
+pronounce on,1357,user_list,phrasal verb,medium,less_common,no,high
+rally round,1358,user_list,phrasal verb,medium,less_common,no,high
+rear on,1359,user_list,phrasal verb,medium,less_common,no,high
+rust away,1360,user_list,phrasal verb,medium,less_common,no,high
+scrape in,1361,user_list,phrasal verb,medium,less_common,no,high
+scrub off,1362,user_list,phrasal verb,medium,less_common,no,high
+scrub out,1363,user_list,phrasal verb,medium,less_common,no,high
+section off,1364,user_list,phrasal verb,medium,less_common,no,high
+shin up,1365,user_list,phrasal verb,medium,less_common,no,high
+shut off from,1366,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+sit in for,1367,user_list,phrasal-prepositional verb,medium,common,no,medium
+skate over,1368,user_list,phrasal verb,medium,less_common,no,high
+skim off,1369,user_list,phrasal verb,medium,less_common,no,high
+skip off,1370,user_list,phrasal verb,medium,less_common,no,high
+smack up,1371,user_list,phrasal verb,medium,less_common,no,high
+squeeze from,1372,user_list,prepositional verb,medium,less_common,no,high
+steam off,1373,user_list,phrasal verb,medium,less_common,no,high
+bottom out,1374,user_list,phrasal verb,medium,less_common,no,high
+camp it up,1375,user_list,phrasal verb,medium,less_common,no,high
+choke back,1376,user_list,phrasal verb,medium,less_common,no,high
+choke off,1377,user_list,phrasal verb,medium,less_common,no,high
+chuck away,1378,user_list,phrasal verb,medium,less_common,no,high
+claim back,1379,user_list,phrasal verb,medium,less_common,no,high
+clean down,1380,user_list,phrasal verb,medium,less_common,no,high
+click through,1381,user_list,phrasal verb,medium,less_common,no,high
+comb out,1382,user_list,phrasal verb,medium,less_common,no,high
+come out of yourself,1383,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+cotton on,1384,user_list,phrasal verb,medium,less_common,no,high
+cull from,1385,user_list,prepositional verb,medium,less_common,no,high
+declare for,1386,user_list,prepositional verb,medium,less_common,no,high
+dial into,1387,user_list,prepositional verb,medium,less_common,no,high
+dig over,1388,user_list,phrasal verb,medium,less_common,no,high
+fetch up,1389,user_list,phrasal verb,medium,less_common,no,high
+fiddle around with,1390,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+find against,1391,user_list,prepositional verb,medium,common,no,high
+follow on from,1392,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+front up,1393,user_list,phrasal verb,medium,less_common,no,high
+gang together,1394,user_list,phrasal verb,medium,less_common,no,high
+glance off,1395,user_list,phrasal verb,medium,less_common,no,high
+hammer into,1396,user_list,prepositional verb,medium,less_common,no,high
+hand round,1397,user_list,phrasal verb,medium,common,no,high
+hire yourself out,1398,user_list,phrasal verb,medium,less_common,no,medium
+hunt out,1399,user_list,phrasal verb,medium,less_common,no,high
+jerk out,1400,user_list,phrasal verb,hard,rare,no,high
+knuckle under,1401,user_list,phrasal verb,medium,less_common,no,high
+launch out,1402,user_list,phrasal verb,medium,less_common,no,high
+listen out for,1403,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+mope about,1404,user_list,phrasal verb,hard,rare,no,high
+muck up,1405,user_list,phrasal verb,hard,rare,no,high
+open onto,1406,user_list,prepositional verb,medium,less_common,no,high
+order about,1407,user_list,prepositional verb,medium,less_common,no,high
+pinch in,1408,user_list,phrasal verb,medium,less_common,no,high
+pivot around,1409,user_list,phrasal verb,medium,less_common,no,high
+punch into,1410,user_list,prepositional verb,medium,less_common,no,high
+put by,1411,user_list,prepositional verb,medium,common,no,high
+put down as,1412,user_list,phrasal-prepositional verb,medium,common,no,medium
+put towards,1413,user_list,prepositional verb,medium,common,no,high
+remit to,1414,user_list,prepositional verb,medium,less_common,no,high
+resolve into,1415,user_list,prepositional verb,medium,less_common,no,high
+root up,1416,user_list,phrasal verb,medium,less_common,no,high
+rule out of,1417,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+sack off,1418,user_list,phrasal verb,medium,less_common,no,high
+shut yourself away,1419,user_list,phrasal verb,medium,less_common,no,medium
+smooth away,1420,user_list,phrasal verb,medium,less_common,no,high
+sock away,1421,user_list,phrasal verb,medium,less_common,no,high
+soup up,1422,user_list,phrasal verb,medium,less_common,no,high
+split away,1423,user_list,phrasal verb,medium,less_common,no,high
+spy out,1424,user_list,phrasal verb,medium,less_common,no,high
+squirrel away,1425,user_list,phrasal verb,medium,less_common,no,high
+stoke up,1426,user_list,phrasal verb,medium,less_common,no,high
+stub out,1427,user_list,phrasal verb,medium,less_common,no,high
+stump up,1428,user_list,phrasal verb,medium,less_common,no,high
+tee up,1429,user_list,phrasal verb,hard,rare,no,high
+bounce into,1430,user_list,prepositional verb,medium,less_common,no,high
+bucket down,1431,user_list,phrasal verb,medium,less_common,no,high
+bunch together,1432,user_list,phrasal verb,medium,less_common,no,high
+bundle together,1433,user_list,phrasal verb,medium,less_common,no,high
+bunk off,1434,user_list,phrasal verb,hard,rare,no,high
+cast about for,1435,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+cast around for,1436,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+change round,1437,user_list,phrasal verb,medium,less_common,no,high
+chew over,1438,user_list,phrasal verb,medium,less_common,no,high
+coax out of,1439,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+cone off,1440,user_list,phrasal verb,medium,less_common,no,high
+count toward,1441,user_list,prepositional verb,medium,less_common,no,high
+count towards,1442,user_list,prepositional verb,medium,less_common,no,high
+crowd round,1443,user_list,phrasal verb,medium,less_common,no,high
+declare against,1444,user_list,prepositional verb,medium,less_common,no,high
+dote on,1445,user_list,prepositional verb,medium,less_common,no,high
+eff off,1446,user_list,phrasal verb,hard,rare,no,high
+farm out to,1447,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+frighten away,1448,user_list,phrasal verb,medium,less_common,no,high
+gad about,1449,user_list,phrasal verb,medium,less_common,no,high
+get above yourself,1450,user_list,prepositional verb,medium,common,no,medium
+grass over,1451,user_list,phrasal verb,medium,less_common,no,high
+hash out,1452,user_list,phrasal verb,medium,less_common,no,high
+hive off,1453,user_list,phrasal verb,medium,less_common,no,high
+hold forth,1454,user_list,phrasal verb,medium,common,no,high
+hunger after,1455,user_list,prepositional verb,medium,less_common,no,high
+inhere in,1456,user_list,phrasal verb,medium,less_common,no,high
+invite along,1457,user_list,prepositional verb,medium,less_common,no,high
+jack around,1458,user_list,phrasal verb,hard,rare,no,high
+jack into,1459,user_list,prepositional verb,hard,rare,no,high
+kit up,1460,user_list,phrasal verb,hard,rare,no,high
+lark around,1461,user_list,phrasal verb,hard,rare,no,high
+map onto,1462,user_list,prepositional verb,medium,less_common,no,high
+moon around,1463,user_list,phrasal verb,medium,less_common,no,high
+palm off,1464,user_list,phrasal verb,medium,less_common,no,high
+patch through,1465,user_list,phrasal verb,medium,less_common,no,high
+patch together,1466,user_list,phrasal verb,medium,less_common,no,high
+pike out,1467,user_list,phrasal verb,medium,less_common,no,high
+piss around,1468,user_list,phrasal verb,hard,rare,no,high
+plaster over,1469,user_list,phrasal verb,medium,less_common,no,high
+prise out,1470,user_list,phrasal verb,medium,less_common,no,high
+push about,1471,user_list,phrasal verb,medium,less_common,no,high
+put above,1472,user_list,prepositional verb,medium,common,no,high
+puzzle out,1473,user_list,phrasal verb,medium,less_common,no,high
+rake over,1474,user_list,phrasal verb,medium,less_common,no,high
+sack out,1475,user_list,phrasal verb,medium,less_common,no,high
+sally forth,1476,user_list,phrasal verb,medium,less_common,no,high
+salt away,1477,user_list,phrasal verb,medium,less_common,no,high
+screw your face up,1478,user_list,verb phrase,hard,less_common,no,low
+shut away,1479,user_list,phrasal verb,medium,less_common,no,high
+sick up,1480,user_list,phrasal verb,medium,less_common,no,high
+slag off,1481,user_list,phrasal verb,hard,rare,no,high
+slobber over,1482,user_list,phrasal verb,hard,rare,no,high
+slope off,1483,user_list,phrasal verb,medium,less_common,no,high
+sniff round,1484,user_list,prepositional verb,medium,less_common,no,high
+spiral up,1485,user_list,phrasal verb,medium,less_common,no,high
+squash up,1486,user_list,phrasal verb,medium,less_common,no,high
+steep yourself in,1487,user_list,phrasal verb,medium,less_common,no,medium
+stretch yourself out,1488,user_list,phrasal verb,medium,less_common,no,medium
+swear into,1489,user_list,prepositional verb,medium,less_common,no,high
+tack onto,1490,user_list,prepositional verb,medium,less_common,no,high
+brim over,1491,user_list,phrasal verb,medium,less_common,no,high
+bring around to,1492,user_list,phrasal-prepositional verb,medium,common,no,medium
+bugger about,1493,user_list,phrasal verb,hard,rare,no,high
+burst in on,1494,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+charm out of,1495,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+chuck off,1496,user_list,phrasal verb,medium,less_common,no,high
+crease up,1497,user_list,phrasal verb,medium,less_common,no,high
+crowd onto,1498,user_list,prepositional verb,medium,less_common,no,high
+cry off,1499,user_list,phrasal verb,medium,less_common,no,high
+curtain off,1500,user_list,phrasal verb,medium,less_common,no,high
+damp down,1501,user_list,phrasal verb,medium,less_common,no,high
+derogate from,1502,user_list,prepositional verb,medium,less_common,no,high
+devolve to,1503,user_list,prepositional verb,medium,less_common,no,high
+dob in,1504,user_list,phrasal verb,hard,rare,no,high
+doll up,1505,user_list,phrasal verb,medium,less_common,no,high
+drop round,1506,user_list,phrasal verb,medium,common,no,high
+enlarge on,1507,user_list,phrasal verb,medium,less_common,no,high
+enlarge upon,1508,user_list,prepositional verb,medium,less_common,no,high
+expatiate on,1509,user_list,phrasal verb,medium,less_common,no,high
+faff around,1510,user_list,phrasal verb,medium,less_common,no,high
+figure on doing,1511,user_list,prepositional verb,medium,less_common,no,high
+fling off,1512,user_list,phrasal verb,medium,less_common,no,high
+fling yourself at,1513,user_list,prepositional verb,medium,less_common,no,medium
+gee up,1514,user_list,phrasal verb,medium,less_common,no,high
+get up as,1515,user_list,phrasal-prepositional verb,medium,common,no,medium
+ginger up,1516,user_list,phrasal verb,hard,rare,no,high
+glance on,1517,user_list,phrasal verb,medium,less_common,no,high
+grub up,1518,user_list,phrasal verb,medium,less_common,no,high
+hinge upon,1519,user_list,prepositional verb,medium,less_common,no,high
+impute to,1520,user_list,prepositional verb,medium,less_common,no,high
+inveigh against,1521,user_list,prepositional verb,medium,less_common,no,high
+invite around,1522,user_list,prepositional verb,medium,less_common,no,high
+jog along,1523,user_list,phrasal verb,medium,less_common,no,high
+jostle for,1524,user_list,prepositional verb,medium,less_common,no,high
+lark about,1525,user_list,phrasal verb,hard,rare,no,high
+lavish on,1526,user_list,phrasal verb,medium,less_common,no,high
+lavish upon,1527,user_list,prepositional verb,medium,less_common,no,high
+live by doing,1528,user_list,prepositional verb,medium,less_common,no,high
+make towards,1529,user_list,prepositional verb,medium,common,no,high
+mark down as,1530,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+mete out,1531,user_list,phrasal verb,medium,less_common,no,high
+model upon,1532,user_list,prepositional verb,medium,less_common,no,high
+muck about with,1533,user_list,phrasal-prepositional verb,hard,rare,no,medium
+muddle along,1534,user_list,phrasal verb,medium,less_common,no,high
+mug up,1535,user_list,phrasal verb,hard,rare,no,high
+nose about,1536,user_list,phrasal verb,medium,less_common,no,high
+nose around,1537,user_list,phrasal verb,medium,less_common,no,high
+pass a round,1538,user_list,prepositional verb,medium,less_common,no,high
+peg back,1539,user_list,phrasal verb,medium,less_common,no,high
+pension off,1540,user_list,phrasal verb,medium,less_common,no,high
+pinch out,1541,user_list,phrasal verb,medium,less_common,no,high
+pitch into,1542,user_list,prepositional verb,medium,less_common,no,high
+plough into,1543,user_list,prepositional verb,medium,less_common,no,high
+plunge ahead,1544,user_list,phrasal verb,medium,less_common,no,high
+presume upon,1545,user_list,prepositional verb,medium,less_common,no,high
+provide against,1546,user_list,prepositional verb,medium,less_common,no,high
+reckon without,1547,user_list,prepositional verb,medium,less_common,no,high
+reel off,1548,user_list,phrasal verb,medium,less_common,no,high
+reel out,1549,user_list,phrasal verb,medium,less_common,no,high
+revolve round,1550,user_list,prepositional verb,medium,less_common,no,high
+score out,1551,user_list,phrasal verb,medium,less_common,no,high
+scrape into,1552,user_list,prepositional verb,medium,less_common,no,high
+set about doing,1553,user_list,prepositional verb,medium,common,no,high
+shade into,1554,user_list,prepositional verb,medium,less_common,no,high
+shift for yourself,1555,user_list,prepositional verb,medium,less_common,no,medium
+shin down,1556,user_list,phrasal verb,medium,less_common,no,high
+sift out,1557,user_list,phrasal verb,medium,less_common,no,high
+slice away,1558,user_list,phrasal verb,medium,less_common,no,high
+slob around,1559,user_list,phrasal verb,hard,rare,no,high
+slob out,1560,user_list,phrasal verb,hard,rare,no,high
+snarl up,1561,user_list,phrasal verb,medium,less_common,no,high
+soothe away,1562,user_list,phrasal verb,medium,less_common,no,high
+spiral downwards,1563,user_list,verb phrase,hard,less_common,no,low
+splash over,1564,user_list,phrasal verb,medium,less_common,no,high
+spread yourself out,1565,user_list,phrasal verb,medium,less_common,no,medium
+starve out,1566,user_list,phrasal verb,medium,less_common,no,high
+steam open,1567,user_list,phrasal verb,medium,less_common,no,high
+tail away,1568,user_list,phrasal verb,medium,less_common,no,high
+bring A and B together,1569,user_list,phrasal verb,hard,less_common,no,medium
+bring round to,1570,user_list,phrasal-prepositional verb,medium,common,no,medium
+bring up against,1571,user_list,phrasal-prepositional verb,medium,common,no,medium
+broaden out,1572,user_list,phrasal verb,medium,less_common,no,high
+bubble under,1573,user_list,phrasal verb,medium,less_common,no,high
+bulk out,1574,user_list,phrasal verb,medium,less_common,no,high
+bunk off school,1575,user_list,phrasal verb,hard,rare,no,high
+bunk off work,1576,user_list,phrasal verb,hard,rare,no,high
+capitalize upon,1577,user_list,prepositional verb,medium,less_common,no,high
+chalk up to,1578,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+coax from,1579,user_list,prepositional verb,medium,less_common,no,high
+come between and,1580,user_list,prepositional verb,medium,common,no,high
+conjure from,1581,user_list,prepositional verb,medium,less_common,no,high
+conjure out of,1582,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+cosy up to,1583,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+deprive of,1584,user_list,prepositional verb,medium,less_common,no,high
+devolve on,1585,user_list,prepositional verb,medium,less_common,no,high
+devolve upon,1586,user_list,prepositional verb,medium,less_common,no,high
+dine out on,1587,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+discourse upon,1588,user_list,prepositional verb,medium,less_common,no,high
+do yourself up,1589,user_list,phrasal verb,medium,less_common,no,medium
+dote upon,1590,user_list,prepositional verb,medium,less_common,no,high
+dragoon into,1591,user_list,prepositional verb,medium,less_common,no,high
+dragoon into doing,1592,user_list,prepositional verb,medium,less_common,no,high
+draw down on,1593,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+duff up,1594,user_list,phrasal verb,hard,rare,no,high
+endear to,1595,user_list,prepositional verb,medium,less_common,no,high
+enquire after,1596,user_list,prepositional verb,medium,less_common,no,high
+expatiate upon,1597,user_list,prepositional verb,medium,less_common,no,high
+faff about,1598,user_list,phrasal verb,medium,less_common,no,high
+fiddle about with,1599,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+flinch from doing,1600,user_list,prepositional verb,medium,less_common,no,high
+fling yourself into,1601,user_list,prepositional verb,medium,less_common,no,medium
+fob off,1602,user_list,phrasal verb,medium,less_common,no,high
+follow about,1603,user_list,phrasal verb,medium,less_common,no,high
+frighten away from,1604,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+frighten into,1605,user_list,prepositional verb,medium,less_common,no,high
+frighten into doing,1606,user_list,prepositional verb,medium,less_common,no,high
+gad around,1607,user_list,phrasal verb,medium,less_common,no,high
+gamble on doing,1608,user_list,prepositional verb,medium,less_common,no,high
+gear towards,1609,user_list,prepositional verb,medium,less_common,no,high
+gird for,1610,user_list,prepositional verb,medium,less_common,no,high
+give on to,1611,user_list,phrasal-prepositional verb,medium,common,no,medium
+give onto,1612,user_list,prepositional verb,medium,common,no,high
+glom onto,1613,user_list,prepositional verb,medium,less_common,no,high
+goad on,1614,user_list,phrasal verb,medium,less_common,no,high
+grub out,1615,user_list,phrasal verb,medium,less_common,no,high
+guilt into,1616,user_list,prepositional verb,medium,less_common,no,high
+guilt into doing,1617,user_list,prepositional verb,medium,less_common,no,high
+gulp back,1618,user_list,phrasal verb,medium,less_common,no,high
+heave to,1619,user_list,prepositional verb,medium,less_common,no,high
+hedge against,1620,user_list,prepositional verb,medium,less_common,no,high
+help off with,1621,user_list,phrasal-prepositional verb,medium,common,no,medium
+help on with,1622,user_list,phrasal-prepositional verb,medium,common,no,medium
+horse about,1623,user_list,phrasal verb,medium,less_common,no,high
+inure to,1624,user_list,prepositional verb,medium,less_common,no,high
+invite round,1625,user_list,prepositional verb,medium,less_common,no,high
+jolly along,1626,user_list,phrasal verb,hard,rare,no,high
+jolly into,1627,user_list,prepositional verb,hard,rare,no,high
+jolly into doing,1628,user_list,prepositional verb,hard,rare,no,high
+jolly up,1629,user_list,phrasal verb,hard,rare,no,high
+keep in with,1630,user_list,phrasal-prepositional verb,medium,common,no,medium
+knock around together,1631,user_list,phrasal verb,medium,less_common,no,high
+leave aside,1632,user_list,phrasal verb,medium,common,no,high
+let in for,1633,user_list,phrasal-prepositional verb,medium,common,no,medium
+liken to,1634,user_list,prepositional verb,medium,less_common,no,high
+mark out as,1635,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+militate against,1636,user_list,prepositional verb,medium,less_common,no,high
+mouse over,1637,user_list,phrasal verb,medium,less_common,no,high
+mug up on,1638,user_list,phrasal-prepositional verb,hard,rare,no,medium
+nibble away at,1639,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+pal up,1640,user_list,phrasal verb,hard,rare,no,high
+palm off as,1641,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+panic into doing,1642,user_list,prepositional verb,medium,less_common,no,high
+partition off,1643,user_list,phrasal verb,medium,less_common,no,high
+peg away,1644,user_list,phrasal verb,medium,less_common,no,high
+pep up,1645,user_list,phrasal verb,medium,less_common,no,high
+play A off against B,1646,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+plough back,1647,user_list,phrasal verb,medium,less_common,no,high
+plough back in,1648,user_list,phrasal verb,medium,less_common,no,high
+ponce about,1649,user_list,phrasal verb,hard,rare,no,high
+press ahead,1650,user_list,phrasal verb,medium,less_common,no,high
+presume on,1651,user_list,phrasal verb,medium,less_common,no,high
+prevail on to do,1652,user_list,phrasal verb,hard,less_common,no,medium
+prevail upon to do,1653,user_list,prepositional verb,hard,less_common,no,medium
+proceed against,1654,user_list,prepositional verb,medium,less_common,no,high
+pronounce upon,1655,user_list,prepositional verb,medium,less_common,no,high
+put behind you,1656,user_list,prepositional verb,medium,common,no,high
+range against,1657,user_list,prepositional verb,medium,less_common,no,high
+reckon up,1658,user_list,phrasal verb,medium,less_common,no,high
+redound to,1659,user_list,prepositional verb,medium,less_common,no,high
+reduce to doing,1660,user_list,prepositional verb,medium,less_common,no,high
+rein back,1661,user_list,phrasal verb,medium,less_common,no,high
+revenge yourself on,1662,user_list,phrasal verb,medium,less_common,no,medium
+romp ahead,1663,user_list,phrasal verb,medium,less_common,no,high
+romp away,1664,user_list,phrasal verb,medium,less_common,no,high
+rub along,1665,user_list,phrasal verb,medium,less_common,no,high
+rule off,1666,user_list,phrasal verb,medium,less_common,no,high
+sack it off,1667,user_list,phrasal verb,medium,less_common,no,high
+sag off,1668,user_list,phrasal verb,medium,less_common,no,high
+sandwich A and B together,1669,user_list,phrasal verb,hard,less_common,no,medium
+sandwich between,1670,user_list,prepositional verb,medium,less_common,no,high
+savour of,1671,user_list,prepositional verb,medium,less_common,no,high
+scan into,1672,user_list,prepositional verb,medium,less_common,no,high
+scare into doing,1673,user_list,prepositional verb,medium,less_common,no,high
+score off,1674,user_list,phrasal verb,medium,less_common,no,high
+score through,1675,user_list,prepositional verb,medium,less_common,no,high
+scratch about,1676,user_list,phrasal verb,medium,less_common,no,high
+screw your eyes up,1677,user_list,verb phrase,hard,less_common,no,low
+shame into doing,1678,user_list,prepositional verb,medium,less_common,no,high
+sheer away,1679,user_list,phrasal verb,medium,less_common,no,high
+sheer off,1680,user_list,phrasal verb,medium,less_common,no,high
+show round,1681,user_list,phrasal verb,medium,common,no,high
+shrug aside,1682,user_list,phrasal verb,medium,less_common,no,high
+shrug away,1683,user_list,phrasal verb,medium,less_common,no,high
+silt up,1684,user_list,phrasal verb,medium,less_common,no,high
+slap about,1685,user_list,phrasal verb,medium,less_common,no,high
+sling off at,1686,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+slop about,1687,user_list,phrasal verb,hard,rare,no,high
+slop around,1688,user_list,phrasal verb,hard,rare,no,high
+slosh about,1689,user_list,phrasal verb,hard,rare,no,high
+soak off,1690,user_list,phrasal verb,medium,less_common,no,high
+soak out,1691,user_list,phrasal verb,medium,less_common,no,high
+spiral upward,1692,user_list,verb phrase,hard,less_common,no,low
+spiral upwards,1693,user_list,verb phrase,hard,less_common,no,low
+stand between and,1694,user_list,prepositional verb,medium,common,no,high
+start on about,1695,user_list,phrasal-prepositional verb,medium,common,no,medium
+start on at,1696,user_list,phrasal-prepositional verb,medium,common,no,medium
+starve into,1697,user_list,prepositional verb,medium,less_common,no,high
+starve into doing,1698,user_list,prepositional verb,medium,less_common,no,high
+stave in,1699,user_list,phrasal verb,medium,less_common,no,high
+struggle along,1700,user_list,phrasal verb,medium,less_common,no,high
+sucker into,1701,user_list,prepositional verb,medium,less_common,no,high
+sucker into doing,1702,user_list,prepositional verb,medium,less_common,no,high
+tag onto,1703,user_list,prepositional verb,medium,less_common,no,high
+tart yourself up,1704,user_list,phrasal verb,hard,rare,no,medium
+tell against,1705,user_list,prepositional verb,medium,less_common,no,high
+abide by,1706,user_list,prepositional verb,medium,less_common,no,high
+abound in,1707,user_list,phrasal verb,medium,less_common,no,high
+abound with,1708,user_list,prepositional verb,medium,less_common,no,high
+accord with,1709,user_list,prepositional verb,medium,less_common,no,high
+account for,1710,user_list,prepositional verb,medium,less_common,no,high
+accustom to,1711,user_list,prepositional verb,medium,less_common,no,high
+act for,1712,user_list,prepositional verb,medium,less_common,no,high
+act on,1713,user_list,prepositional verb,medium,less_common,no,high
+act on behalf of,1714,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+act out,1715,user_list,phrasal verb,medium,less_common,no,high
+act up,1716,user_list,phrasal verb,medium,less_common,no,high
+act upon,1717,user_list,prepositional verb,medium,less_common,no,high
+add in,1718,user_list,phrasal verb,medium,less_common,no,high
+add on,1719,user_list,phrasal verb,medium,less_common,no,high
+add to,1720,user_list,prepositional verb,medium,less_common,no,high
+add up,1721,user_list,phrasal verb,medium,less_common,no,high
+add up to,1722,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+adhere to,1723,user_list,prepositional verb,medium,less_common,no,high
+adjourn to,1724,user_list,prepositional verb,medium,less_common,no,high
+admit of,1725,user_list,prepositional verb,medium,less_common,no,high
+air out,1726,user_list,phrasal verb,medium,less_common,no,high
+alight on,1727,user_list,phrasal verb,medium,less_common,no,high
+alight upon,1728,user_list,prepositional verb,medium,less_common,no,high
+align yourself with,1729,user_list,prepositional verb,medium,less_common,no,medium
+allow for,1730,user_list,prepositional verb,medium,less_common,no,high
+allow of,1731,user_list,prepositional verb,medium,less_common,no,high
+allude to,1732,user_list,prepositional verb,medium,less_common,no,high
+amount to,1733,user_list,prepositional verb,medium,less_common,no,high
+angle for,1734,user_list,prepositional verb,medium,less_common,no,high
+answer back,1735,user_list,phrasal verb,medium,less_common,no,high
+answer for,1736,user_list,prepositional verb,medium,less_common,no,high
+answer to,1737,user_list,prepositional verb,medium,less_common,no,high
+appertain to,1738,user_list,prepositional verb,medium,less_common,no,high
+argue into doing,1739,user_list,prepositional verb,medium,less_common,no,high
+argue out of doing,1740,user_list,phrasal verb,hard,less_common,no,medium
+argue with,1741,user_list,prepositional verb,medium,less_common,no,high
+arrive at,1742,user_list,prepositional verb,medium,less_common,no,high
+arse about,1743,user_list,phrasal verb,hard,rare,no,high
+arse around,1744,user_list,phrasal verb,hard,rare,no,high
+ascribe to,1745,user_list,prepositional verb,medium,less_common,no,high
+ask after,1746,user_list,prepositional verb,medium,less_common,no,high
+ask around,1747,user_list,prepositional verb,medium,less_common,no,high
+ask back,1748,user_list,phrasal verb,medium,less_common,no,high
+ask for,1749,user_list,prepositional verb,medium,less_common,no,high
+ask out,1750,user_list,phrasal verb,easy,very_common,no,high
+attend to,1751,user_list,prepositional verb,medium,less_common,no,high
+auction off,1752,user_list,phrasal verb,medium,less_common,no,high
+avail yourself of,1753,user_list,prepositional verb,medium,less_common,no,medium
+average out,1754,user_list,phrasal verb,medium,less_common,no,high
+awake to,1755,user_list,prepositional verb,medium,less_common,no,high
+awaken to,1756,user_list,prepositional verb,medium,less_common,no,high
+back away,1757,user_list,phrasal verb,medium,less_common,no,high
+back off,1758,user_list,phrasal verb,medium,less_common,no,high
+back onto,1759,user_list,prepositional verb,medium,less_common,no,high
+back out,1760,user_list,phrasal verb,medium,less_common,no,high
+back up,1761,user_list,phrasal verb,easy,very_common,no,high
+bail out,1762,user_list,phrasal verb,medium,less_common,no,high
+band together,1763,user_list,phrasal verb,medium,less_common,no,high
+bandy about,1764,user_list,phrasal verb,medium,less_common,no,high
+bandy around,1765,user_list,phrasal verb,medium,less_common,no,high
+bang about,1766,user_list,phrasal verb,medium,less_common,no,high
+bang around,1767,user_list,phrasal verb,medium,less_common,no,high
+bang into,1768,user_list,prepositional verb,medium,less_common,no,high
+bang on,1769,user_list,phrasal verb,medium,less_common,no,high
+bang up,1770,user_list,phrasal verb,medium,less_common,no,high
+bank on,1771,user_list,phrasal verb,medium,less_common,no,high
+bank up,1772,user_list,phrasal verb,medium,less_common,no,high
+bargain away,1773,user_list,phrasal verb,medium,less_common,no,high
+bargain for,1774,user_list,prepositional verb,medium,less_common,no,high
+bargain on,1775,user_list,phrasal verb,medium,less_common,no,high
+barge in,1776,user_list,phrasal verb,medium,less_common,no,high
+barricade yourself in,1777,user_list,phrasal verb,medium,less_common,no,medium
+barricade yourself inside,1778,user_list,prepositional verb,medium,less_common,no,medium
+base on,1779,user_list,prepositional verb,medium,less_common,no,high
+base upon,1780,user_list,prepositional verb,medium,less_common,no,high
+bash away,1781,user_list,phrasal verb,medium,less_common,no,high
+bash down,1782,user_list,phrasal verb,medium,less_common,no,high
+bash in,1783,user_list,phrasal verb,medium,less_common,no,high
+bash on,1784,user_list,phrasal verb,medium,less_common,no,high
+bash out,1785,user_list,phrasal verb,medium,less_common,no,high
+bash up,1786,user_list,phrasal verb,medium,less_common,no,high
+bat around,1787,user_list,phrasal verb,medium,less_common,no,high
+batter down,1788,user_list,phrasal verb,medium,less_common,no,high
+bawl out,1789,user_list,phrasal verb,medium,less_common,no,high
+be bombed out,1790,user_list,verb phrase,hard,less_common,no,low
+be cast away,1791,user_list,verb phrase,hard,less_common,no,low
+be cast down,1792,user_list,verb phrase,hard,less_common,no,low
+be curled up,1793,user_list,verb phrase,hard,less_common,no,low
+be cursed with,1794,user_list,verb phrase,hard,less_common,no,low
+be dressed up,1795,user_list,verb phrase,hard,less_common,no,low
+be gunning for,1796,user_list,verb phrase,hard,less_common,no,low
+be heading for,1797,user_list,verb phrase,hard,less_common,no,low
+be holed up,1798,user_list,verb phrase,hard,less_common,no,low
+be left over,1799,user_list,verb phrase,hard,less_common,no,low
+be onto,1800,user_list,prepositional verb,medium,common,no,high
+be queuing up,1801,user_list,verb phrase,hard,less_common,no,low
+be rained off,1802,user_list,verb phrase,hard,less_common,no,low
+be revenged on,1803,user_list,verb phrase,hard,less_common,no,low
+be shorn of,1804,user_list,verb phrase,hard,less_common,no,low
+be sold out,1805,user_list,verb phrase,hard,less_common,no,low
+beam down,1806,user_list,phrasal verb,medium,less_common,no,high
+beam up,1807,user_list,phrasal verb,medium,less_common,no,high
+bear down on,1808,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+bear on,1809,user_list,phrasal verb,medium,less_common,no,high
+bear out,1810,user_list,phrasal verb,medium,less_common,no,high
+bear up,1811,user_list,phrasal verb,medium,less_common,no,high
+bear with,1812,user_list,prepositional verb,medium,less_common,no,high
+beat down,1813,user_list,phrasal verb,medium,less_common,no,high
+beat off,1814,user_list,phrasal verb,medium,less_common,no,high
+beat on,1815,user_list,phrasal verb,medium,less_common,no,high
+beat out,1816,user_list,phrasal verb,medium,less_common,no,high
+beat out of,1817,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+beat to,1818,user_list,prepositional verb,medium,less_common,no,high
+beat to it,1819,user_list,prepositional verb,medium,less_common,no,high
+beat up,1820,user_list,phrasal verb,medium,less_common,no,high
+beat up on,1821,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+beat yourself up,1822,user_list,phrasal verb,medium,less_common,no,medium
+beaver away,1823,user_list,phrasal verb,medium,less_common,no,high
+bed down,1824,user_list,phrasal verb,medium,less_common,no,high
+beef up,1825,user_list,phrasal verb,medium,less_common,no,high
+beg off,1826,user_list,phrasal verb,medium,less_common,no,high
+believe in,1827,user_list,prepositional verb,medium,common,no,high
+believe of,1828,user_list,prepositional verb,medium,common,no,high
+belong to,1829,user_list,prepositional verb,medium,less_common,no,high
+belt out,1830,user_list,phrasal verb,medium,less_common,no,high
+big up,1831,user_list,phrasal verb,medium,less_common,no,high
+bind over,1832,user_list,phrasal verb,medium,less_common,no,high
+bite back,1833,user_list,phrasal verb,medium,less_common,no,high
+bite into,1834,user_list,prepositional verb,medium,less_common,no,high
+black out,1835,user_list,phrasal verb,medium,less_common,no,high
+blank out,1836,user_list,phrasal verb,medium,less_common,no,high
+blast away,1837,user_list,phrasal verb,medium,less_common,no,high
+blast off,1838,user_list,phrasal verb,medium,less_common,no,high
+blaze up,1839,user_list,phrasal verb,medium,less_common,no,high
+blend in,1840,user_list,phrasal verb,medium,less_common,no,high
+blend into,1841,user_list,prepositional verb,medium,less_common,no,high
+blink away,1842,user_list,phrasal verb,medium,less_common,no,high
+blink back,1843,user_list,phrasal verb,medium,less_common,no,high
+bliss out,1844,user_list,phrasal verb,medium,less_common,no,high
+block in,1845,user_list,phrasal verb,medium,less_common,no,high
+block off,1846,user_list,phrasal verb,medium,less_common,no,high
+block out,1847,user_list,phrasal verb,medium,less_common,no,high
+block up,1848,user_list,phrasal verb,medium,less_common,no,high
+blot out,1849,user_list,phrasal verb,medium,less_common,no,high
+blow apart,1850,user_list,phrasal verb,medium,less_common,no,high
+blow away,1851,user_list,phrasal verb,medium,less_common,no,high
+blow in,1852,user_list,phrasal verb,medium,less_common,no,high
+blow into,1853,user_list,prepositional verb,medium,less_common,no,high
+blow itself out,1854,user_list,phrasal verb,medium,less_common,no,medium
+blow off,1855,user_list,phrasal verb,medium,less_common,no,high
+blow out,1856,user_list,phrasal verb,medium,less_common,no,high
+blow over,1857,user_list,phrasal verb,medium,less_common,no,high
+blow up,1858,user_list,phrasal verb,medium,less_common,no,high
+bluff into doing,1859,user_list,prepositional verb,medium,less_common,no,high
+bluff your way in,1860,user_list,verb phrase,hard,less_common,no,low
+bluff your way into,1861,user_list,verb phrase,hard,less_common,no,low
+bluff your way out,1862,user_list,verb phrase,hard,less_common,no,low
+bluff your way out of,1863,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+bluff your way through,1864,user_list,verb phrase,hard,less_common,no,low
+blunder into,1865,user_list,prepositional verb,medium,less_common,no,high
+blunder on,1866,user_list,phrasal verb,medium,less_common,no,high
+board out,1867,user_list,phrasal verb,medium,less_common,no,high
+board up,1868,user_list,phrasal verb,medium,less_common,no,high
+bob up,1869,user_list,phrasal verb,medium,less_common,no,high
+bog down,1870,user_list,phrasal verb,hard,rare,no,high
+bog off,1871,user_list,phrasal verb,hard,rare,no,high
+boil down,1872,user_list,phrasal verb,medium,less_common,no,high
+boil down to,1873,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+boil over,1874,user_list,phrasal verb,medium,less_common,no,high
+boil up,1875,user_list,phrasal verb,medium,less_common,no,high
+book in,1876,user_list,phrasal verb,medium,less_common,no,high
+book into,1877,user_list,prepositional verb,medium,less_common,no,high
+break away,1878,user_list,phrasal verb,medium,common,no,high
+break out,1879,user_list,phrasal verb,medium,common,no,high
+dumb down,1880,user_list,phrasal verb,medium,less_common,no,high
+think about,1881,user_list,prepositional verb,medium,less_common,no,high
+think ahead,1882,user_list,phrasal verb,medium,less_common,no,high
+think back,1883,user_list,phrasal verb,medium,less_common,no,high
+think of,1884,user_list,prepositional verb,medium,less_common,no,high
+think out,1885,user_list,phrasal verb,medium,less_common,no,high
+think over,1886,user_list,phrasal verb,easy,very_common,no,high
+think through,1887,user_list,prepositional verb,medium,less_common,no,high
+think up,1888,user_list,phrasal verb,medium,less_common,no,high
+thirst for,1889,user_list,prepositional verb,medium,less_common,no,high
+thrash out,1890,user_list,phrasal verb,medium,less_common,no,high
+thrill to,1891,user_list,prepositional verb,medium,less_common,no,high
+thrive on,1892,user_list,phrasal verb,medium,less_common,no,high
+throng with,1893,user_list,prepositional verb,medium,less_common,no,high
+throttle back,1894,user_list,phrasal verb,medium,less_common,no,high
+throttle down,1895,user_list,phrasal verb,medium,less_common,no,high
+throttle up,1896,user_list,phrasal verb,medium,less_common,no,high
+throw aside,1897,user_list,phrasal verb,medium,less_common,no,high
+throw away,1898,user_list,phrasal verb,easy,very_common,no,high
+throw back at,1899,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+throw back on,1900,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+throw in,1901,user_list,phrasal verb,medium,less_common,no,high
+throw into,1902,user_list,prepositional verb,medium,less_common,no,high
+throw off,1903,user_list,phrasal verb,medium,less_common,no,high
+throw on,1904,user_list,phrasal verb,medium,less_common,no,high
+throw open,1905,user_list,phrasal verb,medium,less_common,no,high
+throw out,1906,user_list,phrasal verb,medium,less_common,no,high
+throw over,1907,user_list,phrasal verb,medium,less_common,no,high
+throw together,1908,user_list,phrasal verb,medium,less_common,no,high
+throw up,1909,user_list,phrasal verb,medium,less_common,no,high
+throw yourself at,1910,user_list,prepositional verb,medium,less_common,no,medium
+thrust aside,1911,user_list,phrasal verb,medium,less_common,no,high
+thrust on,1912,user_list,phrasal verb,medium,less_common,no,high
+thrust upon,1913,user_list,prepositional verb,medium,less_common,no,high
+thumb through,1914,user_list,phrasal verb,medium,less_common,no,high
+tick away,1915,user_list,phrasal verb,medium,less_common,no,high
+tick by,1916,user_list,phrasal verb,medium,less_common,no,high
+tick off,1917,user_list,phrasal verb,medium,less_common,no,high
+tick over,1918,user_list,phrasal verb,medium,less_common,no,high
+tick past,1919,user_list,phrasal verb,medium,less_common,no,high
+tide over,1920,user_list,phrasal verb,medium,less_common,no,high
+tidy away,1921,user_list,phrasal verb,medium,less_common,no,high
+tidy up,1922,user_list,phrasal verb,medium,less_common,no,high
+tie down,1923,user_list,phrasal verb,medium,less_common,no,high
+tie in,1924,user_list,phrasal verb,medium,less_common,no,high
+tie off,1925,user_list,phrasal verb,medium,less_common,no,high
+tie up,1926,user_list,phrasal verb,medium,less_common,no,high
+tighten up,1927,user_list,phrasal verb,medium,less_common,no,high
+tilt at,1928,user_list,prepositional verb,medium,less_common,no,high
+time out,1929,user_list,phrasal verb,medium,less_common,no,high
+tip off,1930,user_list,phrasal verb,medium,less_common,no,high
+tip over,1931,user_list,phrasal verb,medium,less_common,no,high
+tip up,1932,user_list,phrasal verb,medium,less_common,no,high
+tire of,1933,user_list,prepositional verb,medium,less_common,no,high
+tire out,1934,user_list,phrasal verb,medium,less_common,no,high
+tone down,1935,user_list,phrasal verb,medium,less_common,no,high
+tool up,1936,user_list,phrasal verb,hard,rare,no,high
+top up,1937,user_list,phrasal verb,medium,less_common,no,high
+toss off,1938,user_list,phrasal verb,medium,less_common,no,high
+tot up,1939,user_list,phrasal verb,medium,less_common,no,high
+touch down,1940,user_list,phrasal verb,medium,less_common,no,high
+touch for,1941,user_list,prepositional verb,medium,less_common,no,high
+touch off,1942,user_list,phrasal verb,medium,less_common,no,high
+touch on,1943,user_list,phrasal verb,medium,less_common,no,high
+touch up,1944,user_list,phrasal verb,medium,less_common,no,high
+touch upon,1945,user_list,prepositional verb,medium,less_common,no,high
+tough out,1946,user_list,phrasal verb,medium,less_common,no,high
+tower above,1947,user_list,prepositional verb,medium,less_common,no,high
+tower over,1948,user_list,prepositional verb,medium,less_common,no,high
+toy with,1949,user_list,prepositional verb,medium,less_common,no,high
+track down,1950,user_list,phrasal verb,medium,less_common,no,high
+trade at,1951,user_list,prepositional verb,medium,less_common,no,high
+trade down,1952,user_list,phrasal verb,medium,less_common,no,high
+trade in,1953,user_list,prepositional verb,medium,less_common,no,high
+trade off,1954,user_list,phrasal verb,medium,less_common,no,high
+trade on,1955,user_list,prepositional verb,medium,less_common,no,high
+trade up,1956,user_list,phrasal verb,medium,less_common,no,high
+trail away,1957,user_list,phrasal verb,medium,less_common,no,high
+trail off,1958,user_list,phrasal verb,medium,less_common,no,high
+treat to,1959,user_list,prepositional verb,medium,less_common,no,high
+trespass on,1960,user_list,phrasal verb,medium,less_common,no,high
+trick into,1961,user_list,prepositional verb,medium,less_common,no,high
+trick into doing,1962,user_list,prepositional verb,medium,less_common,no,high
+trick out,1963,user_list,phrasal verb,medium,less_common,no,high
+trick out of,1964,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+trickle down,1965,user_list,phrasal verb,medium,less_common,no,high
+trifle with,1966,user_list,prepositional verb,medium,less_common,no,high
+trim down,1967,user_list,phrasal verb,medium,less_common,no,high
+trip up,1968,user_list,phrasal verb,medium,less_common,no,high
+trot out,1969,user_list,phrasal verb,medium,less_common,no,high
+trundle out,1970,user_list,phrasal verb,medium,less_common,no,high
+trust in,1971,user_list,prepositional verb,medium,less_common,no,high
+trust to,1972,user_list,prepositional verb,medium,less_common,no,high
+trust with,1973,user_list,prepositional verb,medium,less_common,no,high
+try for,1974,user_list,prepositional verb,medium,less_common,no,high
+try on,1975,user_list,phrasal verb,easy,very_common,no,high
+try out,1976,user_list,phrasal verb,medium,less_common,no,high
+try out for,1977,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+tuck away,1978,user_list,phrasal verb,medium,less_common,no,high
+tuck in,1979,user_list,phrasal verb,medium,less_common,no,high
+tuck into,1980,user_list,prepositional verb,medium,less_common,no,high
+tuck up,1981,user_list,phrasal verb,medium,less_common,no,high
+tumble to,1982,user_list,prepositional verb,medium,less_common,no,high
+tune in,1983,user_list,prepositional verb,medium,less_common,no,high
+tune in to,1984,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+tune out,1985,user_list,phrasal verb,medium,less_common,no,high
+tune up,1986,user_list,phrasal verb,medium,less_common,no,high
+turf off,1987,user_list,phrasal verb,hard,rare,no,high
+turf out,1988,user_list,phrasal verb,hard,rare,no,high
+turn against,1989,user_list,prepositional verb,medium,common,no,high
+turn around,1990,user_list,phrasal verb,medium,common,no,high
+turn away,1991,user_list,phrasal verb,medium,common,no,high
+turn back,1992,user_list,phrasal verb,medium,common,no,high
+turn down,1993,user_list,phrasal verb,easy,very_common,no,high
+turn in,1994,user_list,phrasal verb,medium,common,no,high
+turn in on yourself,1995,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+turn into,1996,user_list,prepositional verb,easy,very_common,no,high
+turn off,1997,user_list,phrasal verb,easy,very_common,no,high
+turn on,1998,user_list,phrasal verb,easy,very_common,no,high
+turn out,1999,user_list,phrasal verb,easy,very_common,no,high
+turn over,2000,user_list,phrasal verb,medium,common,no,high
+turn to,2001,user_list,prepositional verb,medium,common,no,high
+turn up,2002,user_list,phrasal verb,easy,very_common,no,high
+twist off,2003,user_list,phrasal verb,medium,less_common,no,high
+urge on,2004,user_list,phrasal verb,medium,less_common,no,high
+use up,2005,user_list,phrasal verb,easy,very_common,no,high
+usher in,2006,user_list,phrasal verb,medium,less_common,no,high
+venture into,2007,user_list,prepositional verb,medium,less_common,no,high
+venture on,2008,user_list,prepositional verb,medium,less_common,no,high
+verge on,2009,user_list,prepositional verb,medium,less_common,no,high
+vest in,2010,user_list,prepositional verb,medium,less_common,no,high
+vest with,2011,user_list,prepositional verb,medium,less_common,no,high
+visit on,2012,user_list,prepositional verb,medium,less_common,no,high
+visit upon,2013,user_list,prepositional verb,medium,less_common,no,high
+visit with,2014,user_list,prepositional verb,medium,less_common,no,high
+vote down,2015,user_list,phrasal verb,medium,less_common,no,high
+vote in,2016,user_list,prepositional verb,medium,less_common,no,high
+vote into,2017,user_list,prepositional verb,medium,less_common,no,high
+vote off,2018,user_list,phrasal verb,medium,less_common,no,high
+vote onto,2019,user_list,prepositional verb,medium,less_common,no,high
+vote out,2020,user_list,phrasal verb,medium,less_common,no,high
+vote out of,2021,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+vote through,2022,user_list,prepositional verb,medium,less_common,no,high
+vouch for,2023,user_list,prepositional verb,medium,less_common,no,high
+wade in,2024,user_list,phrasal verb,medium,less_common,no,high
+wade into,2025,user_list,prepositional verb,medium,less_common,no,high
+wade through,2026,user_list,phrasal verb,medium,less_common,no,high
+wait about,2027,user_list,prepositional verb,medium,less_common,no,high
+wait around,2028,user_list,prepositional verb,medium,less_common,no,high
+wait behind,2029,user_list,prepositional verb,medium,less_common,no,high
+wait in,2030,user_list,prepositional verb,medium,less_common,no,high
+wait on,2031,user_list,prepositional verb,medium,less_common,no,high
+wait out,2032,user_list,phrasal verb,medium,less_common,no,high
+wait up,2033,user_list,phrasal verb,medium,less_common,no,high
+wake up,2034,user_list,phrasal verb,easy,very_common,no,high
+wake up to,2035,user_list,phrasal-prepositional verb,medium,common,no,medium
+walk away,2036,user_list,phrasal verb,medium,less_common,no,high
+walk away with,2037,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+walk in on,2038,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+walk into,2039,user_list,prepositional verb,medium,less_common,no,high
+walk off,2040,user_list,phrasal verb,medium,less_common,no,high
+walk off with,2041,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+walk out,2042,user_list,phrasal verb,medium,less_common,no,high
+walk over,2043,user_list,phrasal verb,medium,less_common,no,high
+walk through,2044,user_list,phrasal verb,medium,less_common,no,high
+walk up,2045,user_list,phrasal verb,medium,less_common,no,high
+wall in,2046,user_list,phrasal verb,medium,less_common,no,high
+wall off,2047,user_list,phrasal verb,medium,less_common,no,high
+wall up,2048,user_list,phrasal verb,medium,less_common,no,high
+waltz off,2049,user_list,phrasal verb,medium,less_common,no,high
+want for,2050,user_list,prepositional verb,medium,less_common,no,high
+want in,2051,user_list,phrasal verb,medium,less_common,no,high
+want into,2052,user_list,prepositional verb,medium,less_common,no,high
+want out,2053,user_list,phrasal verb,medium,less_common,no,high
+want out of,2054,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+ward off,2055,user_list,phrasal verb,medium,less_common,no,high
+warm down,2056,user_list,phrasal verb,medium,less_common,no,high
+warm to,2057,user_list,prepositional verb,medium,less_common,no,high
+warm towards,2058,user_list,prepositional verb,medium,less_common,no,high
+warm up,2059,user_list,phrasal verb,easy,very_common,no,high
+warn off,2060,user_list,phrasal verb,medium,less_common,no,high
+wash away,2061,user_list,phrasal verb,medium,less_common,no,high
+wash down,2062,user_list,phrasal verb,medium,less_common,no,high
+wash off,2063,user_list,phrasal verb,medium,less_common,no,high
+wash out,2064,user_list,phrasal verb,medium,less_common,no,high
+wash over,2065,user_list,phrasal verb,medium,less_common,no,high
+wash up,2066,user_list,phrasal verb,medium,less_common,no,high
+waste away,2067,user_list,phrasal verb,medium,less_common,no,high
+watch for,2068,user_list,prepositional verb,medium,less_common,no,high
+watch out,2069,user_list,phrasal verb,easy,very_common,no,high
+watch out for,2070,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+watch over,2071,user_list,phrasal verb,medium,less_common,no,high
+wave aside,2072,user_list,phrasal verb,medium,less_common,no,high
+wave away,2073,user_list,phrasal verb,medium,less_common,no,high
+wave down,2074,user_list,phrasal verb,medium,less_common,no,high
+wave off,2075,user_list,phrasal verb,medium,less_common,no,high
+wean from,2076,user_list,prepositional verb,medium,less_common,no,high
+wean off,2077,user_list,phrasal verb,medium,less_common,no,high
+wean on,2078,user_list,prepositional verb,medium,less_common,no,high
+wear away,2079,user_list,phrasal verb,medium,less_common,no,high
+wear down,2080,user_list,phrasal verb,medium,less_common,no,high
+wear off,2081,user_list,phrasal verb,medium,less_common,no,high
+wear on,2082,user_list,phrasal verb,medium,less_common,no,high
+wear out,2083,user_list,phrasal verb,medium,less_common,no,high
+weasel out,2084,user_list,phrasal verb,medium,less_common,no,high
+weed out,2085,user_list,phrasal verb,medium,less_common,no,high
+weigh down,2086,user_list,phrasal verb,medium,less_common,no,high
+weigh in,2087,user_list,prepositional verb,medium,less_common,no,high
+weigh on,2088,user_list,prepositional verb,medium,less_common,no,high
+weigh out,2089,user_list,phrasal verb,medium,less_common,no,high
+weigh up,2090,user_list,phrasal verb,medium,less_common,no,high
+weird out,2091,user_list,phrasal verb,medium,less_common,no,high
+wheel out,2092,user_list,phrasal verb,medium,less_common,no,high
+while away,2093,user_list,phrasal verb,medium,less_common,no,high
+whip through,2094,user_list,phrasal verb,medium,less_common,no,high
+whip up,2095,user_list,phrasal verb,medium,less_common,no,high
+whittle away,2096,user_list,phrasal verb,medium,less_common,no,high
+whittle down,2097,user_list,phrasal verb,medium,less_common,no,high
+wig out,2098,user_list,phrasal verb,hard,rare,no,high
+wimp out,2099,user_list,phrasal verb,hard,rare,no,high
+win around,2100,user_list,prepositional verb,medium,less_common,no,high
+win back,2101,user_list,phrasal verb,medium,less_common,no,high
+win out,2102,user_list,phrasal verb,medium,less_common,no,high
+win over,2103,user_list,prepositional verb,medium,less_common,no,high
+win round,2104,user_list,prepositional verb,medium,less_common,no,high
+win through,2105,user_list,prepositional verb,medium,less_common,no,high
+wind down,2106,user_list,phrasal verb,medium,less_common,no,high
+wink at,2107,user_list,prepositional verb,medium,less_common,no,high
+winnow out,2108,user_list,phrasal verb,medium,less_common,no,high
+wipe down,2109,user_list,phrasal verb,medium,less_common,no,high
+wipe off,2110,user_list,phrasal verb,medium,less_common,no,high
+wipe out,2111,user_list,phrasal verb,medium,less_common,no,high
+wise up,2112,user_list,phrasal verb,medium,less_common,no,high
+wish away,2113,user_list,phrasal verb,medium,less_common,no,high
+wish on,2114,user_list,prepositional verb,medium,less_common,no,high
+work around to,2115,user_list,phrasal-prepositional verb,medium,common,no,medium
+work at,2116,user_list,prepositional verb,medium,common,no,high
+work in,2117,user_list,prepositional verb,medium,common,no,high
+work into,2118,user_list,prepositional verb,medium,common,no,high
+work off,2119,user_list,phrasal verb,medium,common,no,high
+work on,2120,user_list,phrasal verb,easy,very_common,no,high
+work out,2121,user_list,phrasal verb,easy,very_common,no,high
+work over,2122,user_list,prepositional verb,medium,common,no,high
+work to,2123,user_list,prepositional verb,medium,common,no,high
+work towards,2124,user_list,prepositional verb,easy,very_common,no,high
+work up,2125,user_list,phrasal verb,medium,common,no,high
+worm out of,2126,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+worm your way into,2127,user_list,verb phrase,hard,less_common,no,low
+worm yourself into,2128,user_list,prepositional verb,medium,less_common,no,medium
+worry at,2129,user_list,prepositional verb,medium,less_common,no,high
+wrap it up,2130,user_list,phrasal verb,medium,less_common,no,high
+wrap up,2131,user_list,phrasal verb,medium,less_common,no,high
+wrest from,2132,user_list,prepositional verb,medium,less_common,no,high
+wriggle out of,2133,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+wriggle out of doing,2134,user_list,phrasal verb,hard,less_common,no,medium
+wring from,2135,user_list,prepositional verb,medium,less_common,no,high
+wring out of,2136,user_list,phrasal-prepositional verb,hard,less_common,no,medium
+write back,2137,user_list,phrasal verb,medium,common,no,high
+write down,2138,user_list,phrasal verb,easy,very_common,no,high
+write in,2139,user_list,prepositional verb,medium,common,no,high
+write into,2140,user_list,prepositional verb,medium,common,no,high
+write off,2141,user_list,phrasal verb,medium,common,no,high
+write out,2142,user_list,phrasal verb,medium,common,no,high
+write up,2143,user_list,phrasal verb,medium,common,no,high
+yield to,2144,user_list,prepositional verb,medium,less_common,no,high
+zip up,2145,user_list,phrasal verb,hard,rare,no,high
+zone out,2146,user_list,phrasal verb,medium,less_common,no,high
+break down,,added_common,phrasal verb,easy,very_common,yes,high
+break up,,added_common,phrasal verb,easy,very_common,yes,high
+bring back,,added_common,phrasal verb,easy,very_common,yes,high
+bring out,,added_common,phrasal verb,easy,very_common,yes,high
+bring up,,added_common,phrasal verb,easy,very_common,yes,high
+carry on,,added_common,phrasal verb,easy,very_common,yes,high
+catch up,,added_common,phrasal verb,easy,very_common,yes,high
+check in,,added_common,phrasal verb,easy,very_common,yes,high
+check out,,added_common,phrasal verb,easy,very_common,yes,high
+clean up,,added_common,phrasal verb,easy,very_common,yes,high
+come across,,added_common,phrasal verb,easy,very_common,yes,high
+come along,,added_common,phrasal verb,easy,very_common,yes,high
+come back,,added_common,phrasal verb,easy,very_common,yes,high
+come down with,,added_common,phrasal-prepositional verb,medium,very_common,yes,high
+come from,,added_common,prepositional verb,easy,very_common,yes,high
+come in,,added_common,phrasal verb,easy,very_common,yes,high
+come on,,added_common,phrasal verb,easy,very_common,yes,high
+come out,,added_common,phrasal verb,easy,very_common,yes,high
+come through,,added_common,phrasal verb,easy,very_common,yes,high
+come up,,added_common,phrasal verb,easy,very_common,yes,high
+come up with,,added_common,phrasal-prepositional verb,medium,very_common,yes,high
+count on,,added_common,phrasal verb,easy,very_common,yes,high
+cut off,,added_common,phrasal verb,easy,very_common,yes,high
+deal with,,added_common,prepositional verb,easy,very_common,yes,high
+end up,,added_common,phrasal verb,easy,very_common,yes,high
+fall apart,,added_common,phrasal verb,easy,very_common,yes,high
+figure out,,added_common,phrasal verb,easy,very_common,yes,high
+find out,,added_common,phrasal verb,easy,very_common,yes,high
+get along,,added_common,phrasal verb,easy,very_common,yes,high
+get along with,,added_common,phrasal-prepositional verb,medium,very_common,yes,high
+get away with,,added_common,phrasal-prepositional verb,medium,very_common,yes,high
+get back,,added_common,phrasal verb,easy,very_common,yes,high
+get in,,added_common,phrasal verb,easy,very_common,yes,high
+get into,,added_common,prepositional verb,easy,very_common,yes,high
+get off,,added_common,phrasal verb,easy,very_common,yes,high
+get on,,added_common,phrasal verb,easy,very_common,yes,high
+get out,,added_common,phrasal verb,easy,very_common,yes,high
+get over,,added_common,phrasal verb,easy,very_common,yes,high
+get rid of,,added_common,verb phrase,hard,very_common,yes,high
+get through,,added_common,phrasal verb,easy,very_common,yes,high
+get together,,added_common,phrasal verb,easy,very_common,yes,high
+get up,,added_common,phrasal verb,easy,very_common,yes,high
+give in,,added_common,phrasal verb,easy,very_common,yes,high
+give up,,added_common,phrasal verb,easy,very_common,yes,high
+go ahead,,added_common,phrasal verb,easy,very_common,yes,high
+go on,,added_common,phrasal verb,easy,very_common,yes,high
+go out,,added_common,phrasal verb,easy,very_common,yes,high
+go over,,added_common,phrasal verb,easy,very_common,yes,high
+go through,,added_common,phrasal verb,easy,very_common,yes,high
+grow up,,added_common,phrasal verb,easy,very_common,yes,high
+hand in,,added_common,phrasal verb,easy,very_common,yes,high
+hang around,,added_common,phrasal verb,easy,very_common,yes,high
+hang on,,added_common,phrasal verb,easy,very_common,yes,high
+hang out,,added_common,phrasal verb,easy,very_common,yes,high
+hold on,,added_common,phrasal verb,easy,very_common,yes,high
+keep on,,added_common,phrasal verb,easy,very_common,yes,high
+keep up,,added_common,phrasal verb,easy,very_common,yes,high
+look after,,added_common,prepositional verb,easy,very_common,yes,high
+look down on,,added_common,phrasal-prepositional verb,medium,very_common,yes,high
+look for,,added_common,prepositional verb,easy,very_common,yes,high
+look forward to,,added_common,phrasal-prepositional verb,medium,very_common,yes,high
+look into,,added_common,prepositional verb,easy,very_common,yes,high
+look out,,added_common,phrasal verb,easy,very_common,yes,high
+look up,,added_common,phrasal verb,easy,very_common,yes,high
+look up to,,added_common,phrasal-prepositional verb,medium,very_common,yes,high
+make out,,added_common,phrasal verb,easy,very_common,yes,high
+make up,,added_common,phrasal verb,easy,very_common,yes,high
+move in,,added_common,phrasal verb,easy,very_common,yes,high
+move on,,added_common,phrasal verb,easy,very_common,yes,high
+pick up,,added_common,phrasal verb,easy,very_common,yes,high
+point out,,added_common,phrasal verb,easy,very_common,yes,high
+pull over,,added_common,phrasal verb,easy,very_common,yes,high
+put on,,added_common,phrasal verb,easy,very_common,yes,high
+put out,,added_common,phrasal verb,easy,very_common,yes,high
+put up with,,added_common,phrasal-prepositional verb,medium,very_common,yes,high
+run into,,added_common,prepositional verb,easy,very_common,yes,high
+run out,,added_common,phrasal verb,easy,very_common,yes,high
+set up,,added_common,phrasal verb,easy,very_common,yes,high
+settle down,,added_common,phrasal verb,easy,very_common,yes,high
+show up,,added_common,phrasal verb,easy,very_common,yes,high
+shut down,,added_common,phrasal verb,easy,very_common,yes,high
+sit down,,added_common,phrasal verb,easy,very_common,yes,high
+stand up,,added_common,phrasal verb,easy,very_common,yes,high
+start up,,added_common,phrasal verb,easy,very_common,yes,high
+take off,,added_common,phrasal verb,easy,very_common,yes,high
+take on,,added_common,phrasal verb,easy,very_common,yes,high
+take over,,added_common,phrasal verb,easy,very_common,yes,high
+take up,,added_common,phrasal verb,easy,very_common,yes,high
