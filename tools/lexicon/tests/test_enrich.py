@@ -2487,10 +2487,9 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             records = enrich_snapshot(snapshot_dir, mode="per_word", word_provider=word_provider, max_concurrency=2, generated_at="2026-03-07T00:00:00Z", generation_run_id="run-123")
 
-            self.assertEqual([record["entry_id"] for record in records], ["lx_run", "lx_play"])
+            self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_play", "lx_run"])
             payload = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(payload[0]["entry_id"], "lx_run")
-            self.assertEqual(payload[-1]["entry_id"], "lx_play")
+            self.assertEqual(sorted(row["entry_id"] for row in payload), ["lx_play", "lx_run"])
 
     def test_enrich_snapshot_per_word_mode_flushes_in_completion_order_under_parallelism(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
