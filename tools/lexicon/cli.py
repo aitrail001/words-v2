@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from functools import partial
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -977,7 +978,11 @@ def _import_db_command(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='python -m tools.lexicon.cli', allow_abbrev=False)
-    subparsers = parser.add_subparsers(dest='command', required=True)
+    subparsers = parser.add_subparsers(
+        dest='command',
+        required=True,
+        parser_class=partial(argparse.ArgumentParser, allow_abbrev=False),
+    )
 
     build_base = subparsers.add_parser('build-base', help='build normalized base records for a bounded word list')
     build_base.add_argument('words', nargs='*', help='seed words to normalize and process')
@@ -1194,10 +1199,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     argv_list = list(argv) if argv is not None else None
     parser = build_parser()
-    if argv_list and argv_list[:1] == ['enrich'] and '--mode' in argv_list:
-        mode_index = argv_list.index('--mode')
-        rejected = argv_list[mode_index:mode_index + 2]
-        parser.error(f"unrecognized arguments: {' '.join(rejected)}")
     args = parser.parse_args(argv_list)
     runtime_logger = _build_runtime_logger(args)
     setattr(args, 'runtime_logger', runtime_logger)
