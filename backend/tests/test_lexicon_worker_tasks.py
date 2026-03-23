@@ -1,5 +1,4 @@
 import uuid
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.models.lexicon_job import LexiconJob
