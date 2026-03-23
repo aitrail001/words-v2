@@ -22,6 +22,8 @@ Important:
 - `tools/lexicon/.env.local` is not auto-loaded by the CLI
 - browser/admin apps should use same-origin `/api`; container proxying is handled by `BACKEND_URL`
 - default lexicon reasoning effort is `none`
+- `data/` is local-only operational storage and is not part of the Git-synced code checkout
+- keep using `data/lexicon/...` paths locally, but do not treat snapshot artifacts as repo-tracked fixtures
 
 ## 2. Canonical workflow
 
@@ -43,6 +45,8 @@ python3 -m tools.lexicon.cli build-base --rollout-stage 100 --output-dir data/le
 python3 -m tools.lexicon.cli build-base --top-words 1000 --output-dir data/lexicon/snapshots/words-1000
 python3 -m tools.lexicon.cli build-base run set lead --output-dir data/lexicon/snapshots/demo
 ```
+
+Use `data/lexicon/...` as a local workspace. Long-running enrich, batch, review-export, and import-prep commands should operate there so Git code sync stays separate from runtime artifact churn.
 
 Current base artifacts:
 
@@ -174,6 +178,9 @@ The admin portal no longer supports the old staged-selection review flow.
   - inspect `enrich.failures.jsonl` or `words.regenerate.jsonl`
 - Import does not see reviewed rows
   - confirm `reviewed/approved.jsonl` exists under the selected snapshot
+- Local code checkout is behind remote after a merge
+  - `git fetch origin && git pull --ff-only`
+  - remember that restarting a long-running lexicon command is required before it can pick up newly pulled code
 
 ## 11. Helper scripts
 
