@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useState, type CSSProperties } from "react";
 import {
   createKnowledgeMapSearchHistory,
   getKnowledgeMapEntryDetail,
@@ -14,6 +14,12 @@ import {
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
 
+type SearchHistoryItem = {
+  query: string;
+  entry_type: "word" | "phrase" | null;
+  entry_id: string | null;
+};
+
 const STATUS_LABELS: Record<KnowledgeStatus, string> = {
   undecided: "Undecided",
   to_learn: "Should Learn",
@@ -23,27 +29,57 @@ const STATUS_LABELS: Record<KnowledgeStatus, string> = {
 
 const STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
   { status: "to_learn", label: "Should Learn" },
-  { status: "known", label: "Known" },
   { status: "learning", label: "Learning" },
+  { status: "known", label: "Known" },
 ];
 
-function statusBadgeClass(status: KnowledgeStatus): string {
+function statusChipClass(status: KnowledgeStatus): string {
   switch (status) {
     case "known":
-      return "bg-emerald-100 text-emerald-800";
+      return "bg-[#dcfbff] text-[#1485a5]";
     case "learning":
-      return "bg-amber-100 text-amber-800";
+      return "bg-[#f0d9ff] text-[#8d3cff]";
     case "to_learn":
-      return "bg-rose-100 text-rose-800";
+      return "bg-[#ecd6ff] text-[#8e26ff]";
     default:
-      return "bg-slate-200 text-slate-700";
+      return "bg-[#e4e7f3] text-[#59607d]";
   }
+}
+
+function actionButtonClass(status: KnowledgeStatus, activeStatus: KnowledgeStatus): string {
+  if (status === activeStatus) {
+    return status === "known"
+      ? "bg-[#45c5dd] text-white"
+      : "bg-[#a52fff] text-white";
+  }
+
+  return "bg-white text-[#684f85]";
+}
+
+function buildHeroStyle(seed: string): CSSProperties {
+  const palettes = [
+    ["#2f1450", "#8f2fff", "#4bc6de"],
+    ["#211243", "#5d28bf", "#38d1c8"],
+    ["#38155d", "#bf2dff", "#63c7ff"],
+    ["#2b1247", "#7c3bff", "#46cddd"],
+  ];
+  const hash = Array.from(seed).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const palette = palettes[hash % palettes.length];
+
+  return {
+    backgroundImage: [
+      `radial-gradient(circle at 22% 18%, rgba(255,255,255,0.30), transparent 18%)`,
+      `radial-gradient(circle at 80% 15%, rgba(255,255,255,0.18), transparent 12%)`,
+      `radial-gradient(circle at 70% 72%, ${palette[2]}aa, transparent 30%)`,
+      `linear-gradient(160deg, ${palette[0]} 0%, ${palette[1]} 55%, ${palette[2]} 100%)`,
+    ].join(", "),
+  };
 }
 
 export default function KnowledgeEntryPage() {
   const params = useParams<{ entryType: "word" | "phrase"; entryId: string }>();
   const [detail, setDetail] = useState<KnowledgeMapEntryDetail | null>(null);
-  const [searchHistory, setSearchHistory] = useState<Array<{ query: string; entry_type: "word" | "phrase" | null; entry_id: string | null }>>([]);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<KnowledgeMapEntrySummary[]>([]);
 
@@ -128,107 +164,155 @@ export default function KnowledgeEntryPage() {
   };
 
   if (!detail) {
-    return <p className="text-sm text-slate-500">Loading learner detail…</p>;
+    return <p className="text-sm text-slate-500">Loading learner detail...</p>;
   }
 
+  const firstMeaning = detail.meanings[0];
+  const firstSense = detail.senses[0];
+  const topPartOfSpeech = firstMeaning?.part_of_speech ?? firstSense?.part_of_speech ?? null;
+  const topExample =
+    firstMeaning?.examples[0]?.sentence ??
+    firstSense?.examples[0]?.sentence ??
+    null;
+  const tips = detail.entry_type === "word"
+    ? detail.meanings.slice(0, 3).map((meaning, index) => ({
+        id: meaning.id,
+        title: meaning.part_of_speech
+          ? `${meaning.part_of_speech[0].toUpperCase()}${meaning.part_of_speech.slice(1)} Context`
+          : `Tip ${index + 1}`,
+        body: meaning.definition,
+        example: meaning.examples[0]?.sentence ?? null,
+      }))
+    : detail.senses.slice(0, 3).map((sense, index) => ({
+        id: sense.sense_id ?? `${index}`,
+        title: sense.part_of_speech
+          ? `${sense.part_of_speech[0].toUpperCase()}${sense.part_of_speech.slice(1)} Tip`
+          : `Tip ${index + 1}`,
+        body: sense.definition,
+        example: sense.examples[0]?.sentence ?? null,
+      }));
+
   return (
-    <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-      <section className="space-y-6">
-        <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-[linear-gradient(160deg,#0f3d3e_0%,#2f6d66_45%,#f4d9a7_100%)] p-6 text-white shadow-[0_24px_80px_rgba(37,64,74,0.1)]">
-          <div className="flex items-center justify-between">
-            <Link href="/" className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold">
-              Back To Map
-            </Link>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(detail.status)}`}>
+    <div
+      data-testid="knowledge-detail-mobile-shell"
+      className="mx-auto max-w-[27rem] space-y-5 pb-28 text-[#43235f]"
+    >
+      <section data-testid="knowledge-detail-hero" className="relative overflow-hidden rounded-[2.2rem] shadow-[0_20px_46px_rgba(84,46,135,0.16)]">
+        <div className="h-[24rem]" style={buildHeroStyle(detail.display_text)} />
+
+        <div className="absolute inset-x-0 top-0 flex items-center justify-between px-4 py-4">
+          <Link
+            href="/"
+            className="flex h-12 w-12 items-center justify-center rounded-full bg-white/75 text-xl font-semibold text-[#62368f] backdrop-blur"
+          >
+            x
+          </Link>
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/75 text-xl font-semibold text-[#62368f] backdrop-blur">
+            ...
+          </span>
+        </div>
+
+        <div className="absolute inset-x-0 bottom-0 h-36 bg-[linear-gradient(180deg,transparent,rgba(34,12,66,0.72))]" />
+      </section>
+
+      <section className="-mt-20 px-3">
+        <div className="space-y-4 rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,242,255,0.96))] px-5 py-5 shadow-[0_20px_44px_rgba(85,48,139,0.18)]">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-[2rem] font-semibold leading-none text-[#572c80]">
+                {detail.display_text}
+              </h1>
+                  <p className="mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-[#7c7395]">
+                    <span>{detail.pronunciation ?? "/.../"}</span>
+                    <span>#{detail.browse_rank.toLocaleString()}</span>
+                  </p>
+            </div>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(detail.status)}`}>
               Status: {STATUS_LABELS[detail.status]}
             </span>
           </div>
 
-          <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_0.95fr]">
-            <div className="rounded-[1.8rem] border border-white/20 bg-white/12 p-5 backdrop-blur">
-              <p className="text-xs uppercase tracking-[0.24em] text-white/70">Hero Placeholder</p>
-              <div className="mt-6 h-64 rounded-[1.4rem] border border-white/20 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.24),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(244,217,167,0.5),transparent_36%),rgba(255,255,255,0.08)]" />
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              {topPartOfSpeech && (
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#38bfd8]">
+                  {topPartOfSpeech}
+                </p>
+              )}
             </div>
-
-            <div className="rounded-[1.8rem] border border-white/20 bg-white/12 p-6 backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/70">
-                #{detail.browse_rank} · {detail.entry_type}
-              </p>
-              <h1 className="mt-2 text-4xl font-semibold">{detail.display_text}</h1>
-              {detail.pronunciation && <p className="mt-2 text-lg text-white/85">{detail.pronunciation}</p>}
-              {detail.translation && <p className="mt-3 text-lg text-[#f4d9a7]">{detail.translation}</p>}
-              <p className="mt-6 text-xl leading-8 text-white/95">{detail.primary_definition}</p>
-
-              <div className="mt-8 flex flex-wrap gap-3">
-                {STATUS_ACTIONS.map((action) => (
-                  <button
-                    key={action.status}
-                    type="button"
-                    onClick={() => updateStatus(action.status)}
-                    className="rounded-full border border-white/30 bg-white/10 px-4 py-2 text-sm font-semibold"
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-8 flex gap-3">
-                {detail.previous_entry && (
-                  <Link href={`/knowledge/${detail.previous_entry.entry_type}/${detail.previous_entry.entry_id}`} className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold">
-                    Previous
-                  </Link>
-                )}
-                {detail.next_entry && (
-                  <Link href={`/knowledge/${detail.next_entry.entry_type}/${detail.next_entry.entry_id}`} className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold">
-                    Next
-                  </Link>
-                )}
-              </div>
-            </div>
+            {detail.translation && (
+              <p className="text-lg font-semibold text-[#9a39f2]">{detail.translation}</p>
+            )}
           </div>
-        </div>
 
-        <div className="space-y-4 rounded-[2rem] border border-slate-200 bg-white/85 p-6 shadow-[0_24px_80px_rgba(37,64,74,0.08)]">
-          <h2 className="text-xl font-semibold text-slate-900">
-            {detail.entry_type === "word" ? "Definitions and examples" : "Phrase senses and examples"}
-          </h2>
+          <p className="text-[1.9rem] font-semibold leading-[1.2] text-[#4d295f]">
+            {detail.primary_definition}
+          </p>
+          {topExample && (
+            <p className="text-lg leading-8 text-[#6e5d82]">{topExample}</p>
+          )}
 
-          {detail.meanings.length > 0 &&
-            detail.meanings.map((meaning) => (
-              <article key={meaning.id} className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                  {meaning.part_of_speech ?? "Meaning"}
-                </p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">{meaning.definition}</p>
-                {meaning.examples.map((example) => (
-                  <p key={example.id} className="mt-4 text-sm text-slate-600">
-                    {example.sentence}
-                  </p>
-                ))}
-              </article>
-            ))}
-
-          {detail.senses.length > 0 &&
-            detail.senses.map((sense, index) => (
-              <article key={sense.sense_id ?? index} className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                  {sense.part_of_speech ?? `Sense ${index + 1}`}
-                </p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">{sense.definition}</p>
-                {sense.examples.map((example) => (
-                  <p key={example.id} className="mt-4 text-sm text-slate-600">
-                    {example.sentence}
-                  </p>
-                ))}
-              </article>
-            ))}
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#5f238d] text-lg font-semibold text-white">
+              &gt;
+            </span>
+            {detail.previous_entry && (
+              <Link
+                href={`/knowledge/${detail.previous_entry.entry_type}/${detail.previous_entry.entry_id}`}
+                className="rounded-full bg-[#f1ddff] px-4 py-2 text-sm font-semibold text-[#7d2cff]"
+              >
+                Previous
+              </Link>
+            )}
+            {detail.next_entry && (
+              <Link
+                href={`/knowledge/${detail.next_entry.entry_type}/${detail.next_entry.entry_id}`}
+                className="rounded-full bg-[#e0f9ff] px-4 py-2 text-sm font-semibold text-[#1687a6]"
+              >
+                Next
+              </Link>
+            )}
+          </div>
         </div>
       </section>
 
-      <aside className="space-y-6 rounded-[2rem] border border-slate-200 bg-white/85 p-6 shadow-[0_24px_80px_rgba(37,64,74,0.08)]">
+      <section data-testid="knowledge-detail-pro-tips" className="space-y-4 rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,240,252,0.94))] px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+        <div className="text-center">
+          <p className="text-sm font-semibold tracking-[0.12em] text-[#8e38f2]">Pro Tips</p>
+        </div>
+
+        {tips.length === 0 && (
+          <article className="rounded-[1.6rem] bg-white px-5 py-5 shadow-[0_10px_24px_rgba(86,54,145,0.08)]">
+            <h2 className="text-2xl font-semibold text-[#572c80]">Usage Tip</h2>
+            <p className="mt-3 text-lg leading-8 text-[#5c476f]">
+              Search nearby entries or move to the next card to compare similar words and phrases.
+            </p>
+          </article>
+        )}
+
+        {tips.map((tip) => (
+          <article
+            key={tip.id}
+            className="rounded-[1.6rem] bg-white px-5 py-5 shadow-[0_10px_24px_rgba(86,54,145,0.08)]"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <h2 className="text-2xl font-semibold text-[#572c80]">{tip.title}</h2>
+              <span className="rounded-full bg-[#f1ddff] px-3 py-2 text-xs font-semibold text-[#7d2cff]">
+                Tip
+              </span>
+            </div>
+            <p className="mt-3 text-lg leading-8 text-[#5c476f]">{tip.body}</p>
+            {tip.example && (
+              <p className="mt-4 text-base leading-7 text-[#8b7a9c]">{tip.example}</p>
+            )}
+          </article>
+        ))}
+      </section>
+
+      <section className="space-y-4 rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,240,252,0.94))] px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Search</h2>
-          <p className="mt-1 text-sm text-slate-600">
+          <h2 className="text-lg font-semibold text-[#53287c]">Search</h2>
+          <p className="mt-1 text-sm leading-6 text-[#726682]">
             Search the catalog from within the detail screen and reopen what you searched recently.
           </p>
         </div>
@@ -238,16 +322,17 @@ export default function KnowledgeEntryPage() {
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
           placeholder="Search your knowledge map"
-          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400"
+          className="w-full rounded-[1rem] border border-[#ddd8ee] bg-white px-4 py-3 text-sm text-[#3d2456] outline-none placeholder:text-[#a199b3]"
         />
 
         <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-            Recent Searches
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#84789b]">Recent Searches</p>
           <div className="flex flex-wrap gap-2">
             {searchHistory.map((item) => (
-              <span key={`${item.query}-${item.entry_id ?? "none"}`} className="rounded-full bg-slate-100 px-3 py-1.5 text-sm text-slate-700">
+              <span
+                key={`${item.query}-${item.entry_id ?? "none"}`}
+                className="rounded-full bg-[#f1e8fb] px-3 py-1.5 text-sm font-semibold text-[#7345ab]"
+              >
                 {item.query}
               </span>
             ))}
@@ -256,23 +341,39 @@ export default function KnowledgeEntryPage() {
 
         {searchResults.length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-              Results
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#84789b]">Results</p>
             {searchResults.map((item) => (
               <Link
                 key={`${item.entry_type}-${item.entry_id}`}
                 href={`/knowledge/${item.entry_type}/${item.entry_id}`}
                 onClick={() => void rememberSearch(item)}
-                className="block rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                className="block rounded-[1rem] bg-white px-4 py-3 shadow-[0_10px_20px_rgba(86,54,145,0.08)]"
               >
-                <p className="font-semibold text-slate-900">{item.display_text}</p>
-                <p className="text-sm text-slate-500">{item.translation ?? item.primary_definition ?? "No summary yet"}</p>
+                <p className="font-semibold text-[#572b80]">{item.display_text}</p>
+                <p className="text-sm text-[#7d6f95]">
+                  {item.translation ?? item.primary_definition ?? "No summary yet"}
+                </p>
               </Link>
             ))}
           </div>
         )}
-      </aside>
+      </section>
+
+      <div
+        data-testid="knowledge-detail-bottom-bar"
+        className="fixed bottom-4 left-1/2 z-20 flex w-[min(27rem,calc(100vw-2rem))] -translate-x-1/2 gap-3 rounded-[1.3rem] bg-[rgba(245,240,252,0.96)] p-3 shadow-[0_18px_42px_rgba(84,46,135,0.18)] backdrop-blur"
+      >
+        {STATUS_ACTIONS.map((action) => (
+          <button
+            key={action.status}
+            type="button"
+            onClick={() => void updateStatus(action.status)}
+            className={`flex-1 rounded-[0.95rem] px-3 py-3 text-sm font-semibold ${actionButtonClass(action.status, detail.status)}`}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -19,6 +19,7 @@ type InjectTokenOptions = {
 };
 
 export type AuthUser = {
+  id: string;
   email: string;
   password: string;
   token: string;
@@ -100,7 +101,18 @@ export const registerViaApi = async (
   expect(body.access_token).toBeTruthy();
   expect(body.refresh_token).toBeTruthy();
 
+  const meResponse = await request.get(`${API_URL}/auth/me`, {
+    headers: {
+      Authorization: `Bearer ${body.access_token}`,
+    },
+  });
+
+  expect(meResponse.ok()).toBeTruthy();
+  const me = (await meResponse.json()) as { id: string };
+  expect(me.id).toBeTruthy();
+
   return {
+    id: me.id,
     email,
     password,
     token: body.access_token,

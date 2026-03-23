@@ -1,6 +1,8 @@
 import {
   createKnowledgeMapSearchHistory,
+  getKnowledgeMapDashboard,
   getKnowledgeMapEntryDetail,
+  getKnowledgeMapList,
   getKnowledgeMapOverview,
   getKnowledgeMapRange,
   getKnowledgeMapSearchHistory,
@@ -20,7 +22,7 @@ describe("knowledge-map-client", () => {
   const mockApiClient = require("@/lib/api-client").apiClient;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
   it("loads the overview", async () => {
@@ -30,6 +32,15 @@ describe("knowledge-map-client", () => {
 
     expect(result).toEqual({ bucket_size: 100, ranges: [] });
     expect(mockApiClient.get).toHaveBeenCalledWith("/knowledge-map/overview");
+  });
+
+  it("loads the dashboard summary", async () => {
+    mockApiClient.get.mockResolvedValueOnce({ total_entries: 10 });
+
+    const result = await getKnowledgeMapDashboard();
+
+    expect(result).toEqual({ total_entries: 10 });
+    expect(mockApiClient.get).toHaveBeenCalledWith("/knowledge-map/dashboard");
   });
 
   it("loads a selected range", async () => {
@@ -69,6 +80,22 @@ describe("knowledge-map-client", () => {
 
     expect(result).toEqual({ items: [] });
     expect(mockApiClient.get).toHaveBeenCalledWith("/knowledge-map/search?q=bank%20on");
+  });
+
+  it("loads a filtered learner list", async () => {
+    mockApiClient.get.mockResolvedValueOnce({ items: [] });
+
+    const result = await getKnowledgeMapList({
+      status: "to_learn",
+      q: "bank",
+      sort: "rank_desc",
+      limit: 20,
+    });
+
+    expect(result).toEqual({ items: [] });
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      "/knowledge-map/list?status=to_learn&q=bank&sort=rank_desc&limit=20",
+    );
   });
 
   it("loads search history", async () => {

@@ -22,6 +22,8 @@ STATUS_VALUES = ("undecided", "to_learn", "learning", "known")
 ENTRY_TYPES = ("word", "phrase")
 BUCKET_SIZE = 100
 UNRANKED_BASE = 1_000_000
+LIST_STATUS_VALUES = ("new", "to_learn", "learning", "known")
+LIST_SORT_VALUES = ("rank", "rank_desc", "alpha")
 
 
 def default_preferences() -> UserPreference:
@@ -208,6 +210,70 @@ def build_overview(items: Sequence[dict]) -> dict:
         "bucket_size": BUCKET_SIZE,
         "total_entries": len(items),
         "ranges": [buckets[key] for key in sorted(buckets)],
+    }
+
+
+def filter_catalog_items(
+    items: Sequence[dict],
+    *,
+    status: str | None = None,
+    q: str | None = None,
+) -> list[dict]:
+    filtered = list(items)
+
+    if status:
+        mapped_status = "undecided" if status == "new" else status
+        filtered = [item for item in filtered if item["status"] == mapped_status]
+
+    if q:
+        lowered = q.strip().lower()
+        if lowered:
+            filtered = [
+                item
+                for item in filtered
+                if lowered in (item["display_text"] or "").lower()
+                or lowered in (item["normalized_form"] or "").lower()
+            ]
+
+    return filtered
+
+
+def sort_catalog_items(items: Sequence[dict], sort: str) -> list[dict]:
+    if sort == "rank_desc":
+        return sorted(items, key=lambda item: (-item["browse_rank"], item["display_text"].lower()))
+    if sort == "alpha":
+        return sorted(items, key=lambda item: (item["display_text"].lower(), item["browse_rank"]))
+    return sorted(items, key=lambda item: (item["browse_rank"], item["display_text"].lower()))
+
+
+def build_dashboard_summary(items: Sequence[dict]) -> dict:
+    counts = {status: 0 for status in STATUS_VALUES}
+    for item in items:
+        counts[item["status"]] += 1
+
+    discovery_entry = next((item for item in items if item["status"] != "known"), None)
+    discovery_range_start = (
+        bucket_start_for_rank(discovery_entry["browse_rank"])
+        if discovery_entry is not None
+        else (bucket_start_for_rank(items[0]["browse_rank"]) if items else None)
+    )
+    next_learn_entry = (
+        next((item for item in items if item["status"] == "to_learn"), None)
+        or next((item for item in items if item["status"] == "learning"), None)
+        or discovery_entry
+    )
+
+    return {
+        "total_entries": len(items),
+        "counts": counts,
+        "discovery_range_start": discovery_range_start,
+        "discovery_range_end": (
+            discovery_range_start + BUCKET_SIZE - 1
+            if discovery_range_start is not None
+            else None
+        ),
+        "discovery_entry": discovery_entry,
+        "next_learn_entry": next_learn_entry,
     }
 
 

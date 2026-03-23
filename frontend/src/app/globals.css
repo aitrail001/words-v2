@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --page-ink: #172a33;
-  --page-bg: #f4efe4;
+  --page-ink: #43235f;
+  --page-bg: #eef0f8;
 }
 
 html {
   background:
-    radial-gradient(circle at top left, rgba(25, 168, 134, 0.14), transparent 32%),
-    radial-gradient(circle at top right, rgba(227, 93, 91, 0.12), transparent 24%),
-    linear-gradient(180deg, #fbf7ee 0%, #f2eee4 100%);
+    radial-gradient(circle at top left, rgba(90, 41, 184, 0.14), transparent 28%),
+    radial-gradient(circle at top right, rgba(54, 195, 222, 0.16), transparent 22%),
+    linear-gradient(180deg, #f6f7fc 0%, #ececf7 100%);
 }
 
 body {

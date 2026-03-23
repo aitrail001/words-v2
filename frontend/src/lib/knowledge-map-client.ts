@@ -29,6 +29,27 @@ export type KnowledgeMapOverview = {
   }>;
 };
 
+export type KnowledgeMapDashboard = {
+  total_entries: number;
+  counts: Record<KnowledgeStatus, number>;
+  discovery_range_start: number | null;
+  discovery_range_end: number | null;
+  discovery_entry: {
+    entry_type: KnowledgeEntryType;
+    entry_id: string;
+    display_text: string;
+    browse_rank: number;
+    status: KnowledgeStatus;
+  } | null;
+  next_learn_entry: {
+    entry_type: KnowledgeEntryType;
+    entry_id: string;
+    display_text: string;
+    browse_rank: number;
+    status: KnowledgeStatus;
+  } | null;
+};
+
 export type KnowledgeMapRange = {
   range_start: number;
   range_end: number;
@@ -79,8 +100,14 @@ export type KnowledgeMapSearchHistoryList = {
   }>;
 };
 
+export type KnowledgeMapListStatus = "new" | "to_learn" | "learning" | "known";
+export type KnowledgeMapListSort = "rank" | "rank_desc" | "alpha";
+
 export const getKnowledgeMapOverview = (): Promise<KnowledgeMapOverview> =>
   apiClient.get<KnowledgeMapOverview>("/knowledge-map/overview");
+
+export const getKnowledgeMapDashboard = (): Promise<KnowledgeMapDashboard> =>
+  apiClient.get<KnowledgeMapDashboard>("/knowledge-map/dashboard");
 
 export const getKnowledgeMapRange = (rangeStart: number): Promise<KnowledgeMapRange> =>
   apiClient.get<KnowledgeMapRange>(`/knowledge-map/ranges/${rangeStart}`);
@@ -100,6 +127,26 @@ export const updateKnowledgeEntryStatus = (
 
 export const searchKnowledgeMap = (query: string): Promise<{ items: KnowledgeMapEntrySummary[] }> =>
   apiClient.get<{ items: KnowledgeMapEntrySummary[] }>(`/knowledge-map/search?q=${encodeURIComponent(query)}`);
+
+export const getKnowledgeMapList = (params: {
+  status: KnowledgeMapListStatus;
+  q?: string;
+  sort?: KnowledgeMapListSort;
+  limit?: number;
+}): Promise<{ items: KnowledgeMapEntrySummary[] }> => {
+  const searchParams = new URLSearchParams();
+  searchParams.set("status", params.status);
+  if (params.q) {
+    searchParams.set("q", params.q);
+  }
+  if (params.sort) {
+    searchParams.set("sort", params.sort);
+  }
+  if (params.limit) {
+    searchParams.set("limit", String(params.limit));
+  }
+  return apiClient.get<{ items: KnowledgeMapEntrySummary[] }>(`/knowledge-map/list?${searchParams.toString()}`);
+};
 
 export const getKnowledgeMapSearchHistory = (): Promise<KnowledgeMapSearchHistoryList> =>
   apiClient.get<KnowledgeMapSearchHistoryList>("/knowledge-map/search-history");

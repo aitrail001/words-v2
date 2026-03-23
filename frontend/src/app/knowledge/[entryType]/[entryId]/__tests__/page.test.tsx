@@ -67,8 +67,12 @@ describe("KnowledgeEntryPage", () => {
     render(<KnowledgeEntryPage />);
 
     expect(await screen.findByText("Bank")).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-detail-mobile-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-detail-hero")).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-detail-bottom-bar")).toBeInTheDocument();
     expect(screen.getByText("/baŋk/")).toBeInTheDocument();
     expect(screen.getAllByText("A financial institution.").length).toBeGreaterThan(0);
+    expect(screen.getByText(/pro tips/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /known/i }));
 
@@ -110,5 +114,6 @@ describe("KnowledgeEntryPage", () => {
     expect(screen.getAllByText("To rely on someone.").length).toBeGreaterThan(0);
     expect(screen.getByText(/recent searches/i)).toBeInTheDocument();
     expect(screen.getByText("bank")).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-detail-pro-tips")).toBeInTheDocument();
   });
 });

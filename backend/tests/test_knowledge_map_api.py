@@ -121,13 +121,75 @@ class TestKnowledgeMapOverview:
         assert data["ranges"][1]["counts"]["learning"] == 1
 
 
+class TestKnowledgeMapDashboard:
+    @pytest.mark.asyncio
+    async def test_dashboard_returns_summary_and_next_steps(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word_known = Word(id=uuid.uuid4(), word="the", language="en", frequency_rank=1)
+        word_new = Word(id=uuid.uuid4(), word="resilience", language="en", frequency_rank=20)
+        word_learning = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=140)
+        phrase_to_learn = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="bank on",
+            normalized_form="bank on",
+            phrase_kind="phrasal_verb",
+            language="en",
+        )
+        statuses = [
+            LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_known.id, status="known"),
+            LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_learning.id, status="learning"),
+            LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase_to_learn.id, status="to_learn"),
+        ]
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalars_all_result([word_known, word_new, word_learning]),
+            scalars_all_result([phrase_to_learn]),
+            scalars_all_result(statuses),
+        ]
+
+        response = await client.get(
+            "/api/knowledge-map/dashboard",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_entries"] == 4
+        assert data["counts"] == {
+            "undecided": 1,
+            "to_learn": 1,
+            "learning": 1,
+            "known": 1,
+        }
+        assert data["discovery_range_start"] == 1
+        assert data["discovery_range_end"] == 100
+        assert data["discovery_entry"]["entry_type"] == "word"
+        assert data["discovery_entry"]["display_text"] == "resilience"
+        assert data["next_learn_entry"]["entry_type"] == "phrase"
+        assert data["next_learn_entry"]["display_text"] == "bank on"
+
+
 class TestKnowledgeMapRange:
     @pytest.mark.asyncio
     async def test_range_returns_mixed_entries(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)
-        word = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=20, phonetic="/bæŋk/")
+        preferences = UserPreference(user_id=user_id, accent_preference="uk", translation_locale="es")
+        word = Word(
+            id=uuid.uuid4(),
+            word="bank",
+            language="en",
+            frequency_rank=20,
+            phonetic="/bæŋk/",
+            phonetics={
+                "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+                "uk": {"ipa": "/baŋk/", "confidence": 0.98},
+            },
+        )
         word_meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
+        translation = Translation(id=uuid.uuid4(), meaning_id=word_meaning.id, language="es", translation="banco")
         phrase = PhraseEntry(
             id=uuid.uuid4(),
             phrase_text="bank on",
@@ -150,7 +212,10 @@ class TestKnowledgeMapRange:
             scalars_all_result([word]),
             scalars_all_result([phrase]),
             scalars_all_result(statuses),
+            scalar_one_or_none_result(preferences),
             scalars_all_result([word_meaning]),
+            scalars_all_result([translation]),
+            scalars_all_result([word]),
         ]
 
         response = await client.get(
@@ -164,7 +229,68 @@ class TestKnowledgeMapRange:
         assert len(data["items"]) == 2
         assert data["items"][0]["entry_type"] == "word"
         assert data["items"][0]["status"] == "to_learn"
+        assert data["items"][0]["pronunciation"] == "/baŋk/"
+        assert data["items"][0]["translation"] == "banco"
         assert data["items"][1]["entry_type"] == "phrase"
+
+
+class TestKnowledgeMapList:
+    @pytest.mark.asyncio
+    async def test_list_filters_and_sorts_entries(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word_known = Word(id=uuid.uuid4(), word="the", language="en", frequency_rank=1)
+        word_new = Word(id=uuid.uuid4(), word="resilience", language="en", frequency_rank=20)
+        word_learning = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=140)
+        phrase_to_learn = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="bank on",
+            normalized_form="bank on",
+            phrase_kind="phrasal_verb",
+            language="en",
+        )
+        statuses = [
+            LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_known.id, status="known"),
+            LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_learning.id, status="learning"),
+            LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase_to_learn.id, status="to_learn"),
+        ]
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalars_all_result([word_known, word_new, word_learning]),
+            scalars_all_result([phrase_to_learn]),
+            scalars_all_result(statuses),
+            scalar_one_or_none_result(user),
+            scalars_all_result([word_known, word_new, word_learning]),
+            scalars_all_result([phrase_to_learn]),
+            scalars_all_result(statuses),
+            scalar_one_or_none_result(user),
+            scalars_all_result([word_known, word_new, word_learning]),
+            scalars_all_result([phrase_to_learn]),
+            scalars_all_result(statuses),
+        ]
+
+        new_response = await client.get(
+            "/api/knowledge-map/list?status=new&sort=rank",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert new_response.status_code == 200
+        assert [item["display_text"] for item in new_response.json()["items"]] == ["resilience"]
+
+        learning_response = await client.get(
+            "/api/knowledge-map/list?status=learning&sort=alpha",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert learning_response.status_code == 200
+        assert [item["display_text"] for item in learning_response.json()["items"]] == ["bank"]
+
+        search_response = await client.get(
+            "/api/knowledge-map/list?status=to_learn&q=bank&sort=rank_desc",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert search_response.status_code == 200
+        payload = search_response.json()
+        assert [item["display_text"] for item in payload["items"]] == ["bank on"]
 
 
 class TestKnowledgeMapDetail:

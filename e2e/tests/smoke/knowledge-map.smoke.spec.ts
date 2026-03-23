@@ -1,0 +1,81 @@
+import { expect, test } from "@playwright/test";
+import { injectToken, registerViaApi } from "../helpers/auth";
+import {
+  LEARN_WORD,
+  KNOWLEDGE_PHRASE,
+  KNOWLEDGE_WORD,
+  seedKnowledgeMapFixture,
+} from "../helpers/knowledge-map-fixture";
+
+test("@smoke learner knowledge map supports mixed catalog browsing and persisted statuses", async ({
+  page,
+  request,
+}) => {
+  const user = await registerViaApi(request, "knowledge-map");
+  const fixture = await seedKnowledgeMapFixture(user.id);
+
+  await injectToken(page, user.token);
+
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByText("Words Uncovered")).toBeVisible();
+  await expect(page.getByRole("link", { name: /new/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /started/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /to learn/i })).toBeVisible();
+
+  await page.getByRole("link", { name: /new/i }).click();
+  await expect(page).toHaveURL(/\/knowledge-list\/new$/);
+  await expect(page.getByRole("heading", { name: "New Words" })).toBeVisible();
+  await expect(page.getByText(KNOWLEDGE_WORD, { exact: false })).toBeVisible();
+  await page.getByRole("link", { name: new RegExp(KNOWLEDGE_WORD, "i") }).click();
+  await expect(page).toHaveURL(new RegExp(`/knowledge/word/${fixture.wordId}$`));
+  await expect(page.getByRole("heading", { name: KNOWLEDGE_WORD })).toBeVisible();
+  await expect(page.getByText("The ability to recover quickly from setbacks.").first()).toBeVisible();
+  await expect(page.getByText("Resilience helps teams adapt to sudden change.").first()).toBeVisible();
+  await page.getByRole("button", { name: "Known" }).click();
+  await expect(page.getByText("Status: Known")).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("link", { name: /started/i }).click();
+  await expect(page).toHaveURL(/\/knowledge-list\/learning$/);
+  await expect(page.getByRole("heading", { name: "Learning Words" })).toBeVisible();
+  await expect(page.getByText(KNOWLEDGE_PHRASE, { exact: false })).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("link", { name: /to learn/i }).click();
+  await expect(page).toHaveURL(/\/knowledge-list\/to-learn$/);
+  await expect(page.getByRole("heading", { name: "To Learn" })).toBeVisible();
+  await expect(page.getByText(LEARN_WORD, { exact: false })).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("link", { name: /discover/i }).click();
+  await expect(page).toHaveURL(/\/knowledge-map/);
+  await expect(page.getByRole("heading", { name: "Full Knowledge Map" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /range /i })).toBeVisible();
+
+  await page.getByPlaceholder("Search your knowledge map").fill("bank");
+  const phraseResult = page.getByRole("link", { name: new RegExp(KNOWLEDGE_PHRASE, "i") });
+  await expect(phraseResult).toBeVisible();
+  await phraseResult.click();
+
+  await expect(page).toHaveURL(new RegExp(`/knowledge/phrase/${fixture.phraseId}$`));
+  await expect(page.getByRole("heading", { name: KNOWLEDGE_PHRASE })).toBeVisible();
+  await expect(page.getByText("To depend on someone or something.").first()).toBeVisible();
+  await expect(page.getByText("depender de")).toBeVisible();
+  await expect(page.getByText("You can bank on me when the deadline gets tight.").first()).toBeVisible();
+  await expect(page.getByText("Status: Learning")).toBeVisible();
+
+  await page.getByRole("button", { name: "Known" }).click();
+  await expect(page.getByText("Status: Known")).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("link", { name: /learn next:/i }).click();
+  await expect(page).toHaveURL(new RegExp(`/knowledge/word/${fixture.learnWordId}$`));
+  await expect(page.getByRole("heading", { name: LEARN_WORD })).toBeVisible();
+  await expect(page.getByText("tambor")).toBeVisible();
+
+  await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByText("Learning")).toBeVisible();
+  await expect(page.getByText("Translation")).toBeVisible();
+});

@@ -11,24 +11,30 @@ from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.meaning import Meaning
 from app.models.phrase_entry import PhraseEntry
 from app.models.search_history import SearchHistory
+from app.models.translation import Translation
 from app.models.user import User
 from app.models.word import Word
 from app.services.knowledge_map import (
     ENTRY_TYPES,
+    LIST_SORT_VALUES,
+    LIST_STATUS_VALUES,
     STATUS_VALUES,
     build_catalog,
     build_catalog_items,
+    build_dashboard_summary,
     build_overview,
     build_range,
     build_word_translation_map,
     extract_phrase_primary_definition,
     extract_phrase_translation,
+    filter_catalog_items,
     get_preferences,
     get_status_row,
     list_search_history,
     load_word_detail_relations,
     load_word_primary_definitions,
     select_pronunciation,
+    sort_catalog_items,
 )
 
 router = APIRouter()
@@ -52,6 +58,23 @@ class KnowledgeMapOverviewResponse(BaseModel):
     bucket_size: int
     total_entries: int
     ranges: list[OverviewRangeResponse]
+
+
+class KnowledgeMapAdjacentEntryResponse(BaseModel):
+    entry_type: str
+    entry_id: str
+    display_text: str
+    browse_rank: int
+    status: str
+
+
+class KnowledgeMapDashboardResponse(BaseModel):
+    total_entries: int
+    counts: RangeCountsResponse
+    discovery_range_start: int | None
+    discovery_range_end: int | None
+    discovery_entry: KnowledgeMapAdjacentEntryResponse | None
+    next_learn_entry: KnowledgeMapAdjacentEntryResponse | None
 
 
 class KnowledgeMapEntrySummary(BaseModel):
@@ -78,6 +101,10 @@ class KnowledgeMapRangeResponse(BaseModel):
 
 
 class KnowledgeMapSearchResponse(BaseModel):
+    items: list[KnowledgeMapEntrySummary]
+
+
+class KnowledgeMapListResponse(BaseModel):
     items: list[KnowledgeMapEntrySummary]
 
 
@@ -214,6 +241,18 @@ def _adjacent_entry(item: dict | None) -> AdjacentEntryResponse | None:
     )
 
 
+def _dashboard_entry(item: dict | None) -> KnowledgeMapAdjacentEntryResponse | None:
+    if item is None:
+        return None
+    return KnowledgeMapAdjacentEntryResponse(
+        entry_type=item["entry_type"],
+        entry_id=str(item["entry_id"]),
+        display_text=item["display_text"],
+        browse_rank=item["browse_rank"],
+        status=item["status"],
+    )
+
+
 @router.get("/overview", response_model=KnowledgeMapOverviewResponse)
 async def get_knowledge_map_overview(
     current_user: User = Depends(get_current_user),
@@ -221,6 +260,42 @@ async def get_knowledge_map_overview(
 ):
     overview = build_overview(await build_catalog(db, current_user.id))
     return KnowledgeMapOverviewResponse(**overview)
+
+
+@router.get("/dashboard", response_model=KnowledgeMapDashboardResponse)
+async def get_knowledge_map_dashboard(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    summary = build_dashboard_summary(await build_catalog(db, current_user.id))
+    return KnowledgeMapDashboardResponse(
+        total_entries=summary["total_entries"],
+        counts=RangeCountsResponse(**summary["counts"]),
+        discovery_range_start=summary["discovery_range_start"],
+        discovery_range_end=summary["discovery_range_end"],
+        discovery_entry=_dashboard_entry(summary["discovery_entry"]),
+        next_learn_entry=_dashboard_entry(summary["next_learn_entry"]),
+    )
+
+
+@router.get("/list", response_model=KnowledgeMapListResponse)
+async def get_knowledge_map_list(
+    status_filter: str = Query(..., alias="status"),
+    q: str | None = Query(default=None),
+    sort: str = Query(default="rank"),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if status_filter not in LIST_STATUS_VALUES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported knowledge list status")
+    if sort not in LIST_SORT_VALUES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported knowledge list sort")
+
+    items = await build_catalog(db, current_user.id)
+    filtered = filter_catalog_items(items, status=status_filter, q=q)
+    ordered = sort_catalog_items(filtered, sort)[:limit]
+    return KnowledgeMapListResponse(items=[_summary_from_item(item) for item in ordered])
 
 
 @router.get("/ranges/{range_start}", response_model=KnowledgeMapRangeResponse)
@@ -231,13 +306,32 @@ async def get_knowledge_map_range(
 ):
     items = await build_catalog(db, current_user.id)
     range_payload = build_range(items, range_start)
+    preferences = await get_preferences(db, current_user.id)
     word_ids = [item["entry_id"] for item in range_payload["items"] if item["entry_type"] == "word"]
     primary_meanings = await load_word_primary_definitions(db, word_ids)
+    translations_result = await db.execute(
+        select(Translation)
+        .where(Translation.meaning_id.in_([meaning.id for meaning in primary_meanings.values()]))
+        .order_by(Translation.meaning_id.asc(), Translation.language.asc())
+    )
+    translation_map = build_word_translation_map(
+        translations_result.scalars().all(),
+        preferences.translation_locale,
+    )
+    words_result = await db.execute(select(Word).where(Word.id.in_(word_ids)))
+    words_by_id = {word.id: word for word in words_result.scalars().all()}
 
     for item in range_payload["items"]:
         if item["entry_type"] == "word":
             meaning = primary_meanings.get(item["entry_id"])
+            word = words_by_id.get(item["entry_id"])
             item["primary_definition"] = meaning.definition if meaning is not None else None
+            item["translation"] = translation_map.get(meaning.id) if meaning is not None else None
+            item["pronunciation"] = (
+                select_pronunciation(word, preferences.accent_preference)
+                if word is not None
+                else item.get("pronunciation")
+            )
 
     return KnowledgeMapRangeResponse(
         range_start=range_payload["range_start"],

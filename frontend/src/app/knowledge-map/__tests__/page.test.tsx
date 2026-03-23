@@ -1,9 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import HomePage from "@/app/page";
-import { getAuthRedirectPath } from "@/lib/auth-route-guard";
+import KnowledgeMapPage from "@/app/knowledge-map/page";
 import {
-  getKnowledgeMapDashboard,
+  getKnowledgeMapEntryDetail,
   getKnowledgeMapOverview,
   getKnowledgeMapRange,
   getKnowledgeMapSearchHistory,
@@ -15,10 +14,10 @@ import { getUserPreferences } from "@/lib/user-preferences-client";
 jest.mock("@/lib/knowledge-map-client");
 jest.mock("@/lib/user-preferences-client");
 
-describe("HomePage (Knowledge Map)", () => {
-  const mockGetKnowledgeMapDashboard = getKnowledgeMapDashboard as jest.MockedFunction<typeof getKnowledgeMapDashboard>;
+describe("KnowledgeMapPage", () => {
   const mockGetKnowledgeMapOverview = getKnowledgeMapOverview as jest.MockedFunction<typeof getKnowledgeMapOverview>;
   const mockGetKnowledgeMapRange = getKnowledgeMapRange as jest.MockedFunction<typeof getKnowledgeMapRange>;
+  const mockGetKnowledgeMapEntryDetail = getKnowledgeMapEntryDetail as jest.MockedFunction<typeof getKnowledgeMapEntryDetail>;
   const mockGetKnowledgeMapSearchHistory = getKnowledgeMapSearchHistory as jest.MockedFunction<typeof getKnowledgeMapSearchHistory>;
   const mockSearchKnowledgeMap = searchKnowledgeMap as jest.MockedFunction<typeof searchKnowledgeMap>;
   const mockUpdateKnowledgeEntryStatus = updateKnowledgeEntryStatus as jest.MockedFunction<typeof updateKnowledgeEntryStatus>;
@@ -26,31 +25,6 @@ describe("HomePage (Knowledge Map)", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetKnowledgeMapDashboard.mockResolvedValue({
-      total_entries: 13760,
-      counts: {
-        undecided: 2385,
-        to_learn: 4293,
-        learning: 7082,
-        known: 0,
-      },
-      discovery_range_start: 7001,
-      discovery_range_end: 7100,
-      discovery_entry: {
-        entry_type: "word",
-        entry_id: "word-1",
-        display_text: "Resilience",
-        browse_rank: 7002,
-        status: "undecided",
-      },
-      next_learn_entry: {
-        entry_type: "word",
-        entry_id: "word-2",
-        display_text: "Drum",
-        browse_rank: 2616,
-        status: "to_learn",
-      },
-    });
     mockGetUserPreferences.mockResolvedValue({
       accent_preference: "uk",
       translation_locale: "zh-Hans",
@@ -104,6 +78,22 @@ describe("HomePage (Knowledge Map)", () => {
         },
       ],
     });
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      translation: "银行",
+      primary_definition: "A financial institution.",
+      meanings: [],
+      senses: [],
+      previous_entry: null,
+      next_entry: null,
+    });
     mockGetKnowledgeMapSearchHistory.mockResolvedValue({
       items: [
         {
@@ -139,66 +129,41 @@ describe("HomePage (Knowledge Map)", () => {
     });
   });
 
-  it("renders the dashboard summary cards", async () => {
-    render(<HomePage />);
+  it("renders the overview and initial range cards", async () => {
+    render(<KnowledgeMapPage />);
 
-    expect(await screen.findByText(/words uncovered/i)).toBeInTheDocument();
-    expect(await screen.findByText("13,760")).toBeInTheDocument();
-    expect(await screen.findByRole("link", { name: "New 2,385" })).toBeInTheDocument();
-    expect(await screen.findByRole("link", { name: "Started 7,082" })).toBeInTheDocument();
-    expect(await screen.findByRole("link", { name: "To Learn 4,293" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /discover/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /learn next: drum/i })).toBeInTheDocument();
-    expect(screen.getByText(/practice with lexi/i)).toBeInTheDocument();
+    expect(await screen.findByText(/full knowledge map/i)).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-map-mobile-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-map-tile-grid")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /1-100/i })).toBeInTheDocument();
+    expect(await screen.findByText("Bank")).toBeInTheDocument();
+    expect(screen.getByText("A financial institution.")).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-range-strip")).toBeInTheDocument();
   });
 
-  it("loads dashboard data and shows the current discovery and next learn words", async () => {
-    render(<HomePage />);
+  it("switches between cards, tags, and list views", async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeMapPage />);
 
-    expect(await screen.findByText(/range 7000/i)).toBeInTheDocument();
-    expect(screen.getByText(/next: drum/i)).toBeInTheDocument();
-    expect(mockGetKnowledgeMapDashboard).toHaveBeenCalled();
+    await screen.findByText("Bank");
+    expect(screen.getByTestId("knowledge-card-view")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /tags view/i }));
+    expect(screen.getByTestId("knowledge-tags-view")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /list view/i }));
+    expect(screen.getByTestId("knowledge-list-view")).toBeInTheDocument();
   });
 
-  it("keeps the main dashboard navigation visible", async () => {
-    render(<HomePage />);
+  it("updates learner status from the cards view", async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeMapPage />);
 
-    expect(await screen.findByRole("link", { name: "13,760" })).toHaveAttribute("href", "/knowledge-map");
-    expect(screen.getByRole("link", { name: "New 2,385" })).toHaveAttribute("href", "/knowledge-list/new");
-    expect(screen.getByRole("link", { name: "Started 7,082" })).toHaveAttribute("href", "/knowledge-list/learning");
-    expect(screen.getByRole("link", { name: "To Learn 4,293" })).toHaveAttribute("href", "/knowledge-list/to-learn");
-    expect(screen.getByRole("link", { name: /settings/i })).toHaveAttribute("href", "/settings");
-  });
-});
+    await screen.findByText("Bank");
+    await user.click(screen.getByRole("button", { name: /known/i }));
 
-describe("Auth middleware for /", () => {
-  it("redirects unauthenticated requests to /login", () => {
-    expect(getAuthRedirectPath("/", false)).toBe("/login?next=%2F");
-  });
-
-  it("allows authenticated requests", () => {
-    expect(getAuthRedirectPath("/", true)).toBeNull();
-  });
-
-  it("redirects unauthenticated /imports requests", () => {
-    expect(getAuthRedirectPath("/imports", false)).toBe(
-      "/login?next=%2Fimports",
-    );
-  });
-
-  it("redirects unauthenticated knowledge-map routes", () => {
-    expect(getAuthRedirectPath("/knowledge-map", false)).toBe(
-      "/login?next=%2Fknowledge-map",
-    );
-    expect(getAuthRedirectPath("/knowledge-list/new", false)).toBe(
-      "/login?next=%2Fknowledge-list%2Fnew",
-    );
-    expect(getAuthRedirectPath("/settings", false)).toBe(
-      "/login?next=%2Fsettings",
-    );
-  });
-
-  it("allows authenticated /imports requests", () => {
-    expect(getAuthRedirectPath("/imports", true)).toBeNull();
+    await waitFor(() => {
+      expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "known");
+      expect(screen.getByText(/status: known/i)).toBeInTheDocument();
+    });
   });
 });
