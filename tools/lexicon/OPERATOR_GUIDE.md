@@ -174,3 +174,26 @@ python3 -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/revie
   - inspect `enrich.failures.jsonl` or `words.regenerate.jsonl`
 - Import does not see reviewed rows
   - confirm `reviewed/approved.jsonl` exists under the selected snapshot
+
+## 11. Helper scripts
+
+Monitor realtime enrichment sidecars:
+
+```bash
+zsh tools/lexicon/scripts/monitor-enrich.zsh data/lexicon/snapshots/demo
+zsh tools/lexicon/scripts/monitor-enrich.zsh --no-tail data/lexicon/snapshots/demo
+```
+
+Show discarded realtime decisions and why:
+
+```bash
+python3 tools/lexicon/scripts/show-discarded.py data/lexicon/snapshots/demo
+python3 tools/lexicon/scripts/show-discarded.py data/lexicon/snapshots/demo/enrich.decisions.jsonl --json
+```
+
+Show realtime failures and why:
+
+```bash
+python3 tools/lexicon/scripts/show-failures.py data/lexicon/snapshots/demo
+python3 tools/lexicon/scripts/show-failures.py data/lexicon/snapshots/demo/enrich.failures.jsonl --json
+```
