@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from importlib import import_module
 from pathlib import Path
 from typing import Any
-import sys
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -26,6 +24,7 @@ from app.services.lexicon_jsonl_reviews import (
     resolve_output_dir_path,
     resolve_repo_local_path,
 )
+from app.services.lexicon_tool_imports import import_lexicon_tool_module
 from app.tasks.lexicon_jobs import (
     run_lexicon_compiled_materialize,
     run_lexicon_import_db,
@@ -70,16 +69,8 @@ class LexiconJobCompiledMaterializeRequest(BaseModel):
     output_dir: str | None = None
 
 
-def _import_db_module() -> Any:
-    try:
-        return import_module("tools.lexicon.import_db")
-    except ModuleNotFoundError as exc:
-        if not exc.name or not exc.name.startswith("tools"):
-            raise
-        repo_root = Path(__file__).resolve().parents[2]
-        if str(repo_root) not in sys.path:
-            sys.path.insert(0, str(repo_root))
-        return import_module("tools.lexicon.import_db")
+def _import_db_module():
+    return import_lexicon_tool_module("tools.lexicon.import_db")
 
 
 def _serialize_job(job: LexiconJob) -> LexiconJobResponse:

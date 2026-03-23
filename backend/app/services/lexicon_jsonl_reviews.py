@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from importlib import import_module
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,6 +9,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 from app.core.config import Settings
+from app.services.lexicon_tool_imports import import_lexicon_tool_module
 
 DECISION_SCHEMA_VERSION = "lexicon_review_decision.v1"
 ALLOWED_DECISIONS = {"approved", "rejected", "reopened"}
@@ -22,15 +21,7 @@ REGENERATE_FILENAME = "regenerate.jsonl"
 
 
 def _import_review_prep_module() -> Any:
-    try:
-        return import_module("tools.lexicon.review_prep")
-    except ModuleNotFoundError as exc:
-        if not exc.name or not exc.name.startswith("tools"):
-            raise
-        repo_root = Path(__file__).resolve().parents[2]
-        if str(repo_root) not in sys.path:
-            sys.path.insert(0, str(repo_root))
-        return import_module("tools.lexicon.review_prep")
+    return import_lexicon_tool_module("tools.lexicon.review_prep")
 
 
 def _canonical_json_bytes(payload: Any) -> bytes:

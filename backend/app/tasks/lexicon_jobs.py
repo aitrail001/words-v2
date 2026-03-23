@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from importlib import import_module
 from pathlib import Path
 from typing import Any
-import sys
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -20,21 +18,14 @@ from app.services.lexicon_jobs import (
     apply_lexicon_job_started,
 )
 from app.services.lexicon_jsonl_reviews import materialize_jsonl_review_outputs
+from app.services.lexicon_tool_imports import import_lexicon_tool_module
 
 settings = get_settings()
 sync_engine = create_engine(settings.database_url_sync)
 
 
 def _import_db_module() -> Any:
-    try:
-        return import_module("tools.lexicon.import_db")
-    except ModuleNotFoundError as exc:
-        if not exc.name or not exc.name.startswith("tools"):
-            raise
-        repo_root = Path(__file__).resolve().parents[2]
-        if str(repo_root) not in sys.path:
-            sys.path.insert(0, str(repo_root))
-        return import_module("tools.lexicon.import_db")
+    return import_lexicon_tool_module("tools.lexicon.import_db")
 
 
 def _load_job(db: Session, job_id: str) -> LexiconJob:
