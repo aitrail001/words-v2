@@ -20,5 +20,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/knowledge-map", "/knowledge-list/:path*", "/knowledge/:path*", "/settings", "/review/:path*", "/imports/:path*"],
+  matcher: ["/", "/knowledge-map", "/knowledge-list/:path*", "/word/:path*", "/phrase/:path*", "/search", "/settings", "/review/:path*", "/imports/:path*"],
 };

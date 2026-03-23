@@ -5,8 +5,6 @@ import {
   getKnowledgeMapEntryDetail,
   getKnowledgeMapOverview,
   getKnowledgeMapRange,
-  getKnowledgeMapSearchHistory,
-  searchKnowledgeMap,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
 import { getUserPreferences } from "@/lib/user-preferences-client";
@@ -18,8 +16,6 @@ describe("KnowledgeMapPage", () => {
   const mockGetKnowledgeMapOverview = getKnowledgeMapOverview as jest.MockedFunction<typeof getKnowledgeMapOverview>;
   const mockGetKnowledgeMapRange = getKnowledgeMapRange as jest.MockedFunction<typeof getKnowledgeMapRange>;
   const mockGetKnowledgeMapEntryDetail = getKnowledgeMapEntryDetail as jest.MockedFunction<typeof getKnowledgeMapEntryDetail>;
-  const mockGetKnowledgeMapSearchHistory = getKnowledgeMapSearchHistory as jest.MockedFunction<typeof getKnowledgeMapSearchHistory>;
-  const mockSearchKnowledgeMap = searchKnowledgeMap as jest.MockedFunction<typeof searchKnowledgeMap>;
   const mockUpdateKnowledgeEntryStatus = updateKnowledgeEntryStatus as jest.MockedFunction<typeof updateKnowledgeEntryStatus>;
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
 
@@ -29,6 +25,7 @@ describe("KnowledgeMapPage", () => {
       accent_preference: "uk",
       translation_locale: "zh-Hans",
       knowledge_view_preference: "cards",
+      show_translations_by_default: true,
     });
     mockGetKnowledgeMapOverview.mockResolvedValue({
       bucket_size: 100,
@@ -91,36 +88,10 @@ describe("KnowledgeMapPage", () => {
       primary_definition: "A financial institution.",
       meanings: [],
       senses: [],
+      relation_groups: [],
+      confusable_words: [],
       previous_entry: null,
       next_entry: null,
-    });
-    mockGetKnowledgeMapSearchHistory.mockResolvedValue({
-      items: [
-        {
-          query: "bank",
-          entry_type: "word",
-          entry_id: "word-1",
-          last_searched_at: "2026-03-23T00:00:00Z",
-        },
-      ],
-    });
-    mockSearchKnowledgeMap.mockResolvedValue({
-      items: [
-        {
-          entry_type: "word",
-          entry_id: "word-1",
-          display_text: "Bank",
-          normalized_form: "bank",
-          browse_rank: 20,
-          status: "to_learn",
-          cefr_level: "A2",
-          pronunciation: "/baŋk/",
-          translation: "银行",
-          primary_definition: "A financial institution.",
-          part_of_speech: "noun",
-          phrase_kind: null,
-        },
-      ],
     });
     mockUpdateKnowledgeEntryStatus.mockResolvedValue({
       entry_type: "word",
@@ -139,6 +110,7 @@ describe("KnowledgeMapPage", () => {
     expect(await screen.findByText("Bank")).toBeInTheDocument();
     expect(screen.getByText("A financial institution.")).toBeInTheDocument();
     expect(screen.getByTestId("knowledge-range-strip")).toBeInTheDocument();
+    expect(screen.queryByText(/search the graph/i)).not.toBeInTheDocument();
   });
 
   it("switches between cards, tags, and list views", async () => {

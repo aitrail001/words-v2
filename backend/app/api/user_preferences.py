@@ -10,18 +10,21 @@ from app.models.user_preference import UserPreference
 from app.services.knowledge_map import DEFAULT_ACCENT, DEFAULT_TRANSLATION_LOCALE, DEFAULT_VIEW
 
 router = APIRouter()
+DEFAULT_SHOW_TRANSLATIONS = True
 
 
 class UserPreferencesResponse(BaseModel):
     accent_preference: str
     translation_locale: str
     knowledge_view_preference: str
+    show_translations_by_default: bool
 
 
 class UserPreferencesUpdateRequest(BaseModel):
     accent_preference: str
     translation_locale: str
     knowledge_view_preference: str
+    show_translations_by_default: bool
 
     @field_validator("accent_preference")
     @classmethod
@@ -44,11 +47,13 @@ def _response(row: UserPreference | None) -> UserPreferencesResponse:
             accent_preference=DEFAULT_ACCENT,
             translation_locale=DEFAULT_TRANSLATION_LOCALE,
             knowledge_view_preference=DEFAULT_VIEW,
+            show_translations_by_default=DEFAULT_SHOW_TRANSLATIONS,
         )
     return UserPreferencesResponse(
         accent_preference=row.accent_preference,
         translation_locale=row.translation_locale,
         knowledge_view_preference=row.knowledge_view_preference,
+        show_translations_by_default=row.show_translations_by_default,
     )
 
 
@@ -75,11 +80,13 @@ async def put_user_preferences(
             accent_preference=payload.accent_preference,
             translation_locale=payload.translation_locale,
             knowledge_view_preference=payload.knowledge_view_preference,
+            show_translations_by_default=payload.show_translations_by_default,
         )
         db.add(row)
     else:
         row.accent_preference = payload.accent_preference
         row.translation_locale = payload.translation_locale
         row.knowledge_view_preference = payload.knowledge_view_preference
+        row.show_translations_by_default = payload.show_translations_by_default
     await db.commit()
     return _response(row)

@@ -2,28 +2,20 @@
 
 import Link from "next/link";
 import { startTransition, useEffect, useState, type CSSProperties } from "react";
+import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
 import {
-  createKnowledgeMapSearchHistory,
   getKnowledgeMapEntryDetail,
   getKnowledgeMapOverview,
   getKnowledgeMapRange,
-  getKnowledgeMapSearchHistory,
   type KnowledgeMapEntrySummary,
   type KnowledgeMapOverview,
   type KnowledgeMapRange,
-  searchKnowledgeMap,
   type KnowledgeStatus,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
 import { getUserPreferences } from "@/lib/user-preferences-client";
 
 type ViewMode = "cards" | "tags" | "list";
-
-type SearchHistoryItem = {
-  query: string;
-  entry_type: "word" | "phrase" | null;
-  entry_id: string | null;
-};
 
 const STATUS_LABELS: Record<KnowledgeStatus, string> = {
   undecided: "Undecided",
@@ -137,7 +129,7 @@ function MiniRangeStrip({
   return (
     <div
       data-testid="knowledge-range-strip"
-      className="rounded-[1.7rem] bg-white/90 px-4 py-4 shadow-[0_18px_42px_rgba(84,46,135,0.12)]"
+      className="rounded-[1.55rem] bg-white/88 px-3 py-3 shadow-[0_18px_42px_rgba(84,46,135,0.12)]"
     >
       <div className="flex items-center justify-between gap-4">
         <button
@@ -159,14 +151,17 @@ function MiniRangeStrip({
         </button>
       </div>
 
-      <div className="mt-3 grid grid-cols-10 gap-[3px] rounded-[1rem] bg-[#f4eefc] p-2">
+      <div
+        className="mt-3 grid gap-[2px] rounded-[0.95rem] bg-[#f4eefc] p-2"
+        style={{ gridTemplateColumns: "repeat(25, minmax(0, 1fr))" }}
+      >
         {selectedRange.items.map((item, index) => (
           <button
             key={`${item.entry_type}-${item.entry_id}`}
             type="button"
             onClick={() => onSelectIndex(index)}
             aria-label={item.display_text}
-            className={`h-4 rounded-[3px] transition ${
+            className={`h-2.5 rounded-[3px] transition ${
               index === activeIndex ? "ring-2 ring-[#ffffff]" : ""
             }`}
             style={{ backgroundColor: STATUS_COLORS[item.status] }}
@@ -182,19 +177,16 @@ export default function HomePage() {
   const [selectedRange, setSelectedRange] = useState<KnowledgeMapRange | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
-  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<KnowledgeMapEntrySummary[]>([]);
+  const [showTranslations, setShowTranslations] = useState(true);
   const [loadingRange, setLoadingRange] = useState(false);
 
   useEffect(() => {
     let active = true;
 
     (async () => {
-      const [preferences, overviewPayload, historyPayload] = await Promise.all([
+      const [preferences, overviewPayload] = await Promise.all([
         getUserPreferences(),
         getKnowledgeMapOverview(),
-        getKnowledgeMapSearchHistory(),
       ]);
 
       if (!active) {
@@ -202,8 +194,8 @@ export default function HomePage() {
       }
 
       setViewMode(preferences.knowledge_view_preference);
+      setShowTranslations(preferences.show_translations_by_default);
       setOverview(overviewPayload);
-      setSearchHistory(historyPayload.items);
 
       const requestedRangeStart = Number(
         typeof window === "undefined"
@@ -238,34 +230,6 @@ export default function HomePage() {
       active = false;
     };
   }, []);
-
-  useEffect(() => {
-    let active = true;
-    const trimmed = searchQuery.trim();
-    if (trimmed.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      searchKnowledgeMap(trimmed)
-        .then((response) => {
-          if (active) {
-            setSearchResults(response.items);
-          }
-        })
-        .catch(() => {
-          if (active) {
-            setSearchResults([]);
-          }
-        });
-    }, 250);
-
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [searchQuery]);
 
   useEffect(() => {
     let active = true;
@@ -348,22 +312,6 @@ export default function HomePage() {
     });
   };
 
-  const rememberSearch = async (entry: KnowledgeMapEntrySummary) => {
-    const historyItem = await createKnowledgeMapSearchHistory({
-      query: entry.display_text,
-      entry_type: entry.entry_type,
-      entry_id: entry.entry_id,
-    });
-    setSearchHistory((current) => [
-      {
-        query: historyItem.query,
-        entry_type: historyItem.entry_type ?? null,
-        entry_id: historyItem.entry_id ?? null,
-      },
-      ...current.filter((item) => item.query !== historyItem.query).slice(0, 5),
-    ]);
-  };
-
   const activeRangeLabel = selectedRange
     ? `Range ${selectedRange.range_start.toLocaleString()}-${selectedRange.range_end.toLocaleString()}`
     : "Pick a tile to begin";
@@ -371,31 +319,31 @@ export default function HomePage() {
   return (
     <div
       data-testid="knowledge-map-mobile-shell"
-      className="mx-auto max-w-[27rem] space-y-5 pb-10 text-[#43235f]"
+      className="mx-auto max-w-[27rem] space-y-4 pb-10 text-[#43235f]"
     >
-      <section className="rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,242,255,0.92))] px-5 py-6 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+      <section className="rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,242,255,0.92))] px-4 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
         <div className="flex items-center justify-between">
           <span className="w-8 text-xl text-[#7d52c7]">{""}</span>
-          <h2 className="text-center text-[2rem] font-semibold tracking-tight text-[#502a7d]">
+          <h2 className="text-center text-[1.8rem] font-semibold tracking-tight text-[#502a7d]">
             Full Knowledge Map
           </h2>
           <span className="w-8 text-right text-sm font-semibold text-[#7d52c7]">
             {overview?.total_entries ?? "..."}
           </span>
         </div>
-        <p className="mt-4 text-sm leading-6 text-[#6b5d86]">
+        <p className="mt-3 text-sm leading-6 text-[#6b5d86]">
           This is a map of your English knowledge. Each box shows 100 words and phrases.
           They are sorted by relevance to your life. Discover them all, starting from the top.
         </p>
 
-        <div data-testid="knowledge-map-tile-grid" className="mt-5 grid grid-cols-4 gap-2">
+        <div data-testid="knowledge-map-tile-grid" className="mt-4 grid grid-cols-5 gap-1.5">
           {overview?.ranges.map((range) => (
             <button
               key={range.range_start}
               type="button"
               onClick={() => void loadRange(range.range_start)}
               aria-label={`${range.range_start}-${range.range_end}`}
-              className={`rounded-[0.45rem] border px-2 py-2 text-center text-sm font-semibold shadow-sm transition ${
+              className={`rounded-[0.45rem] border px-1.5 py-2 text-center text-[0.72rem] font-semibold shadow-sm transition ${
                 selectedRange?.range_start === range.range_start
                   ? "border-[#7c4dff] ring-2 ring-[#ddcbff]"
                   : "border-white/70"
@@ -408,19 +356,19 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="space-y-4 rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,238,252,0.95))] px-4 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+      <section className="space-y-4 rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,238,252,0.95))] px-4 py-4 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-[1.8rem] font-semibold tracking-tight text-[#53287c]">Knowledge Map</h3>
+            <h3 className="text-[1.55rem] font-semibold tracking-tight text-[#53287c]">Knowledge Map</h3>
             <h4 className="mt-1 text-sm font-semibold text-[#766389]">{activeRangeLabel}</h4>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {VIEW_OPTIONS.map((option) => (
               <button
                 key={option.mode}
                 type="button"
                 onClick={() => setViewMode(option.mode)}
-                className={`rounded-full px-3 py-2 text-xs font-semibold transition ${
+                className={`rounded-full px-2.5 py-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] transition ${
                   viewMode === option.mode
                     ? "bg-[#5b238c] text-white"
                     : "bg-[#f0eafb] text-[#6d42a9]"
@@ -436,8 +384,8 @@ export default function HomePage() {
 
         {!loadingRange && selectedRange && viewMode === "cards" && activeEntry && (
           <div data-testid="knowledge-card-view" className="space-y-4">
-            <div className="overflow-hidden rounded-[1.9rem] bg-white shadow-[0_14px_30px_rgba(94,53,177,0.12)]">
-              <div className="relative h-56 overflow-hidden" style={buildHeroStyle(activeEntry.display_text)}>
+            <div className="overflow-hidden rounded-[1.8rem] bg-white shadow-[0_14px_30px_rgba(94,53,177,0.12)]">
+              <div className="relative h-52 overflow-hidden" style={buildHeroStyle(activeEntry.display_text)}>
                 <div className="absolute inset-x-0 top-0 flex items-center justify-between px-4 py-4 text-white">
                   <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em]">
                     {activeEntry.entry_type}
@@ -449,39 +397,40 @@ export default function HomePage() {
                 <div className="absolute inset-x-0 bottom-0 h-24 bg-[linear-gradient(180deg,transparent,rgba(39,12,74,0.68))]" />
               </div>
 
-              <div className="space-y-3 px-5 py-5">
+              <div className="space-y-3 px-4 py-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h4 className="text-[2rem] font-semibold leading-none text-[#572a80]">
+                    <h4 className="text-[1.8rem] font-semibold leading-none text-[#572a80]">
                       {activeEntry.display_text}
                     </h4>
                     <p className="mt-2 text-sm font-semibold text-[#8f82a1]">
                       {activeEntry.pronunciation ?? "/.../"} #{activeEntry.browse_rank.toLocaleString()}
                     </p>
                   </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(activeEntry.status)}`}>
-                      Status: {STATUS_LABELS[activeEntry.status]}
-                    </span>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(activeEntry.status)}`}>
+                    Status: {STATUS_LABELS[activeEntry.status]}
+                  </span>
                 </div>
 
-                <p className="text-xl font-semibold text-[#9c3af2]">
-                  {activeEntry.translation ?? "Translation unavailable"}
-                </p>
-                <p className="text-[1.05rem] leading-8 text-[#4e3564]">
+                {showTranslations && (
+                  <p className="text-lg font-semibold text-[#9c3af2]">
+                    {activeEntry.translation ?? "Translation unavailable"}
+                  </p>
+                )}
+                <p className="text-[1rem] leading-7 text-[#4e3564]">
                   {activeEntry.primary_definition ?? "No learner definition has been generated yet."}
                 </p>
 
                 <div className="pt-1 text-right">
                   <Link
-                    href={`/knowledge/${activeEntry.entry_type}/${activeEntry.entry_id}`}
-                    onClick={() => void rememberSearch(activeEntry)}
+                    href={getKnowledgeEntryHref(activeEntry.entry_type, activeEntry.entry_id)}
                     className="text-sm font-semibold text-[#9a86b5] underline underline-offset-4"
                   >
                     Learn More
                   </Link>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-2">
+                <div className="grid grid-cols-2 gap-2.5 pt-2">
                   {PRIMARY_STATUS_ACTIONS.map((action) => (
                     <button
                       key={`${activeEntry.entry_id}-${action.status}-${action.label}`}
@@ -512,13 +461,12 @@ export default function HomePage() {
         )}
 
         {!loadingRange && selectedRange && viewMode === "tags" && (
-          <div data-testid="knowledge-tags-view" className="grid grid-cols-3 gap-2">
+          <div data-testid="knowledge-tags-view" className="grid grid-cols-4 gap-1.5">
             {selectedRange.items.map((item) => (
               <Link
                 key={`${item.entry_type}-${item.entry_id}`}
-                href={`/knowledge/${item.entry_type}/${item.entry_id}`}
-                onClick={() => void rememberSearch(item)}
-                className="rounded-[0.45rem] px-3 py-4 text-center text-sm font-semibold text-white shadow-sm"
+                href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
+                className="rounded-[0.45rem] px-2 py-3 text-center text-[0.72rem] font-semibold text-white shadow-sm"
                 style={{ backgroundColor: STATUS_COLORS[item.status] }}
               >
                 {item.display_text}
@@ -528,29 +476,30 @@ export default function HomePage() {
         )}
 
         {!loadingRange && selectedRange && viewMode === "list" && (
-          <div data-testid="knowledge-list-view" className="space-y-3">
+          <div data-testid="knowledge-list-view" className="space-y-2">
             {selectedRange.items.map((item) => (
               <div
                 key={`${item.entry_type}-${item.entry_id}`}
-                className="grid grid-cols-[5.5rem_1fr] gap-3 overflow-hidden rounded-[1.3rem] bg-white shadow-[0_10px_24px_rgba(86,54,145,0.08)]"
+                className="grid grid-cols-[4.5rem_1fr] gap-3 overflow-hidden rounded-[1.15rem] bg-white px-2 py-2 shadow-[0_10px_24px_rgba(86,54,145,0.08)]"
               >
-                <div className="min-h-24" style={buildHeroStyle(item.display_text)} />
-                <div className="space-y-2 px-1 py-3 pr-4">
+                <div className="min-h-20 rounded-[0.9rem]" style={buildHeroStyle(item.display_text)} />
+                <div className="space-y-1.5 py-1 pr-2">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-[1.35rem] font-semibold text-[#562c7f]">{item.display_text}</p>
-                      <p className="text-sm font-semibold text-[#a141ef]">
-                        {item.translation ?? item.primary_definition ?? "No summary yet"}
-                      </p>
+                      <p className="text-[1.18rem] font-semibold text-[#562c7f]">{item.display_text}</p>
+                      {showTranslations && (
+                        <p className="text-sm font-semibold text-[#a141ef]">
+                          {item.translation ?? item.primary_definition ?? "No summary yet"}
+                        </p>
+                      )}
                     </div>
                     <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(item.status)}`}>
                       {STATUS_LABELS[item.status]}
                     </span>
                   </div>
                   <Link
-                    href={`/knowledge/${item.entry_type}/${item.entry_id}`}
-                    onClick={() => void rememberSearch(item)}
-                    className="inline-flex rounded-[0.8rem] bg-[#f1ddff] px-3 py-2 text-xs font-semibold text-[#7c2cff]"
+                    href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
+                    className="inline-flex rounded-[0.8rem] bg-[#f1ddff] px-3 py-1.5 text-xs font-semibold text-[#7c2cff]"
                   >
                     Open
                   </Link>
@@ -571,63 +520,6 @@ export default function HomePage() {
           }
           onSelectIndex={setActiveIndex}
         />
-      </section>
-
-      <section className="space-y-4 rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,240,252,0.94))] px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
-        <div>
-          <h3 className="text-xl font-semibold text-[#53287c]">Search The Graph</h3>
-          <p className="mt-1 text-sm leading-6 text-[#726682]">
-            Jump to a word or phrase, or revisit what you searched recently.
-          </p>
-        </div>
-
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Search your knowledge map"
-          className="w-full rounded-[1rem] border border-[#ddd8ee] bg-white px-4 py-3 text-sm text-[#3d2456] outline-none placeholder:text-[#a199b3]"
-        />
-
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#84789b]">Recent Searches</p>
-          <div className="flex flex-wrap gap-2">
-            {searchHistory.map((item) => (
-              <span
-                key={`${item.query}-${item.entry_id ?? "none"}`}
-                className="rounded-full bg-[#f1e8fb] px-3 py-1.5 text-sm font-semibold text-[#7345ab]"
-              >
-                {item.query}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {searchResults.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#84789b]">Results</p>
-            <div className="space-y-2">
-              {searchResults.map((item) => (
-                <Link
-                  key={`${item.entry_type}-${item.entry_id}`}
-                  href={`/knowledge/${item.entry_type}/${item.entry_id}`}
-                  onClick={() => void rememberSearch(item)}
-                  className="flex items-center justify-between gap-4 rounded-[1rem] bg-white px-4 py-3 shadow-[0_10px_20px_rgba(86,54,145,0.08)]"
-                >
-                  <div>
-                    <p className="font-semibold text-[#572b80]">{item.display_text}</p>
-                    <p className="text-sm text-[#7d6f95]">
-                      {item.translation ?? item.primary_definition ?? "No summary yet"}
-                    </p>
-                  </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(item.status)}`}>
-                    {STATUS_LABELS[item.status]}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
     </div>
   );

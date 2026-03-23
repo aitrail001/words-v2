@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
 import {
   getKnowledgeMapDashboard,
   type KnowledgeMapDashboard,
@@ -46,11 +47,10 @@ export default function HomePage() {
   const learningCount = dashboard?.counts.learning ?? 0;
   const toLearnCount = dashboard?.counts.to_learn ?? 0;
   const knownCount = dashboard?.counts.known ?? 0;
-  const countedTotal = newCount + learningCount + toLearnCount + knownCount;
-  const progressSegments = countedTotal > 0
+  const progressTotal = learningCount + toLearnCount + knownCount;
+  const progressSegments = progressTotal > 0
     ? [
         { label: "Known", value: knownCount, color: "bg-[#3dc8df]" },
-        { label: "New", value: newCount, color: "bg-[#29c3de]" },
         { label: "Started", value: learningCount, color: "bg-[#b674ff]" },
         { label: "To Learn", value: toLearnCount, color: "bg-[#dd49ff]" },
       ]
@@ -103,15 +103,15 @@ export default function HomePage() {
               <div
                 key={segment.label}
                 className={segment.color}
-                style={{ width: `${(segment.value / countedTotal) * 100}%` }}
+                style={{ width: `${(segment.value / progressTotal) * 100}%` }}
               />
             ))}
           </div>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-[1.05rem] font-semibold">
-          <Link href="/knowledge-list/new" className="text-[#36d0e6]">
-            New {formatCount(newCount)}
+          <Link href="/knowledge-list/known" className="text-[#36d0e6]">
+            Knew {formatCount(knownCount)}
           </Link>
           <Link href="/knowledge-list/to-learn" className="text-right text-[#d28fff]">
             To Learn {formatCount(toLearnCount)}
@@ -154,7 +154,10 @@ export default function HomePage() {
           <Link
             href={
               dashboard?.next_learn_entry
-                ? `/knowledge/${dashboard.next_learn_entry.entry_type}/${dashboard.next_learn_entry.entry_id}`
+                ? getKnowledgeEntryHref(
+                    dashboard.next_learn_entry.entry_type,
+                    dashboard.next_learn_entry.entry_id,
+                  )
                 : "/knowledge-map"
             }
             className="overflow-hidden rounded-[1.1rem] border border-[#e5ddf4] bg-white shadow-[0_12px_28px_rgba(78,41,126,0.08)]"

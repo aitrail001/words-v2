@@ -87,6 +87,8 @@ export type KnowledgeMapEntryDetail = {
   primary_definition: string | null;
   meanings: KnowledgeMapMeaning[];
   senses: KnowledgeMapSense[];
+  relation_groups: Array<{ relation_type: string; related_words: string[] }>;
+  confusable_words: Array<{ word: string; note: string | null }>;
   previous_entry: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
   next_entry: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
 };

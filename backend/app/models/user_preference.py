@@ -20,6 +20,11 @@ class UserPreference(Base):
     accent_preference: Mapped[str] = mapped_column(String(10), nullable=False, insert_default="us")
     translation_locale: Mapped[str] = mapped_column(String(16), nullable=False, insert_default="zh-Hans")
     knowledge_view_preference: Mapped[str] = mapped_column(String(16), nullable=False, insert_default="cards")
+    show_translations_by_default: Mapped[bool] = mapped_column(
+        nullable=False,
+        insert_default=True,
+        server_default=text("true"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -38,6 +43,7 @@ class UserPreference(Base):
         kwargs.setdefault("accent_preference", "us")
         kwargs.setdefault("translation_locale", "zh-Hans")
         kwargs.setdefault("knowledge_view_preference", "cards")
+        kwargs.setdefault("show_translations_by_default", True)
         kwargs.setdefault("created_at", datetime.now(timezone.utc))
         kwargs.setdefault("updated_at", datetime.now(timezone.utc))
         super().__init__(**kwargs)
