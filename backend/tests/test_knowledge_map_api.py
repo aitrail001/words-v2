@@ -11,6 +11,7 @@ from app.core.security import create_access_token, hash_password
 from app.main import app
 from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.meaning import Meaning
+from app.models.meaning_example import MeaningExample
 from app.models.phrase_entry import PhraseEntry
 from app.models.search_history import SearchHistory
 from app.models.translation import Translation
@@ -94,6 +95,14 @@ class TestKnowledgeMapOverview:
             normalized_form="bank on",
             phrase_kind="phrasal_verb",
             language="en",
+            compiled_payload={
+                "senses": [
+                    {
+                        "definition": "To depend on someone.",
+                        "translations": {"es": {"definition": "contar con", "examples": [], "usage_note": None}},
+                    }
+                ]
+            },
         )
         statuses = [
             LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_one.id, status="known"),
@@ -201,7 +210,7 @@ class TestKnowledgeMapRange:
                 "senses": [
                     {
                         "definition": "To depend on someone.",
-                        "translations": {"zh-Hans": {"definition": "依靠", "examples": [], "usage_note": "common"}},
+                        "translations": {"es": {"definition": "contar con", "examples": [], "usage_note": "common"}},
                     }
                 ]
             },
@@ -217,6 +226,7 @@ class TestKnowledgeMapRange:
             scalars_all_result([word_meaning]),
             scalars_all_result([translation]),
             scalars_all_result([word]),
+            scalars_all_result([phrase]),
         ]
 
         response = await client.get(
@@ -233,6 +243,7 @@ class TestKnowledgeMapRange:
         assert data["items"][0]["pronunciation"] == "/baŋk/"
         assert data["items"][0]["translation"] == "banco"
         assert data["items"][1]["entry_type"] == "phrase"
+        assert data["items"][1]["translation"] == "contar con"
 
 
 class TestKnowledgeMapList:
@@ -426,9 +437,9 @@ class TestKnowledgeMapDetail:
         assert data["pronunciation"] == "/baŋk/"
         assert data["translation"] == "banco"
         assert data["confusable_words"] == [
-            {"word": "bench", "note": "Different object."},
-            {"word": "bench", "note": None},
-            {"word": "banque", "note": "Foreign-language lookalike."},
+            {"word": "bench", "note": "Different object.", "target": None},
+            {"word": "bench", "note": None, "target": None},
+            {"word": "banque", "note": "Foreign-language lookalike.", "target": None},
         ]
         assert data["relation_groups"] == [
             {"relation_type": "synonym", "related_words": ["lender", "iPhone"]},
@@ -441,6 +452,153 @@ class TestKnowledgeMapDetail:
             "Synonym",
             " synonym ",
         }
+
+    @pytest.mark.asyncio
+    async def test_word_detail_returns_schema_aligned_translations_forms_and_related_links(
+        self, client, mock_db, auth_token
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        preferences = UserPreference(user_id=user_id, accent_preference="uk", translation_locale="pt-BR")
+        word = Word(
+            id=uuid.uuid4(),
+            word="time",
+            language="en",
+            frequency_rank=60,
+            phonetics={
+                "uk": {"ipa": "taɪm", "confidence": 0.96},
+                "us": {"ipa": "taɪm", "confidence": 0.96},
+            },
+            word_forms={
+                "verb_forms": {
+                    "base": "time",
+                    "past": "timed",
+                    "gerund": "timing",
+                    "past_participle": "timed",
+                    "third_person_singular": "times",
+                },
+                "plural_forms": ["times"],
+                "derivations": ["timely", "timing"],
+                "comparative": None,
+                "superlative": None,
+            },
+            confusable_words=[{"word": "clock", "note": "Device rather than duration."}],
+        )
+        meaning = Meaning(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            definition="the thing measured in minutes and hours",
+            part_of_speech="noun",
+            primary_domain="general",
+            secondary_domains=["society"],
+            register_label="neutral",
+            grammar_patterns=["have time", "time for + noun"],
+            usage_note="Common in both abstract and practical contexts.",
+            order_index=0,
+        )
+        example = MeaningExample(
+            id=uuid.uuid4(),
+            meaning_id=meaning.id,
+            sentence="I do not have time today.",
+            difficulty="A1",
+            order_index=0,
+        )
+        translation = Translation(
+            id=uuid.uuid4(),
+            meaning_id=meaning.id,
+            language="pt-BR",
+            translation="tempo",
+        )
+        setattr(translation, "usage_note", "Muito comum em contextos abstratos e práticos.")
+        setattr(translation, "examples", ["Eu não tenho tempo hoje."])
+        synonym = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type="synonym",
+            related_word="duration",
+        )
+        antonym = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type="antonym",
+            related_word="timelessness",
+        )
+        collocation = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type="collocation",
+            related_word="have time",
+        )
+        linked_word = Word(id=uuid.uuid4(), word="duration", language="en", frequency_rank=500)
+        linked_phrase = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="have time",
+            normalized_form="have time",
+            phrase_kind="phrase",
+            language="en",
+        )
+        status = LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="to_learn")
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(preferences),
+            scalar_one_or_none_result(word),
+            scalars_all_result([meaning]),
+            scalars_all_result([example]),
+            scalars_all_result([translation]),
+            scalars_all_result([synonym, antonym, collocation]),
+            scalars_all_result([word, linked_word]),
+            scalars_all_result([linked_phrase]),
+            scalar_one_or_none_result(status),
+        ]
+
+        response = await client.get(
+            f"/api/knowledge-map/entries/word/{word.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["pronunciation"] == "taɪm"
+        assert data["translation"] == "tempo"
+        assert data["forms"]["verb_forms"]["past"] == "timed"
+        assert data["forms"]["plural_forms"] == ["times"]
+        assert data["forms"]["derivations"][0]["text"] == "timely"
+        assert data["meanings"][0]["localized_definition"] == "tempo"
+        assert data["meanings"][0]["localized_usage_note"] == "Muito comum em contextos abstratos e práticos."
+        assert data["meanings"][0]["usage_note"] == "Common in both abstract and practical contexts."
+        assert data["meanings"][0]["grammar_patterns"] == ["have time", "time for + noun"]
+        assert data["meanings"][0]["register"] == "neutral"
+        assert data["meanings"][0]["primary_domain"] == "general"
+        assert data["meanings"][0]["secondary_domains"] == ["society"]
+        assert data["meanings"][0]["examples"][0]["translation"] == "Eu não tenho tempo hoje."
+        assert data["meanings"][0]["examples"][0]["linked_entries"] == [
+            {
+                "text": "time",
+                "entry_type": "word",
+                "entry_id": str(word.id),
+            }
+        ]
+        assert data["meanings"][0]["synonyms"][0] == {
+            "text": "duration",
+            "target": {
+                "entry_type": "word",
+                "entry_id": str(linked_word.id),
+                "display_text": "duration",
+            },
+        }
+        assert data["meanings"][0]["collocations"][0] == {
+            "text": "have time",
+            "target": {
+                "entry_type": "phrase",
+                "entry_id": str(linked_phrase.id),
+                "display_text": "have time",
+            },
+        }
+        assert data["confusable_words"][0]["target"] is None
 
     @pytest.mark.asyncio
     async def test_phrase_detail_reads_compiled_payload(self, client, mock_db, auth_token):
@@ -487,6 +645,89 @@ class TestKnowledgeMapDetail:
         assert data["senses"][0]["definition"] == "To rely on someone."
         assert data["relation_groups"] == []
         assert data["confusable_words"] == []
+
+    @pytest.mark.asyncio
+    async def test_phrase_detail_returns_localized_examples_usage_notes_and_exact_links(
+        self, client, mock_db, auth_token
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        preferences = UserPreference(user_id=user_id, translation_locale="ja")
+        phrase = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="bank on",
+            normalized_form="bank on",
+            phrase_kind="phrasal_verb",
+            language="en",
+            compiled_payload={
+                "senses": [
+                    {
+                        "sense_id": "sense-1",
+                        "definition": "To rely on someone.",
+                        "pos": "phrasal_verb",
+                        "register": "neutral",
+                        "primary_domain": "general",
+                        "secondary_domains": ["relationships"],
+                        "usage_note": "Often used in spoken English.",
+                        "grammar_patterns": ["bank on + noun", "bank on + someone"],
+                        "synonyms": ["depend on"],
+                        "antonyms": ["doubt"],
+                        "collocations": ["bank on support"],
+                        "examples": [{"sentence": "You can bank on support from me.", "difficulty": "B1"}],
+                        "translations": {
+                            "ja": {
+                                "definition": "頼りにする",
+                                "usage_note": "話し言葉でよく使われる。",
+                                "examples": ["私の支援を頼りにしていい。"],
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+        linked_phrase = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="depend on",
+            normalized_form="depend on",
+            phrase_kind="phrasal_verb",
+            language="en",
+        )
+        linked_word = Word(id=uuid.uuid4(), word="support", language="en", frequency_rank=320)
+        status = LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase.id, status="known")
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(preferences),
+            scalar_one_or_none_result(phrase),
+            scalar_one_or_none_result(status),
+            scalars_all_result([linked_word]),
+            scalars_all_result([phrase, linked_phrase]),
+        ]
+
+        response = await client.get(
+            f"/api/knowledge-map/entries/phrase/{phrase.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["translation"] == "頼りにする"
+        assert data["senses"][0]["localized_definition"] == "頼りにする"
+        assert data["senses"][0]["localized_usage_note"] == "話し言葉でよく使われる。"
+        assert data["senses"][0]["examples"][0]["translation"] == "私の支援を頼りにしていい。"
+        assert data["senses"][0]["examples"][0]["linked_entries"] == [
+            {
+                "text": "support",
+                "entry_type": "word",
+                "entry_id": str(linked_word.id),
+            }
+        ]
+        assert data["senses"][0]["synonyms"][0]["target"] == {
+            "entry_type": "phrase",
+            "entry_id": str(linked_phrase.id),
+            "display_text": "depend on",
+        }
+        assert data["senses"][0]["collocations"][0]["target"] is None
 
 
 class TestKnowledgeMapStatus:
@@ -539,6 +780,14 @@ class TestKnowledgeMapSearchAndHistory:
             normalized_form="bank on",
             phrase_kind="phrasal_verb",
             language="en",
+            compiled_payload={
+                "senses": [
+                    {
+                        "definition": "To depend on someone.",
+                        "translations": {"es": {"definition": "contar con", "examples": [], "usage_note": None}},
+                    }
+                ]
+            },
         )
         status = LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="learning")
 
@@ -551,6 +800,7 @@ class TestKnowledgeMapSearchAndHistory:
             scalars_all_result([meaning]),
             scalars_all_result([translation]),
             scalars_all_result([word]),
+            scalars_all_result([phrase]),
         ]
 
         response = await client.get(
@@ -565,6 +815,8 @@ class TestKnowledgeMapSearchAndHistory:
         assert data["items"][0]["pronunciation"] == "/baŋk/"
         assert data["items"][0]["translation"] == "banco"
         assert data["items"][0]["primary_definition"] == "A financial institution"
+        assert data["items"][1]["display_text"] == "bank on"
+        assert data["items"][1]["translation"] == "contar con"
 
     @pytest.mark.asyncio
     async def test_search_history_round_trip(self, client, mock_db, auth_token):

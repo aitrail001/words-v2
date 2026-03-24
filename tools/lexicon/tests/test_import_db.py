@@ -1,13 +1,83 @@
 import json
+import sys
 import tempfile
 import unittest
 import uuid
 from dataclasses import dataclass, field
+from types import ModuleType
 from typing import Optional
 from unittest.mock import MagicMock
 from pathlib import Path
 
-from tools.lexicon.import_db import ImportSummary, import_compiled_rows
+from tools.lexicon.import_db import (
+    ImportSummary,
+    _load_existing_examples,
+    _load_existing_relations,
+    import_compiled_rows,
+)
+
+
+class _FakeClause:
+    def __init__(self, text: str):
+        self.text = text
+
+    def __str__(self) -> str:
+        return self.text
+
+
+class _FakeOrderClause(_FakeClause):
+    pass
+
+
+class _FakeColumn:
+    def __init__(self, table_name: str, column_name: str):
+        self.table_name = table_name
+        self.column_name = column_name
+
+    def __eq__(self, other: object) -> _FakeClause:  # type: ignore[override]
+        return _FakeClause(f"{self.table_name}.{self.column_name} = {other}")
+
+    def in_(self, values: object) -> _FakeClause:
+        return _FakeClause(f"{self.table_name}.{self.column_name} IN {values}")
+
+    def asc(self) -> _FakeOrderClause:
+        return _FakeOrderClause(f"{self.table_name}.{self.column_name} ASC")
+
+
+class _FakeSelectStatement:
+    def __init__(self, model: type):
+        self.model = model
+        self.whereclause = _FakeClause("")
+
+    def where(self, *clauses: _FakeClause):
+        self.whereclause = _FakeClause(" AND ".join(str(clause) for clause in clauses))
+        return self
+
+    def order_by(self, *_clauses: _FakeOrderClause):
+        return self
+
+
+def _install_fake_sqlalchemy_module() -> None:
+    module = ModuleType("sqlalchemy")
+    module.select = lambda model: _FakeSelectStatement(model)
+    sys.modules["sqlalchemy"] = module
+
+
+class SqlMeaningExample:
+    __tablename__ = "meaning_examples"
+    __table__ = object()
+    meaning_id = _FakeColumn("meaning_examples", "meaning_id")
+    source = _FakeColumn("meaning_examples", "source")
+    order_index = _FakeColumn("meaning_examples", "order_index")
+
+
+class SqlWordRelation:
+    __tablename__ = "word_relations"
+    __table__ = object()
+    meaning_id = _FakeColumn("word_relations", "meaning_id")
+    relation_type = _FakeColumn("word_relations", "relation_type")
+    related_word = _FakeColumn("word_relations", "related_word")
+    source = _FakeColumn("word_relations", "source")
 
 
 @dataclass
@@ -58,6 +128,16 @@ class FakeMeaningExample:
     source: object = None
     confidence: object = None
     enrichment_run_id: object = None
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeTranslation:
+    meaning_id: uuid.UUID
+    language: str
+    translation: str
+    usage_note: object = None
+    examples: object = None
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -171,6 +251,31 @@ class _ListResult:
 
 
 class ImportCompiledRowsTests(unittest.TestCase):
+    def test_load_existing_examples_ignores_source_filter_for_sqlalchemy_models(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ListResult([])
+        _install_fake_sqlalchemy_module()
+
+        _load_existing_examples(session, SqlMeaningExample, uuid.uuid4(), "snapshot_refresh")
+
+        statement = session.execute.call_args[0][0]
+        where_clause = str(statement.whereclause)
+        self.assertIn("meaning_examples.meaning_id", where_clause)
+        self.assertNotIn("meaning_examples.source", where_clause)
+
+    def test_load_existing_relations_ignores_source_filter_for_sqlalchemy_models(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ListResult([])
+        _install_fake_sqlalchemy_module()
+
+        _load_existing_relations(session, SqlWordRelation, uuid.uuid4(), "snapshot_refresh")
+
+        statement = session.execute.call_args[0][0]
+        where_clause = str(statement.whereclause)
+        self.assertIn("word_relations.meaning_id", where_clause)
+        self.assertIn("word_relations.relation_type", where_clause)
+        self.assertNotIn("word_relations.source", where_clause)
+
     def test_import_creates_word_and_meanings_with_provenance(self) -> None:
         session = MagicMock()
         session.execute.side_effect = [
@@ -415,6 +520,63 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_phrase.source_type, "db_export")
         self.assertEqual(imported_phrase.source_reference, "phrase-fixture")
         self.assertEqual(imported_phrase.language, "en")
+
+    def test_import_preserves_localized_usage_notes_and_example_translations(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [
+            _ScalarResult(None),  # existing word lookup
+            _ListResult([]),      # existing meanings
+            _ListResult([]),      # existing examples
+            _ListResult([]),      # existing translations
+            _ListResult([]),      # existing relations
+        ]
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "word",
+                "word": "time",
+                "language": "en",
+                "forms": {},
+                "senses": [
+                    {
+                        "sense_id": "sense-001",
+                        "definition": "the thing measured in minutes and hours",
+                        "pos": "noun",
+                        "examples": [{"sentence": "I do not have time today.", "difficulty": "A1"}],
+                        "translations": {
+                            "pt-BR": {
+                                "definition": "tempo",
+                                "usage_note": "Muito comum em contextos abstratos e práticos.",
+                                "examples": ["Eu não tenho tempo hoje."],
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260324",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            meaning_example_model=FakeMeaningExample,
+            translation_model=FakeTranslation,
+            word_relation_model=FakeWordRelation,
+        )
+
+        self.assertEqual(summary.created_translations, 1)
+        imported_translation = next(item for item in added if isinstance(item, FakeTranslation))
+        self.assertEqual(imported_translation.translation, "tempo")
+        self.assertEqual(imported_translation.usage_note, "Muito comum em contextos abstratos e práticos.")
+        self.assertEqual(imported_translation.examples, ["Eu não tenho tempo hoje."])
 
     def test_import_updates_existing_word_and_meanings_without_duplication(self) -> None:
         existing_word = FakeWord(

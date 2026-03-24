@@ -21,7 +21,13 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("@/lib/knowledge-map-client");
-jest.mock("@/lib/user-preferences-client");
+jest.mock("@/lib/user-preferences-client", () => {
+  const actual = jest.requireActual("@/lib/user-preferences-client");
+  return {
+    ...actual,
+    getUserPreferences: jest.fn(),
+  };
+});
 
 describe("PhraseEntryPage", () => {
   const mockUseParams = useParams as jest.MockedFunction<typeof useParams>;
@@ -128,13 +134,33 @@ describe("PhraseEntryPage", () => {
       pronunciation: null,
       translation: "依靠",
       primary_definition: "To rely on someone.",
+      supported_translation_locales: ["ar", "es", "ja", "pt-BR", "zh-Hans"],
+      forms: null,
       meanings: [],
       senses: [
         {
           sense_id: "sense-1",
           definition: "To rely on someone.",
+          localized_definition: "依靠",
           part_of_speech: "phrasal verb",
-          examples: [{ id: "example-1", sentence: "You can bank on me.", difficulty: "B1" }],
+          usage_note: "Common spoken phrase.",
+          localized_usage_note: "口语中常见。",
+          register: "neutral",
+          primary_domain: "general",
+          secondary_domains: ["relationships"],
+          grammar_patterns: ["bank on + noun"],
+          synonyms: [{ text: "depend on", target: { entry_type: "phrase", entry_id: "phrase-9", display_text: "depend on" } }],
+          antonyms: [],
+          collocations: [{ text: "bank on support", target: null }],
+          examples: [
+            {
+              id: "example-1",
+              sentence: "You can bank on support from me.",
+              difficulty: "B1",
+              translation: "你可以指望我的支持。",
+              linked_entries: [{ text: "support", entry_type: "word", entry_id: "word-7" }],
+            },
+          ],
         },
       ],
       relation_groups: [],
@@ -149,6 +175,10 @@ describe("PhraseEntryPage", () => {
     expect(await screen.findByText("Bank on")).toBeInTheDocument();
     expect(mockGetKnowledgeMapEntryDetail).toHaveBeenCalledWith("phrase", "phrase-1");
     expect(screen.queryByPlaceholderText(/search your knowledge map/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Pronunciation unavailable")).not.toBeInTheDocument();
+    expect(screen.getByText("口语中常见。")).toBeInTheDocument();
+    expect(screen.getByText("你可以指望我的支持。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "depend on" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /learning/i }));
 

@@ -1,6 +1,7 @@
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
+import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.models.word_relation import WordRelation
 DEFAULT_ACCENT = "us"
 DEFAULT_TRANSLATION_LOCALE = "zh-Hans"
 DEFAULT_VIEW = "cards"
+SUPPORTED_TRANSLATION_LOCALES = ("ar", "es", "ja", "pt-BR", "zh-Hans")
 STATUS_VALUES = ("undecided", "to_learn", "learning", "known")
 ENTRY_TYPES = ("word", "phrase")
 BUCKET_SIZE = 100
@@ -115,6 +117,136 @@ def normalize_confusable_words(word: Word) -> list[dict[str, str | None]]:
         raw_note = raw_item.get("note")
         note = raw_note.strip() if isinstance(raw_note, str) and raw_note.strip() else None
         items.append({"word": raw_word.strip(), "note": note})
+    return items
+
+
+def normalize_word_forms(word: Word) -> dict[str, object]:
+    forms = word.word_forms if isinstance(word.word_forms, dict) else {}
+    verb_forms = forms.get("verb_forms") if isinstance(forms.get("verb_forms"), dict) else {}
+    plural_forms = [str(item).strip() for item in forms.get("plural_forms", []) if str(item).strip()]
+    derivations = [str(item).strip() for item in forms.get("derivations", []) if str(item).strip()]
+    comparative = forms.get("comparative")
+    superlative = forms.get("superlative")
+    return {
+        "verb_forms": {
+            "base": str(verb_forms.get("base") or "").strip(),
+            "past": str(verb_forms.get("past") or "").strip(),
+            "gerund": str(verb_forms.get("gerund") or "").strip(),
+            "past_participle": str(verb_forms.get("past_participle") or "").strip(),
+            "third_person_singular": str(verb_forms.get("third_person_singular") or "").strip(),
+        },
+        "plural_forms": plural_forms,
+        "derivations": derivations,
+        "comparative": comparative.strip() if isinstance(comparative, str) and comparative.strip() else None,
+        "superlative": superlative.strip() if isinstance(superlative, str) and superlative.strip() else None,
+    }
+
+
+def build_entry_lookup(
+    words: Sequence[Word],
+    phrases: Sequence[PhraseEntry],
+) -> dict[str, dict[str, object]]:
+    lookup: dict[str, dict[str, object]] = {}
+    for word in words:
+        normalized = word.word.strip().lower()
+        if normalized and normalized not in lookup:
+            lookup[normalized] = {
+                "entry_type": "word",
+                "entry_id": str(word.id),
+                "display_text": word.word,
+            }
+    for phrase in phrases:
+        for raw_value in (phrase.normalized_form, phrase.phrase_text):
+            normalized = raw_value.strip().lower()
+            if normalized and normalized not in lookup:
+                lookup[normalized] = {
+                    "entry_type": "phrase",
+                    "entry_id": str(phrase.id),
+                    "display_text": phrase.phrase_text,
+                }
+    return lookup
+
+
+def resolve_exact_match_target(
+    value: str | None,
+    lookup: dict[str, dict[str, object]],
+) -> dict[str, str] | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    target = lookup.get(value.strip().lower())
+    if target is None:
+        return None
+    return {
+        "entry_type": str(target["entry_type"]),
+        "entry_id": str(target["entry_id"]),
+        "display_text": str(target["display_text"]),
+    }
+
+
+def find_example_links(
+    sentence: str | None,
+    lookup: dict[str, dict[str, object]],
+    *,
+    excluded_terms: Sequence[str] = (),
+) -> list[dict[str, str]]:
+    if not isinstance(sentence, str) or not sentence.strip():
+        return []
+    excluded = {term.strip().lower() for term in excluded_terms if isinstance(term, str) and term.strip()}
+    tokens = re.findall(r"[A-Za-z]+(?:[-'][A-Za-z]+)*", sentence)
+    results: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for index in range(len(tokens)):
+        for width in range(1, 0, -1):
+            chunk = tokens[index:index + width]
+            if len(chunk) != width:
+                continue
+            phrase = " ".join(chunk)
+            normalized = phrase.lower()
+            if normalized in excluded:
+                continue
+            target = lookup.get(normalized)
+            if target is None:
+                continue
+            key = (normalized, str(target["entry_id"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(
+                {
+                    "text": phrase,
+                    "entry_type": str(target["entry_type"]),
+                    "entry_id": str(target["entry_id"]),
+                }
+            )
+            break
+    return results
+
+
+def phrase_locale_payload(sense: dict[str, object], locale: str) -> dict[str, object]:
+    translations = sense.get("translations") if isinstance(sense.get("translations"), dict) else {}
+    payload = translations.get(locale)
+    return payload if isinstance(payload, dict) else {}
+
+
+def relation_terms(
+    relations: Sequence[WordRelation],
+    relation_type: str,
+    lookup: dict[str, dict[str, object]],
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for relation in relations:
+        current_relation_type = relation.relation_type.strip().lower() if isinstance(relation.relation_type, str) else ""
+        if current_relation_type != relation_type:
+            continue
+        text = relation.related_word.strip() if isinstance(relation.related_word, str) else ""
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({"text": text, "target": resolve_exact_match_target(text, lookup)})
     return items
 
 

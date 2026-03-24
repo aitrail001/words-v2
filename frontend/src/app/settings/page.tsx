@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   getUserPreferences,
+  SUPPORTED_TRANSLATION_LOCALES,
+  TRANSLATION_LANGUAGE_LABELS,
+  type TranslationLocale,
   updateUserPreferences,
   type UserPreferences,
 } from "@/lib/user-preferences-client";
@@ -61,7 +64,7 @@ export default function SettingsPage() {
     void persistPreferences({ ...preferences, accent_preference: accent });
 
   const updateTranslationLocale = (translationLocale: string) =>
-    void persistPreferences({ ...preferences, translation_locale: translationLocale });
+    void persistPreferences({ ...preferences, translation_locale: translationLocale as TranslationLocale });
 
   const updateView = (view: ViewPreference) =>
     void persistPreferences({ ...preferences, knowledge_view_preference: view });
@@ -140,21 +143,15 @@ export default function SettingsPage() {
             <label htmlFor="translation-language">Language</label>
             <select
               id="translation-language"
-              value={preferences.translation_locale === "zh-Hans" ? "Chinese" : preferences.translation_locale === "es" ? "Spanish" : preferences.translation_locale}
-              onChange={(event) =>
-                updateTranslationLocale(
-                  event.target.value === "Chinese"
-                    ? "zh-Hans"
-                    : event.target.value === "Spanish"
-                      ? "es"
-                      : event.target.value,
-                )
-              }
+              value={preferences.translation_locale}
+              onChange={(event) => updateTranslationLocale(event.target.value)}
               className="rounded-[0.7rem] bg-transparent text-right outline-none"
             >
-              <option>Chinese</option>
-              <option>Spanish</option>
-              <option>Japanese</option>
+              {SUPPORTED_TRANSLATION_LOCALES.map((locale) => (
+                <option key={locale} value={locale}>
+                  {TRANSLATION_LANGUAGE_LABELS[locale]}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex items-center justify-between">

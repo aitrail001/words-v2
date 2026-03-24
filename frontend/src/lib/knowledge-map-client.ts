@@ -61,17 +61,67 @@ export type KnowledgeMapRange = {
 export type KnowledgeMapMeaning = {
   id: string;
   definition: string;
+  localized_definition?: string | null;
   part_of_speech: string | null;
-  examples: Array<{ id: string; sentence: string; difficulty: string | null }>;
-  translations: Array<{ id: string; language: string; translation: string }>;
+  usage_note?: string | null;
+  localized_usage_note?: string | null;
+  register?: string | null;
+  primary_domain?: string | null;
+  secondary_domains?: string[];
+  grammar_patterns?: string[];
+  synonyms?: Array<{
+    text: string;
+    target: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
+  }>;
+  antonyms?: Array<{
+    text: string;
+    target: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
+  }>;
+  collocations?: Array<{
+    text: string;
+    target: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
+  }>;
+  examples: Array<{
+    id: string;
+    sentence: string;
+    difficulty: string | null;
+    translation?: string | null;
+    linked_entries?: Array<{ text: string; entry_type: KnowledgeEntryType; entry_id: string }>;
+  }>;
+  translations: Array<{ id: string; language: string; translation: string; usage_note?: string | null; examples?: string[] }>;
   relations: Array<{ id: string; relation_type: string; related_word: string }>;
 };
 
 export type KnowledgeMapSense = {
   sense_id: string | null;
   definition: string;
+  localized_definition?: string | null;
   part_of_speech: string | null;
-  examples: Array<{ id: string; sentence: string; difficulty: string | null }>;
+  usage_note?: string | null;
+  localized_usage_note?: string | null;
+  register?: string | null;
+  primary_domain?: string | null;
+  secondary_domains?: string[];
+  grammar_patterns?: string[];
+  synonyms?: Array<{
+    text: string;
+    target: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
+  }>;
+  antonyms?: Array<{
+    text: string;
+    target: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
+  }>;
+  collocations?: Array<{
+    text: string;
+    target: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
+  }>;
+  examples: Array<{
+    id: string;
+    sentence: string;
+    difficulty: string | null;
+    translation?: string | null;
+    linked_entries?: Array<{ text: string; entry_type: KnowledgeEntryType; entry_id: string }>;
+  }>;
 };
 
 export type KnowledgeMapEntryDetail = {
@@ -85,10 +135,25 @@ export type KnowledgeMapEntryDetail = {
   pronunciation: string | null;
   translation: string | null;
   primary_definition: string | null;
+  supported_translation_locales?: string[];
+  forms?: {
+    verb_forms: Record<string, string>;
+    plural_forms: string[];
+    derivations: Array<{
+      text: string;
+      target: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
+    }>;
+    comparative: string | null;
+    superlative: string | null;
+  } | null;
   meanings: KnowledgeMapMeaning[];
   senses: KnowledgeMapSense[];
   relation_groups: Array<{ relation_type: string; related_words: string[] }>;
-  confusable_words: Array<{ word: string; note: string | null }>;
+  confusable_words: Array<{
+    word: string;
+    note: string | null;
+    target?: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
+  }>;
   previous_entry: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
   next_entry: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
 };

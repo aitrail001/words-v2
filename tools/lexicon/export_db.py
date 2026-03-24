@@ -70,6 +70,16 @@ def _serialize_translations(translations: Iterable[Any]) -> dict[str, dict[str, 
         if not locale or not text:
             continue
         payload[locale] = {"definition": text}
+        usage_note = getattr(translation, "usage_note", None)
+        if isinstance(usage_note, str) and usage_note.strip():
+            payload[locale]["usage_note"] = usage_note.strip()
+        examples = [
+            str(example).strip()
+            for example in (getattr(translation, "examples", None) or [])
+            if str(example).strip()
+        ]
+        if examples:
+            payload[locale]["examples"] = examples
     return payload
 
 

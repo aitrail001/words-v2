@@ -192,6 +192,41 @@ describe("KnowledgeMapRangePage", () => {
     });
   });
 
+  it("uses the consolidated learner actions for range cards", async () => {
+    const user = userEvent.setup();
+    mockUpdateKnowledgeEntryStatus
+      .mockResolvedValueOnce({
+        entry_type: "word",
+        entry_id: "word-1",
+        status: "learning",
+      })
+      .mockResolvedValueOnce({
+        entry_type: "word",
+        entry_id: "word-1",
+        status: "known",
+      });
+    render(<KnowledgeMapRangePage />);
+
+    expect(await screen.findByRole("button", { name: /learn now/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /already know/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^learning$/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /learn now/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "learning");
+    });
+
+    expect(await screen.findByRole("button", { name: /^learning$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^known$/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^known$/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "known");
+    });
+  });
+
   it("keeps the selected entry and definition in sync when browsing across entries", async () => {
     const user = userEvent.setup();
     render(<KnowledgeMapRangePage />);

@@ -50,9 +50,10 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
 
   await expect(page).toHaveURL(new RegExp(`/phrase/${fixture.phraseId}$`));
   await expect(page.getByRole("heading", { name: KNOWLEDGE_PHRASE })).toBeVisible();
-  await expect(page.getByText("To depend on someone or something.").first()).toBeVisible();
-  await expect(page.getByText("depender de")).toBeVisible();
+  await expect(page.getByText("depender de").first()).toBeVisible();
   await expect(page.getByText("You can bank on me when the deadline gets tight.").first()).toBeVisible();
+  await expect(page.getByText("Puedes depender de mi cuando el plazo es corto.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /spanish on/i })).toBeVisible();
   await expect(page.getByText("Status: Learning")).toBeVisible();
 
   await page.getByRole("button", { name: "Known" }).click();
@@ -74,7 +75,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await learnNextLink.click();
   await expect(page).toHaveURL(new RegExp(`/word/${fixture.learnWordId}$`));
   await expect(page.getByRole("heading", { name: LEARN_WORD })).toBeVisible({ timeout: 30000 });
-  await expect(page.getByText("tambor")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("tambor").first()).toBeVisible({ timeout: 30000 });
 
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();

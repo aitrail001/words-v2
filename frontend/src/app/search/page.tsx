@@ -143,35 +143,48 @@ export default function SearchPage() {
 
       {results.length > 0 && (
         <div className="space-y-3">
-          {results.map((item) => (
-            <Link
-              key={`${item.entry_type}-${item.entry_id}`}
-              href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
-              onClick={() => void rememberSearch(item)}
-            className="block rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_10px_20px_rgba(94,53,177,0.08)]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[1.5rem] font-semibold leading-none text-[#572a80]">
-                    {item.display_text}
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-[#8f82a1]">
-                    {item.pronunciation ?? "Pronunciation unavailable"} #{item.browse_rank.toLocaleString()}
-                  </p>
-                </div>
-                <span className="rounded-full bg-[#f3ebff] px-3 py-1 text-xs font-semibold text-[#7d2cff]">
-                  {item.entry_type}
-                </span>
-              </div>
+          {results.map((item) => {
+            const summaryTranslation = showTranslations
+              ? item.translation ?? item.primary_definition ?? null
+              : null;
+            const definitionText =
+              item.primary_definition && item.primary_definition !== summaryTranslation
+                ? item.primary_definition
+                : item.primary_definition && !summaryTranslation
+                  ? item.primary_definition
+                  : null;
 
-              {showTranslations && item.translation && (
-                <p className="mt-3 text-lg font-semibold text-[#9c3af2]">{item.translation}</p>
-              )}
-              <p className="mt-2 text-sm leading-6 text-[#645678]">
-                {item.primary_definition ?? "No learner definition has been generated yet."}
-              </p>
-            </Link>
-          ))}
+            return (
+              <Link
+                key={`${item.entry_type}-${item.entry_id}`}
+                href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
+                onClick={() => void rememberSearch(item)}
+                className="block rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_10px_20px_rgba(94,53,177,0.08)]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[1.5rem] font-semibold leading-none text-[#572a80]">
+                      {item.display_text}
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-[#8f82a1]">
+                      {item.pronunciation ? `${item.pronunciation} ` : ""}
+                      #{item.browse_rank.toLocaleString()}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-[#f3ebff] px-3 py-1 text-xs font-semibold text-[#7d2cff]">
+                    {item.entry_type}
+                  </span>
+                </div>
+
+                {summaryTranslation && (
+                  <p className="mt-3 text-sm font-semibold text-[#9c3af2]">{summaryTranslation}</p>
+                )}
+                {definitionText ? (
+                  <p className="mt-2 text-[1rem] font-semibold leading-6 text-[#4d295f]">{definitionText}</p>
+                ) : null}
+              </Link>
+            );
+          })}
         </div>
       )}
     </section>
