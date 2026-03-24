@@ -54,6 +54,7 @@ services:
       - ./backend:/app
       - ./tools:/app/tools:ro
       - ./data:/app/data
+      - ./tests:/app/tests
       - backend_uploads:/app/uploads
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -82,6 +83,7 @@ services:
       - ./backend:/app
       - ./tools:/app/tools:ro
       - ./data:/app/data
+      - ./tests:/app/tests:ro
       - backend_uploads:/app/uploads
     depends_on:
       postgres:

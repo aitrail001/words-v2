@@ -330,6 +330,92 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_word.confusable_words, [{"word": "single", "note": "Related but not identical."}])
         self.assertIsNotNone(imported_word.learner_generated_at)
 
+    def test_import_honors_row_level_word_language_and_provenance(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [
+            _ScalarResult(None),
+            _ListResult([]),
+        ]
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "word",
+                "word": "bonjour",
+                "language": "fr",
+                "source_type": "db_export",
+                "source_reference": "fixture-fr",
+                "frequency_rank": 11,
+                "forms": {},
+                "senses": [
+                    {
+                        "sense_id": "sense-fr-001",
+                        "definition": "hello",
+                        "pos": "interjection",
+                    }
+                ],
+            }
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            rows,
+            source_type="fallback_source",
+            source_reference="fallback-ref",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+        )
+
+        self.assertEqual(summary.created_words, 1)
+        imported_word = next(item for item in added if isinstance(item, FakeWord))
+        imported_meaning = next(item for item in added if isinstance(item, FakeMeaning))
+        self.assertEqual(imported_word.language, "fr")
+        self.assertEqual(imported_word.source_type, "db_export")
+        self.assertEqual(imported_word.source_reference, "fixture-fr")
+        self.assertEqual(imported_meaning.source, "db_export")
+        self.assertEqual(imported_meaning.source_reference, "fixture-fr:sense-fr-001")
+
+    def test_import_honors_row_level_phrase_provenance(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [_ScalarResult(None)]
+        added = []
+        session.add.side_effect = added.append
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "phrase",
+                "word": "by and large",
+                "display_form": "by and large",
+                "normalized_form": "by and large",
+                "language": "en",
+                "source_type": "db_export",
+                "source_reference": "phrase-fixture",
+                "senses": [],
+            }
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            rows,
+            source_type="fallback_source",
+            source_reference="fallback-ref",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+        )
+
+        self.assertEqual(summary.created_phrases, 1)
+        imported_phrase = next(item for item in added if isinstance(item, FakePhraseEntry))
+        self.assertEqual(imported_phrase.source_type, "db_export")
+        self.assertEqual(imported_phrase.source_reference, "phrase-fixture")
+        self.assertEqual(imported_phrase.language, "en")
+
     def test_import_updates_existing_word_and_meanings_without_duplication(self) -> None:
         existing_word = FakeWord(
             word="run",

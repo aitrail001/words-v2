@@ -364,6 +364,18 @@ def _sync_meaning_level_learner_fields(meaning: Any, sense: dict[str, Any], row:
         meaning.generated_at = _parse_timestamp(meaning_generated_at)
 
 
+def _effective_row_language(row: dict[str, Any], default_language: str) -> str:
+    return str(row.get("language") or default_language or "en").strip() or "en"
+
+
+def _effective_row_source_type(row: dict[str, Any], default_source_type: str) -> str:
+    return str(row.get("source_type") or default_source_type).strip() or default_source_type
+
+
+def _effective_row_source_reference(row: dict[str, Any], default_source_reference: str) -> str:
+    return str(row.get("source_reference") or default_source_reference).strip() or default_source_reference
+
+
 def import_compiled_rows(
     session: Any,
     rows: Iterable[dict[str, Any]],
@@ -413,16 +425,24 @@ def import_compiled_rows(
 
     for row_index, row in enumerate(row_list, start=1):
         entry_type = str(row.get("entry_type") or "word").strip().lower() or "word"
+        row_language = _effective_row_language(row, language)
+        row_source_type = _effective_row_source_type(row, source_type)
+        row_source_reference = _effective_row_source_reference(row, source_reference)
         if entry_type == "phrase":
             if resolved_phrase_model is None:
                 resolved_phrase_model = _default_phrase_models()
-            existing_phrase = _find_existing_by_normalized_form(session, resolved_phrase_model, str(row.get("normalized_form") or "").strip(), str(row.get("language") or language))
+            existing_phrase = _find_existing_by_normalized_form(
+                session,
+                resolved_phrase_model,
+                str(row.get("normalized_form") or "").strip(),
+                row_language,
+            )
             if existing_phrase is None:
                 phrase = resolved_phrase_model(
                     phrase_text=row.get("display_form") or row.get("word"),
                     normalized_form=row.get("normalized_form") or str(row.get("word") or "").strip().lower(),
                     phrase_kind=row.get("phrase_kind") or "multiword_expression",
-                    language=row.get("language") or language,
+                    language=row_language,
                     cefr_level=row.get("cefr_level"),
                     register_label=row.get("register") or row.get("register_label"),
                     brief_usage_note=row.get("brief_usage_note") or row.get("usage_note"),
@@ -430,8 +450,8 @@ def import_compiled_rows(
                     seed_metadata=row.get("seed_metadata") if hasattr(resolved_phrase_model, "seed_metadata") else None,
                     confidence_score=_normalize_confidence(row.get("confidence")) if hasattr(resolved_phrase_model, "confidence_score") else None,
                     generated_at=_parse_timestamp(row.get("generated_at")) if hasattr(resolved_phrase_model, "generated_at") else None,
-                    source_type=source_type,
-                    source_reference=source_reference,
+                    source_type=row_source_type,
+                    source_reference=row_source_reference,
                 )
                 session.add(phrase)
                 summary = _increment(summary, created_phrases=1)
@@ -451,9 +471,9 @@ def import_compiled_rows(
                 if hasattr(existing_phrase, "generated_at"):
                     existing_phrase.generated_at = _parse_timestamp(row.get("generated_at"))
                 if hasattr(existing_phrase, "source_type"):
-                    existing_phrase.source_type = source_type
+                    existing_phrase.source_type = row_source_type
                 if hasattr(existing_phrase, "source_reference"):
-                    existing_phrase.source_reference = source_reference
+                    existing_phrase.source_reference = row_source_reference
                 summary = _increment(summary, updated_phrases=1)
             continue
         if entry_type == "reference":
@@ -463,7 +483,12 @@ def import_compiled_rows(
                     resolved_reference_model = default_reference_model
                 if resolved_reference_localization_model is None:
                     resolved_reference_localization_model = default_reference_localization_model
-            existing_reference = _find_existing_by_normalized_form(session, resolved_reference_model, str(row.get("normalized_form") or "").strip(), str(row.get("language") or language))
+            existing_reference = _find_existing_by_normalized_form(
+                session,
+                resolved_reference_model,
+                str(row.get("normalized_form") or "").strip(),
+                row_language,
+            )
             if existing_reference is None:
                 reference_entry = resolved_reference_model(
                     reference_type=row.get("reference_type") or "name",
@@ -473,9 +498,9 @@ def import_compiled_rows(
                     brief_description=row.get("brief_description") or "",
                     pronunciation=row.get("pronunciation") or "",
                     learner_tip=row.get("learner_tip"),
-                    language=row.get("language") or language,
-                    source_type=source_type,
-                    source_reference=source_reference,
+                    language=row_language,
+                    source_type=row_source_type,
+                    source_reference=row_source_reference,
                 )
                 session.add(reference_entry)
                 session.flush()
@@ -491,9 +516,9 @@ def import_compiled_rows(
                 current_reference.pronunciation = row.get("pronunciation") or current_reference.pronunciation
                 current_reference.learner_tip = row.get("learner_tip")
                 if hasattr(current_reference, "source_type"):
-                    current_reference.source_type = source_type
+                    current_reference.source_type = row_source_type
                 if hasattr(current_reference, "source_reference"):
-                    current_reference.source_reference = source_reference
+                    current_reference.source_reference = row_source_reference
                 summary = _increment(summary, updated_reference_entries=1)
             localization_rows = list(row.get("localizations") or [])
             if localization_rows:
@@ -522,15 +547,15 @@ def import_compiled_rows(
                         summary = _increment(summary, updated_reference_localizations=1)
             continue
 
-        word = _find_existing_word(session, word_model, row["word"], language)
+        word = _find_existing_word(session, word_model, row["word"], row_language)
         if word is None:
             word = word_model(
                 word=row["word"],
-                language=language,
+                language=row_language,
                 frequency_rank=row.get("frequency_rank"),
                 word_forms=row.get("forms"),
-                source_type=source_type,
-                source_reference=source_reference,
+                source_type=row_source_type,
+                source_reference=row_source_reference,
             )
             session.add(word)
             session.flush()
@@ -539,12 +564,12 @@ def import_compiled_rows(
             word.frequency_rank = row.get("frequency_rank")
             word.word_forms = row.get("forms")
             if hasattr(word, "source_type"):
-                word.source_type = source_type
+                word.source_type = row_source_type
             if hasattr(word, "source_reference"):
-                word.source_reference = source_reference
+                word.source_reference = row_source_reference
             summary = _increment(summary, updated_words=1)
 
-        _sync_word_level_enrichment_fields(word, row, None, source_type)
+        _sync_word_level_enrichment_fields(word, row, None, row_source_type)
 
         existing_meanings = _load_existing_meanings(session, meaning_model, word.id)
         matched_meaning_ids: set[Any] = set()
@@ -583,8 +608,8 @@ def import_compiled_rows(
                     continue
                 generation_run_id, model_name, prompt_version = group_key
                 prompt_hash = _make_word_prompt_hash(
-                    source_type,
-                    source_reference,
+                    row_source_type,
+                    row_source_reference,
                     row["word"],
                     generation_run_id,
                     model_name,
@@ -600,7 +625,7 @@ def import_compiled_rows(
                 if enrichment_run is None:
                     enrichment_run = lexicon_enrichment_run_model(
                         enrichment_job_id=enrichment_job.id,
-                        generator_provider=source_type,
+                        generator_provider=row_source_type,
                         generator_model=model_name,
                         prompt_version=prompt_version,
                         prompt_hash=prompt_hash,
@@ -613,7 +638,7 @@ def import_compiled_rows(
                     summary = _increment(summary, created_enrichment_runs=1)
                 else:
                     if hasattr(enrichment_run, "generator_provider"):
-                        enrichment_run.generator_provider = source_type
+                        enrichment_run.generator_provider = row_source_type
                     if hasattr(enrichment_run, "generator_model"):
                         enrichment_run.generator_model = model_name
                     if hasattr(enrichment_run, "verdict"):
@@ -624,7 +649,7 @@ def import_compiled_rows(
                 enrichment_run_by_group[group_key] = enrichment_run
 
         for index, sense in enumerate(row.get("senses") or []):
-            sense_source_reference = f"{source_reference}:{sense['sense_id']}"
+            sense_source_reference = f"{row_source_reference}:{sense['sense_id']}"
             example_sentence = _first_example_sentence(sense)
             meaning = next(
                 (
@@ -642,7 +667,7 @@ def import_compiled_rows(
                     part_of_speech=sense.get("pos"),
                     example_sentence=example_sentence,
                     order_index=index,
-                    source=source_type,
+                    source=row_source_type,
                     source_reference=sense_source_reference,
                 )
                 _sync_meaning_level_learner_fields(meaning, sense, row)
@@ -656,7 +681,7 @@ def import_compiled_rows(
                 meaning.example_sentence = example_sentence
                 meaning.order_index = index
                 if hasattr(meaning, "source"):
-                    meaning.source = source_type
+                    meaning.source = row_source_type
                 if hasattr(meaning, "source_reference"):
                     meaning.source_reference = sense_source_reference
                 _sync_meaning_level_learner_fields(meaning, sense, row)
@@ -667,10 +692,10 @@ def import_compiled_rows(
             if enrichment_job is not None and lexicon_enrichment_run_model is not None:
                 enrichment_run = enrichment_run_by_group.get(_sense_run_group_key(sense))
 
-            _sync_word_level_enrichment_fields(word, row, enrichment_run, source_type)
+            _sync_word_level_enrichment_fields(word, row, enrichment_run, row_source_type)
 
             if meaning_example_model is not None:
-                existing_examples = _load_existing_examples(session, meaning_example_model, meaning.id, source_type)
+                existing_examples = _load_existing_examples(session, meaning_example_model, meaning.id, row_source_type)
                 deleted_any_examples = False
                 for existing_example in existing_examples:
                     session.delete(existing_example)
@@ -689,7 +714,7 @@ def import_compiled_rows(
                         sentence=sentence,
                         difficulty=(example or {}).get("difficulty"),
                         order_index=example_index,
-                        source=source_type,
+                        source=row_source_type,
                         confidence=_normalize_confidence(sense.get("confidence")),
                         enrichment_run_id=getattr(enrichment_run, "id", None),
                     )
@@ -719,7 +744,7 @@ def import_compiled_rows(
                         summary = _increment(summary, updated_translations=1)
 
             if word_relation_model is not None:
-                existing_relations = _load_existing_relations(session, word_relation_model, meaning.id, source_type)
+                existing_relations = _load_existing_relations(session, word_relation_model, meaning.id, row_source_type)
                 deleted_any_relations = False
                 for existing_relation in existing_relations:
                     session.delete(existing_relation)
@@ -741,7 +766,7 @@ def import_compiled_rows(
                             relation_type=relation_type,
                             related_word=related_text,
                             related_word_id=None,
-                            source=source_type,
+                            source=row_source_type,
                             confidence=_normalize_confidence(sense.get("confidence")),
                             enrichment_run_id=getattr(enrichment_run, "id", None),
                         )
@@ -751,7 +776,7 @@ def import_compiled_rows(
         for existing_meaning in list(existing_meanings):
             if existing_meaning.id in matched_meaning_ids:
                 continue
-            if getattr(existing_meaning, "source", None) != source_type:
+            if getattr(existing_meaning, "source", None) != row_source_type:
                 continue
             session.delete(existing_meaning)
 
