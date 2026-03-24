@@ -1,14 +1,13 @@
 import json
+import sys
 import tempfile
 import unittest
 import uuid
 from dataclasses import dataclass, field
+from types import ModuleType
 from typing import Optional
 from unittest.mock import MagicMock
 from pathlib import Path
-
-from sqlalchemy import String, Uuid
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from tools.lexicon.import_db import (
     ImportSummary,
@@ -18,28 +17,67 @@ from tools.lexicon.import_db import (
 )
 
 
-class _SqlAlchemyBase(DeclarativeBase):
+class _FakeClause:
+    def __init__(self, text: str):
+        self.text = text
+
+    def __str__(self) -> str:
+        return self.text
+
+
+class _FakeOrderClause(_FakeClause):
     pass
 
 
-class SqlMeaningExample(_SqlAlchemyBase):
+class _FakeColumn:
+    def __init__(self, table_name: str, column_name: str):
+        self.table_name = table_name
+        self.column_name = column_name
+
+    def __eq__(self, other: object) -> _FakeClause:  # type: ignore[override]
+        return _FakeClause(f"{self.table_name}.{self.column_name} = {other}")
+
+    def in_(self, values: object) -> _FakeClause:
+        return _FakeClause(f"{self.table_name}.{self.column_name} IN {values}")
+
+    def asc(self) -> _FakeOrderClause:
+        return _FakeOrderClause(f"{self.table_name}.{self.column_name} ASC")
+
+
+class _FakeSelectStatement:
+    def __init__(self, model: type):
+        self.model = model
+        self.whereclause = _FakeClause("")
+
+    def where(self, *clauses: _FakeClause):
+        self.whereclause = _FakeClause(" AND ".join(str(clause) for clause in clauses))
+        return self
+
+    def order_by(self, *_clauses: _FakeOrderClause):
+        return self
+
+
+def _install_fake_sqlalchemy_module() -> None:
+    module = ModuleType("sqlalchemy")
+    module.select = lambda model: _FakeSelectStatement(model)
+    sys.modules["sqlalchemy"] = module
+
+
+class SqlMeaningExample:
     __tablename__ = "meaning_examples"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    meaning_id: Mapped[uuid.UUID] = mapped_column(Uuid)
-    sentence: Mapped[str] = mapped_column(String)
-    source: Mapped[str] = mapped_column(String)
-    order_index: Mapped[int] = mapped_column(default=0)
+    __table__ = object()
+    meaning_id = _FakeColumn("meaning_examples", "meaning_id")
+    source = _FakeColumn("meaning_examples", "source")
+    order_index = _FakeColumn("meaning_examples", "order_index")
 
 
-class SqlWordRelation(_SqlAlchemyBase):
+class SqlWordRelation:
     __tablename__ = "word_relations"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    meaning_id: Mapped[uuid.UUID] = mapped_column(Uuid)
-    relation_type: Mapped[str] = mapped_column(String)
-    related_word: Mapped[str] = mapped_column(String)
-    source: Mapped[str] = mapped_column(String)
+    __table__ = object()
+    meaning_id = _FakeColumn("word_relations", "meaning_id")
+    relation_type = _FakeColumn("word_relations", "relation_type")
+    related_word = _FakeColumn("word_relations", "related_word")
+    source = _FakeColumn("word_relations", "source")
 
 
 @dataclass
@@ -216,6 +254,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
     def test_load_existing_examples_ignores_source_filter_for_sqlalchemy_models(self) -> None:
         session = MagicMock()
         session.execute.return_value = _ListResult([])
+        _install_fake_sqlalchemy_module()
 
         _load_existing_examples(session, SqlMeaningExample, uuid.uuid4(), "snapshot_refresh")
 
@@ -227,6 +266,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
     def test_load_existing_relations_ignores_source_filter_for_sqlalchemy_models(self) -> None:
         session = MagicMock()
         session.execute.return_value = _ListResult([])
+        _install_fake_sqlalchemy_module()
 
         _load_existing_relations(session, SqlWordRelation, uuid.uuid4(), "snapshot_refresh")
 
