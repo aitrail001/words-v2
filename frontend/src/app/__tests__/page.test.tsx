@@ -1,27 +1,19 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, within } from "@testing-library/react";
 import HomePage from "@/app/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
-import {
-  getKnowledgeMapDashboard,
-  getKnowledgeMapOverview,
-  getKnowledgeMapRange,
-  getKnowledgeMapSearchHistory,
-  searchKnowledgeMap,
-  updateKnowledgeEntryStatus,
-} from "@/lib/knowledge-map-client";
+import { getKnowledgeMapDashboard } from "@/lib/knowledge-map-client";
 import { getUserPreferences } from "@/lib/user-preferences-client";
+
+jest.mock("next/navigation", () => ({
+  usePathname: jest.fn(() => "/"),
+}));
 
 jest.mock("@/lib/knowledge-map-client");
 jest.mock("@/lib/user-preferences-client");
+jest.mock("../globals.css", () => ({}));
 
 describe("HomePage (Knowledge Map)", () => {
   const mockGetKnowledgeMapDashboard = getKnowledgeMapDashboard as jest.MockedFunction<typeof getKnowledgeMapDashboard>;
-  const mockGetKnowledgeMapOverview = getKnowledgeMapOverview as jest.MockedFunction<typeof getKnowledgeMapOverview>;
-  const mockGetKnowledgeMapRange = getKnowledgeMapRange as jest.MockedFunction<typeof getKnowledgeMapRange>;
-  const mockGetKnowledgeMapSearchHistory = getKnowledgeMapSearchHistory as jest.MockedFunction<typeof getKnowledgeMapSearchHistory>;
-  const mockSearchKnowledgeMap = searchKnowledgeMap as jest.MockedFunction<typeof searchKnowledgeMap>;
-  const mockUpdateKnowledgeEntryStatus = updateKnowledgeEntryStatus as jest.MockedFunction<typeof updateKnowledgeEntryStatus>;
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
 
   beforeEach(() => {
@@ -29,10 +21,10 @@ describe("HomePage (Knowledge Map)", () => {
     mockGetKnowledgeMapDashboard.mockResolvedValue({
       total_entries: 13760,
       counts: {
-        undecided: 2385,
+        undecided: 1,
         to_learn: 4293,
         learning: 7082,
-        known: 0,
+        known: 4,
       },
       discovery_range_start: 7001,
       discovery_range_end: 7100,
@@ -55,96 +47,18 @@ describe("HomePage (Knowledge Map)", () => {
       accent_preference: "uk",
       translation_locale: "zh-Hans",
       knowledge_view_preference: "cards",
-    });
-    mockGetKnowledgeMapOverview.mockResolvedValue({
-      bucket_size: 100,
-      total_entries: 2,
-      ranges: [
-        {
-          range_start: 1,
-          range_end: 100,
-          total_entries: 2,
-          counts: { undecided: 1, to_learn: 1, learning: 0, known: 0 },
-        },
-      ],
-    });
-    mockGetKnowledgeMapRange.mockResolvedValue({
-      range_start: 1,
-      range_end: 100,
-      previous_range_start: null,
-      next_range_start: null,
-      items: [
-        {
-          entry_type: "word",
-          entry_id: "word-1",
-          display_text: "Bank",
-          normalized_form: "bank",
-          browse_rank: 20,
-          status: "to_learn",
-          cefr_level: "A2",
-          pronunciation: "/baŋk/",
-          translation: "银行",
-          primary_definition: "A financial institution.",
-          part_of_speech: "noun",
-          phrase_kind: null,
-        },
-        {
-          entry_type: "phrase",
-          entry_id: "phrase-1",
-          display_text: "Bank on",
-          normalized_form: "bank on",
-          browse_rank: 21,
-          status: "undecided",
-          cefr_level: "B1",
-          pronunciation: null,
-          translation: "依靠",
-          primary_definition: "To rely on someone.",
-          part_of_speech: null,
-          phrase_kind: "phrasal_verb",
-        },
-      ],
-    });
-    mockGetKnowledgeMapSearchHistory.mockResolvedValue({
-      items: [
-        {
-          query: "bank",
-          entry_type: "word",
-          entry_id: "word-1",
-          last_searched_at: "2026-03-23T00:00:00Z",
-        },
-      ],
-    });
-    mockSearchKnowledgeMap.mockResolvedValue({
-      items: [
-        {
-          entry_type: "word",
-          entry_id: "word-1",
-          display_text: "Bank",
-          normalized_form: "bank",
-          browse_rank: 20,
-          status: "to_learn",
-          cefr_level: "A2",
-          pronunciation: "/baŋk/",
-          translation: "银行",
-          primary_definition: "A financial institution.",
-          part_of_speech: "noun",
-          phrase_kind: null,
-        },
-      ],
-    });
-    mockUpdateKnowledgeEntryStatus.mockResolvedValue({
-      entry_type: "word",
-      entry_id: "word-1",
-      status: "known",
+      show_translations_by_default: true,
     });
   });
 
   it("renders the dashboard summary cards", async () => {
     render(<HomePage />);
 
-    expect(await screen.findByText(/words uncovered/i)).toBeInTheDocument();
+    expect(
+      (await screen.findAllByText((_, element) => element?.textContent === "WordsUncovered")).length,
+    ).toBeGreaterThan(0);
     expect(await screen.findByText("13,760")).toBeInTheDocument();
-    expect(await screen.findByRole("link", { name: "New 2,385" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Knew 4" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Started 7,082" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "To Learn 4,293" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /discover/i })).toBeInTheDocument();
@@ -164,11 +78,67 @@ describe("HomePage (Knowledge Map)", () => {
     render(<HomePage />);
 
     expect(await screen.findByRole("link", { name: "13,760" })).toHaveAttribute("href", "/knowledge-map");
-    expect(screen.getByRole("link", { name: "New 2,385" })).toHaveAttribute("href", "/knowledge-list/new");
+    expect(screen.getByRole("link", { name: "Knew 4" })).toHaveAttribute("href", "/knowledge-list/known");
     expect(screen.getByRole("link", { name: "Started 7,082" })).toHaveAttribute("href", "/knowledge-list/learning");
     expect(screen.getByRole("link", { name: "To Learn 4,293" })).toHaveAttribute("href", "/knowledge-list/to-learn");
     expect(screen.getByRole("link", { name: /settings/i })).toHaveAttribute("href", "/settings");
   });
+});
+
+describe("RootLayout learner shell", () => {
+  const mockUsePathname = require("next/navigation").usePathname as jest.Mock;
+
+  beforeEach(() => {
+    mockUsePathname.mockReturnValue("/");
+  });
+
+  it("renders the persistent learner bottom nav links", () => {
+    const RootLayout = require("@/app/layout").default as typeof import("@/app/layout").default;
+    const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      render(
+        <RootLayout>
+          <div>Child content</div>
+        </RootLayout>,
+      );
+
+      const learnerShellNav = within(screen.getByTestId("learner-shell-nav"));
+
+      expect(learnerShellNav.getByRole("link", { name: /home/i })).toHaveAttribute("href", "/");
+      expect(learnerShellNav.getByRole("link", { name: /knowledge/i })).toHaveAttribute("href", "/knowledge-map");
+      expect(learnerShellNav.getByRole("link", { name: /search/i })).toHaveAttribute("href", "/search");
+      expect(learnerShellNav.getByRole("link", { name: /settings/i })).toHaveAttribute("href", "/settings");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it.each(["/knowledge-list/new", "/word/word-1"])(
+    "keeps the Knowledge tab active on learner knowledge routes like %s",
+    (pathname) => {
+    const RootLayout = require("@/app/layout").default as typeof import("@/app/layout").default;
+    const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    mockUsePathname.mockReturnValue(pathname);
+
+    try {
+      render(
+        <RootLayout>
+          <div>Child content</div>
+        </RootLayout>,
+      );
+
+      const learnerShellNav = within(screen.getByTestId("learner-shell-nav"));
+      const knowledgeLink = learnerShellNav.getByRole("link", { name: /knowledge/i });
+      const searchLink = learnerShellNav.getByRole("link", { name: /search/i });
+
+      expect(knowledgeLink.className).toContain("text-white");
+      expect(searchLink.className).toContain("bg-white");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+    },
+  );
 });
 
 describe("Auth middleware for /", () => {
@@ -192,6 +162,9 @@ describe("Auth middleware for /", () => {
     );
     expect(getAuthRedirectPath("/knowledge-list/new", false)).toBe(
       "/login?next=%2Fknowledge-list%2Fnew",
+    );
+    expect(getAuthRedirectPath("/search", false)).toBe(
+      "/login?next=%2Fsearch",
     );
     expect(getAuthRedirectPath("/settings", false)).toBe(
       "/login?next=%2Fsettings",

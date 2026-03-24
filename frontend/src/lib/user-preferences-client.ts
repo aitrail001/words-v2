@@ -4,6 +4,7 @@ export type UserPreferences = {
   accent_preference: "us" | "uk" | "au";
   translation_locale: string;
   knowledge_view_preference: "cards" | "tags" | "list";
+  show_translations_by_default: boolean;
 };
 
 export const getUserPreferences = (): Promise<UserPreferences> =>

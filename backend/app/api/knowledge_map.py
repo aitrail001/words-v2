@@ -24,6 +24,7 @@ from app.services.knowledge_map import (
     build_dashboard_summary,
     build_overview,
     build_range,
+    build_relation_groups,
     build_word_translation_map,
     extract_phrase_primary_definition,
     extract_phrase_translation,
@@ -33,6 +34,7 @@ from app.services.knowledge_map import (
     list_search_history,
     load_word_detail_relations,
     load_word_primary_definitions,
+    normalize_confusable_words,
     select_pronunciation,
     sort_catalog_items,
 )
@@ -126,6 +128,16 @@ class RelationResponse(BaseModel):
     related_word: str
 
 
+class RelationGroupResponse(BaseModel):
+    relation_type: str
+    related_words: list[str]
+
+
+class ConfusableWordResponse(BaseModel):
+    word: str
+    note: str | None = None
+
+
 class KnowledgeMeaningResponse(BaseModel):
     id: str
     definition: str
@@ -161,6 +173,8 @@ class KnowledgeMapDetailResponse(BaseModel):
     primary_definition: str | None
     meanings: list[KnowledgeMeaningResponse] = []
     senses: list[PhraseSenseResponse] = []
+    relation_groups: list[RelationGroupResponse] = []
+    confusable_words: list[ConfusableWordResponse] = []
     previous_entry: AdjacentEntryResponse | None = None
     next_entry: AdjacentEntryResponse | None = None
 
@@ -253,6 +267,51 @@ def _dashboard_entry(item: dict | None) -> KnowledgeMapAdjacentEntryResponse | N
     )
 
 
+async def _hydrate_word_summary_items(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    items: list[dict],
+) -> list[dict]:
+    word_ids = [item["entry_id"] for item in items if item["entry_type"] == "word"]
+    if not word_ids:
+        return items
+
+    preferences = await get_preferences(db, user_id)
+    primary_meanings = await load_word_primary_definitions(db, word_ids)
+    meaning_ids = [meaning.id for meaning in primary_meanings.values()]
+
+    translations = []
+    if meaning_ids:
+        translations_result = await db.execute(
+            select(Translation)
+            .where(Translation.meaning_id.in_(meaning_ids))
+            .order_by(Translation.meaning_id.asc(), Translation.language.asc())
+        )
+        translations = translations_result.scalars().all()
+
+    translation_map = build_word_translation_map(
+        translations,
+        preferences.translation_locale,
+    )
+    words_result = await db.execute(select(Word).where(Word.id.in_(word_ids)))
+    words_by_id = {word.id: word for word in words_result.scalars().all()}
+
+    for item in items:
+        if item["entry_type"] != "word":
+            continue
+        meaning = primary_meanings.get(item["entry_id"])
+        word = words_by_id.get(item["entry_id"])
+        item["primary_definition"] = meaning.definition if meaning is not None else item.get("primary_definition")
+        item["translation"] = translation_map.get(meaning.id) if meaning is not None else item.get("translation")
+        item["pronunciation"] = (
+            select_pronunciation(word, preferences.accent_preference)
+            if word is not None
+            else item.get("pronunciation")
+        )
+
+    return items
+
+
 @router.get("/overview", response_model=KnowledgeMapOverviewResponse)
 async def get_knowledge_map_overview(
     current_user: User = Depends(get_current_user),
@@ -295,6 +354,7 @@ async def get_knowledge_map_list(
     items = await build_catalog(db, current_user.id)
     filtered = filter_catalog_items(items, status=status_filter, q=q)
     ordered = sort_catalog_items(filtered, sort)[:limit]
+    ordered = await _hydrate_word_summary_items(db, current_user.id, ordered)
     return KnowledgeMapListResponse(items=[_summary_from_item(item) for item in ordered])
 
 
@@ -306,32 +366,11 @@ async def get_knowledge_map_range(
 ):
     items = await build_catalog(db, current_user.id)
     range_payload = build_range(items, range_start)
-    preferences = await get_preferences(db, current_user.id)
-    word_ids = [item["entry_id"] for item in range_payload["items"] if item["entry_type"] == "word"]
-    primary_meanings = await load_word_primary_definitions(db, word_ids)
-    translations_result = await db.execute(
-        select(Translation)
-        .where(Translation.meaning_id.in_([meaning.id for meaning in primary_meanings.values()]))
-        .order_by(Translation.meaning_id.asc(), Translation.language.asc())
+    range_payload["items"] = await _hydrate_word_summary_items(
+        db,
+        current_user.id,
+        range_payload["items"],
     )
-    translation_map = build_word_translation_map(
-        translations_result.scalars().all(),
-        preferences.translation_locale,
-    )
-    words_result = await db.execute(select(Word).where(Word.id.in_(word_ids)))
-    words_by_id = {word.id: word for word in words_result.scalars().all()}
-
-    for item in range_payload["items"]:
-        if item["entry_type"] == "word":
-            meaning = primary_meanings.get(item["entry_id"])
-            word = words_by_id.get(item["entry_id"])
-            item["primary_definition"] = meaning.definition if meaning is not None else None
-            item["translation"] = translation_map.get(meaning.id) if meaning is not None else None
-            item["pronunciation"] = (
-                select_pronunciation(word, preferences.accent_preference)
-                if word is not None
-                else item.get("pronunciation")
-            )
 
     return KnowledgeMapRangeResponse(
         range_start=range_payload["range_start"],
@@ -428,6 +467,17 @@ async def get_knowledge_map_entry_detail(
                 )
                 for meaning in meanings
             ],
+            relation_groups=[
+                RelationGroupResponse(
+                    relation_type=group["relation_type"],
+                    related_words=list(group["related_words"]),
+                )
+                for group in build_relation_groups(relations_by_meaning)
+            ],
+            confusable_words=[
+                ConfusableWordResponse(word=item["word"], note=item["note"])
+                for item in normalize_confusable_words(word)
+            ],
             previous_entry=_adjacent_entry(catalog[current_index - 1] if current_index not in (None, 0) else None),
             next_entry=_adjacent_entry(catalog[current_index + 1] if current_index is not None and current_index + 1 < len(catalog) else None),
         )
@@ -477,6 +527,8 @@ async def get_knowledge_map_entry_detail(
         translation=extract_phrase_translation(phrase, preferences.translation_locale),
         primary_definition=extract_phrase_primary_definition(phrase),
         senses=senses,
+        relation_groups=[],
+        confusable_words=[],
         previous_entry=_adjacent_entry(catalog[current_index - 1] if current_index not in (None, 0) else None),
         next_entry=_adjacent_entry(catalog[current_index + 1] if current_index is not None and current_index + 1 < len(catalog) else None),
     )
@@ -521,6 +573,7 @@ async def search_knowledge_map(
     db: AsyncSession = Depends(get_db),
 ):
     items = await build_catalog(db, current_user.id, q=q)
+    items = await _hydrate_word_summary_items(db, current_user.id, items)
     return KnowledgeMapSearchResponse(items=[_summary_from_item(item) for item in items])
 
 

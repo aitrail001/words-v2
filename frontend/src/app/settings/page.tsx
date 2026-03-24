@@ -28,6 +28,7 @@ export default function SettingsPage() {
     accent_preference: "us",
     translation_locale: "zh-Hans",
     knowledge_view_preference: "cards",
+    show_translations_by_default: true,
   });
 
   useEffect(() => {
@@ -65,19 +66,32 @@ export default function SettingsPage() {
   const updateView = (view: ViewPreference) =>
     void persistPreferences({ ...preferences, knowledge_view_preference: view });
 
+  const updateShowTranslations = (showTranslationsByDefault: boolean) =>
+    void persistPreferences({
+      ...preferences,
+      show_translations_by_default: showTranslationsByDefault,
+    });
+
   return (
-    <div className="mx-auto max-w-[27rem] space-y-5 pb-10 text-[#482060]">
-      <section className="rounded-[2rem] bg-white/92 px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
-        <div className="flex items-center justify-between">
-          <Link href="/" className="text-2xl font-semibold text-[#6f42aa]">
-            ←
-          </Link>
-          <h1 className="text-[2rem] font-semibold tracking-tight text-[#52277e]">Settings</h1>
-          <span className="w-6" />
+    <div className="mx-auto max-w-[46rem] pb-10 text-[#482060]">
+      <section className="relative overflow-hidden rounded-[0.95rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,240,252,0.95))] px-4 py-4 shadow-[0_16px_30px_rgba(84,46,135,0.12)]">
+        <div className="absolute left-0 top-0 h-full w-3 bg-[linear-gradient(180deg,#8a35ff,#3cc8de)]" />
+        <div className="relative space-y-4">
+          <div className="flex items-center justify-between">
+            <Link href="/" className="text-2xl font-semibold text-[#6f42aa]">
+              ←
+            </Link>
+            <h1 className="text-[1.9rem] font-semibold tracking-tight text-[#52277e]">Settings</h1>
+            <span className="w-6" />
+          </div>
+          <p className="pl-1 text-sm leading-6 text-[#6f6386]">
+            Personalize how learner cards sound, translate, and appear across the app.
+          </p>
         </div>
       </section>
 
-      <section className="space-y-5 rounded-[2rem] bg-white/94 px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+      <div className="mt-3 space-y-3 rounded-[0.95rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.90),rgba(246,241,252,0.93))] px-3 py-3 shadow-[0_12px_28px_rgba(84,46,135,0.10)]">
+      <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Learning</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between">
@@ -119,7 +133,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="space-y-5 rounded-[2rem] bg-white/94 px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+      <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Translation</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between">
@@ -148,13 +162,24 @@ export default function SettingsPage() {
             <div className="rounded-[0.7rem] bg-[#efedf7] px-4 py-2 text-[#7a6794]">Off / On</div>
           </div>
           <div className="flex items-center justify-between">
-            <span>Translate Review Cards</span>
-            <div className="rounded-[0.7rem] bg-[#38c7dd] px-4 py-2 text-white">On</div>
+            <span>Show Translations By Default</span>
+            <button
+              type="button"
+              aria-label="Show translations by default"
+              onClick={() => updateShowTranslations(!preferences.show_translations_by_default)}
+              className={`rounded-[0.7rem] px-4 py-2 ${
+                preferences.show_translations_by_default
+                  ? "bg-[#38c7dd] text-white"
+                  : "bg-[#efedf7] text-[#7a6794]"
+              }`}
+            >
+              {preferences.show_translations_by_default ? "On" : "Off"}
+            </button>
           </div>
         </div>
       </section>
 
-      <section className="space-y-5 rounded-[2rem] bg-white/94 px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+      <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Review Cards</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between">
@@ -196,7 +221,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="space-y-5 rounded-[2rem] bg-white/94 px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+      <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Data/Storage</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between">
@@ -211,6 +236,7 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+      </div>
     </div>
   );
 }

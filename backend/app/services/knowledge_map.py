@@ -32,6 +32,7 @@ def default_preferences() -> UserPreference:
         accent_preference=DEFAULT_ACCENT,
         translation_locale=DEFAULT_TRANSLATION_LOCALE,
         knowledge_view_preference=DEFAULT_VIEW,
+        show_translations_by_default=True,
     )
 
 
@@ -100,6 +101,44 @@ def build_word_translation_map(translations: Sequence[Translation], locale: str)
         if translation.language == locale and translation.meaning_id not in translation_map:
             translation_map[translation.meaning_id] = translation.translation
     return translation_map
+
+
+def normalize_confusable_words(word: Word) -> list[dict[str, str | None]]:
+    raw_confusables = word.confusable_words if isinstance(word.confusable_words, list) else []
+    items: list[dict[str, str | None]] = []
+    for raw_item in raw_confusables:
+        if not isinstance(raw_item, dict):
+            continue
+        raw_word = raw_item.get("word")
+        if not isinstance(raw_word, str) or not raw_word.strip():
+            continue
+        raw_note = raw_item.get("note")
+        note = raw_note.strip() if isinstance(raw_note, str) and raw_note.strip() else None
+        items.append({"word": raw_word.strip(), "note": note})
+    return items
+
+
+def build_relation_groups(relations_by_meaning: dict[uuid.UUID, list[WordRelation]]) -> list[dict[str, object]]:
+    grouped: dict[str, list[str]] = defaultdict(list)
+    seen: set[tuple[str, str]] = set()
+    for relations in relations_by_meaning.values():
+        for relation in relations:
+            raw_relation_type = relation.relation_type.strip() if isinstance(relation.relation_type, str) else ""
+            raw_related_word = relation.related_word.strip() if isinstance(relation.related_word, str) else ""
+            relation_type = raw_relation_type.lower()
+            related_word_key = raw_related_word.lower()
+            if not relation_type or not related_word_key:
+                continue
+            key = (relation_type, related_word_key)
+            if key in seen:
+                continue
+            seen.add(key)
+            grouped[relation_type].append(raw_related_word)
+
+    return [
+        {"relation_type": relation_type, "related_words": related_words}
+        for relation_type, related_words in sorted(grouped.items())
+    ]
 
 
 async def build_catalog(

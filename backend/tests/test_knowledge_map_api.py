@@ -17,6 +17,7 @@ from app.models.translation import Translation
 from app.models.user import User
 from app.models.user_preference import UserPreference
 from app.models.word import Word
+from app.models.word_relation import WordRelation
 
 
 @pytest.fixture
@@ -239,9 +240,33 @@ class TestKnowledgeMapList:
     async def test_list_filters_and_sorts_entries(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)
+        preferences = UserPreference(user_id=user_id, accent_preference="uk", translation_locale="es")
         word_known = Word(id=uuid.uuid4(), word="the", language="en", frequency_rank=1)
         word_new = Word(id=uuid.uuid4(), word="resilience", language="en", frequency_rank=20)
-        word_learning = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=140)
+        word_learning = Word(
+            id=uuid.uuid4(),
+            word="bank",
+            language="en",
+            frequency_rank=140,
+            phonetics={
+                "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+                "uk": {"ipa": "/baŋk/", "confidence": 0.98},
+            },
+        )
+        word_new_meaning = Meaning(id=uuid.uuid4(), word_id=word_new.id, definition="Resilience definition", order_index=0)
+        word_learning_meaning = Meaning(id=uuid.uuid4(), word_id=word_learning.id, definition="Bank definition", order_index=0)
+        word_new_translation = Translation(
+            id=uuid.uuid4(),
+            meaning_id=word_new_meaning.id,
+            language="es",
+            translation="resiliencia",
+        )
+        word_learning_translation = Translation(
+            id=uuid.uuid4(),
+            meaning_id=word_learning_meaning.id,
+            language="es",
+            translation="banco",
+        )
         phrase_to_learn = PhraseEntry(
             id=uuid.uuid4(),
             phrase_text="bank on",
@@ -260,10 +285,18 @@ class TestKnowledgeMapList:
             scalars_all_result([word_known, word_new, word_learning]),
             scalars_all_result([phrase_to_learn]),
             scalars_all_result(statuses),
+            scalar_one_or_none_result(preferences),
+            scalars_all_result([word_new_meaning]),
+            scalars_all_result([word_new_translation]),
+            scalars_all_result([word_new]),
             scalar_one_or_none_result(user),
             scalars_all_result([word_known, word_new, word_learning]),
             scalars_all_result([phrase_to_learn]),
             scalars_all_result(statuses),
+            scalar_one_or_none_result(preferences),
+            scalars_all_result([word_learning_meaning]),
+            scalars_all_result([word_learning_translation]),
+            scalars_all_result([word_learning]),
             scalar_one_or_none_result(user),
             scalars_all_result([word_known, word_new, word_learning]),
             scalars_all_result([phrase_to_learn]),
@@ -276,6 +309,7 @@ class TestKnowledgeMapList:
         )
         assert new_response.status_code == 200
         assert [item["display_text"] for item in new_response.json()["items"]] == ["resilience"]
+        assert new_response.json()["items"][0]["translation"] == "resiliencia"
 
         learning_response = await client.get(
             "/api/knowledge-map/list?status=learning&sort=alpha",
@@ -283,6 +317,8 @@ class TestKnowledgeMapList:
         )
         assert learning_response.status_code == 200
         assert [item["display_text"] for item in learning_response.json()["items"]] == ["bank"]
+        assert learning_response.json()["items"][0]["pronunciation"] == "/baŋk/"
+        assert learning_response.json()["items"][0]["primary_definition"] == "Bank definition"
 
         search_response = await client.get(
             "/api/knowledge-map/list?status=to_learn&q=bank&sort=rank_desc",
@@ -309,9 +345,52 @@ class TestKnowledgeMapDetail:
                 "us": {"ipa": "/bæŋk/", "confidence": 0.99},
                 "uk": {"ipa": "/baŋk/", "confidence": 0.98},
             },
+            confusable_words=[
+                {"word": "bench", "note": "Different object."},
+                {"word": " bench ", "note": "  "},
+                {"word": "banque", "note": "Foreign-language lookalike."},
+                {"note": "Missing word."},
+                "invalid",
+                {"word": "   ", "note": "Blank word."},
+            ],
         )
         meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
         translation = Translation(id=uuid.uuid4(), meaning_id=meaning.id, language="es", translation="banco")
+        relation = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type="synonym",
+            related_word="lender",
+        )
+        relation_duplicate = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type=" Synonym ",
+            related_word=" lender ",
+        )
+        relation_mixed_case = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type="SYNONYM",
+            related_word="LENDER",
+        )
+        relation_proper_noun = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type="Synonym",
+            related_word="iPhone",
+        )
+        relation_proper_noun_duplicate = WordRelation(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            meaning_id=meaning.id,
+            relation_type=" synonym ",
+            related_word="iphone",
+        )
         status = LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="learning")
 
         mock_db.execute.side_effect = [
@@ -321,7 +400,15 @@ class TestKnowledgeMapDetail:
             scalars_all_result([meaning]),
             scalars_all_result([]),
             scalars_all_result([translation]),
-            scalars_all_result([]),
+            scalars_all_result(
+                [
+                    relation,
+                    relation_duplicate,
+                    relation_mixed_case,
+                    relation_proper_noun,
+                    relation_proper_noun_duplicate,
+                ]
+            ),
             scalars_all_result([word]),
             scalars_all_result([]),
             scalar_one_or_none_result(status),
@@ -338,6 +425,22 @@ class TestKnowledgeMapDetail:
         assert data["status"] == "learning"
         assert data["pronunciation"] == "/baŋk/"
         assert data["translation"] == "banco"
+        assert data["confusable_words"] == [
+            {"word": "bench", "note": "Different object."},
+            {"word": "bench", "note": None},
+            {"word": "banque", "note": "Foreign-language lookalike."},
+        ]
+        assert data["relation_groups"] == [
+            {"relation_type": "synonym", "related_words": ["lender", "iPhone"]},
+        ]
+        assert len(data["meanings"][0]["relations"]) == 5
+        assert {item["relation_type"] for item in data["meanings"][0]["relations"]} == {
+            "synonym",
+            " Synonym ",
+            "SYNONYM",
+            "Synonym",
+            " synonym ",
+        }
 
     @pytest.mark.asyncio
     async def test_phrase_detail_reads_compiled_payload(self, client, mock_db, auth_token):
@@ -382,6 +485,8 @@ class TestKnowledgeMapDetail:
         assert data["status"] == "known"
         assert data["translation"] == "依靠"
         assert data["senses"][0]["definition"] == "To rely on someone."
+        assert data["relation_groups"] == []
+        assert data["confusable_words"] == []
 
 
 class TestKnowledgeMapStatus:
@@ -415,7 +520,19 @@ class TestKnowledgeMapSearchAndHistory:
     async def test_search_returns_mixed_entries(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)
-        word = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=20)
+        preferences = UserPreference(user_id=user_id, accent_preference="uk", translation_locale="es")
+        word = Word(
+            id=uuid.uuid4(),
+            word="bank",
+            language="en",
+            frequency_rank=20,
+            phonetics={
+                "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+                "uk": {"ipa": "/baŋk/", "confidence": 0.98},
+            },
+        )
+        meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
+        translation = Translation(id=uuid.uuid4(), meaning_id=meaning.id, language="es", translation="banco")
         phrase = PhraseEntry(
             id=uuid.uuid4(),
             phrase_text="bank on",
@@ -430,6 +547,10 @@ class TestKnowledgeMapSearchAndHistory:
             scalars_all_result([word]),
             scalars_all_result([phrase]),
             scalars_all_result([status]),
+            scalar_one_or_none_result(preferences),
+            scalars_all_result([meaning]),
+            scalars_all_result([translation]),
+            scalars_all_result([word]),
         ]
 
         response = await client.get(
@@ -441,6 +562,9 @@ class TestKnowledgeMapSearchAndHistory:
         data = response.json()
         assert len(data["items"]) == 2
         assert data["items"][0]["display_text"] == "bank"
+        assert data["items"][0]["pronunciation"] == "/baŋk/"
+        assert data["items"][0]["translation"] == "banco"
+        assert data["items"][0]["primary_definition"] == "A financial institution"
 
     @pytest.mark.asyncio
     async def test_search_history_round_trip(self, client, mock_db, auth_token):

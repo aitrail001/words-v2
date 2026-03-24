@@ -9,6 +9,7 @@ from app.core.redis import get_redis
 from app.core.security import create_access_token, hash_password
 from app.main import app
 from app.models.user import User
+from app.models.user_preference import UserPreference
 
 
 @pytest.fixture
@@ -87,6 +88,7 @@ class TestUserPreferencesApi:
         assert data["accent_preference"] == "us"
         assert data["translation_locale"] == "zh-Hans"
         assert data["knowledge_view_preference"] == "cards"
+        assert data["show_translations_by_default"] is True
 
     @pytest.mark.asyncio
     async def test_put_upserts_preferences(self, client, mock_db, auth_token):
@@ -104,6 +106,7 @@ class TestUserPreferencesApi:
                 "accent_preference": "au",
                 "translation_locale": "es",
                 "knowledge_view_preference": "list",
+                "show_translations_by_default": False,
             },
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -113,3 +116,42 @@ class TestUserPreferencesApi:
         assert data["accent_preference"] == "au"
         assert data["translation_locale"] == "es"
         assert data["knowledge_view_preference"] == "list"
+        assert data["show_translations_by_default"] is False
+
+    @pytest.mark.asyncio
+    async def test_put_updates_existing_preferences(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        existing = UserPreference(
+            user_id=user_id,
+            accent_preference="us",
+            translation_locale="zh-Hans",
+            knowledge_view_preference="cards",
+            show_translations_by_default=True,
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(existing),
+        ]
+
+        response = await client.put(
+            "/api/user-preferences",
+            json={
+                "accent_preference": "uk",
+                "translation_locale": "ja",
+                "knowledge_view_preference": "tags",
+                "show_translations_by_default": False,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["accent_preference"] == "uk"
+        assert data["translation_locale"] == "ja"
+        assert data["knowledge_view_preference"] == "tags"
+        assert data["show_translations_by_default"] is False
+        assert existing.accent_preference == "uk"
+        assert existing.show_translations_by_default is False
+        mock_db.add.assert_not_called()
