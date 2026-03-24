@@ -1,0 +1,291 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from copy import deepcopy
+from pathlib import Path
+from typing import Any, Iterable
+import json
+
+from tools.lexicon.import_db import _ensure_backend_path, summarize_compiled_rows
+
+SCHEMA_VERSION = "1.1.0"
+
+
+def _created_iso(value: object) -> str | None:
+    if value is None:
+        return None
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    return str(value)
+
+
+def _sense_id_for_meaning(meaning: Any, row_source_reference: str | None, index: int) -> str:
+    meaning_source_reference = getattr(meaning, "source_reference", None)
+    if (
+        row_source_reference
+        and isinstance(meaning_source_reference, str)
+        and meaning_source_reference.startswith(f"{row_source_reference}:")
+    ):
+        suffix = meaning_source_reference[len(row_source_reference) + 1 :].strip()
+        if suffix:
+            return suffix
+    wn_synset_id = getattr(meaning, "wn_synset_id", None)
+    if isinstance(wn_synset_id, str) and wn_synset_id.strip():
+        return wn_synset_id.strip()
+    return f"db-sense-{index:03d}-{getattr(meaning, 'id')}"
+
+
+def _serialize_examples(examples: Iterable[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for example in sorted(
+        examples,
+        key=lambda item: (
+            getattr(item, "order_index", 0),
+            str(getattr(item, "id", "")),
+        ),
+    ):
+        sentence = str(getattr(example, "sentence", "") or "").strip()
+        if not sentence:
+            continue
+        payload: dict[str, Any] = {"sentence": sentence}
+        difficulty = getattr(example, "difficulty", None)
+        if difficulty:
+            payload["difficulty"] = difficulty
+        rows.append(payload)
+    return rows
+
+
+def _serialize_translations(translations: Iterable[Any]) -> dict[str, dict[str, Any]]:
+    payload: dict[str, dict[str, Any]] = {}
+    for translation in sorted(
+        translations,
+        key=lambda item: (
+            str(getattr(item, "language", "")),
+            str(getattr(item, "id", "")),
+        ),
+    ):
+        locale = str(getattr(translation, "language", "") or "").strip()
+        text = str(getattr(translation, "translation", "") or "").strip()
+        if not locale or not text:
+            continue
+        payload[locale] = {"definition": text}
+    return payload
+
+
+def _serialize_relations(relations: Iterable[Any]) -> dict[str, list[str]]:
+    buckets = {
+        "synonyms": [],
+        "antonyms": [],
+        "collocations": [],
+    }
+    field_map = {
+        "synonym": "synonyms",
+        "antonym": "antonyms",
+        "collocation": "collocations",
+    }
+    for relation in sorted(
+        relations,
+        key=lambda item: (
+            str(getattr(item, "relation_type", "")),
+            str(getattr(item, "related_word", "")),
+            str(getattr(item, "id", "")),
+        ),
+    ):
+        relation_type = str(getattr(relation, "relation_type", "") or "").strip()
+        related_word = str(getattr(relation, "related_word", "") or "").strip()
+        field = field_map.get(relation_type)
+        if not field or not related_word:
+            continue
+        if related_word not in buckets[field]:
+            buckets[field].append(related_word)
+    return buckets
+
+
+def serialize_word_row(
+    word: Any,
+    *,
+    examples_by_meaning_id: dict[Any, list[Any]] | None = None,
+    relations_by_meaning_id: dict[Any, list[Any]] | None = None,
+) -> dict[str, Any]:
+    examples_by_meaning_id = examples_by_meaning_id or {}
+    relations_by_meaning_id = relations_by_meaning_id or {}
+    row_source_reference = getattr(word, "source_reference", None)
+    row: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "entry_type": "word",
+        "word": word.word,
+        "language": getattr(word, "language", "en") or "en",
+        "cefr_level": getattr(word, "cefr_level", None),
+        "frequency_rank": getattr(word, "frequency_rank", None),
+        "part_of_speech": list(getattr(word, "learner_part_of_speech", None) or []),
+        "forms": deepcopy(getattr(word, "word_forms", None) or {}),
+        "confusable_words": deepcopy(getattr(word, "confusable_words", None) or []),
+        "phonetics": deepcopy(getattr(word, "phonetics", None) or {}),
+        "phonetic": getattr(word, "phonetic", None),
+        "phonetic_confidence": getattr(word, "phonetic_confidence", None),
+        "generated_at": _created_iso(getattr(word, "learner_generated_at", None)),
+        "source_type": getattr(word, "source_type", None),
+        "source_reference": row_source_reference,
+        "senses": [],
+    }
+
+    meanings = sorted(
+        list(getattr(word, "meanings", []) or []),
+        key=lambda item: (
+            getattr(item, "order_index", 0),
+            str(getattr(item, "id", "")),
+        ),
+    )
+    for index, meaning in enumerate(meanings):
+        relation_payload = _serialize_relations(relations_by_meaning_id.get(getattr(meaning, "id", None), []))
+        sense_payload: dict[str, Any] = {
+            "sense_id": _sense_id_for_meaning(meaning, row_source_reference, index),
+            "definition": getattr(meaning, "definition", ""),
+            "pos": getattr(meaning, "part_of_speech", None),
+            "wn_synset_id": getattr(meaning, "wn_synset_id", None),
+            "primary_domain": getattr(meaning, "primary_domain", None),
+            "secondary_domains": list(getattr(meaning, "secondary_domains", None) or []),
+            "register": getattr(meaning, "register_label", None),
+            "grammar_patterns": list(getattr(meaning, "grammar_patterns", None) or []),
+            "usage_note": getattr(meaning, "usage_note", None),
+            "generated_at": _created_iso(
+                getattr(meaning, "learner_generated_at", None) or getattr(word, "learner_generated_at", None)
+            ),
+            "examples": _serialize_examples(examples_by_meaning_id.get(getattr(meaning, "id", None), [])),
+            "translations": _serialize_translations(getattr(meaning, "translations", []) or []),
+            **relation_payload,
+        }
+        row["senses"].append(sense_payload)
+    return row
+
+
+def serialize_phrase_row(phrase: Any) -> dict[str, Any]:
+    compiled_payload = getattr(phrase, "compiled_payload", None)
+    row = deepcopy(compiled_payload) if isinstance(compiled_payload, dict) else {}
+    row.setdefault("schema_version", SCHEMA_VERSION)
+    row["entry_type"] = "phrase"
+    row["word"] = row.get("word") or getattr(phrase, "phrase_text", "")
+    row["display_form"] = row.get("display_form") or getattr(phrase, "phrase_text", "")
+    row["normalized_form"] = row.get("normalized_form") or getattr(phrase, "normalized_form", "")
+    row["language"] = row.get("language") or getattr(phrase, "language", "en") or "en"
+    row["phrase_kind"] = row.get("phrase_kind") or getattr(phrase, "phrase_kind", "multiword_expression")
+    row["cefr_level"] = row.get("cefr_level") if row.get("cefr_level") is not None else getattr(phrase, "cefr_level", None)
+    row["register"] = row.get("register") if row.get("register") is not None else getattr(phrase, "register_label", None)
+    row["brief_usage_note"] = (
+        row.get("brief_usage_note")
+        if row.get("brief_usage_note") is not None
+        else getattr(phrase, "brief_usage_note", None)
+    )
+    row["usage_note"] = row.get("usage_note") if row.get("usage_note") is not None else getattr(phrase, "brief_usage_note", None)
+    row["confidence"] = row.get("confidence") if row.get("confidence") is not None else getattr(phrase, "confidence_score", None)
+    row["generated_at"] = row.get("generated_at") or _created_iso(getattr(phrase, "generated_at", None))
+    row["seed_metadata"] = row.get("seed_metadata") if row.get("seed_metadata") is not None else deepcopy(getattr(phrase, "seed_metadata", None) or {})
+    row["source_type"] = row.get("source_type") or getattr(phrase, "source_type", None)
+    row["source_reference"] = row.get("source_reference") or getattr(phrase, "source_reference", None)
+    row.setdefault("senses", [])
+    return row
+
+
+def load_export_rows(
+    *,
+    max_words: int | None = None,
+    max_phrases: int | None = None,
+) -> list[dict[str, Any]]:
+    _ensure_backend_path()
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session, selectinload
+
+    from app.core.config import get_settings
+    from app.models.meaning import Meaning
+    from app.models.meaning_example import MeaningExample
+    from app.models.phrase_entry import PhraseEntry
+    from app.models.word import Word
+    from app.models.word_relation import WordRelation
+    from sqlalchemy import create_engine
+
+    settings = get_settings()
+    engine = create_engine(settings.database_url_sync)
+
+    with Session(engine) as session:
+        words = list(
+            session.execute(
+                select(Word).options(
+                    selectinload(Word.meanings).selectinload(Meaning.translations),
+                )
+            ).scalars().all()
+        )
+        words.sort(
+            key=lambda item: (
+                getattr(item, "frequency_rank", None) is None,
+                getattr(item, "frequency_rank", 10**9) or 10**9,
+                str(getattr(item, "word", "")).lower(),
+            )
+        )
+        if max_words is not None:
+            words = words[:max_words]
+
+        meaning_ids = [
+            meaning.id
+            for word in words
+            for meaning in list(getattr(word, "meanings", []) or [])
+        ]
+        examples_by_meaning_id: dict[Any, list[Any]] = defaultdict(list)
+        relations_by_meaning_id: dict[Any, list[Any]] = defaultdict(list)
+
+        if meaning_ids:
+            for example in session.execute(
+                select(MeaningExample).where(MeaningExample.meaning_id.in_(meaning_ids))
+            ).scalars().all():
+                examples_by_meaning_id[example.meaning_id].append(example)
+
+            for relation in session.execute(
+                select(WordRelation).where(WordRelation.meaning_id.in_(meaning_ids))
+            ).scalars().all():
+                relations_by_meaning_id[relation.meaning_id].append(relation)
+
+        phrases = list(session.execute(select(PhraseEntry)).scalars().all())
+        phrases.sort(
+            key=lambda item: (
+                str(getattr(item, "normalized_form", "")).lower(),
+                str(getattr(item, "phrase_text", "")).lower(),
+            )
+        )
+        if max_phrases is not None:
+            phrases = phrases[:max_phrases]
+    engine.dispose()
+
+    rows = [
+        serialize_word_row(
+            word,
+            examples_by_meaning_id=examples_by_meaning_id,
+            relations_by_meaning_id=relations_by_meaning_id,
+        )
+        for word in words
+    ]
+    rows.extend(serialize_phrase_row(phrase) for phrase in phrases)
+    return rows
+
+
+def write_export_rows(output_path: str | Path, rows: Iterable[dict[str, Any]]) -> Path:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False))
+            handle.write("\n")
+    return path
+
+
+def export_db_fixture(
+    output_path: str | Path,
+    *,
+    max_words: int | None = None,
+    max_phrases: int | None = None,
+) -> dict[str, Any]:
+    rows = load_export_rows(max_words=max_words, max_phrases=max_phrases)
+    written_path = write_export_rows(output_path, rows)
+    return {
+        "output_path": str(written_path),
+        **summarize_compiled_rows(rows),
+    }

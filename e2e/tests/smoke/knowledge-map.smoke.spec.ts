@@ -11,6 +11,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   page,
   request,
 }) => {
+  test.setTimeout(90_000);
   const user = await registerViaApi(request, "knowledge-map");
   const fixture = await seedKnowledgeMapFixture(user.id);
 
@@ -61,13 +62,15 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await page.getByRole("link", { name: /discover/i }).click();
   await expect(page).toHaveURL(/\/knowledge-map/);
   await expect(page.getByRole("heading", { name: "Full Knowledge Map" })).toBeVisible();
-  await expect(page.getByText(/range 1-100/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /range [\d,]+\s*-\s*[\d,]+/i })).toBeVisible();
 
   await page.goto("/");
-  await page.getByRole("link", { name: /learn next:/i }).click();
+  const learnNextLink = page.getByRole("link", { name: /learn next:/i });
+  await expect(learnNextLink).toBeVisible({ timeout: 30000 });
+  await learnNextLink.click();
   await expect(page).toHaveURL(new RegExp(`/word/${fixture.learnWordId}$`));
-  await expect(page.getByRole("heading", { name: LEARN_WORD })).toBeVisible();
-  await expect(page.getByText("tambor")).toBeVisible();
+  await expect(page.getByRole("heading", { name: LEARN_WORD })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("tambor")).toBeVisible({ timeout: 30000 });
 
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();

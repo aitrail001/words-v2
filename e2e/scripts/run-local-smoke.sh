@@ -21,6 +21,7 @@ export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://backend:8000/api}"
 export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001}"
 
 E2E_SMOKE_CLEANUP="${E2E_SMOKE_CLEANUP:-0}"
+E2E_LEXICON_FIXTURE="${E2E_LEXICON_FIXTURE:-none}"
 
 compose() {
   docker compose -f "${COMPOSE_FILE}" --profile tests "$@"
@@ -65,6 +66,11 @@ wait_http_ready "admin frontend" "http://localhost:3001/login"
 
 echo "[local-smoke] running backend migrations"
 compose exec -T backend alembic upgrade head
+
+if [[ "${E2E_LEXICON_FIXTURE}" == "smoke" || "${E2E_LEXICON_FIXTURE}" == "full" ]]; then
+  echo "[local-smoke] importing lexicon fixture: ${E2E_LEXICON_FIXTURE}"
+  "${ROOT_DIR}/scripts/import-lexicon-db-fixture.sh" "${E2E_LEXICON_FIXTURE}"
+fi
 
 echo "[local-smoke] running playwright smoke suite"
 compose exec -T playwright sh -lc "

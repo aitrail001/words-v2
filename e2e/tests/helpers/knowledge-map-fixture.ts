@@ -346,6 +346,19 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
     await client.query(
       `
       INSERT INTO learner_entry_statuses (id, user_id, entry_type, entry_id, status)
+      SELECT gen_random_uuid(), $1::uuid, 'word', id, 'known'
+      FROM lexicon.words
+      WHERE frequency_rank IS NOT NULL
+        AND frequency_rank < 2616
+      ON CONFLICT (user_id, entry_type, entry_id)
+      DO UPDATE SET status = EXCLUDED.status, updated_at = now()
+      `,
+      [userId],
+    );
+
+    await client.query(
+      `
+      INSERT INTO learner_entry_statuses (id, user_id, entry_type, entry_id, status)
       VALUES ($1::uuid, $2::uuid, 'phrase', $3::uuid, 'learning')
       ON CONFLICT (user_id, entry_type, entry_id)
       DO UPDATE SET status = EXCLUDED.status, updated_at = now()

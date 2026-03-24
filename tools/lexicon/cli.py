@@ -27,6 +27,7 @@ from tools.lexicon.batch_client import BatchClient
 from tools.lexicon.form_adjudication import adjudicate_forms, load_adjudications
 from tools.lexicon.compile_export import compile_snapshot
 from tools.lexicon.enrich import run_enrichment
+from tools.lexicon.export_db import export_db_fixture
 from tools.lexicon.ids import build_snapshot_id
 from tools.lexicon.inventory import load_seed_rows
 from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, run_import_file, summarize_compiled_rows
@@ -976,6 +977,19 @@ def _import_db_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export_db_command(args: argparse.Namespace) -> int:
+    payload = {
+        'command': 'export-db',
+        **export_db_fixture(
+            Path(args.output),
+            max_words=args.max_words,
+            max_phrases=args.max_phrases,
+        ),
+    }
+    print(json.dumps(payload))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='python -m tools.lexicon.cli', allow_abbrev=False)
     subparsers = parser.add_subparsers(
@@ -1192,6 +1206,13 @@ def build_parser() -> argparse.ArgumentParser:
     import_db.add_argument('--language', default='en', help='language code for imported words')
     _add_shared_logging_args(import_db)
     import_db.set_defaults(handler=_import_db_command)
+
+    export_db = subparsers.add_parser('export-db', help='export current lexicon DB rows into importer-compatible learner JSONL')
+    export_db.add_argument('--output', required=True, help='output JSONL path')
+    export_db.add_argument('--max-words', type=int, help='optional deterministic cap on exported word rows')
+    export_db.add_argument('--max-phrases', type=int, help='optional deterministic cap on exported phrase rows')
+    _add_shared_logging_args(export_db)
+    export_db.set_defaults(handler=_export_db_command)
 
     return parser
 

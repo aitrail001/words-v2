@@ -43,6 +43,7 @@ export default function HomePage() {
   }, []);
 
   const totalEntries = dashboard?.total_entries ?? 0;
+  const dashboardReady = dashboard !== null;
   const newCount = dashboard?.counts.undecided ?? 0;
   const learningCount = dashboard?.counts.learning ?? 0;
   const toLearnCount = dashboard?.counts.to_learn ?? 0;
@@ -55,6 +56,13 @@ export default function HomePage() {
         { label: "To Learn", value: toLearnCount, color: "bg-[#dd49ff]" },
       ]
     : [];
+  const discoverHref = dashboard?.discovery_range_start ? `/knowledge-map?rangeStart=${dashboard.discovery_range_start}` : "/knowledge-map";
+  const learnHref = dashboard?.next_learn_entry
+    ? getKnowledgeEntryHref(
+        dashboard.next_learn_entry.entry_type,
+        dashboard.next_learn_entry.entry_id,
+      )
+    : "/knowledge-map";
 
   return (
     <div className="mx-auto max-w-[46rem] space-y-4 pb-10 text-[#472164]">
@@ -135,48 +143,79 @@ export default function HomePage() {
         </p>
 
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <Link
-            href={dashboard?.discovery_range_start ? `/knowledge-map?rangeStart=${dashboard.discovery_range_start}` : "/knowledge-map"}
-            className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white shadow-[0_6px_14px_rgba(78,41,126,0.06)]"
-          >
-            <div className="grid h-36 grid-cols-2 gap-1 bg-[#f3eef9] p-1.5">
-              <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#756a5c,#d4c49b)]" />
-              <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#6f9dc8,#f2d6d1)]" />
-              <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#45425a,#9691cc)]" />
-              <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#8b7a5d,#d9cdaa)]" />
-            </div>
-            <div className="space-y-2 px-3 py-3">
-              <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#c066ff] px-4 py-2.5 text-base font-semibold text-white">
-                Discover
+          {dashboardReady ? (
+            <Link
+              href={discoverHref}
+              className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white shadow-[0_6px_14px_rgba(78,41,126,0.06)]"
+            >
+              <div className="grid h-36 grid-cols-2 gap-1 bg-[#f3eef9] p-1.5">
+                <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#756a5c,#d4c49b)]" />
+                <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#6f9dc8,#f2d6d1)]" />
+                <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#45425a,#9691cc)]" />
+                <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#8b7a5d,#d9cdaa)]" />
               </div>
-              <p className="text-center text-sm font-semibold text-[#9b85b4]">
-                Range {dashboard?.discovery_range_start ? Math.floor(dashboard.discovery_range_start / 100) * 100 : 0}
-              </p>
-            </div>
-          </Link>
-
-          <Link
-            href={
-              dashboard?.next_learn_entry
-                ? getKnowledgeEntryHref(
-                    dashboard.next_learn_entry.entry_type,
-                    dashboard.next_learn_entry.entry_id,
-                  )
-                : "/knowledge-map"
-            }
-            aria-label={`Learn next: ${dashboard?.next_learn_entry?.display_text ?? "Nothing queued"}`}
-            className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white shadow-[0_6px_14px_rgba(78,41,126,0.06)]"
-          >
-            <div className="h-36 bg-[linear-gradient(145deg,#49517d,#4a1d76_42%,#45c1d8)]" />
-            <div className="space-y-2 px-3 py-3">
-              <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#42c2dd] px-4 py-2.5 text-base font-semibold text-white">
-                Learn
+              <div className="space-y-2 px-3 py-3">
+                <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#c066ff] px-4 py-2.5 text-base font-semibold text-white">
+                  Discover
+                </div>
+                <p className="text-center text-sm font-semibold text-[#9b85b4]">
+                  Range {dashboard?.discovery_range_start ? Math.floor(dashboard.discovery_range_start / 100) * 100 : 0}
+                </p>
               </div>
-              <p className="text-center text-sm font-semibold text-[#9b85b4]">
-                Next: {dashboard?.next_learn_entry?.display_text ?? "Nothing queued"}
-              </p>
+            </Link>
+          ) : (
+            <div
+              aria-label="Discover loading"
+              className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white opacity-70 shadow-[0_6px_14px_rgba(78,41,126,0.06)]"
+            >
+              <div className="grid h-36 grid-cols-2 gap-1 bg-[#f3eef9] p-1.5">
+                <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#756a5c,#d4c49b)]" />
+                <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#6f9dc8,#f2d6d1)]" />
+                <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#45425a,#9691cc)]" />
+                <div className="rounded-[0.15rem] bg-[linear-gradient(140deg,#8b7a5d,#d9cdaa)]" />
+              </div>
+              <div className="space-y-2 px-3 py-3">
+                <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#c066ff] px-4 py-2.5 text-base font-semibold text-white">
+                  Discover
+                </div>
+                <p className="text-center text-sm font-semibold text-[#9b85b4]">
+                  Loading...
+                </p>
+              </div>
             </div>
-          </Link>
+          )}
+          {dashboardReady ? (
+            <Link
+              href={learnHref}
+              aria-label={`Learn next: ${dashboard?.next_learn_entry?.display_text ?? "Nothing queued"}`}
+              className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white shadow-[0_6px_14px_rgba(78,41,126,0.06)]"
+            >
+              <div className="h-36 bg-[linear-gradient(145deg,#49517d,#4a1d76_42%,#45c1d8)]" />
+              <div className="space-y-2 px-3 py-3">
+                <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#42c2dd] px-4 py-2.5 text-base font-semibold text-white">
+                  Learn
+                </div>
+                <p className="text-center text-sm font-semibold text-[#9b85b4]">
+                  Next: {dashboard?.next_learn_entry?.display_text ?? "Nothing queued"}
+                </p>
+              </div>
+            </Link>
+          ) : (
+            <div
+              aria-label="Learn loading"
+              className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white opacity-70 shadow-[0_6px_14px_rgba(78,41,126,0.06)]"
+            >
+              <div className="h-36 bg-[linear-gradient(145deg,#49517d,#4a1d76_42%,#45c1d8)]" />
+              <div className="space-y-2 px-3 py-3">
+                <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#42c2dd] px-4 py-2.5 text-base font-semibold text-white">
+                  Learn
+                </div>
+                <p className="text-center text-sm font-semibold text-[#9b85b4]">
+                  Loading...
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

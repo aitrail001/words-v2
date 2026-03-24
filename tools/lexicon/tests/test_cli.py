@@ -793,6 +793,7 @@ class CliTests(unittest.TestCase):
         build_base_args = parser.parse_args(["build-base", "run"])
         batch_prepare_args = parser.parse_args(["batch-prepare", "--input", "/tmp/input.jsonl", "--output-dir", "/tmp/out"])
         import_db_args = parser.parse_args(["import-db", "--input", "/tmp/compiled.jsonl"])
+        export_db_args = parser.parse_args(["export-db", "--output", "/tmp/export.jsonl"])
 
         self.assertEqual(build_base_args.log_level, "info")
         self.assertIsNone(build_base_args.log_file)
@@ -800,6 +801,8 @@ class CliTests(unittest.TestCase):
         self.assertIsNone(batch_prepare_args.log_file)
         self.assertEqual(import_db_args.log_level, "info")
         self.assertIsNone(import_db_args.log_file)
+        self.assertEqual(export_db_args.log_level, "info")
+        self.assertIsNone(export_db_args.log_file)
 
     def test_smoke_openai_compatible_command_defaults_to_bounded_values(self) -> None:
         parser = cli.build_parser()
@@ -1261,6 +1264,36 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["sense_count"], 1)
             self.assertEqual(payload["example_count"], 1)
             self.assertEqual(payload["relation_count"], 3)
+
+    def test_export_db_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "approved.jsonl"
+            with patch(
+                "tools.lexicon.cli.export_db_fixture",
+                return_value={
+                    "output_path": str(output_path),
+                    "row_count": 2,
+                    "word_count": 1,
+                    "phrase_count": 1,
+                    "reference_count": 0,
+                },
+            ) as mocked_export:
+                code, stdout, _ = self.run_cli([
+                    "export-db",
+                    "--output",
+                    str(output_path),
+                    "--max-words",
+                    "10",
+                    "--max-phrases",
+                    "20",
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "export-db")
+            self.assertEqual(payload["word_count"], 1)
+            self.assertEqual(payload["phrase_count"], 1)
+            mocked_export.assert_called_once_with(output_path, max_words=10, max_phrases=20)
 
 
 if __name__ == "__main__":
