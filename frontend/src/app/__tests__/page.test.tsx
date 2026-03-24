@@ -54,7 +54,9 @@ describe("HomePage (Knowledge Map)", () => {
   it("renders the dashboard summary cards", async () => {
     render(<HomePage />);
 
-    expect(await screen.findByText(/words uncovered/i)).toBeInTheDocument();
+    expect(
+      (await screen.findAllByText((_, element) => element?.textContent === "WordsUncovered")).length,
+    ).toBeGreaterThan(0);
     expect(await screen.findByText("13,760")).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Knew 4" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Started 7,082" })).toBeInTheDocument();
@@ -131,7 +133,7 @@ describe("RootLayout learner shell", () => {
       const searchLink = learnerShellNav.getByRole("link", { name: /search/i });
 
       expect(knowledgeLink.className).toContain("text-white");
-      expect(searchLink.className).toContain("bg-white/75");
+      expect(searchLink.className).toContain("bg-white");
     } finally {
       consoleErrorSpy.mockRestore();
     }

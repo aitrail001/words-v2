@@ -92,8 +92,8 @@ export default function SearchPage() {
   };
 
   return (
-    <section className="mx-auto max-w-[27rem] space-y-5 pb-10 text-[#482060]">
-      <div className="overflow-hidden rounded-[2rem] bg-[linear-gradient(135deg,#6f2bff,#38c5da)] px-5 py-6 text-white shadow-[0_24px_60px_rgba(89,44,145,0.28)]">
+    <section className="mx-auto max-w-[46rem] space-y-3 pb-10 text-[#482060]">
+      <div className="overflow-hidden rounded-[0.9rem] bg-[linear-gradient(135deg,#6f2bff,#38c5da)] px-4 py-4 text-white shadow-[0_16px_34px_rgba(89,44,145,0.18)]">
         <p className="text-sm font-semibold uppercase tracking-[0.28em] text-white/75">Learner Search</p>
         <h1 className="mt-3 text-[2.1rem] font-semibold tracking-tight">Search</h1>
         <p className="mt-3 text-sm leading-6 text-white/85">
@@ -101,7 +101,7 @@ export default function SearchPage() {
         </p>
       </div>
 
-      <div className="rounded-[1.75rem] bg-white/90 p-5 shadow-[0_22px_50px_rgba(109,78,140,0.12)]">
+      <div className="rounded-[0.9rem] bg-white/90 p-4 shadow-[0_12px_28px_rgba(109,78,140,0.10)]">
         <input
           type="text"
           value={query}
@@ -148,7 +148,7 @@ export default function SearchPage() {
               key={`${item.entry_type}-${item.entry_id}`}
               href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
               onClick={() => void rememberSearch(item)}
-              className="block rounded-[1.5rem] bg-white/94 px-4 py-4 shadow-[0_14px_30px_rgba(94,53,177,0.12)]"
+            className="block rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_10px_20px_rgba(94,53,177,0.08)]"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>

@@ -117,19 +117,19 @@ export default function KnowledgeListPage() {
   };
 
   return (
-    <div className="mx-auto max-w-[27rem] space-y-4 pb-10 text-[#492160]">
-      <section className="rounded-[2rem] bg-white/92 px-4 py-4 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+    <div className="mx-auto max-w-[46rem] space-y-3 pb-10 text-[#492160]">
+      <section className="rounded-[0.8rem] bg-[#f1f2f8] px-2 py-2">
         <div className="flex items-center justify-between">
           <Link href="/" className="text-2xl font-semibold text-[#6f42aa]">
             ←
           </Link>
-          <h1 className="text-[1.8rem] font-semibold tracking-tight text-[#54267f]">{config.title}</h1>
+          <h1 className="text-[1.45rem] font-semibold tracking-tight text-[#54267f]">{config.title}</h1>
           <button
             type="button"
             onClick={cycleSort}
-            className="rounded-full border border-[#ebdffc] bg-[#faf7ff] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#5c3d84]"
+            className="rounded-[0.45rem] border border-[#d9dcec] bg-white px-3 py-2 text-xs font-semibold text-[#5c3d84]"
           >
-            {SORT_OPTIONS.find((option) => option.value === sort)?.label}
+            ↕ {SORT_OPTIONS.find((option) => option.value === sort)?.label}
           </button>
         </div>
 
@@ -138,36 +138,36 @@ export default function KnowledgeListPage() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search"
-          className="mt-4 w-full rounded-[0.8rem] border border-[#e2daef] bg-white px-4 py-3 text-sm text-[#43235f] outline-none placeholder:text-[#b6a9c8]"
+          className="mt-3 w-full rounded-[0.35rem] border border-[#dce0ee] bg-white px-3 py-2.5 text-sm text-[#43235f] outline-none placeholder:text-[#b6a9c8]"
         />
       </section>
 
-      <section className="space-y-2.5">
+      <section className="space-y-1.5">
         {items.map((item) => (
           <div
             key={`${item.entry_type}-${item.entry_id}`}
-            className="grid grid-cols-[4.9rem_1fr] gap-3 overflow-hidden rounded-[1.2rem] bg-white/94 px-3 py-3 shadow-[0_12px_28px_rgba(78,41,126,0.08)]"
+            className="grid grid-cols-[4.5rem_1fr] gap-2 overflow-hidden rounded-[0.25rem] border border-[#dce0ee] bg-white px-2 py-2"
           >
             <Link
               href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
-              className={`min-h-[5.25rem] rounded-[0.95rem] ${rowImageStyle(item.display_text)}`}
+              className={`min-h-[4.75rem] rounded-[0.15rem] ${rowImageStyle(item.display_text)}`}
             />
-            <div className="space-y-1.5 py-0.5">
+            <div className="space-y-1 py-0.5">
               <Link href={getKnowledgeEntryHref(item.entry_type, item.entry_id)} className="block">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-[1.45rem] font-semibold leading-none text-[#4e216f]">{item.display_text}</p>
-                  <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-[#a68ebb]">
-                    {ROW_STATUS_LABELS[item.status]}
-                  </p>
+                  <p className="text-[1.1rem] font-semibold leading-none text-[#35204e]">{item.display_text}</p>
                 </div>
                 {showTranslations && (
-                  <p className="mt-1.5 text-[0.95rem] font-semibold leading-6 text-[#6b5b86]">
+                  <p className="mt-1 text-[0.82rem] font-semibold leading-5 text-[#6b5b86]">
                     {item.translation ?? item.primary_definition ?? "No translation yet"}
                   </p>
                 )}
               </Link>
 
-              <div className="pt-1">
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <p className="text-[0.72rem] font-semibold text-[#48bfd7]">
+                  {ROW_STATUS_LABELS[item.status]} ▼
+                </p>
                 <label className="sr-only" htmlFor={`status-${item.entry_id}`}>
                   Update status
                 </label>
@@ -175,7 +175,7 @@ export default function KnowledgeListPage() {
                   id={`status-${item.entry_id}`}
                   value={item.status}
                   onChange={(event) => void handleStatusChange(item, event.target.value as KnowledgeStatus)}
-                  className="rounded-full border border-[#e2ddf0] bg-[#f4f6fb] px-3 py-2 text-sm font-semibold text-[#4bc5db] outline-none"
+                  className="max-w-[8.2rem] rounded-[0.35rem] border border-[#dce0ee] bg-[#f8fbff] px-2 py-1.5 text-[0.72rem] font-semibold text-[#4bc5db] outline-none"
                 >
                   <option value="undecided">New</option>
                   <option value="to_learn">To Learn</option>

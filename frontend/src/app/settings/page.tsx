@@ -73,8 +73,8 @@ export default function SettingsPage() {
     });
 
   return (
-    <div className="mx-auto max-w-[27rem] pb-10 text-[#482060]">
-      <section className="relative overflow-hidden rounded-[2.2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,240,252,0.95))] px-5 py-5 shadow-[0_20px_46px_rgba(84,46,135,0.14)]">
+    <div className="mx-auto max-w-[46rem] pb-10 text-[#482060]">
+      <section className="relative overflow-hidden rounded-[0.95rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,240,252,0.95))] px-4 py-4 shadow-[0_16px_30px_rgba(84,46,135,0.12)]">
         <div className="absolute left-0 top-0 h-full w-3 bg-[linear-gradient(180deg,#8a35ff,#3cc8de)]" />
         <div className="relative space-y-4">
           <div className="flex items-center justify-between">
@@ -90,8 +90,8 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <div className="mt-4 space-y-4 rounded-[2.1rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.90),rgba(246,241,252,0.93))] px-4 py-4 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
-      <section className="space-y-5 rounded-[1.75rem] bg-white/94 px-5 py-5 shadow-[0_12px_24px_rgba(84,46,135,0.08)]">
+      <div className="mt-3 space-y-3 rounded-[0.95rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.90),rgba(246,241,252,0.93))] px-3 py-3 shadow-[0_12px_28px_rgba(84,46,135,0.10)]">
+      <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Learning</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between">
@@ -133,7 +133,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="space-y-5 rounded-[1.75rem] bg-white/94 px-5 py-5 shadow-[0_12px_24px_rgba(84,46,135,0.08)]">
+      <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Translation</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between">
@@ -179,7 +179,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="space-y-5 rounded-[1.75rem] bg-white/94 px-5 py-5 shadow-[0_12px_24px_rgba(84,46,135,0.08)]">
+      <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Review Cards</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between">
@@ -221,7 +221,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="space-y-5 rounded-[1.75rem] bg-white/94 px-5 py-5 shadow-[0_12px_24px_rgba(84,46,135,0.08)]">
+      <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Data/Storage</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between">

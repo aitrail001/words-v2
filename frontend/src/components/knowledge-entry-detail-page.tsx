@@ -155,7 +155,7 @@ export function KnowledgeEntryDetailPage({
 
   if (loadState === "error" || !detail) {
     return (
-      <section className="mx-auto max-w-[27rem] rounded-[2rem] bg-white/94 px-5 py-6 text-[#43235f] shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+      <section className="mx-auto max-w-[46rem] rounded-[2rem] bg-white/94 px-5 py-6 text-[#43235f] shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
         <h1 className="text-[1.7rem] font-semibold text-[#572c80]">Unable to load this entry</h1>
         <p className="mt-3 text-sm leading-6 text-[#6d6084]">
           The learner card could not be loaded right now.
@@ -196,34 +196,38 @@ export function KnowledgeEntryDetailPage({
   return (
     <div
       data-testid="knowledge-detail-mobile-shell"
-      className="mx-auto max-w-[27rem] space-y-4 pb-32 text-[#43235f]"
+      className="mx-auto max-w-[46rem] space-y-3 pb-32 text-[#43235f]"
     >
       <section
         data-testid="knowledge-detail-hero"
-        className="relative overflow-hidden rounded-[2.2rem] shadow-[0_20px_46px_rgba(84,46,135,0.16)]"
+        className="relative overflow-hidden rounded-[0.75rem] shadow-[0_10px_24px_rgba(84,46,135,0.10)]"
       >
-        <div className="h-[16.5rem]" style={buildHeroStyle(detail.display_text)} />
+        <div className="h-[18rem]" style={buildHeroStyle(detail.display_text)} />
 
         <div className="absolute inset-x-0 top-0 flex items-center justify-between px-4 py-4">
           <Link
             href="/knowledge-map"
-            className="flex h-12 w-12 items-center justify-center rounded-full bg-white/75 text-xl font-semibold text-[#62368f] backdrop-blur"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/75 text-sm font-semibold text-[#62368f] backdrop-blur"
           >
             ←
           </Link>
-          <span className="rounded-full bg-white/75 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#62368f] backdrop-blur">
-            {detail.entry_type}
-          </span>
+          <button
+            type="button"
+            aria-label="Detail options"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/75 text-sm font-semibold text-[#62368f] backdrop-blur"
+          >
+            •••
+          </button>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 h-28 bg-[linear-gradient(180deg,transparent,rgba(34,12,66,0.72))]" />
+        <div className="absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(180deg,transparent,rgba(34,12,66,0.32))]" />
       </section>
 
       <section>
-        <div className="space-y-4 rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(247,242,255,0.96))] px-5 py-4 shadow-[0_20px_44px_rgba(85,48,139,0.18)]">
+        <div className="space-y-3 rounded-[0.55rem] bg-white px-4 py-4 shadow-[0_8px_20px_rgba(85,48,139,0.08)]">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-[2rem] font-semibold leading-none text-[#572c80]">
+              <h1 className="text-[1.55rem] font-semibold leading-none text-[#572c80]">
                 {detail.display_text}
               </h1>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-[#7c7395]">
@@ -236,48 +240,33 @@ export function KnowledgeEntryDetailPage({
                 <span>#{detail.browse_rank.toLocaleString()}</span>
               </div>
             </div>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(detail.status)}`}>
-              Status: {STATUS_LABELS[detail.status]}
+            <span className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-[#7ebed7]">
+              {activePartOfSpeech ?? detail.entry_type}
             </span>
+            <span className="sr-only">Status: {STATUS_LABELS[detail.status]}</span>
           </div>
 
-          <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.14em]">
-            {activePartOfSpeech && (
-              <span className="rounded-full bg-[#dcfbff] px-3 py-2 text-[#1990b0]">
-                {activePartOfSpeech}
-              </span>
-            )}
-            {detail.cefr_level && (
-              <span className="rounded-full bg-[#f1ddff] px-3 py-2 text-[#7d2cff]">
-                {detail.cefr_level}
-              </span>
-            )}
-            {detail.entry_type === "phrase" && detail.normalized_form && (
-              <span className="rounded-full bg-[#f5f0fc] px-3 py-2 text-[#77678f]">
-                {detail.normalized_form}
-              </span>
-            )}
+          <div className="flex flex-wrap items-center gap-2 text-[0.74rem] font-semibold text-[#7c7395]">
+            {detail.cefr_level && <span>{detail.cefr_level}</span>}
+            {detail.entry_type === "phrase" && detail.normalized_form && <span>{detail.normalized_form}</span>}
           </div>
 
           {showTranslations && activeTranslation && (
-            <p className="text-lg font-semibold text-[#9a39f2]">{activeTranslation}</p>
+            <p className="text-sm font-semibold text-[#9a39f2]">{activeTranslation}</p>
           )}
 
-          <p className="text-[1.5rem] font-semibold leading-[1.28] text-[#4d295f]">
+          <p className="text-[1rem] font-semibold leading-6 text-[#4d295f]">
             {activeDefinition ?? "No learner definition has been generated yet."}
           </p>
 
           {activeExample && (
-            <div className="rounded-[1.3rem] bg-[#f8f5fc] px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8f82a5]">
-                Example
-              </p>
-              <p className="mt-2 text-base leading-7 text-[#5e4a74]">{activeExample}</p>
+            <div className="border-t border-[#ebedf5] pt-2">
+              <p className="text-[0.92rem] italic leading-6 text-[#5e4a74]">{activeExample}</p>
             </div>
           )}
 
           {contentCount > 1 && (
-            <div className="flex items-center justify-between gap-3 rounded-[1.2rem] bg-[#f7f1ff] px-4 py-3">
+            <div className="flex items-center justify-between gap-3 rounded-[0.45rem] bg-[#f6f4fb] px-3 py-2.5">
               <button
                 type="button"
                 onClick={() => setMeaningIndex((current) => Math.max(current - 1, 0))}
@@ -305,7 +294,7 @@ export function KnowledgeEntryDetailPage({
       </section>
 
       {(detail.relation_groups.length > 0 || detail.confusable_words.length > 0) && (
-        <section className="space-y-4 rounded-[2rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(245,240,252,0.94))] px-5 py-5 shadow-[0_18px_42px_rgba(84,46,135,0.12)]">
+        <section className="space-y-3 rounded-[0.55rem] bg-[#f5f6fb] px-3 py-3">
           <div className="text-center">
             <p className="text-sm font-semibold tracking-[0.12em] text-[#8e38f2]">Pro Tips</p>
           </div>
@@ -313,7 +302,7 @@ export function KnowledgeEntryDetailPage({
           {detail.relation_groups.map((group) => (
             <article
               key={group.relation_type}
-              className="rounded-[1.4rem] bg-white px-4 py-4 shadow-[0_10px_24px_rgba(86,54,145,0.08)]"
+              className="rounded-[0.45rem] bg-white px-4 py-4 shadow-[0_6px_16px_rgba(86,54,145,0.06)]"
             >
               <h2 className="text-lg font-semibold text-[#572c80]">
                 {formatRelationType(group.relation_type)}
@@ -335,14 +324,14 @@ export function KnowledgeEntryDetailPage({
           ))}
 
           {detail.confusable_words.length > 0 && (
-            <article className="rounded-[1.4rem] bg-white px-4 py-4 shadow-[0_10px_24px_rgba(86,54,145,0.08)]">
+            <article className="rounded-[0.45rem] bg-white px-4 py-4 shadow-[0_6px_16px_rgba(86,54,145,0.06)]">
               <h2 className="text-lg font-semibold text-[#572c80]">Confusing Words</h2>
               <p className="mt-1 text-sm leading-6 text-[#7a6d90]">
                 Watch these nearby forms before you mark the word as fully known.
               </p>
               <div className="mt-3 space-y-3">
                 {detail.confusable_words.map((item) => (
-                  <div key={`${item.word}-${item.note ?? "note"}`} className="rounded-[1rem] bg-[#f8f5fc] px-4 py-3">
+                  <div key={`${item.word}-${item.note ?? "note"}`} className="rounded-[0.4rem] bg-[#f8f5fc] px-4 py-3">
                     <p className="font-semibold text-[#53287c]">{item.word}</p>
                     {item.note && (
                       <p className="mt-1 text-sm leading-6 text-[#75698a]">{item.note}</p>
@@ -357,7 +346,7 @@ export function KnowledgeEntryDetailPage({
 
       <div
         data-testid="knowledge-detail-bottom-bar"
-        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+6.5rem)] left-1/2 z-30 flex w-[min(27rem,calc(100vw-1.5rem))] -translate-x-1/2 flex-col gap-2.5 rounded-[1.3rem] bg-[rgba(245,240,252,0.96)] p-3 shadow-[0_18px_42px_rgba(84,46,135,0.18)] backdrop-blur"
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.85rem)] left-1/2 z-30 flex w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 flex-col gap-2 rounded-[0.65rem] bg-[rgba(245,240,252,0.96)] p-2.5 shadow-[0_12px_26px_rgba(84,46,135,0.14)] backdrop-blur"
       >
         <button
           type="button"

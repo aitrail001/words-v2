@@ -86,7 +86,24 @@ describe("KnowledgeMapPage", () => {
       pronunciation: "/baŋk/",
       translation: "银行",
       primary_definition: "A financial institution.",
-      meanings: [],
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A financial institution.",
+          part_of_speech: "noun",
+          examples: [],
+          translations: [{ id: "translation-1", language: "zh-Hans", translation: "银行" }],
+          relations: [],
+        },
+        {
+          id: "meaning-2",
+          definition: "The side of a river.",
+          part_of_speech: "noun",
+          examples: [],
+          translations: [{ id: "translation-2", language: "zh-Hans", translation: "河岸" }],
+          relations: [],
+        },
+      ],
       senses: [],
       relation_groups: [],
       confusable_words: [],
@@ -137,5 +154,22 @@ describe("KnowledgeMapPage", () => {
       expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "known");
       expect(screen.getByText(/status: known/i)).toBeInTheDocument();
     });
+  });
+
+  it("moves between definitions in the cards view with arrow controls", async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeMapPage />);
+
+    expect(await screen.findByText("A financial institution.")).toBeInTheDocument();
+    expect(await screen.findByText(/definition 1 of 2/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /next definition/i }));
+
+    expect(await screen.findByText("The side of a river.")).toBeInTheDocument();
+    expect(screen.getByText(/definition 2 of 2/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /previous definition/i }));
+
+    expect(await screen.findByText("A financial institution.")).toBeInTheDocument();
   });
 });
