@@ -98,6 +98,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: words-frontend
+    command: sh -lc "find .next -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true; npm run dev"
     environment:
       - NEXT_PUBLIC_API_URL=/api
       - BACKEND_URL=${BACKEND_URL:-http://backend:8000/api}
@@ -117,6 +118,7 @@ services:
       context: ./admin-frontend
       dockerfile: Dockerfile
     container_name: words-admin-frontend
+    command: sh -lc "find .next -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true; npm run dev"
     environment:
       - NEXT_PUBLIC_API_URL=/api
       - BACKEND_URL=${BACKEND_URL:-http://backend:8000/api}
