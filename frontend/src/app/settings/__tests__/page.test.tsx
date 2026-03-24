@@ -3,7 +3,14 @@ import userEvent from "@testing-library/user-event";
 import SettingsPage from "@/app/settings/page";
 import { getUserPreferences, updateUserPreferences } from "@/lib/user-preferences-client";
 
-jest.mock("@/lib/user-preferences-client");
+jest.mock("@/lib/user-preferences-client", () => {
+  const actual = jest.requireActual("@/lib/user-preferences-client");
+  return {
+    ...actual,
+    getUserPreferences: jest.fn(),
+    updateUserPreferences: jest.fn(),
+  };
+});
 
 describe("SettingsPage", () => {
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
@@ -38,9 +45,23 @@ describe("SettingsPage", () => {
   it("loads the persisted learner preferences", async () => {
     render(<SettingsPage />);
 
-    expect(await screen.findByDisplayValue("Chinese")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Chinese (Simplified)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /uk accent/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /cards view/i })).toBeInTheDocument();
+  });
+
+  it("shows the full supported translation language names", async () => {
+    render(<SettingsPage />);
+
+    const languageSelect = await screen.findByLabelText(/language/i);
+    const labels = Array.from(languageSelect.querySelectorAll("option")).map((option) => option.textContent);
+    expect(labels).toEqual([
+      "Arabic",
+      "Spanish",
+      "Japanese",
+      "Portuguese (Brazil)",
+      "Chinese (Simplified)",
+    ]);
   });
 
   it("persists the global translation visibility toggle", async () => {

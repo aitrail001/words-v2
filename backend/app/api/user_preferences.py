@@ -7,7 +7,12 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import User
 from app.models.user_preference import UserPreference
-from app.services.knowledge_map import DEFAULT_ACCENT, DEFAULT_TRANSLATION_LOCALE, DEFAULT_VIEW
+from app.services.knowledge_map import (
+    DEFAULT_ACCENT,
+    DEFAULT_TRANSLATION_LOCALE,
+    DEFAULT_VIEW,
+    SUPPORTED_TRANSLATION_LOCALES,
+)
 
 router = APIRouter()
 DEFAULT_SHOW_TRANSLATIONS = True
@@ -31,6 +36,13 @@ class UserPreferencesUpdateRequest(BaseModel):
     def validate_accent(cls, value: str) -> str:
         if value not in {"us", "uk", "au"}:
             raise ValueError("Unsupported accent preference")
+        return value
+
+    @field_validator("translation_locale")
+    @classmethod
+    def validate_translation_locale(cls, value: str) -> str:
+        if value not in SUPPORTED_TRANSLATION_LOCALES:
+            raise ValueError("Unsupported translation locale")
         return value
 
     @field_validator("knowledge_view_preference")

@@ -19,15 +19,18 @@ from app.services.knowledge_map import (
     LIST_SORT_VALUES,
     LIST_STATUS_VALUES,
     STATUS_VALUES,
+    SUPPORTED_TRANSLATION_LOCALES,
     build_catalog,
     build_catalog_items,
     build_dashboard_summary,
+    build_entry_lookup,
     build_overview,
     build_range,
     build_relation_groups,
     build_word_translation_map,
     extract_phrase_primary_definition,
     extract_phrase_translation,
+    find_example_links,
     filter_catalog_items,
     get_preferences,
     get_status_row,
@@ -35,6 +38,10 @@ from app.services.knowledge_map import (
     load_word_detail_relations,
     load_word_primary_definitions,
     normalize_confusable_words,
+    normalize_word_forms,
+    phrase_locale_payload,
+    relation_terms,
+    resolve_exact_match_target,
     select_pronunciation,
     sort_catalog_items,
 )
@@ -114,12 +121,16 @@ class MeaningExampleResponse(BaseModel):
     id: str
     sentence: str
     difficulty: str | None
+    translation: str | None = None
+    linked_entries: list["InlineLinkedEntryResponse"] = []
 
 
 class TranslationResponse(BaseModel):
     id: str
     language: str
     translation: str
+    usage_note: str | None = None
+    examples: list[str] = []
 
 
 class RelationResponse(BaseModel):
@@ -136,12 +147,48 @@ class RelationGroupResponse(BaseModel):
 class ConfusableWordResponse(BaseModel):
     word: str
     note: str | None = None
+    target: "LinkTargetResponse | None" = None
+
+
+class InlineLinkedEntryResponse(BaseModel):
+    text: str
+    entry_type: str
+    entry_id: str
+
+
+class LinkTargetResponse(BaseModel):
+    entry_type: str
+    entry_id: str
+    display_text: str
+
+
+class LinkedTextResponse(BaseModel):
+    text: str
+    target: LinkTargetResponse | None = None
+
+
+class WordFormsResponse(BaseModel):
+    verb_forms: dict[str, str]
+    plural_forms: list[str]
+    derivations: list[LinkedTextResponse]
+    comparative: str | None = None
+    superlative: str | None = None
 
 
 class KnowledgeMeaningResponse(BaseModel):
     id: str
     definition: str
+    localized_definition: str | None = None
     part_of_speech: str | None
+    usage_note: str | None = None
+    localized_usage_note: str | None = None
+    register: str | None = None
+    primary_domain: str | None = None
+    secondary_domains: list[str] = []
+    grammar_patterns: list[str] = []
+    synonyms: list[LinkedTextResponse] = []
+    antonyms: list[LinkedTextResponse] = []
+    collocations: list[LinkedTextResponse] = []
     examples: list[MeaningExampleResponse]
     translations: list[TranslationResponse]
     relations: list[RelationResponse]
@@ -150,7 +197,17 @@ class KnowledgeMeaningResponse(BaseModel):
 class PhraseSenseResponse(BaseModel):
     sense_id: str | None
     definition: str
+    localized_definition: str | None = None
     part_of_speech: str | None
+    usage_note: str | None = None
+    localized_usage_note: str | None = None
+    register: str | None = None
+    primary_domain: str | None = None
+    secondary_domains: list[str] = []
+    grammar_patterns: list[str] = []
+    synonyms: list[LinkedTextResponse] = []
+    antonyms: list[LinkedTextResponse] = []
+    collocations: list[LinkedTextResponse] = []
     examples: list[MeaningExampleResponse]
 
 
@@ -171,6 +228,8 @@ class KnowledgeMapDetailResponse(BaseModel):
     pronunciation: str | None
     translation: str | None
     primary_definition: str | None
+    supported_translation_locales: list[str] = []
+    forms: WordFormsResponse | None = None
     meanings: list[KnowledgeMeaningResponse] = []
     senses: list[PhraseSenseResponse] = []
     relation_groups: list[RelationGroupResponse] = []
@@ -267,7 +326,7 @@ def _dashboard_entry(item: dict | None) -> KnowledgeMapAdjacentEntryResponse | N
     )
 
 
-async def _hydrate_word_summary_items(
+async def _hydrate_summary_items(
     db: AsyncSession,
     user_id: uuid.UUID,
     items: list[dict],
@@ -308,6 +367,19 @@ async def _hydrate_word_summary_items(
             if word is not None
             else item.get("pronunciation")
         )
+
+    phrase_ids = [item["entry_id"] for item in items if item["entry_type"] == "phrase"]
+    if phrase_ids:
+        phrases_result = await db.execute(select(PhraseEntry).where(PhraseEntry.id.in_(phrase_ids)))
+        phrases_by_id = {phrase.id: phrase for phrase in phrases_result.scalars().all()}
+        for item in items:
+            if item["entry_type"] != "phrase":
+                continue
+            phrase = phrases_by_id.get(item["entry_id"])
+            if phrase is None:
+                continue
+            item["translation"] = extract_phrase_translation(phrase, preferences.translation_locale)
+            item["primary_definition"] = extract_phrase_primary_definition(phrase) or item.get("primary_definition")
 
     return items
 
@@ -354,7 +426,7 @@ async def get_knowledge_map_list(
     items = await build_catalog(db, current_user.id)
     filtered = filter_catalog_items(items, status=status_filter, q=q)
     ordered = sort_catalog_items(filtered, sort)[:limit]
-    ordered = await _hydrate_word_summary_items(db, current_user.id, ordered)
+    ordered = await _hydrate_summary_items(db, current_user.id, ordered)
     return KnowledgeMapListResponse(items=[_summary_from_item(item) for item in ordered])
 
 
@@ -366,7 +438,7 @@ async def get_knowledge_map_range(
 ):
     items = await build_catalog(db, current_user.id)
     range_payload = build_range(items, range_start)
-    range_payload["items"] = await _hydrate_word_summary_items(
+    range_payload["items"] = await _hydrate_summary_items(
         db,
         current_user.id,
         range_payload["items"],
@@ -409,9 +481,13 @@ async def get_knowledge_map_entry_detail(
         examples_by_meaning, translations_by_meaning, relations_by_meaning = await load_word_detail_relations(db, meaning_ids)
         words_result = await db.execute(select(Word))
         phrases_result = await db.execute(select(PhraseEntry))
+        all_words = words_result.scalars().all()
+        all_phrases = phrases_result.scalars().all()
+        entry_lookup = build_entry_lookup(all_words, all_phrases)
         status_row = await get_status_row(db, current_user.id, "word", entry_id)
-        catalog = build_catalog_items(words_result.scalars().all(), phrases_result.scalars().all())
+        catalog = build_catalog_items(all_words, all_phrases)
         current_index = next((index for index, item in enumerate(catalog) if item["entry_type"] == "word" and item["entry_id"] == entry_id), None)
+        forms = normalize_word_forms(word)
 
         translation = None
         translation_map = build_word_translation_map(
@@ -435,24 +511,90 @@ async def get_knowledge_map_entry_detail(
             pronunciation=select_pronunciation(word, preferences.accent_preference),
             translation=translation,
             primary_definition=primary_definition,
+            supported_translation_locales=list(SUPPORTED_TRANSLATION_LOCALES),
+            forms=WordFormsResponse(
+                verb_forms=forms["verb_forms"],
+                plural_forms=forms["plural_forms"],
+                derivations=[
+                    LinkedTextResponse(
+                        text=item,
+                        target=LinkTargetResponse(**target) if (target := resolve_exact_match_target(item, entry_lookup)) else None,
+                    )
+                    for item in forms["derivations"]
+                ],
+                comparative=forms["comparative"],
+                superlative=forms["superlative"],
+            ),
             meanings=[
                 KnowledgeMeaningResponse(
                     id=str(meaning.id),
                     definition=meaning.definition,
+                    localized_definition=next(
+                        (
+                            item.translation
+                            for item in translations_by_meaning.get(meaning.id, [])
+                            if item.language == preferences.translation_locale
+                        ),
+                        None,
+                    ),
                     part_of_speech=meaning.part_of_speech,
+                    usage_note=meaning.usage_note,
+                    localized_usage_note=next(
+                        (
+                            getattr(item, "usage_note", None)
+                            for item in translations_by_meaning.get(meaning.id, [])
+                            if item.language == preferences.translation_locale
+                        ),
+                        None,
+                    ),
+                    register=meaning.register_label,
+                    primary_domain=meaning.primary_domain,
+                    secondary_domains=list(meaning.secondary_domains or []),
+                    grammar_patterns=list(meaning.grammar_patterns or []),
+                    synonyms=[
+                        LinkedTextResponse(text=item["text"], target=LinkTargetResponse(**item["target"]) if item["target"] else None)
+                        for item in relation_terms(relations_by_meaning.get(meaning.id, []), "synonym", entry_lookup)
+                    ],
+                    antonyms=[
+                        LinkedTextResponse(text=item["text"], target=LinkTargetResponse(**item["target"]) if item["target"] else None)
+                        for item in relation_terms(relations_by_meaning.get(meaning.id, []), "antonym", entry_lookup)
+                    ],
+                    collocations=[
+                        LinkedTextResponse(text=item["text"], target=LinkTargetResponse(**item["target"]) if item["target"] else None)
+                        for item in relation_terms(relations_by_meaning.get(meaning.id, []), "collocation", entry_lookup)
+                    ],
                     examples=[
                         MeaningExampleResponse(
                             id=str(example.id),
                             sentence=example.sentence,
                             difficulty=example.difficulty,
+                            translation=next(
+                                (
+                                    item.examples[example_index]
+                                    for item in translations_by_meaning.get(meaning.id, [])
+                                    if item.language == preferences.translation_locale
+                                    and isinstance(getattr(item, "examples", None), list)
+                                    and len(item.examples) > example_index
+                                ),
+                                None,
+                            ),
+                            linked_entries=[
+                                InlineLinkedEntryResponse(**link)
+                                for link in find_example_links(
+                                    example.sentence,
+                                    entry_lookup,
+                                )
+                            ],
                         )
-                        for example in examples_by_meaning.get(meaning.id, [])
+                        for example_index, example in enumerate(examples_by_meaning.get(meaning.id, []))
                     ],
                     translations=[
                         TranslationResponse(
                             id=str(translation.id),
                             language=translation.language,
                             translation=translation.translation,
+                            usage_note=getattr(translation, "usage_note", None),
+                            examples=list(getattr(translation, "examples", []) or []),
                         )
                         for translation in translations_by_meaning.get(meaning.id, [])
                     ],
@@ -475,7 +617,15 @@ async def get_knowledge_map_entry_detail(
                 for group in build_relation_groups(relations_by_meaning)
             ],
             confusable_words=[
-                ConfusableWordResponse(word=item["word"], note=item["note"])
+                ConfusableWordResponse(
+                    word=item["word"],
+                    note=item["note"],
+                    target=(
+                        LinkTargetResponse(**target)
+                        if (target := resolve_exact_match_target(item["word"], entry_lookup))
+                        else None
+                    ),
+                )
                 for item in normalize_confusable_words(word)
             ],
             previous_entry=_adjacent_entry(catalog[current_index - 1] if current_index not in (None, 0) else None),
@@ -490,25 +640,78 @@ async def get_knowledge_map_entry_detail(
     status_row = await get_status_row(db, current_user.id, "phrase", entry_id)
     words_result = await db.execute(select(Word))
     phrases_result = await db.execute(select(PhraseEntry))
-    catalog = build_catalog_items(words_result.scalars().all(), phrases_result.scalars().all())
+    all_words = words_result.scalars().all()
+    all_phrases = phrases_result.scalars().all()
+    catalog = build_catalog_items(all_words, all_phrases)
     current_index = next((index for index, item in enumerate(catalog) if item["entry_type"] == "phrase" and item["entry_id"] == entry_id), None)
 
     payload = phrase.compiled_payload if isinstance(phrase.compiled_payload, dict) else {}
     raw_senses = payload.get("senses") if isinstance(payload.get("senses"), list) else []
+    entry_lookup = build_entry_lookup(all_words, all_phrases)
     senses = []
     for sense_index, raw_sense in enumerate(raw_senses, start=1):
         sense = raw_sense if isinstance(raw_sense, dict) else {}
         raw_examples = sense.get("examples") if isinstance(sense.get("examples"), list) else []
+        locale_payload = phrase_locale_payload(sense, preferences.translation_locale)
         senses.append(
             PhraseSenseResponse(
                 sense_id=sense.get("sense_id") if isinstance(sense.get("sense_id"), str) else None,
                 definition=sense.get("definition") if isinstance(sense.get("definition"), str) else f"Sense {sense_index}",
-                part_of_speech=sense.get("part_of_speech") if isinstance(sense.get("part_of_speech"), str) else None,
+                localized_definition=locale_payload.get("definition") if isinstance(locale_payload.get("definition"), str) else None,
+                part_of_speech=(
+                    sense.get("part_of_speech")
+                    if isinstance(sense.get("part_of_speech"), str)
+                    else (sense.get("pos") if isinstance(sense.get("pos"), str) else None)
+                ),
+                usage_note=sense.get("usage_note") if isinstance(sense.get("usage_note"), str) else None,
+                localized_usage_note=locale_payload.get("usage_note") if isinstance(locale_payload.get("usage_note"), str) else None,
+                register=sense.get("register") if isinstance(sense.get("register"), str) else None,
+                primary_domain=sense.get("primary_domain") if isinstance(sense.get("primary_domain"), str) else None,
+                secondary_domains=[
+                    str(item)
+                    for item in (sense.get("secondary_domains") if isinstance(sense.get("secondary_domains"), list) else [])
+                    if str(item).strip()
+                ],
+                grammar_patterns=[
+                    str(item)
+                    for item in (sense.get("grammar_patterns") if isinstance(sense.get("grammar_patterns"), list) else [])
+                    if str(item).strip()
+                ],
+                synonyms=[
+                    LinkedTextResponse(text=str(item).strip(), target=LinkTargetResponse(**target) if (target := resolve_exact_match_target(str(item).strip(), entry_lookup)) else None)
+                    for item in (sense.get("synonyms") if isinstance(sense.get("synonyms"), list) else [])
+                    if str(item).strip()
+                ],
+                antonyms=[
+                    LinkedTextResponse(text=str(item).strip(), target=LinkTargetResponse(**target) if (target := resolve_exact_match_target(str(item).strip(), entry_lookup)) else None)
+                    for item in (sense.get("antonyms") if isinstance(sense.get("antonyms"), list) else [])
+                    if str(item).strip()
+                ],
+                collocations=[
+                    LinkedTextResponse(text=str(item).strip(), target=LinkTargetResponse(**target) if (target := resolve_exact_match_target(str(item).strip(), entry_lookup)) else None)
+                    for item in (sense.get("collocations") if isinstance(sense.get("collocations"), list) else [])
+                    if str(item).strip()
+                ],
                 examples=[
                     MeaningExampleResponse(
                         id=f"{phrase.id}-sense-{sense_index}-example-{example_index}",
                         sentence=example.get("sentence") if isinstance(example, dict) and isinstance(example.get("sentence"), str) else str(example),
                         difficulty=example.get("difficulty") if isinstance(example, dict) and isinstance(example.get("difficulty"), str) else None,
+                        translation=(
+                            locale_payload.get("examples")[example_index - 1]
+                            if isinstance(locale_payload.get("examples"), list)
+                            and len(locale_payload.get("examples")) >= example_index
+                            and isinstance(locale_payload.get("examples")[example_index - 1], str)
+                            else None
+                        ),
+                        linked_entries=[
+                            InlineLinkedEntryResponse(**link)
+                            for link in find_example_links(
+                                example.get("sentence") if isinstance(example, dict) else str(example),
+                                entry_lookup,
+                                excluded_terms=[phrase.normalized_form, phrase.phrase_text],
+                            )
+                        ],
                     )
                     for example_index, example in enumerate(raw_examples, start=1)
                 ],
@@ -526,6 +729,8 @@ async def get_knowledge_map_entry_detail(
         pronunciation=None,
         translation=extract_phrase_translation(phrase, preferences.translation_locale),
         primary_definition=extract_phrase_primary_definition(phrase),
+        supported_translation_locales=list(SUPPORTED_TRANSLATION_LOCALES),
+        forms=None,
         senses=senses,
         relation_groups=[],
         confusable_words=[],
@@ -573,7 +778,7 @@ async def search_knowledge_map(
     db: AsyncSession = Depends(get_db),
 ):
     items = await build_catalog(db, current_user.id, q=q)
-    items = await _hydrate_word_summary_items(db, current_user.id, items)
+    items = await _hydrate_summary_items(db, current_user.id, items)
     return KnowledgeMapSearchResponse(items=[_summary_from_item(item) for item in items])
 
 

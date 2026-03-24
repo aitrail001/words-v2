@@ -13,6 +13,8 @@ from tools.lexicon.export_db import serialize_phrase_row, serialize_word_row
 class FakeTranslation:
     language: str
     translation: str
+    usage_note: str | None = None
+    examples: list[str] | None = None
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -95,7 +97,14 @@ class ExportDbTests(unittest.TestCase):
             grammar_patterns=["run + adverb"],
             usage_note="Common learner verb.",
             learner_generated_at=datetime(2026, 3, 24, tzinfo=timezone.utc),
-            translations=[FakeTranslation(language="es", translation="correr")],
+            translations=[
+                FakeTranslation(
+                    language="es",
+                    translation="correr",
+                    usage_note="Verbo común de aprendizaje.",
+                    examples=["Corro cada mañana."],
+                )
+            ],
         )
         word = FakeWord(
             word="run",
@@ -125,6 +134,8 @@ class ExportDbTests(unittest.TestCase):
         self.assertEqual(row["phonetics"]["us"]["ipa"], "/rʌn/")
         self.assertEqual(row["senses"][0]["sense_id"], "sense-001")
         self.assertEqual(row["senses"][0]["translations"]["es"]["definition"], "correr")
+        self.assertEqual(row["senses"][0]["translations"]["es"]["usage_note"], "Verbo común de aprendizaje.")
+        self.assertEqual(row["senses"][0]["translations"]["es"]["examples"], ["Corro cada mañana."])
         self.assertEqual(row["senses"][0]["synonyms"], ["jog"])
         self.assertEqual(row["senses"][0]["examples"][0]["sentence"], "I run every morning.")
 

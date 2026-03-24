@@ -66,6 +66,20 @@ describe("SearchPage", () => {
           part_of_speech: "noun",
           phrase_kind: null,
         },
+        {
+          entry_type: "phrase",
+          entry_id: "phrase-1",
+          display_text: "Bank on",
+          normalized_form: "bank on",
+          browse_rank: 21,
+          status: "learning",
+          cefr_level: "B1",
+          pronunciation: null,
+          translation: null,
+          primary_definition: "To rely on someone.",
+          part_of_speech: null,
+          phrase_kind: "phrasal_verb",
+        },
       ],
     });
   });
@@ -79,5 +93,8 @@ describe("SearchPage", () => {
     await user.type(screen.getByPlaceholderText(/search words and phrases/i), "ba");
 
     expect(await screen.findByRole("link", { name: /bank/i })).toHaveAttribute("href", "/word/word-1");
+    expect(await screen.findByRole("link", { name: /bank on/i })).toHaveAttribute("href", "/phrase/phrase-1");
+    expect(screen.getAllByText("To rely on someone.").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Pronunciation unavailable")).not.toBeInTheDocument();
   });
 });

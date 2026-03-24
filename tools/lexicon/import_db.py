@@ -211,7 +211,6 @@ def _load_existing_examples(session: Any, example_model: Type[Any], meaning_id: 
             select(example_model)
             .where(
                 example_model.meaning_id == meaning_id,
-                example_model.source == source,
             )
             .order_by(example_model.order_index.asc())
         )
@@ -245,7 +244,6 @@ def _load_existing_relations(session: Any, relation_model: Type[Any], meaning_id
             select(relation_model)
             .where(
                 relation_model.meaning_id == meaning_id,
-                relation_model.source == source,
                 relation_model.relation_type.in_(relation_types),
             )
             .order_by(relation_model.relation_type.asc(), relation_model.related_word.asc())
@@ -730,6 +728,12 @@ def import_compiled_rows(
                     translated_definition = str((locale_payload or {}).get('definition') or '').strip()
                     if not translated_definition:
                         continue
+                    translated_usage_note = str((locale_payload or {}).get('usage_note') or '').strip() or None
+                    translated_examples = [
+                        str(example).strip()
+                        for example in ((locale_payload or {}).get('examples') or [])
+                        if str(example).strip()
+                    ]
                     translation = existing_translations.get(locale)
                     if translation is None:
                         translation = translation_model(
@@ -742,6 +746,10 @@ def import_compiled_rows(
                     else:
                         translation.translation = translated_definition
                         summary = _increment(summary, updated_translations=1)
+                    if hasattr(translation, "usage_note"):
+                        translation.usage_note = translated_usage_note
+                    if hasattr(translation, "examples"):
+                        translation.examples = translated_examples
 
             if word_relation_model is not None:
                 existing_relations = _load_existing_relations(session, word_relation_model, meaning.id, row_source_type)

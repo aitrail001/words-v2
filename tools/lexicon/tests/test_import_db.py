@@ -7,7 +7,39 @@ from typing import Optional
 from unittest.mock import MagicMock
 from pathlib import Path
 
-from tools.lexicon.import_db import ImportSummary, import_compiled_rows
+from sqlalchemy import String, Uuid
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from tools.lexicon.import_db import (
+    ImportSummary,
+    _load_existing_examples,
+    _load_existing_relations,
+    import_compiled_rows,
+)
+
+
+class _SqlAlchemyBase(DeclarativeBase):
+    pass
+
+
+class SqlMeaningExample(_SqlAlchemyBase):
+    __tablename__ = "meaning_examples"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    meaning_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    sentence: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
+    order_index: Mapped[int] = mapped_column(default=0)
+
+
+class SqlWordRelation(_SqlAlchemyBase):
+    __tablename__ = "word_relations"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    meaning_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    relation_type: Mapped[str] = mapped_column(String)
+    related_word: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
 
 
 @dataclass
@@ -58,6 +90,16 @@ class FakeMeaningExample:
     source: object = None
     confidence: object = None
     enrichment_run_id: object = None
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeTranslation:
+    meaning_id: uuid.UUID
+    language: str
+    translation: str
+    usage_note: object = None
+    examples: object = None
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -171,6 +213,29 @@ class _ListResult:
 
 
 class ImportCompiledRowsTests(unittest.TestCase):
+    def test_load_existing_examples_ignores_source_filter_for_sqlalchemy_models(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ListResult([])
+
+        _load_existing_examples(session, SqlMeaningExample, uuid.uuid4(), "snapshot_refresh")
+
+        statement = session.execute.call_args[0][0]
+        where_clause = str(statement.whereclause)
+        self.assertIn("meaning_examples.meaning_id", where_clause)
+        self.assertNotIn("meaning_examples.source", where_clause)
+
+    def test_load_existing_relations_ignores_source_filter_for_sqlalchemy_models(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ListResult([])
+
+        _load_existing_relations(session, SqlWordRelation, uuid.uuid4(), "snapshot_refresh")
+
+        statement = session.execute.call_args[0][0]
+        where_clause = str(statement.whereclause)
+        self.assertIn("word_relations.meaning_id", where_clause)
+        self.assertIn("word_relations.relation_type", where_clause)
+        self.assertNotIn("word_relations.source", where_clause)
+
     def test_import_creates_word_and_meanings_with_provenance(self) -> None:
         session = MagicMock()
         session.execute.side_effect = [
@@ -415,6 +480,63 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_phrase.source_type, "db_export")
         self.assertEqual(imported_phrase.source_reference, "phrase-fixture")
         self.assertEqual(imported_phrase.language, "en")
+
+    def test_import_preserves_localized_usage_notes_and_example_translations(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [
+            _ScalarResult(None),  # existing word lookup
+            _ListResult([]),      # existing meanings
+            _ListResult([]),      # existing examples
+            _ListResult([]),      # existing translations
+            _ListResult([]),      # existing relations
+        ]
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "word",
+                "word": "time",
+                "language": "en",
+                "forms": {},
+                "senses": [
+                    {
+                        "sense_id": "sense-001",
+                        "definition": "the thing measured in minutes and hours",
+                        "pos": "noun",
+                        "examples": [{"sentence": "I do not have time today.", "difficulty": "A1"}],
+                        "translations": {
+                            "pt-BR": {
+                                "definition": "tempo",
+                                "usage_note": "Muito comum em contextos abstratos e práticos.",
+                                "examples": ["Eu não tenho tempo hoje."],
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260324",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            meaning_example_model=FakeMeaningExample,
+            translation_model=FakeTranslation,
+            word_relation_model=FakeWordRelation,
+        )
+
+        self.assertEqual(summary.created_translations, 1)
+        imported_translation = next(item for item in added if isinstance(item, FakeTranslation))
+        self.assertEqual(imported_translation.translation, "tempo")
+        self.assertEqual(imported_translation.usage_note, "Muito comum em contextos abstratos e práticos.")
+        self.assertEqual(imported_translation.examples, ["Eu não tenho tempo hoje."])
 
     def test_import_updates_existing_word_and_meanings_without_duplication(self) -> None:
         existing_word = FakeWord(

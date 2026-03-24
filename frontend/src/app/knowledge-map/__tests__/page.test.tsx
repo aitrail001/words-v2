@@ -1,14 +1,13 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen } from "@testing-library/react";
 import KnowledgeMapPage from "@/app/knowledge-map/page";
-import {
-  getKnowledgeMapOverview,
-} from "@/lib/knowledge-map-client";
+import { getKnowledgeMapOverview } from "@/lib/knowledge-map-client";
 
 jest.mock("@/lib/knowledge-map-client");
 
 describe("KnowledgeMapPage", () => {
-  const mockGetKnowledgeMapOverview = getKnowledgeMapOverview as jest.MockedFunction<typeof getKnowledgeMapOverview>;
+  const mockGetKnowledgeMapOverview = getKnowledgeMapOverview as jest.MockedFunction<
+    typeof getKnowledgeMapOverview
+  >;
 
   beforeEach(() => {
     jest.clearAllMocks();

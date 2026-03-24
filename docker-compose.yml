@@ -35,6 +35,33 @@ services:
     networks:
       - words-network
 
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: words-migrate
+    command: sh -lc "cd /app && alembic upgrade head"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=development
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./backend:/app
+      - ./tools:/app/tools:ro
+      - ./data:/app/data
+      - ./tests:/app/tests
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - words-network
+
   backend:
     build:
       context: ./backend
@@ -59,6 +86,8 @@ services:
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -86,6 +115,8 @@ services:
       - ./tests:/app/tests:ro
       - backend_uploads:/app/uploads
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

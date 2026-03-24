@@ -19,7 +19,7 @@ type ViewMode = "cards" | "tags" | "list";
 
 const STATUS_LABELS: Record<KnowledgeStatus, string> = {
   undecided: "Undecided",
-  to_learn: "Should Learn",
+  to_learn: "To Learn",
   learning: "Learning",
   known: "Known",
 };
@@ -42,10 +42,25 @@ const PRIMARY_STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> 
   { status: "known", label: "Already Know" },
 ];
 
+const READY_TO_LEARN_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
+  { status: "learning", label: "Learn Now" },
+  { status: "known", label: "Already Know" },
+];
+
 const SECONDARY_STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
   { status: "learning", label: "Learning" },
   { status: "known", label: "Known" },
 ];
+
+function getCardActions(status: KnowledgeStatus): Array<{ status: KnowledgeStatus; label: string }> {
+  if (status === "undecided") {
+    return PRIMARY_STATUS_ACTIONS;
+  }
+  if (status === "to_learn") {
+    return READY_TO_LEARN_ACTIONS;
+  }
+  return SECONDARY_STATUS_ACTIONS;
+}
 
 function buildHeroStyle(seed: string): CSSProperties {
   const palettes = [
@@ -85,12 +100,6 @@ function primaryStatusButtonClass(status: KnowledgeStatus): string {
     return "bg-[#45c5dd] text-white";
   }
   return "bg-[#a52fff] text-white";
-}
-
-function secondaryStatusButtonClass(active: boolean): string {
-  return active
-    ? "border-[#8f2fff] bg-[#f1ddff] text-[#7f22ff]"
-    : "border-[#d7d7ea] bg-white text-[#6e5d87]";
 }
 
 function MiniRangeStrip({
@@ -413,6 +422,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
     : "Pick a tile to begin";
   const canGoPreviousEntry = activeIndex > 0;
   const canGoNextEntry = selectedRange ? activeIndex < selectedRange.items.length - 1 : false;
+  const activeCardActions = activeEntry ? getCardActions(activeEntry.status) : [];
 
   return (
     <section className="space-y-3 rounded-[0.8rem] bg-[#f1f2f8] px-2 py-2">
@@ -534,25 +544,12 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
               </div>
 
               <div className="grid grid-cols-2 gap-2 pt-1.5">
-                {PRIMARY_STATUS_ACTIONS.map((action) => (
+                {activeCardActions.map((action) => (
                   <button
                     key={`${activeEntry.entry_id}-${action.status}-${action.label}`}
                     type="button"
                     onClick={() => void updateStatus(activeEntry, action.status)}
                     className={`rounded-[0.3rem] px-3 py-2.5 text-sm font-semibold ${primaryStatusButtonClass(action.status)}`}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                {SECONDARY_STATUS_ACTIONS.map((action) => (
-                  <button
-                    key={`${activeEntry.entry_id}-${action.status}-secondary`}
-                    type="button"
-                    onClick={() => void updateStatus(activeEntry, action.status)}
-                    className={`rounded-[0.3rem] border px-2.5 py-1.5 text-[0.72rem] font-semibold ${secondaryStatusButtonClass(activeEntry.status === action.status)}`}
                   >
                     {action.label}
                   </button>
