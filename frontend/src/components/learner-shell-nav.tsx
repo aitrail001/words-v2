@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const NAV_ITEMS = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: string;
+  testId?: string;
+};
+
+const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", label: "Home", icon: "⌂" },
   { href: "/knowledge-map", label: "Knowledge", icon: "◫" },
   { href: "/review", label: "Review", icon: "↻", testId: "nav-review-link" },
@@ -25,7 +32,7 @@ function isKnowledgeRoute(pathname: string | null): boolean {
   );
 }
 
-function isActiveNavItem(pathname: string | null, href: (typeof NAV_ITEMS)[number]["href"]): boolean {
+function isActiveNavItem(pathname: string | null, href: NavItem["href"]): boolean {
   if (href === "/") {
     return pathname === "/";
   }
