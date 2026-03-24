@@ -1,3 +1,0 @@
-{"timestamp": "2026-03-24T03:27:53Z", "level": "info", "event": "command-start", "message": "Command started", "fields": {"command": "export-db"}}
-{"timestamp": "2026-03-24T03:28:17Z", "level": "info", "event": "command-start", "message": "Command started", "fields": {"command": "export-db"}}
-{"timestamp": "2026-03-24T03:28:22Z", "level": "info", "event": "command-complete", "message": "Command completed", "fields": {"command": "export-db", "exit_code": 0}}
