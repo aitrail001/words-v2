@@ -19,7 +19,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
 
   await page.goto("/");
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByText("Words Uncovered")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Knowledge Map" })).toBeVisible();
   await expect(page.getByRole("link", { name: /knew/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /started/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /to learn/i })).toBeVisible();
@@ -62,6 +62,10 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await page.getByRole("link", { name: /discover/i }).click();
   await expect(page).toHaveURL(/\/knowledge-map/);
   await expect(page.getByRole("heading", { name: "Full Knowledge Map" })).toBeVisible();
+  const firstRangeLink = page.getByRole("link", { name: "1-100", exact: true });
+  await expect(firstRangeLink).toBeVisible();
+  await firstRangeLink.click();
+  await expect(page).toHaveURL(/\/knowledge-map\/range\/1$/);
   await expect(page.getByRole("heading", { name: /range [\d,]+\s*-\s*[\d,]+/i })).toBeVisible();
 
   await page.goto("/");

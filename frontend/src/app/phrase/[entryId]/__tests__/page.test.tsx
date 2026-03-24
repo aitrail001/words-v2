@@ -1,8 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import KnowledgeListPage from "@/app/knowledge-list/[status]/page";
 import KnowledgeMapPage from "@/app/knowledge-map/page";
+import KnowledgeMapRangePage from "@/app/knowledge-map/range/[start]/page";
 import PhraseEntryPage from "@/app/phrase/[entryId]/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
 import {
@@ -16,6 +17,7 @@ import { getUserPreferences } from "@/lib/user-preferences-client";
 
 jest.mock("next/navigation", () => ({
   useParams: jest.fn(),
+  useRouter: jest.fn(),
 }));
 
 jest.mock("@/lib/knowledge-map-client");
@@ -23,6 +25,7 @@ jest.mock("@/lib/user-preferences-client");
 
 describe("PhraseEntryPage", () => {
   const mockUseParams = useParams as jest.MockedFunction<typeof useParams>;
+  const mockUseRouter = useRouter as jest.MockedFunction<typeof useRouter>;
   const mockGetKnowledgeMapEntryDetail = getKnowledgeMapEntryDetail as jest.MockedFunction<typeof getKnowledgeMapEntryDetail>;
   const mockGetKnowledgeMapList = getKnowledgeMapList as jest.MockedFunction<typeof getKnowledgeMapList>;
   const mockGetKnowledgeMapOverview = getKnowledgeMapOverview as jest.MockedFunction<typeof getKnowledgeMapOverview>;
@@ -33,6 +36,7 @@ describe("PhraseEntryPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseParams.mockReturnValue({ entryId: "phrase-1" } as never);
+    mockUseRouter.mockReturnValue({ push: jest.fn() } as never);
     mockGetUserPreferences.mockResolvedValue({
       accent_preference: "uk",
       translation_locale: "zh-Hans",
@@ -157,10 +161,17 @@ describe("PhraseEntryPage", () => {
     const user = userEvent.setup();
     render(<KnowledgeMapPage />);
 
+    expect(await screen.findByRole("link", { name: "1-100", exact: true })).toHaveAttribute(
+      "href",
+      "/knowledge-map/range/1",
+    );
+
+    mockUseParams.mockReturnValue({ start: "1" } as never);
+    render(<KnowledgeMapRangePage />);
+
     expect(await screen.findByRole("link", { name: /learn more/i })).toHaveAttribute("href", "/word/word-1");
 
     await user.click(screen.getByRole("button", { name: /tags view/i }));
-
     expect(screen.getByRole("link", { name: "Bank on" })).toHaveAttribute("href", "/phrase/phrase-1");
   });
 
