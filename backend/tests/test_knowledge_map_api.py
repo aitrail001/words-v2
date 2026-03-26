@@ -139,7 +139,7 @@ class TestKnowledgeMapOverview:
                 ]
             },
         )
-        statuses = [
+        [
             LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_one.id, status="known"),
             LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase.id, status="learning"),
         ]
@@ -215,7 +215,7 @@ class TestKnowledgeMapDashboard:
             phrase_kind="phrasal_verb",
             language="en",
         )
-        statuses = [
+        [
             LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_known.id, status="known"),
             LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_learning.id, status="learning"),
             LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase_to_learn.id, status="to_learn"),
@@ -552,7 +552,7 @@ class TestKnowledgeMapList:
             localized_definition="contar con",
             localized_usage_note="common",
         )
-        statuses = [
+        [
             LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_known.id, status="known"),
             LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_learning.id, status="learning"),
             LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase_to_learn.id, status="to_learn"),
@@ -1523,7 +1523,7 @@ class TestKnowledgeMapSearchAndHistory:
             localized_definition="contar con",
             localized_usage_note="common",
         )
-        status = LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="learning")
+        LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="learning")
 
         mock_db.execute.side_effect = [
             scalar_one_or_none_result(user),

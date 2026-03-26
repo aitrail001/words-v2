@@ -10,7 +10,7 @@ from pathlib import Path
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import Column, DateTime, MetaData, String, Table, UniqueConstraint, create_engine, func, select, text
+from sqlalchemy import Column, DateTime, MetaData, String, Table, UniqueConstraint, create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 

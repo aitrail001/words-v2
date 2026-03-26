@@ -29,11 +29,9 @@ from app.services.knowledge_map import (
     build_dashboard_summary,
     build_entry_lookup,
     build_overview,
-    build_range,
     build_relation_groups,
     build_word_translation_map,
     find_example_links,
-    filter_catalog_items,
     get_preferences,
     get_status_row,
     list_search_history,
@@ -50,7 +48,6 @@ from app.services.knowledge_map import (
     relation_terms,
     resolve_exact_match_target,
     select_pronunciation,
-    sort_catalog_items,
 )
 
 router = APIRouter()
