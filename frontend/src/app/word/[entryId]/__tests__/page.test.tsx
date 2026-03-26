@@ -239,10 +239,10 @@ describe("WordEntryPage", () => {
     expect(screen.queryByRole("link", { name: /previous/i })).not.toBeInTheDocument();
     expect(screen.getByText(/meaning 1 of 2/i)).toBeInTheDocument();
     expect(screen.getByText("A financial institution.")).toBeInTheDocument();
-    expect(screen.getAllByText("银行").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /Chinese \(Simplified\) On/i })).toBeInTheDocument();
     expect(screen.getByText("Confusing Words")).toBeInTheDocument();
     expect(screen.getByText("金融中常见。")).toBeInTheDocument();
-    expect(screen.getByText("我去了银行。")).toBeInTheDocument();
+    expect(screen.getByText("I went to the")).toBeInTheDocument();
     expect(screen.getByText("Verb Forms")).toBeInTheDocument();
     expect(screen.getByText("Pro Tips")).toBeInTheDocument();
     expect(screen.getByText("Word Variants")).toBeInTheDocument();

@@ -10,6 +10,7 @@ from app.core.database import Base
 from app.models.schema_names import LEXICON_TABLE_ARGS, lexicon_fk
 
 if TYPE_CHECKING:
+    from app.models.meaning_metadata import MeaningMetadata
     from app.models.translation import Translation
     from app.models.word import Word
 
@@ -46,6 +47,12 @@ class Meaning(Base):
     word: Mapped["Word"] = relationship("Word", back_populates="meanings")
     translations: Mapped[list["Translation"]] = relationship(
         "Translation", back_populates="meaning", cascade="all, delete-orphan"
+    )
+    metadata_entries: Mapped[list["MeaningMetadata"]] = relationship(
+        "MeaningMetadata",
+        back_populates="meaning",
+        cascade="all, delete-orphan",
+        order_by="MeaningMetadata.order_index",
     )
 
     def __init__(self, **kwargs):

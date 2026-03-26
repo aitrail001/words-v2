@@ -9,6 +9,8 @@ import json
 import sys
 from collections import Counter
 
+from tools.lexicon.validate import validate_compiled_record
+
 
 SUPPORTED_RELATION_FIELDS = (
     ("synonym", "synonyms"),
@@ -24,24 +26,32 @@ def _ensure_backend_path() -> None:
         sys.path.insert(0, backend_str)
 
 
-def _default_models() -> tuple[type, type, type, type, type, type, type]:
+def _default_models() -> tuple[type, type, type, type, type, type, type, type, type, type, type]:
     _ensure_backend_path()
     from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
     from app.models.meaning import Meaning
+    from app.models.meaning_metadata import MeaningMetadata
     from app.models.meaning_example import MeaningExample
     from app.models.translation import Translation
+    from app.models.translation_example import TranslationExample
     from app.models.word import Word
+    from app.models.word_confusable import WordConfusable
+    from app.models.word_form import WordForm
     from app.models.word_relation import WordRelation
 
-    return Word, Meaning, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun, Translation
+    return Word, Meaning, MeaningMetadata, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun, Translation, TranslationExample, WordConfusable, WordForm
 
 
-def _default_phrase_models() -> type:
+def _default_phrase_models() -> tuple[type, type, type, type, type]:
     _ensure_backend_path()
     from app.models.phrase_entry import PhraseEntry
+    from app.models.phrase_sense import PhraseSense
+    from app.models.phrase_sense_example import PhraseSenseExample
+    from app.models.phrase_sense_example_localization import PhraseSenseExampleLocalization
+    from app.models.phrase_sense_localization import PhraseSenseLocalization
 
-    return PhraseEntry
+    return PhraseEntry, PhraseSense, PhraseSenseLocalization, PhraseSenseExample, PhraseSenseExampleLocalization
 
 
 def _default_reference_models() -> tuple[type, type]:
@@ -81,6 +91,37 @@ def _increment(summary: ImportSummary, **changes: int) -> ImportSummary:
     for key, delta in changes.items():
         values[key] = values.get(key, 0) + delta
     return replace(summary, **values)
+
+
+def _replace_collection(parent: Any, attribute: str, items: list[Any]) -> None:
+    collection = getattr(parent, attribute, None)
+    if isinstance(collection, list):
+        collection.clear()
+        collection.extend(items)
+    else:
+        setattr(parent, attribute, list(items))
+
+
+def _phrase_example_translation_score(translations: dict[str, Any], example_index: int) -> tuple[int, int]:
+    translated_count = 0
+    translated_length = 0
+    for locale in sorted(translations.keys()):
+        locale_payload = translations.get(locale) or {}
+        translated_examples = locale_payload.get("examples") or []
+        if not isinstance(translated_examples, list) or example_index >= len(translated_examples):
+            continue
+        translated_example = str(translated_examples[example_index] or "").strip()
+        if not translated_example:
+            continue
+        translated_count += 1
+        translated_length += len(translated_example)
+    return translated_count, translated_length
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if isinstance(item, str) and str(item).strip()]
 
 
 def _first_example_sentence(sense: dict[str, Any]) -> str | None:
@@ -340,6 +381,145 @@ def _sync_word_level_enrichment_fields(word: Any, row: dict[str, Any], run: Any 
         word.phonetic_enrichment_run_id = run.id
 
 
+def _sync_word_confusable_rows(word: Any, row: dict[str, Any], word_confusable_model: Type[Any] | None) -> None:
+    if word_confusable_model is None or not hasattr(word, "confusable_entries"):
+        return
+
+    confusable_rows: list[Any] = []
+    for index, item in enumerate(list(row.get("confusable_words") or [])):
+        if not isinstance(item, dict):
+            continue
+        confusable_word = str(item.get("word") or "").strip()
+        if not confusable_word:
+            continue
+        note = item.get("note")
+        confusable_rows.append(
+            word_confusable_model(
+                word_id=word.id,
+                confusable_word=confusable_word,
+                note=str(note).strip() if isinstance(note, str) and str(note).strip() else None,
+                order_index=index,
+            )
+        )
+    _replace_collection(word, "confusable_entries", confusable_rows)
+
+
+def _sync_word_form_rows(word: Any, row: dict[str, Any], word_form_model: Type[Any] | None) -> None:
+    if word_form_model is None or not hasattr(word, "form_entries"):
+        return
+
+    forms = row.get("forms") if isinstance(row.get("forms"), dict) else {}
+    normalized_rows: list[Any] = []
+
+    verb_forms = forms.get("verb_forms") if isinstance(forms.get("verb_forms"), dict) else {}
+    for index, slot in enumerate(("base", "past", "gerund", "past_participle", "third_person_singular")):
+        value = str(verb_forms.get(slot) or "").strip()
+        if not value:
+            continue
+        normalized_rows.append(
+            word_form_model(
+                word_id=word.id,
+                form_kind="verb",
+                form_slot=slot,
+                value=value,
+                order_index=index,
+            )
+        )
+
+    for index, value in enumerate(_normalize_string_list(forms.get("plural_forms"))):
+        normalized_rows.append(
+            word_form_model(
+                word_id=word.id,
+                form_kind="plural",
+                form_slot="",
+                value=value,
+                order_index=index,
+            )
+        )
+
+    for index, value in enumerate(_normalize_string_list(forms.get("derivations"))):
+        normalized_rows.append(
+            word_form_model(
+                word_id=word.id,
+                form_kind="derivation",
+                form_slot="",
+                value=value,
+                order_index=index,
+            )
+        )
+
+    comparative = str(forms.get("comparative") or "").strip()
+    if comparative:
+        normalized_rows.append(
+            word_form_model(
+                word_id=word.id,
+                form_kind="comparative",
+                form_slot="",
+                value=comparative,
+                order_index=0,
+            )
+        )
+
+    superlative = str(forms.get("superlative") or "").strip()
+    if superlative:
+        normalized_rows.append(
+            word_form_model(
+                word_id=word.id,
+                form_kind="superlative",
+                form_slot="",
+                value=superlative,
+                order_index=0,
+            )
+        )
+
+    _replace_collection(word, "form_entries", normalized_rows)
+
+
+def _sync_translation_example_rows(
+    translation: Any,
+    translated_examples: list[str],
+    translation_example_model: Type[Any] | None,
+) -> None:
+    if translation_example_model is None or not hasattr(translation, "example_entries"):
+        return
+
+    example_rows = [
+        translation_example_model(
+            translation_id=translation.id,
+            text=text,
+            order_index=index,
+        )
+        for index, text in enumerate(translated_examples)
+    ]
+    _replace_collection(translation, "example_entries", example_rows)
+
+
+def _sync_meaning_metadata_rows(meaning: Any, sense: dict[str, Any], meaning_metadata_model: Type[Any] | None) -> None:
+    if meaning_metadata_model is None or not hasattr(meaning, "metadata_entries"):
+        return
+
+    metadata_rows: list[Any] = []
+    for index, value in enumerate(_normalize_string_list(sense.get("secondary_domains"))):
+        metadata_rows.append(
+            meaning_metadata_model(
+                meaning_id=meaning.id,
+                metadata_kind="secondary_domain",
+                value=value,
+                order_index=index,
+            )
+        )
+    for index, value in enumerate(_normalize_string_list(sense.get("grammar_patterns"))):
+        metadata_rows.append(
+            meaning_metadata_model(
+                meaning_id=meaning.id,
+                metadata_kind="grammar_pattern",
+                value=value,
+                order_index=index,
+            )
+        )
+    _replace_collection(meaning, "metadata_entries", metadata_rows)
+
+
 def _sync_meaning_level_learner_fields(meaning: Any, sense: dict[str, Any], row: dict[str, Any]) -> None:
     if sense.get("wn_synset_id") is not None and hasattr(meaning, "wn_synset_id"):
         meaning.wn_synset_id = sense.get("wn_synset_id")
@@ -383,28 +563,42 @@ def import_compiled_rows(
     language: str = "en",
     word_model: Optional[Type[Any]] = None,
     meaning_model: Optional[Type[Any]] = None,
+    meaning_metadata_model: Optional[Type[Any]] = None,
     meaning_example_model: Optional[Type[Any]] = None,
     word_relation_model: Optional[Type[Any]] = None,
     lexicon_enrichment_job_model: Optional[Type[Any]] = None,
     lexicon_enrichment_run_model: Optional[Type[Any]] = None,
     translation_model: Optional[Type[Any]] = None,
+    translation_example_model: Optional[Type[Any]] = None,
     phrase_model: Optional[Type[Any]] = None,
+    phrase_sense_model: Optional[Type[Any]] = None,
+    phrase_sense_localization_model: Optional[Type[Any]] = None,
+    phrase_sense_example_model: Optional[Type[Any]] = None,
+    phrase_sense_example_localization_model: Optional[Type[Any]] = None,
     reference_model: Optional[Type[Any]] = None,
     reference_localization_model: Optional[Type[Any]] = None,
+    word_confusable_model: Optional[Type[Any]] = None,
+    word_form_model: Optional[Type[Any]] = None,
     progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
 ) -> ImportSummary:
     if word_model is None or meaning_model is None:
         (
             word_model,
             meaning_model,
+            default_meaning_metadata_model,
             default_meaning_example_model,
             default_word_relation_model,
             default_job_model,
             default_run_model,
             default_translation_model,
+            default_translation_example_model,
+            default_word_confusable_model,
+            default_word_form_model,
         ) = _default_models()
         if meaning_example_model is None:
             meaning_example_model = default_meaning_example_model
+        if meaning_metadata_model is None:
+            meaning_metadata_model = default_meaning_metadata_model
         if word_relation_model is None:
             word_relation_model = default_word_relation_model
         if lexicon_enrichment_job_model is None:
@@ -413,7 +607,17 @@ def import_compiled_rows(
             lexicon_enrichment_run_model = default_run_model
         if translation_model is None:
             translation_model = default_translation_model
+        if translation_example_model is None:
+            translation_example_model = default_translation_example_model
+        if word_confusable_model is None:
+            word_confusable_model = default_word_confusable_model
+        if word_form_model is None:
+            word_form_model = default_word_form_model
     resolved_phrase_model = phrase_model
+    resolved_phrase_sense_model = phrase_sense_model
+    resolved_phrase_sense_localization_model = phrase_sense_localization_model
+    resolved_phrase_sense_example_model = phrase_sense_example_model
+    resolved_phrase_sense_example_localization_model = phrase_sense_example_localization_model
     resolved_reference_model = reference_model
     resolved_reference_localization_model = reference_localization_model
 
@@ -427,8 +631,37 @@ def import_compiled_rows(
         row_source_type = _effective_row_source_type(row, source_type)
         row_source_reference = _effective_row_source_reference(row, source_reference)
         if entry_type == "phrase":
+            senses = row.get("senses")
+            if isinstance(senses, list) and senses:
+                validation_errors = validate_compiled_record(row)
+                if validation_errors:
+                    raise RuntimeError("; ".join(validation_errors))
+            if (
+                resolved_phrase_model is None
+                or resolved_phrase_sense_model is None
+                or resolved_phrase_sense_localization_model is None
+                or resolved_phrase_sense_example_model is None
+                or resolved_phrase_sense_example_localization_model is None
+            ) and isinstance(senses, list) and senses:
+                (
+                    default_phrase_model,
+                    default_phrase_sense_model,
+                    default_phrase_sense_localization_model,
+                    default_phrase_sense_example_model,
+                    default_phrase_sense_example_localization_model,
+                ) = _default_phrase_models()
+                if resolved_phrase_model is None:
+                    resolved_phrase_model = default_phrase_model
+                if resolved_phrase_sense_model is None:
+                    resolved_phrase_sense_model = default_phrase_sense_model
+                if resolved_phrase_sense_localization_model is None:
+                    resolved_phrase_sense_localization_model = default_phrase_sense_localization_model
+                if resolved_phrase_sense_example_model is None:
+                    resolved_phrase_sense_example_model = default_phrase_sense_example_model
+                if resolved_phrase_sense_example_localization_model is None:
+                    resolved_phrase_sense_example_localization_model = default_phrase_sense_example_localization_model
             if resolved_phrase_model is None:
-                resolved_phrase_model = _default_phrase_models()
+                resolved_phrase_model = _default_phrase_models()[0]
             existing_phrase = _find_existing_by_normalized_form(
                 session,
                 resolved_phrase_model,
@@ -452,7 +685,9 @@ def import_compiled_rows(
                     source_reference=row_source_reference,
                 )
                 session.add(phrase)
+                session.flush()
                 summary = _increment(summary, created_phrases=1)
+                current_phrase = phrase
             else:
                 existing_phrase.phrase_text = row.get("display_form") or row.get("word")
                 existing_phrase.normalized_form = row.get("normalized_form") or existing_phrase.normalized_form
@@ -473,6 +708,106 @@ def import_compiled_rows(
                 if hasattr(existing_phrase, "source_reference"):
                     existing_phrase.source_reference = row_source_reference
                 summary = _increment(summary, updated_phrases=1)
+                current_phrase = existing_phrase
+            if isinstance(senses, list):
+                _replace_collection(current_phrase, "phrase_senses", [])
+            if isinstance(senses, list) and senses and resolved_phrase_sense_model is not None:
+                _replace_collection(current_phrase, "phrase_senses", [])
+                phrase_senses: list[Any] = []
+                for sense_index, sense in enumerate(senses):
+                    phrase_sense = resolved_phrase_sense_model(
+                        phrase_entry_id=current_phrase.id,
+                        definition=str((sense or {}).get("definition") or "").strip(),
+                        usage_note=str((sense or {}).get("usage_note") or "").strip() or None,
+                        part_of_speech=str((sense or {}).get("part_of_speech") or (sense or {}).get("pos") or "").strip() or None,
+                        register=str((sense or {}).get("register") or "").strip() or None,
+                        primary_domain=str((sense or {}).get("primary_domain") or "").strip() or None,
+                        secondary_domains=_normalize_string_list((sense or {}).get("secondary_domains")),
+                        grammar_patterns=_normalize_string_list((sense or {}).get("grammar_patterns")),
+                        synonyms=_normalize_string_list((sense or {}).get("synonyms")),
+                        antonyms=_normalize_string_list((sense or {}).get("antonyms")),
+                        collocations=_normalize_string_list((sense or {}).get("collocations")),
+                        order_index=sense_index,
+                    )
+                    session.add(phrase_sense)
+                    session.flush()
+                    sense_localizations: list[Any] = []
+                    translations = (sense or {}).get("translations") or {}
+                    for locale in sorted(translations.keys()):
+                        locale_payload = translations.get(locale) or {}
+                        localized_definition = str(locale_payload.get("definition") or "").strip() or None
+                        localized_usage_note = str(locale_payload.get("usage_note") or "").strip() or None
+                        if localized_definition is None and localized_usage_note is None:
+                            continue
+                        localization = resolved_phrase_sense_localization_model(
+                            phrase_sense_id=phrase_sense.id,
+                            locale=locale,
+                            localized_definition=localized_definition,
+                            localized_usage_note=localized_usage_note,
+                        )
+                        session.add(localization)
+                        sense_localizations.append(localization)
+                    _replace_collection(phrase_sense, "localizations", sense_localizations)
+
+                    phrase_examples: list[Any] = []
+                    selected_examples_by_sentence: dict[str, dict[str, Any]] = {}
+                    selected_sentence_order: list[str] = []
+                    for example_index, example in enumerate((sense or {}).get("examples") or []):
+                        sentence = str((example or {}).get("sentence") or "").strip()
+                        if not sentence:
+                            continue
+                        example_score = _phrase_example_translation_score(translations, example_index)
+                        current_best = selected_examples_by_sentence.get(sentence)
+                        if current_best is None:
+                            selected_examples_by_sentence[sentence] = {
+                                "sentence": sentence,
+                                "difficulty": (example or {}).get("difficulty"),
+                                "example_index": example_index,
+                                "score": example_score,
+                            }
+                            selected_sentence_order.append(sentence)
+                            continue
+                        if example_score > current_best["score"]:
+                            current_best.update(
+                                {
+                                    "difficulty": (example or {}).get("difficulty"),
+                                    "example_index": example_index,
+                                    "score": example_score,
+                                }
+                            )
+                    for selected_sentence in selected_sentence_order:
+                        selected_example = selected_examples_by_sentence[selected_sentence]
+                        selected_example_index = int(selected_example["example_index"])
+                        phrase_example = resolved_phrase_sense_example_model(
+                            phrase_sense_id=phrase_sense.id,
+                            sentence=selected_example["sentence"],
+                            difficulty=selected_example["difficulty"],
+                            order_index=len(phrase_examples),
+                            source=row_source_type,
+                        )
+                        session.add(phrase_example)
+                        session.flush()
+                        example_localizations: list[Any] = []
+                        for locale in sorted(translations.keys()):
+                            locale_payload = translations.get(locale) or {}
+                            translated_examples = locale_payload.get("examples") or []
+                            translated_example = None
+                            if isinstance(translated_examples, list) and selected_example_index < len(translated_examples):
+                                translated_example = str(translated_examples[selected_example_index] or "").strip() or None
+                            if translated_example is None:
+                                continue
+                            example_localization = resolved_phrase_sense_example_localization_model(
+                                phrase_sense_example_id=phrase_example.id,
+                                locale=locale,
+                                translation=translated_example,
+                            )
+                            session.add(example_localization)
+                            example_localizations.append(example_localization)
+                        _replace_collection(phrase_example, "localizations", example_localizations)
+                        phrase_examples.append(phrase_example)
+                    _replace_collection(phrase_sense, "examples", phrase_examples)
+                    phrase_senses.append(phrase_sense)
+                _replace_collection(current_phrase, "phrase_senses", phrase_senses)
             continue
         if entry_type == "reference":
             if resolved_reference_model is None or resolved_reference_localization_model is None:
@@ -568,6 +903,8 @@ def import_compiled_rows(
             summary = _increment(summary, updated_words=1)
 
         _sync_word_level_enrichment_fields(word, row, None, row_source_type)
+        _sync_word_confusable_rows(word, row, word_confusable_model)
+        _sync_word_form_rows(word, row, word_form_model)
 
         existing_meanings = _load_existing_meanings(session, meaning_model, word.id)
         matched_meaning_ids: set[Any] = set()
@@ -668,7 +1005,6 @@ def import_compiled_rows(
                     source=row_source_type,
                     source_reference=sense_source_reference,
                 )
-                _sync_meaning_level_learner_fields(meaning, sense, row)
                 session.add(meaning)
                 session.flush()
                 summary = _increment(summary, created_meanings=1)
@@ -682,8 +1018,9 @@ def import_compiled_rows(
                     meaning.source = row_source_type
                 if hasattr(meaning, "source_reference"):
                     meaning.source_reference = sense_source_reference
-                _sync_meaning_level_learner_fields(meaning, sense, row)
                 summary = _increment(summary, updated_meanings=1)
+            _sync_meaning_level_learner_fields(meaning, sense, row)
+            _sync_meaning_metadata_rows(meaning, sense, meaning_metadata_model)
             matched_meaning_ids.add(meaning.id)
 
             enrichment_run = None
@@ -750,6 +1087,7 @@ def import_compiled_rows(
                         translation.usage_note = translated_usage_note
                     if hasattr(translation, "examples"):
                         translation.examples = translated_examples
+                    _sync_translation_example_rows(translation, translated_examples, translation_example_model)
 
             if word_relation_model is not None:
                 existing_relations = _load_existing_relations(session, word_relation_model, meaning.id, row_source_type)

@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
     from app.models.meaning import Meaning
+    from app.models.word_confusable import WordConfusable
+    from app.models.word_form import WordForm
     from app.models.word_list_item import WordListItem
     from app.models.word_relation import WordRelation
 
@@ -52,6 +54,17 @@ class Word(Base):
     )
     word_list_items: Mapped[list["WordListItem"]] = relationship(
         "WordListItem", back_populates="word", cascade="all, delete-orphan"
+    )
+    confusable_entries: Mapped[list["WordConfusable"]] = relationship(
+        "WordConfusable",
+        back_populates="word",
+        cascade="all, delete-orphan",
+        order_by="WordConfusable.order_index",
+    )
+    form_entries: Mapped[list["WordForm"]] = relationship(
+        "WordForm",
+        back_populates="word",
+        cascade="all, delete-orphan",
     )
     relations: Mapped[list["WordRelation"]] = relationship(
         "WordRelation",

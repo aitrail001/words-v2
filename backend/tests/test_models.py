@@ -1,7 +1,11 @@
 import uuid
 
 
+import app.models as model_registry
+from app.core.database import Base
 from app.models.user import User
+from app.models.phrase_entry import PhraseEntry
+from app.models.phrase_sense import PhraseSense
 from app.models.word import Word
 from app.models.meaning import Meaning
 from app.models.lexicon_job import LexiconJob
@@ -63,6 +67,64 @@ class TestWordModel:
     def test_word_table_uses_lexicon_schema(self):
         assert Word.__table__.schema == LEXICON_SCHEMA
 
+    def test_word_models_register_confusable_relationship(self):
+        assert hasattr(model_registry, "WordConfusable")
+        assert "lexicon.word_confusables" in Base.metadata.tables
+        assert Word(word="bank").confusable_entries == []
+
+    def test_word_models_register_word_form_relationship(self):
+        assert hasattr(model_registry, "WordForm")
+        assert "lexicon.word_forms" in Base.metadata.tables
+        assert Word(word="bank").form_entries == []
+
+
+class TestPhraseEntryModel:
+    def test_phrase_entry_keeps_compiled_payload_and_phrase_senses_relationship(self):
+        entry = PhraseEntry(
+            phrase_text="take off",
+            normalized_form="take off",
+            phrase_kind="phrasal_verb",
+            compiled_payload={"entry_type": "phrase", "entry_id": "ph_take_off"},
+        )
+        assert entry.compiled_payload["entry_id"] == "ph_take_off"
+        assert entry.phrase_senses == []
+
+    def test_phrase_entry_models_register_through_aggregate_import_path(self):
+        assert hasattr(model_registry, "PhraseSense")
+        assert hasattr(model_registry, "PhraseSenseLocalization")
+        assert hasattr(model_registry, "PhraseSenseExample")
+        assert hasattr(model_registry, "PhraseSenseExampleLocalization")
+        assert "lexicon.phrase_senses" in Base.metadata.tables
+        assert "lexicon.phrase_sense_localizations" in Base.metadata.tables
+        assert "lexicon.phrase_sense_examples" in Base.metadata.tables
+        assert "lexicon.phrase_sense_example_localizations" in Base.metadata.tables
+
+
+class TestPhraseSenseModel:
+    def test_phrase_sense_exposes_normalized_metadata_fields(self):
+        sense = PhraseSense(
+            phrase_entry_id=uuid.uuid4(),
+            definition="to depart",
+            usage_note="Common for planes.",
+            part_of_speech="phrasal_verb",
+            register="neutral",
+            primary_domain="general",
+            secondary_domains=["transport"],
+            grammar_patterns=["take off + adverb"],
+            synonyms=["depart"],
+            antonyms=["land"],
+            collocations=["take off quickly"],
+        )
+
+        assert sense.part_of_speech == "phrasal_verb"
+        assert sense.register == "neutral"
+        assert sense.primary_domain == "general"
+        assert sense.secondary_domains == ["transport"]
+        assert sense.grammar_patterns == ["take off + adverb"]
+        assert sense.synonyms == ["depart"]
+        assert sense.antonyms == ["land"]
+        assert sense.collocations == ["take off quickly"]
+
 
 class TestMeaningModel:
     def test_meaning_has_required_fields(self):
@@ -100,6 +162,12 @@ class TestMeaningModel:
         assert meaning.source == "lexicon_snapshot"
         assert meaning.source_reference == "snapshot-20260307:sn_1"
 
+    def test_meaning_models_register_metadata_relationship(self):
+        assert hasattr(model_registry, "MeaningMetadata")
+        assert "lexicon.meaning_metadata" in Base.metadata.tables
+        meaning = Meaning(word_id=uuid.uuid4(), definition="test")
+        assert meaning.metadata_entries == []
+
 
 class TestTranslationModel:
     def test_translation_has_required_fields(self):
@@ -116,6 +184,12 @@ class TestTranslationModel:
     def test_meaning_and_translation_tables_use_lexicon_schema(self):
         assert Meaning.__table__.schema == LEXICON_SCHEMA
         assert Translation.__table__.schema == LEXICON_SCHEMA
+
+    def test_translation_models_register_example_relationship(self):
+        assert hasattr(model_registry, "TranslationExample")
+        assert "lexicon.translation_examples" in Base.metadata.tables
+        translation = Translation(meaning_id=uuid.uuid4(), language="es", translation="banco")
+        assert translation.example_entries == []
 
 
 class TestLexiconJobModel:

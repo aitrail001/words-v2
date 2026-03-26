@@ -1,9 +1,12 @@
 import unittest
+import tempfile
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from tools.lexicon.compile_export import compile_words
+from tools.lexicon.compile_export import compile_phrase_rows
 from tools.lexicon.enrich import _validate_openai_compatible_payload
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord, SenseExample, SenseRecord
 from tools.lexicon.import_db import import_compiled_rows
@@ -173,6 +176,29 @@ class CompileWordsTranslationTests(unittest.TestCase):
         compiled = compile_words([lexeme], [sense], [enrichment])
 
         self.assertEqual(compiled[0].to_dict()["senses"][0]["translations"]["es"]["definition"], "correr")
+
+
+class CompilePhraseRowsTranslationTests(unittest.TestCase):
+    def test_compile_phrase_rows_preserves_example_translations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "phrases.jsonl").write_text(
+                "\n".join(
+                    [
+                        """{"schema_version":"1.1.0","entry_id":"ph_take_off","entry_type":"phrase","normalized_form":"take off","source_provenance":[{"source":"phrase_seed"}],"entity_category":"general","word":"take off","part_of_speech":["phrasal_verb"],"cefr_level":"B1","frequency_rank":0,"forms":{"plural_forms":[],"verb_forms":{},"comparative":null,"superlative":null,"derivations":[]},"senses":[{"sense_id":"phrase-1","definition":"leave the ground","part_of_speech":"verb","examples":[{"sentence":"The plane took off.","difficulty":"A1"}],"grammar_patterns":["subject + take off"],"usage_note":"Common for planes.","translations":{"zh-Hans":{"definition":"起飞","usage_note":"常见用法","examples":["飞机起飞了。"]},"es":{"definition":"despegar","usage_note":"uso común","examples":["El avión despegó."]},"ar":{"definition":"يقلع","usage_note":"استخدام شائع","examples":["أقلعت الطائرة."]},"pt-BR":{"definition":"decolar","usage_note":"uso comum","examples":["O avião decolou."]},"ja":{"definition":"離陸する","usage_note":"よくある用法","examples":["飛行機が離陸した。"]}}}],"confusable_words":[],"generated_at":"2026-03-20T00:00:00Z","phrase_kind":"phrasal_verb","display_form":"take off","seed_metadata":{"raw_reviewed_as":"phrasal verb"}}"""
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            rows = compile_phrase_rows(root)
+
+        self.assertEqual(rows[0]["entry_type"], "phrase")
+        self.assertEqual(rows[0]["senses"][0]["translations"]["ja"]["examples"], ["飛行機が離陸した。"])
+        self.assertEqual(rows[0]["senses"][0]["translations"]["es"]["examples"], ["El avión despegó."])
+        self.assertEqual(rows[0]["senses"][0]["translations"]["zh-Hans"]["examples"], ["飞机起飞了。"])
+        self.assertEqual(rows[0]["senses"][0]["examples"][0]["sentence"], "The plane took off.")
 
 
 class ImportCompiledRowsTranslationTests(unittest.TestCase):

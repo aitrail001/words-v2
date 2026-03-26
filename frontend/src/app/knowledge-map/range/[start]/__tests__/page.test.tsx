@@ -174,7 +174,7 @@ describe("KnowledgeMapRangePage", () => {
     expect(await screen.findByTestId("knowledge-card-view")).toBeInTheDocument();
     expect(screen.getByTestId("knowledge-range-strip")).toBeInTheDocument();
     expect(screen.getByText("Bank")).toBeInTheDocument();
-    expect(screen.getByText("银行")).toBeInTheDocument();
+    expect(screen.getByText("A financial institution.")).toBeInTheDocument();
     expect(screen.queryByText("مصرف")).not.toBeInTheDocument();
     expect(mockGetKnowledgeMapRange).toHaveBeenCalledWith(1);
   });

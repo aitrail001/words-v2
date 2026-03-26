@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
@@ -15,6 +16,8 @@ from app.models.meaning_example import MeaningExample
 from app.models.user import User
 from app.models.word import Word
 from app.models.word_relation import WordRelation
+from app.services.knowledge_map import normalize_confusable_words
+from app.services.knowledge_map import normalize_meaning_metadata
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -110,7 +113,7 @@ class WordEnrichmentDetailResponse(WordResponse):
     phonetic_enrichment_run_id: str | None
     cefr_level: str | None
     part_of_speech: list[str] | None
-    confusable_words: list[dict[str, str]] | None
+    confusable_words: list[dict[str, str | None]] | None
     learner_generated_at: str | None
     meanings: list[EnrichedMeaningResponse]
     enrichment_runs: list[LexiconEnrichmentRunResponse]
@@ -183,6 +186,7 @@ async def get_word_enrichment(
 
     meanings_result = await db.execute(
         select(Meaning)
+        .options(selectinload(Meaning.metadata_entries))
         .where(Meaning.word_id == word_id)
         .order_by(Meaning.order_index)
     )
@@ -227,6 +231,8 @@ async def get_word_enrichment(
         )
         enrichment_runs = runs_result.scalars().all()
 
+    meaning_metadata = {meaning.id: normalize_meaning_metadata(meaning) for meaning in meanings}
+
     return WordEnrichmentDetailResponse(
         id=str(word.id),
         word=word.word,
@@ -239,16 +245,16 @@ async def get_word_enrichment(
         phonetic_enrichment_run_id=str(word.phonetic_enrichment_run_id) if word.phonetic_enrichment_run_id else None,
         cefr_level=word.cefr_level,
         part_of_speech=word.learner_part_of_speech,
-        confusable_words=word.confusable_words,
+        confusable_words=normalize_confusable_words(word),
         learner_generated_at=word.learner_generated_at.isoformat() if word.learner_generated_at else None,
         meanings=[
             EnrichedMeaningResponse(
                 **_meaning_response(meaning).model_dump(),
                 wn_synset_id=meaning.wn_synset_id,
                 primary_domain=meaning.primary_domain,
-                secondary_domains=meaning.secondary_domains,
+                secondary_domains=meaning_metadata[meaning.id]["secondary_domains"],
                 register_label=meaning.register_label,
-                grammar_patterns=meaning.grammar_patterns,
+                grammar_patterns=meaning_metadata[meaning.id]["grammar_patterns"],
                 usage_note=meaning.usage_note,
                 learner_generated_at=meaning.learner_generated_at.isoformat() if meaning.learner_generated_at else None,
                 examples=[
@@ -317,6 +323,7 @@ async def get_word(
 
     meanings_result = await db.execute(
         select(Meaning)
+        .options(selectinload(Meaning.metadata_entries))
         .where(Meaning.word_id == word_id)
         .order_by(Meaning.order_index)
     )
@@ -343,6 +350,7 @@ async def lookup_word(
     if word is not None:
         meanings_result = await db.execute(
             select(Meaning)
+            .options(selectinload(Meaning.metadata_entries))
             .where(Meaning.word_id == word.id)
             .order_by(Meaning.order_index)
         )

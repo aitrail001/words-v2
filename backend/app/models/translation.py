@@ -10,6 +10,7 @@ from app.models.schema_names import lexicon_fk, lexicon_table_args
 
 if TYPE_CHECKING:
     from app.models.meaning import Meaning
+    from app.models.translation_example import TranslationExample
 
 
 class Translation(Base):
@@ -27,6 +28,12 @@ class Translation(Base):
     examples: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     meaning: Mapped["Meaning"] = relationship("Meaning", back_populates="translations")
+    example_entries: Mapped[list["TranslationExample"]] = relationship(
+        "TranslationExample",
+        back_populates="translation",
+        cascade="all, delete-orphan",
+        order_by="TranslationExample.order_index",
+    )
 
     __table_args__ = lexicon_table_args(
         UniqueConstraint("meaning_id", "language", name="uq_translation_meaning_language"),
