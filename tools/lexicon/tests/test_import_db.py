@@ -257,6 +257,7 @@ class FakeWord:
     learner_generated_at: object = None
     word_forms: object = None
     form_entries: object = field(default_factory=list)
+    part_of_speech_entries: object = field(default_factory=list)
     source_type: object = None
     source_reference: object = None
     phonetic_source: object = None
@@ -379,6 +380,14 @@ class FakeWordForm:
     form_kind: str
     value: str
     form_slot: object = None
+    order_index: int = 0
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeWordPartOfSpeech:
+    word_id: uuid.UUID
+    value: str
     order_index: int = 0
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
@@ -614,11 +623,8 @@ class ImportCompiledRowsTests(unittest.TestCase):
         imported_meanings = [item for item in added if isinstance(item, FakeMeaning)]
         self.assertEqual(imported_word.word, "run")
         self.assertEqual(imported_word.cefr_level, "A1")
-        self.assertEqual(imported_word.learner_part_of_speech, ["verb", "noun"])
-        self.assertEqual(imported_word.confusable_words, [{"word": "ran", "note": "Past tense form."}])
         self.assertEqual(imported_word.source_type, "lexicon_snapshot")
         self.assertEqual(imported_word.source_reference, "snapshot-20260307")
-        self.assertEqual(imported_word.word_forms["verb_forms"]["past"], "ran")
         self.assertEqual(imported_word.phonetics["au"]["ipa"], "/rɐn/")
         self.assertEqual(imported_word.phonetic, "/rʌn/")
         self.assertEqual(imported_word.phonetic_source, "lexicon_snapshot")
@@ -627,7 +633,6 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_meanings[0].source, "lexicon_snapshot")
         self.assertEqual(imported_meanings[0].primary_domain, "general")
         self.assertEqual(imported_meanings[0].register_label, "neutral")
-        self.assertEqual(imported_meanings[0].grammar_patterns, ["run + adverb"])
         self.assertEqual(imported_meanings[0].usage_note, "Common everyday verb.")
         self.assertEqual(imported_meanings[0].source_reference, "snapshot-20260307:sn_lx_run_run_v_01_abcd1234")
         self.assertEqual(imported_meanings[1].order_index, 1)
@@ -745,7 +750,51 @@ class ImportCompiledRowsTests(unittest.TestCase):
                 ("derivation", "", "runner", 0),
             ],
         )
-        self.assertEqual(existing_word.word_forms["verb_forms"]["base"], "run")
+        self.assertEqual(existing_word.word_forms["verb_forms"]["base"], "stale")
+
+    def test_import_replaces_normalized_word_part_of_speech_rows(self) -> None:
+        session = MagicMock()
+        existing_word = FakeWord(
+            word="run",
+            learner_part_of_speech=["stale"],
+            part_of_speech_entries=[
+                FakeWordPartOfSpeech(word_id=uuid.uuid4(), value="stale", order_index=0),
+            ],
+        )
+        session.execute.side_effect = [
+            _ScalarResult(existing_word),
+            _ListResult([]),
+        ]
+        session.add.side_effect = lambda _: None
+        session.flush.side_effect = lambda: None
+
+        import_compiled_rows(
+            session,
+            [
+                {
+                    "schema_version": "1.0.0",
+                    "word": "run",
+                    "part_of_speech": ["verb", "noun"],
+                    "cefr_level": "A1",
+                    "frequency_rank": 5,
+                    "forms": {},
+                    "senses": [],
+                    "confusable_words": [],
+                }
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260307",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            word_part_of_speech_model=FakeWordPartOfSpeech,
+        )
+
+        self.assertEqual(
+            [(item.value, item.order_index) for item in existing_word.part_of_speech_entries],
+            [("verb", 0), ("noun", 1)],
+        )
+        self.assertEqual(existing_word.learner_part_of_speech, ["stale"])
 
 
     def test_import_applies_word_level_fields_even_without_senses(self) -> None:
@@ -797,8 +846,6 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(summary.created_meanings, 0)
         imported_word = next(item for item in added if isinstance(item, FakeWord))
         self.assertEqual(imported_word.cefr_level, "A2")
-        self.assertEqual(imported_word.learner_part_of_speech, ["adjective"])
-        self.assertEqual(imported_word.confusable_words, [{"word": "single", "note": "Related but not identical."}])
         self.assertIsNotNone(imported_word.learner_generated_at)
 
     def test_import_honors_row_level_word_language_and_provenance(self) -> None:
@@ -935,6 +982,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
             meaning_model=FakeMeaning,
             meaning_example_model=FakeMeaningExample,
             translation_model=FakeTranslation,
+            translation_example_model=FakeTranslationExample,
             word_relation_model=FakeWordRelation,
         )
 
@@ -942,7 +990,10 @@ class ImportCompiledRowsTests(unittest.TestCase):
         imported_translation = next(item for item in added if isinstance(item, FakeTranslation))
         self.assertEqual(imported_translation.translation, "tempo")
         self.assertEqual(imported_translation.usage_note, "Muito comum em contextos abstratos e práticos.")
-        self.assertEqual(imported_translation.examples, ["Eu não tenho tempo hoje."])
+        self.assertEqual(
+            [(item.text, item.order_index) for item in imported_translation.example_entries],
+            [("Eu não tenho tempo hoje.", 0)],
+        )
 
     def test_import_replaces_normalized_translation_example_rows(self) -> None:
         session = MagicMock()
@@ -957,7 +1008,6 @@ class ImportCompiledRowsTests(unittest.TestCase):
             meaning_id=existing_meaning.id,
             language="pt-BR",
             translation="tempo",
-            examples=["stale translated example"],
             example_entries=[
                 FakeTranslationExample(
                     translation_id=uuid.uuid4(),
@@ -1013,7 +1063,6 @@ class ImportCompiledRowsTests(unittest.TestCase):
             word_relation_model=FakeWordRelation,
         )
 
-        self.assertEqual(existing_translation.examples, ["Eu não tenho tempo hoje."])
         self.assertEqual(
             [(item.text, item.order_index) for item in existing_translation.example_entries],
             [("Eu não tenho tempo hoje.", 0)],
@@ -1075,8 +1124,6 @@ class ImportCompiledRowsTests(unittest.TestCase):
             meaning_metadata_model=FakeMeaningMetadata,
         )
 
-        self.assertEqual(existing_meaning.secondary_domains, ["general", "movement"])
-        self.assertEqual(existing_meaning.grammar_patterns, ["run + adverb"])
         self.assertEqual(
             [(item.metadata_kind, item.value, item.order_index) for item in existing_meaning.metadata_entries],
             [
@@ -1174,15 +1221,12 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(summary, ImportSummary(created_words=0, updated_words=1, created_meanings=0, updated_meanings=1))
         self.assertEqual(existing_word.frequency_rank, 5)
         self.assertEqual(existing_word.cefr_level, "A1")
-        self.assertEqual(existing_word.learner_part_of_speech, ["verb"])
-        self.assertEqual(existing_word.confusable_words, [])
         self.assertIsNotNone(existing_word.learner_generated_at)
         self.assertEqual(existing_word.source_reference, "snapshot-20260307")
         self.assertEqual(existing_meaning.definition, "to move quickly on foot")
         self.assertEqual(existing_meaning.example_sentence, "I run every morning.")
         self.assertEqual(existing_meaning.primary_domain, "general")
         self.assertEqual(existing_meaning.register_label, "neutral")
-        self.assertEqual(existing_meaning.grammar_patterns, ["run + adverb"])
         self.assertEqual(existing_meaning.usage_note, "Common everyday verb.")
         self.assertIsNotNone(existing_meaning.learner_generated_at)
         self.assertEqual(existing_meaning.source_reference, "snapshot-20260307:sn_lx_run_run_v_01_abcd1234")
@@ -1287,14 +1331,10 @@ class ImportCompiledRowsTests(unittest.TestCase):
         imported_word = next(item for item in added if isinstance(item, FakeWord))
         imported_meaning = next(item for item in added if isinstance(item, FakeMeaning))
         self.assertEqual(imported_word.cefr_level, "A1")
-        self.assertEqual(imported_word.learner_part_of_speech, ["verb"])
-        self.assertEqual(imported_word.confusable_words, [])
         self.assertIsNotNone(imported_word.learner_generated_at)
         self.assertEqual(imported_meaning.wn_synset_id, "run.v.01")
         self.assertEqual(imported_meaning.primary_domain, "general")
-        self.assertEqual(imported_meaning.secondary_domains, [])
         self.assertEqual(imported_meaning.register_label, "neutral")
-        self.assertEqual(imported_meaning.grammar_patterns, ["run + adverb"])
         self.assertEqual(imported_meaning.usage_note, "Common everyday verb.")
         self.assertIsNotNone(imported_meaning.learner_generated_at)
         self.assertEqual([item.sentence for item in imported_examples], [
@@ -2212,11 +2252,9 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(summary.created_examples, 1)
         self.assertEqual(summary.created_relations, 2)
         self.assertEqual(existing_word.cefr_level, "A1")
-        self.assertEqual(existing_word.learner_part_of_speech, ["verb"])
         self.assertEqual(existing_meaning.wn_synset_id, "run.v.01")
         self.assertEqual(existing_meaning.primary_domain, "general")
         self.assertEqual(existing_meaning.register_label, "neutral")
-        self.assertEqual(existing_meaning.grammar_patterns, ["run + adverb"])
         self.assertEqual(existing_meaning.usage_note, "Common everyday verb.")
         self.assertEqual(deleted, [old_example, old_relation])
         self.assertEqual(session.flush.call_count, 2)

@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 import uuid
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -199,6 +200,36 @@ class CompilePhraseRowsTranslationTests(unittest.TestCase):
         self.assertEqual(rows[0]["senses"][0]["translations"]["es"]["examples"], ["El avión despegó."])
         self.assertEqual(rows[0]["senses"][0]["translations"]["zh-Hans"]["examples"], ["飞机起飞了。"])
         self.assertEqual(rows[0]["senses"][0]["examples"][0]["sentence"], "The plane took off.")
+
+    def test_smoke_fixture_contains_word_and_phrase_rows_with_aligned_two_example_translations(self) -> None:
+        rows = [
+            json.loads(line)
+            for line in (Path("tests/fixtures/lexicon-db/smoke/approved.jsonl")).read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+        def has_two_aligned_examples(row: dict, *, require_phrase: bool) -> bool:
+            is_phrase = str(row.get("entry_type") or "word").strip().lower() == "phrase"
+            if is_phrase != require_phrase:
+                return False
+            for sense in row.get("senses") or []:
+                examples = sense.get("examples") or []
+                if len(examples) < 2:
+                    continue
+                translations = sense.get("translations") or {}
+                if not translations:
+                    continue
+                if all(
+                    isinstance(locale_payload, dict)
+                    and isinstance(locale_payload.get("examples"), list)
+                    and len(locale_payload.get("examples")) >= 2
+                    for locale_payload in translations.values()
+                ):
+                    return True
+            return False
+
+        self.assertTrue(any(has_two_aligned_examples(row, require_phrase=False) for row in rows))
+        self.assertTrue(any(has_two_aligned_examples(row, require_phrase=True) for row in rows))
 
 
 class ImportCompiledRowsTranslationTests(unittest.TestCase):

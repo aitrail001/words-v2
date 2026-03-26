@@ -30,6 +30,7 @@ from app.models.user_preference import UserPreference
 from app.models.word import Word
 from app.models.word_confusable import WordConfusable
 from app.models.word_form import WordForm
+from app.models.word_part_of_speech import WordPartOfSpeech
 from app.models.word_list import WordList
 from app.models.word_list_item import WordListItem
 from app.models.word_relation import WordRelation
@@ -39,6 +40,7 @@ __all__ = [
     "Word",
     "WordConfusable",
     "WordForm",
+    "WordPartOfSpeech",
     "Meaning",
     "MeaningMetadata",
     "MeaningExample",

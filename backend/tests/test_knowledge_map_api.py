@@ -89,6 +89,7 @@ def scalars_all_result(values):
 def mappings_all_result(values):
     result = MagicMock()
     result.mappings.return_value.all.return_value = values
+    result.mappings.return_value.one_or_none.return_value = values[0] if len(values) == 1 else None
     return result
 
 
@@ -123,7 +124,6 @@ class TestKnowledgeMapOverview:
         token, user_id = auth_token
         user = make_user(user_id)
         word_one = Word(id=uuid.uuid4(), word="bank", language="en", frequency_rank=20)
-        word_two = Word(id=uuid.uuid4(), word="branch", language="en", frequency_rank=130)
         phrase = PhraseEntry(
             id=uuid.uuid4(),
             phrase_text="bank on",
@@ -149,37 +149,19 @@ class TestKnowledgeMapOverview:
             mappings_all_result(
                 [
                     {
-                        "entry_type": "word",
-                        "entry_id": word_one.id,
-                        "display_text": "bank",
-                        "normalized_form": "bank",
-                        "browse_rank": 20,
+                        "range_start": 1,
                         "status": "known",
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
-                        "phrase_kind": None,
+                        "entry_count": 1,
                     },
                     {
-                        "entry_type": "word",
-                        "entry_id": word_two.id,
-                        "display_text": "branch",
-                        "normalized_form": "branch",
-                        "browse_rank": 130,
+                        "range_start": 101,
                         "status": "undecided",
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
-                        "phrase_kind": None,
+                        "entry_count": 1,
                     },
                     {
-                        "entry_type": "phrase",
-                        "entry_id": phrase.id,
-                        "display_text": "bank on",
-                        "normalized_form": "bank on",
-                        "browse_rank": 131,
+                        "range_start": 101,
                         "status": "learning",
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
-                        "phrase_kind": "phrasal_verb",
+                        "entry_count": 1,
                     },
                 ]
             ),
@@ -226,49 +208,46 @@ class TestKnowledgeMapDashboard:
             mappings_all_result(
                 [
                     {
-                        "entry_type": "word",
-                        "entry_id": word_known.id,
-                        "display_text": "the",
-                        "normalized_form": "the",
-                        "browse_rank": 1,
                         "status": "known",
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
-                        "phrase_kind": None,
+                        "entry_count": 1,
                     },
                     {
-                        "entry_type": "word",
-                        "entry_id": word_new.id,
-                        "display_text": "resilience",
-                        "normalized_form": "resilience",
-                        "browse_rank": 20,
                         "status": "undecided",
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
-                        "phrase_kind": None,
+                        "entry_count": 1,
                     },
                     {
-                        "entry_type": "word",
-                        "entry_id": word_learning.id,
-                        "display_text": "bank",
-                        "normalized_form": "bank",
-                        "browse_rank": 140,
                         "status": "learning",
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
-                        "phrase_kind": None,
+                        "entry_count": 1,
                     },
                     {
                         "entry_type": "phrase",
                         "entry_id": phrase_to_learn.id,
                         "display_text": "bank on",
-                        "normalized_form": "bank on",
+                        "status": "to_learn",
+                        "entry_count": 1,
+                    },
+                ]
+            ),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "word",
+                        "entry_id": word_new.id,
+                        "display_text": "resilience",
+                        "browse_rank": 20,
+                        "status": "undecided",
+                    }
+                ]
+            ),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "phrase",
+                        "entry_id": phrase_to_learn.id,
+                        "display_text": "bank on",
                         "browse_rank": 141,
                         "status": "to_learn",
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
-                        "phrase_kind": "phrasal_verb",
-                    },
+                    }
                 ]
             ),
         ]
@@ -615,11 +594,10 @@ class TestKnowledgeMapList:
                     }
                 ]
             ),
+            mappings_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
-            scalars_all_result([]),
-            scalars_all_result([]),
         ]
 
         new_response = await client.get(
@@ -666,8 +644,9 @@ class TestKnowledgeMapDetail:
                 "us": {"ipa": "/bæŋk/", "confidence": 0.99},
                 "uk": {"ipa": "/baŋk/", "confidence": 0.98},
             },
-            word_forms={"derivations": ["lender"]},
         )
+        word.part_of_speech_entries = [MagicMock(value="noun", order_index=0)]
+        word.form_entries = [MagicMock(form_kind="derivation", form_slot=None, value="lender", order_index=0)]
         meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
         translation = Translation(id=uuid.uuid4(), meaning_id=meaning.id, language="es", translation="banco")
         word_status = LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="learning")
@@ -682,22 +661,40 @@ class TestKnowledgeMapDetail:
             scalars_all_result([]),
             scalars_all_result([translation]),
             scalars_all_result([]),
+            scalar_one_or_none_result(word_status),
             mappings_all_result(
                 [
                     {
-                        "id": word.id,
-                        "word": "bank",
-                        "frequency_rank": 20,
+                        "entry_type": "word",
+                        "entry_id": word.id,
+                        "display_text": "bank",
+                        "browse_rank": 20,
+                        "status": "learning",
                         "cefr_level": None,
-                        "learner_part_of_speech": ["noun"],
                     },
+                ]
+            ),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "word",
+                        "entry_id": lender_id,
+                        "display_text": "lender",
+                        "browse_rank": 30,
+                        "status": "undecided",
+                        "cefr_level": None,
+                    }
+                ]
+            ),
+            mappings_all_result(
+                [
                     {
                         "id": lender_id,
                         "word": "lender",
                         "frequency_rank": 30,
                         "cefr_level": None,
-                        "learner_part_of_speech": ["noun"],
-                    },
+                        "learner_part_of_speech": "noun",
+                    }
                 ]
             ),
             mappings_all_result(
@@ -711,7 +708,6 @@ class TestKnowledgeMapDetail:
                     }
                 ]
             ),
-            scalar_one_or_none_result(word_status),
         ]
 
         response = await client.get(
@@ -752,15 +748,14 @@ class TestKnowledgeMapDetail:
                 "us": {"ipa": "/bæŋk/", "confidence": 0.99},
                 "uk": {"ipa": "/baŋk/", "confidence": 0.98},
             },
-            confusable_words=[
-                {"word": "bench", "note": "Different object."},
-                {"word": " bench ", "note": "  "},
-                {"word": "banque", "note": "Foreign-language lookalike."},
-                {"note": "Missing word."},
-                "invalid",
-                {"word": "   ", "note": "Blank word."},
-            ],
         )
+        word.part_of_speech_entries = [MagicMock(value="noun", order_index=0)]
+        word.confusable_entries = [
+            MagicMock(confusable_word="bench", note="Different object.", order_index=0),
+            MagicMock(confusable_word="bench", note=None, order_index=1),
+            MagicMock(confusable_word="banque", note="Foreign-language lookalike.", order_index=2),
+            MagicMock(confusable_word="", note="Blank word.", order_index=3),
+        ]
         meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
         translation = Translation(id=uuid.uuid4(), meaning_id=meaning.id, language="es", translation="banco")
         relation = WordRelation(
@@ -816,9 +811,22 @@ class TestKnowledgeMapDetail:
                     relation_proper_noun_duplicate,
                 ]
             ),
-            scalars_all_result([word]),
-            scalars_all_result([]),
             scalar_one_or_none_result(status),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "word",
+                        "entry_id": word.id,
+                        "display_text": "bank",
+                        "browse_rank": 20,
+                        "status": "learning",
+                        "cefr_level": None,
+                    }
+                ]
+            ),
+            mappings_all_result([]),
+            mappings_all_result([]),
+            mappings_all_result([]),
         ]
 
         response = await client.get(
@@ -865,21 +873,8 @@ class TestKnowledgeMapDetail:
                 "uk": {"ipa": "taɪm", "confidence": 0.96},
                 "us": {"ipa": "taɪm", "confidence": 0.96},
             },
-            word_forms={
-                "verb_forms": {
-                    "base": "stale-base",
-                    "past": "stale-past",
-                    "gerund": "stale-gerund",
-                    "past_participle": "stale-participle",
-                    "third_person_singular": "stale-third",
-                },
-                "plural_forms": ["stale-plural"],
-                "derivations": ["stale-derivation"],
-                "comparative": "staler",
-                "superlative": "stalest",
-            },
-            confusable_words=[{"word": "clock", "note": "Device rather than duration."}],
         )
+        word.part_of_speech_entries = [MagicMock(value="noun", order_index=0)]
         word.form_entries = [
             MagicMock(form_kind="verb", form_slot="base", value="time", order_index=0),
             MagicMock(form_kind="verb", form_slot="past", value="timed", order_index=1),
@@ -890,15 +885,16 @@ class TestKnowledgeMapDetail:
             MagicMock(form_kind="derivation", form_slot=None, value="timely", order_index=0),
             MagicMock(form_kind="derivation", form_slot=None, value="timing", order_index=1),
         ]
+        word.confusable_entries = [
+            MagicMock(confusable_word="clock", note="Device rather than duration.", order_index=0),
+        ]
         meaning = Meaning(
             id=uuid.uuid4(),
             word_id=word.id,
             definition="the thing measured in minutes and hours",
             part_of_speech="noun",
             primary_domain="general",
-            secondary_domains=["stale-domain"],
             register_label="neutral",
-            grammar_patterns=["stale-pattern"],
             usage_note="Common in both abstract and practical contexts.",
             order_index=0,
         )
@@ -962,9 +958,49 @@ class TestKnowledgeMapDetail:
             scalars_all_result([example]),
             scalars_all_result([translation]),
             scalars_all_result([synonym, antonym, collocation]),
-            scalars_all_result([word, linked_word]),
-            scalars_all_result([linked_phrase]),
             scalar_one_or_none_result(status),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "word",
+                        "entry_id": word.id,
+                        "display_text": "time",
+                        "browse_rank": 60,
+                        "status": "to_learn",
+                        "cefr_level": None,
+                    }
+                ]
+            ),
+            mappings_all_result([]),
+            mappings_all_result(
+                [
+                    {
+                        "id": word.id,
+                        "word": "time",
+                        "frequency_rank": 60,
+                        "cefr_level": None,
+                        "learner_part_of_speech": "noun",
+                    },
+                    {
+                        "id": linked_word.id,
+                        "word": "duration",
+                        "frequency_rank": 500,
+                        "cefr_level": None,
+                        "learner_part_of_speech": None,
+                    },
+                ]
+            ),
+            mappings_all_result(
+                [
+                    {
+                        "id": linked_phrase.id,
+                        "phrase_text": "have time",
+                        "normalized_form": "have time",
+                        "cefr_level": None,
+                        "phrase_kind": "phrase",
+                    }
+                ]
+            ),
         ]
 
         response = await client.get(
@@ -1093,14 +1129,25 @@ class TestKnowledgeMapDetail:
             scalar_one_or_none_result(preferences),
             scalar_one_or_none_result(phrase),
             scalar_one_or_none_result(status),
-            scalars_all_result([]),
-            scalars_all_result([phrase]),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "phrase",
+                        "entry_id": phrase.id,
+                        "display_text": "bank on",
+                        "browse_rank": 141,
+                        "status": "known",
+                        "cefr_level": None,
+                    }
+                ]
+            ),
+            mappings_all_result([]),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
             scalars_all_result([phrase_example]),
             scalars_all_result([phrase_example_localization]),
-            scalars_all_result([]),
-            scalars_all_result([]),
+            mappings_all_result([]),
+            mappings_all_result([]),
         ]
 
         response = await client.get(
@@ -1219,14 +1266,45 @@ class TestKnowledgeMapDetail:
             scalar_one_or_none_result(preferences),
             scalar_one_or_none_result(phrase),
             scalar_one_or_none_result(status),
-            scalars_all_result([linked_word]),
-            scalars_all_result([phrase, linked_phrase]),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "phrase",
+                        "entry_id": phrase.id,
+                        "display_text": "bank on",
+                        "browse_rank": 141,
+                        "status": "known",
+                        "cefr_level": None,
+                    }
+                ]
+            ),
+            mappings_all_result([]),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
             scalars_all_result([phrase_example]),
             scalars_all_result([phrase_example_localization]),
-            scalars_all_result([]),
-            scalars_all_result([]),
+            mappings_all_result(
+                [
+                    {
+                        "id": linked_word.id,
+                        "word": "support",
+                        "frequency_rank": 320,
+                        "cefr_level": None,
+                        "learner_part_of_speech": None,
+                    }
+                ]
+            ),
+            mappings_all_result(
+                [
+                    {
+                        "id": linked_phrase.id,
+                        "phrase_text": "depend on",
+                        "normalized_form": "depend on",
+                        "cefr_level": None,
+                        "phrase_kind": "phrasal_verb",
+                    }
+                ]
+            ),
         ]
 
         response = await client.get(
@@ -1411,14 +1489,25 @@ class TestKnowledgeMapDetail:
             scalar_one_or_none_result(preferences),
             scalar_one_or_none_result(phrase),
             scalar_one_or_none_result(status),
-            scalars_all_result([]),
-            scalars_all_result([phrase]),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "phrase",
+                        "entry_id": phrase.id,
+                        "display_text": "bank on",
+                        "browse_rank": 141,
+                        "status": "known",
+                        "cefr_level": None,
+                    }
+                ]
+            ),
+            mappings_all_result([]),
             scalars_all_result([earlier_sense, later_sense]),
             scalars_all_result([earlier_localization, later_localization]),
             scalars_all_result([earlier_example, later_example]),
             scalars_all_result([earlier_example_localization, later_example_localization]),
-            scalars_all_result([]),
-            scalars_all_result([]),
+            mappings_all_result([]),
+            mappings_all_result([]),
         ]
 
         response = await client.get(
@@ -1540,6 +1629,10 @@ class TestKnowledgeMapSearchAndHistory:
                         "learner_part_of_speech": None,
                         "phrase_kind": None,
                     },
+                ]
+            ),
+            mappings_all_result(
+                [
                     {
                         "entry_type": "phrase",
                         "entry_id": phrase.id,

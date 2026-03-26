@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
@@ -25,22 +25,22 @@ from app.services.knowledge_map import (
     STATUS_VALUES,
     SUPPORTED_TRANSLATION_LOCALES,
     build_catalog,
-    build_catalog_items,
-    build_dashboard_summary,
-    build_entry_lookup,
-    build_overview,
     build_relation_groups,
     build_word_translation_map,
+    collect_exact_lookup_terms,
     find_example_links,
     get_preferences,
     get_status_row,
+    load_catalog_neighbors,
     list_search_history,
-    load_word_detail_relations,
-    load_catalog_rows,
-    load_range_catalog_items,
-    load_word_primary_definitions,
+    load_entry_lookup_for_terms,
+    load_dashboard_summary,
+    load_overview_summary,
     load_phrase_detail_rows,
     load_phrase_summary_map,
+    load_range_catalog_items,
+    load_word_detail_relations,
+    load_word_primary_definitions,
     normalize_confusable_words,
     normalize_meaning_metadata,
     normalize_translation_examples,
@@ -452,7 +452,7 @@ async def get_knowledge_map_overview(
 ):
     request_start = perf_counter()
     async with _instrument_knowledge_map_db(request, db):
-        overview = build_overview(await build_catalog(db, current_user.id))
+        overview = await load_overview_summary(db, current_user.id)
     _finalize_knowledge_map_metrics(
         response,
         request,
@@ -472,7 +472,7 @@ async def get_knowledge_map_dashboard(
 ):
     request_start = perf_counter()
     async with _instrument_knowledge_map_db(request, db):
-        summary = build_dashboard_summary(await build_catalog(db, current_user.id))
+        summary = await load_dashboard_summary(db, current_user.id)
     _finalize_knowledge_map_metrics(
         response,
         request,
@@ -577,7 +577,24 @@ async def get_knowledge_map_entry_detail(
 
     async with _instrument_knowledge_map_db(request, db):
         if entry_type == "word":
-            word_result = await db.execute(select(Word).where(Word.id == entry_id))
+            word_result = await db.execute(
+                select(Word)
+                .options(
+                    load_only(
+                        Word.id,
+                        Word.word,
+                        Word.language,
+                        Word.phonetics,
+                        Word.phonetic,
+                        Word.cefr_level,
+                        Word.frequency_rank,
+                    ),
+                    selectinload(Word.part_of_speech_entries),
+                    selectinload(Word.form_entries),
+                    selectinload(Word.confusable_entries),
+                )
+                .where(Word.id == entry_id)
+            )
             word = word_result.scalar_one_or_none()
             if word is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge map entry not found")
@@ -591,12 +608,19 @@ async def get_knowledge_map_entry_detail(
             meanings = meanings_result.scalars().all()
             meaning_ids = [meaning.id for meaning in meanings]
             examples_by_meaning, translations_by_meaning, relations_by_meaning = await load_word_detail_relations(db, meaning_ids)
-            all_words, all_phrases = await load_catalog_rows(db)
-            entry_lookup = build_entry_lookup(all_words, all_phrases)
             status_row = await get_status_row(db, current_user.id, "word", entry_id)
-            catalog = build_catalog_items(all_words, all_phrases)
-            current_index = next((index for index, item in enumerate(catalog) if item["entry_type"] == "word" and item["entry_id"] == entry_id), None)
+            current_entry, previous_entry, next_entry = await load_catalog_neighbors(db, "word", entry_id)
             forms = normalize_word_forms(word)
+
+            lookup_terms = collect_exact_lookup_terms(
+                values=[
+                    *forms["derivations"],
+                    *(item.related_word for rows in relations_by_meaning.values() for item in rows),
+                    *(item["word"] for item in normalize_confusable_words(word)),
+                ],
+                sentences=[example.sentence for rows in examples_by_meaning.values() for example in rows],
+            )
+            entry_lookup = await load_entry_lookup_for_terms(db, lookup_terms)
 
             translation = None
             translation_map = build_word_translation_map(
@@ -614,7 +638,7 @@ async def get_knowledge_map_entry_detail(
                 entry_id=str(word.id),
                 display_text=word.word,
                 normalized_form=word.word,
-                browse_rank=catalog[current_index]["browse_rank"] if current_index is not None else (word.frequency_rank or 0),
+                browse_rank=int(current_entry["browse_rank"]) if current_entry is not None else (word.frequency_rank or 0),
                 status=status_row.status if status_row else "undecided",
                 cefr_level=word.cefr_level,
                 pronunciation=select_pronunciation(word, preferences.accent_preference),
@@ -737,8 +761,8 @@ async def get_knowledge_map_entry_detail(
                     )
                     for item in normalize_confusable_words(word)
                 ],
-                previous_entry=_adjacent_entry(catalog[current_index - 1] if current_index not in (None, 0) else None),
-                next_entry=_adjacent_entry(catalog[current_index + 1] if current_index is not None and current_index + 1 < len(catalog) else None),
+                previous_entry=_adjacent_entry(previous_entry),
+                next_entry=_adjacent_entry(next_entry),
             )
             _finalize_knowledge_map_metrics(
                 response,
@@ -749,22 +773,42 @@ async def get_knowledge_map_entry_detail(
             )
             return detail_response
 
-        phrase_result = await db.execute(select(PhraseEntry).where(PhraseEntry.id == entry_id))
+        phrase_result = await db.execute(
+            select(PhraseEntry)
+            .options(
+                load_only(
+                    PhraseEntry.id,
+                    PhraseEntry.phrase_text,
+                    PhraseEntry.normalized_form,
+                    PhraseEntry.phrase_kind,
+                    PhraseEntry.language,
+                    PhraseEntry.cefr_level,
+                    PhraseEntry.register_label,
+                    PhraseEntry.brief_usage_note,
+                )
+            )
+            .where(PhraseEntry.id == entry_id)
+        )
         phrase = phrase_result.scalar_one_or_none()
         if phrase is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge map entry not found")
 
         status_row = await get_status_row(db, current_user.id, "phrase", entry_id)
-        all_words, all_phrases = await load_catalog_rows(db)
-        catalog = build_catalog_items(all_words, all_phrases)
-        current_index = next((index for index, item in enumerate(catalog) if item["entry_type"] == "phrase" and item["entry_id"] == entry_id), None)
-
-        entry_lookup = build_entry_lookup(all_words, all_phrases)
+        current_entry, previous_entry, next_entry = await load_catalog_neighbors(db, "phrase", entry_id)
         senses_by_phrase, localized_by_sense, examples_by_sense, localized_examples_by_example = await load_phrase_detail_rows(
             db,
             phrase.id,
             preferences.translation_locale,
         )
+        lookup_terms = collect_exact_lookup_terms(
+            values=[
+                *(text for sense in senses_by_phrase for text in list(sense.synonyms or [])),
+                *(text for sense in senses_by_phrase for text in list(sense.antonyms or [])),
+                *(text for sense in senses_by_phrase for text in list(sense.collocations or [])),
+            ],
+            sentences=[example.sentence for rows in examples_by_sense.values() for example in rows],
+        )
+        entry_lookup = await load_entry_lookup_for_terms(db, lookup_terms)
         senses = []
         for sense in senses_by_phrase:
             localized_sense = localized_by_sense.get(sense.id)
@@ -849,7 +893,7 @@ async def get_knowledge_map_entry_detail(
             entry_id=str(phrase.id),
             display_text=phrase.phrase_text,
             normalized_form=phrase.normalized_form,
-            browse_rank=catalog[current_index]["browse_rank"] if current_index is not None else 0,
+            browse_rank=int(current_entry["browse_rank"]) if current_entry is not None else 0,
             status=status_row.status if status_row else "undecided",
             cefr_level=phrase.cefr_level,
             pronunciation=None,
@@ -860,8 +904,8 @@ async def get_knowledge_map_entry_detail(
             senses=senses,
             relation_groups=[],
             confusable_words=[],
-            previous_entry=_adjacent_entry(catalog[current_index - 1] if current_index not in (None, 0) else None),
-            next_entry=_adjacent_entry(catalog[current_index + 1] if current_index is not None and current_index + 1 < len(catalog) else None),
+            previous_entry=_adjacent_entry(previous_entry),
+            next_entry=_adjacent_entry(next_entry),
         )
         _finalize_knowledge_map_metrics(
             response,

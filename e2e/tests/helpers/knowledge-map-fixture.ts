@@ -61,7 +61,6 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
         language,
         phonetics,
         phonetic,
-        learner_part_of_speech,
         frequency_rank,
         created_at
       )
@@ -71,7 +70,6 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
         'en',
         $3::json,
         $4,
-        $5::json,
         20,
         now()
       )
@@ -79,7 +77,6 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
       DO UPDATE SET
         phonetics = EXCLUDED.phonetics,
         phonetic = EXCLUDED.phonetic,
-        learner_part_of_speech = EXCLUDED.learner_part_of_speech,
         frequency_rank = EXCLUDED.frequency_rank
       RETURNING id::text AS id
       `,
@@ -91,13 +88,20 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
           uk: { ipa: "/rɪˈzɪliəns/", confidence: 0.99 },
         }),
         "/rɪˈzɪliəns/",
-        JSON.stringify(["noun"]),
       ],
     );
     const wordId = wordResult.rows[0]?.id;
     if (!wordId) {
       throw new Error("Failed to upsert learner knowledge-map word fixture");
     }
+    await client.query(`DELETE FROM lexicon.word_part_of_speech WHERE word_id = $1::uuid`, [wordId]);
+    await client.query(
+      `
+      INSERT INTO lexicon.word_part_of_speech (id, word_id, value, order_index, created_at)
+      VALUES ($1::uuid, $2::uuid, 'noun', 0, now())
+      `,
+      [randomUUID(), wordId],
+    );
 
     await client.query(
       `
@@ -189,7 +193,6 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
         language,
         phonetics,
         phonetic,
-        learner_part_of_speech,
         frequency_rank,
         created_at
       )
@@ -199,7 +202,6 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
         'en',
         $3::json,
         $4,
-        $5::json,
         2616,
         now()
       )
@@ -207,7 +209,6 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
       DO UPDATE SET
         phonetics = EXCLUDED.phonetics,
         phonetic = EXCLUDED.phonetic,
-        learner_part_of_speech = EXCLUDED.learner_part_of_speech,
         frequency_rank = EXCLUDED.frequency_rank
       RETURNING id::text AS id
       `,
@@ -219,13 +220,20 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
           uk: { ipa: "/drʌm/", confidence: 0.99 },
         }),
         "/drʌm/",
-        JSON.stringify(["noun"]),
       ],
     );
     const learnWordId = learnWordResult.rows[0]?.id;
     if (!learnWordId) {
       throw new Error("Failed to upsert learner next-learn word fixture");
     }
+    await client.query(`DELETE FROM lexicon.word_part_of_speech WHERE word_id = $1::uuid`, [learnWordId]);
+    await client.query(
+      `
+      INSERT INTO lexicon.word_part_of_speech (id, word_id, value, order_index, created_at)
+      VALUES ($1::uuid, $2::uuid, 'noun', 0, now())
+      `,
+      [randomUUID(), learnWordId],
+    );
 
     await client.query(
       `

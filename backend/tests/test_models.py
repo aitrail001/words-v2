@@ -53,7 +53,7 @@ class TestWordModel:
         assert word.phonetics is None
         assert word.phonetic is None
         assert word.frequency_rank is None
-        assert word.word_forms is None
+        assert word.form_entries == []
 
     def test_word_repr(self):
         word = Word(word="bank")
@@ -76,6 +76,11 @@ class TestWordModel:
         assert hasattr(model_registry, "WordForm")
         assert "lexicon.word_forms" in Base.metadata.tables
         assert Word(word="bank").form_entries == []
+
+    def test_word_models_register_part_of_speech_relationship(self):
+        assert hasattr(model_registry, "WordPartOfSpeech")
+        assert "lexicon.word_part_of_speech" in Base.metadata.tables
+        assert Word(word="bank").part_of_speech_entries == []
 
 
 class TestPhraseEntryModel:
@@ -135,6 +140,7 @@ class TestMeaningModel:
         )
         assert meaning.word_id == word_id
         assert meaning.definition == "A financial institution"
+        assert meaning.metadata_entries == []
         assert meaning.order_index == 0
 
     def test_meaning_optional_fields(self):

@@ -2,7 +2,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -25,8 +25,6 @@ class Translation(Base):
     language: Mapped[str] = mapped_column(String(10), nullable=False)
     translation: Mapped[str] = mapped_column(Text, nullable=False)
     usage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    examples: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-
     meaning: Mapped["Meaning"] = relationship("Meaning", back_populates="translations")
     example_entries: Mapped[list["TranslationExample"]] = relationship(
         "TranslationExample",
