@@ -156,8 +156,8 @@ jobs:
 
       - name: Install lexicon dependencies
         run: pip install -r tools/lexicon/requirements-dev.txt
-      - name: Install shared DB test dependency
-        run: pip install sqlalchemy
+      - name: Install shared backend model dependencies
+        run: pip install -r backend/requirements.txt
 
       - name: Download WordNet corpora
         run: python -m nltk.downloader -d "$NLTK_DATA" wordnet omw-1.4
