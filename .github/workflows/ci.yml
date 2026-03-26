@@ -44,9 +44,9 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.13"
           cache: pip
@@ -78,9 +78,9 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6.3.0
         with:
           node-version: "22"
           cache: npm
@@ -109,9 +109,9 @@ jobs:
         working-directory: admin-frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6.3.0
         with:
           node-version: "22"
           cache: npm
@@ -138,9 +138,9 @@ jobs:
       NLTK_DATA: ~/.cache/nltk_data
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.13"
           cache: pip
@@ -149,7 +149,7 @@ jobs:
             tools/lexicon/requirements-dev.txt
 
       - name: Cache WordNet corpora
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.4
         with:
           path: ~/.cache/nltk_data
           key: ${{ runner.os }}-nltk-wordnet-v1
@@ -193,9 +193,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6.3.0
         with:
           node-version: "22"
           cache: npm
@@ -311,9 +311,9 @@ jobs:
     needs: [e2e-smoke]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6.3.0
         with:
           node-version: "22"
           cache: npm
