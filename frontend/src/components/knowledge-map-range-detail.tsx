@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { startTransition, useEffect, useRef, useState, type CSSProperties } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
 import {
   getKnowledgeMapEntryDetail,
   getKnowledgeMapRange,
+  normalizeLearnerTranslation,
   type KnowledgeMapEntryDetail,
   type KnowledgeMapRange,
   type KnowledgeMapEntrySummary,
@@ -227,7 +228,15 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
   const [entryDetailCache, setEntryDetailCache] = useState<Record<string, KnowledgeMapEntryDetail>>({});
   const [activeMeaningIndex, setActiveMeaningIndex] = useState(0);
   const dragStartXRef = useRef<number | null>(null);
-  const activeRangeItems = selectedRange?.items ?? [];
+  const activeRangeItems = useMemo(() => selectedRange?.items ?? [], [selectedRange]);
+  const normalizedRangeItems = useMemo(
+    () =>
+      activeRangeItems.map((item) => ({
+        ...item,
+        normalizedTranslation: normalizeLearnerTranslation(item.translation),
+      })),
+    [activeRangeItems],
+  );
   const activeRangeEntry = activeRangeItems[activeIndex] ?? null;
   const activeEntryId = activeRangeEntry?.entry_id ?? null;
   const activeEntryType = activeRangeEntry?.entry_type ?? null;
@@ -371,6 +380,10 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
         ]?.translations?.[0]?.translation ??
         activeEntry?.translation
       : activeEntry?.translation;
+  const normalizedActiveCardTranslation = useMemo(
+    () => normalizeLearnerTranslation(activeCardTranslation),
+    [activeCardTranslation],
+  );
 
   const moveMeaning = (direction: -1 | 1) => {
     if (activeContentCount <= 1) {
@@ -490,7 +503,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
 
               {showTranslations && (
                 <p className="text-sm font-semibold text-[#9c3af2]">
-                  {activeCardTranslation ?? activeEntry.translation ?? "Translation unavailable"}
+                  {normalizedActiveCardTranslation}
                 </p>
               )}
               <div
@@ -588,7 +601,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
 
       {!loadingRange && selectedRange && viewMode === "list" && (
         <div data-testid="knowledge-list-view" className="space-y-2">
-          {selectedRange.items.map((item) => (
+          {normalizedRangeItems.map((item) => (
             <div
               key={`${item.entry_type}-${item.entry_id}`}
               className="grid grid-cols-[4.2rem_1fr] gap-2 overflow-hidden rounded-[0.25rem] border border-[#dce0ee] bg-white px-2 py-2"
@@ -598,9 +611,12 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[1.02rem] font-semibold text-[#562c7f]">{item.display_text}</p>
-                    {showTranslations && (
+                    <p className="text-[0.8rem] font-semibold leading-5 text-[#a141ef]">
+                      {item.primary_definition ?? "No summary yet"}
+                    </p>
+                    {item.normalizedTranslation && (
                       <p className="text-[0.8rem] font-semibold leading-5 text-[#a141ef]">
-                        {item.translation ?? item.primary_definition ?? "No summary yet"}
+                        {item.normalizedTranslation}
                       </p>
                     )}
                   </div>

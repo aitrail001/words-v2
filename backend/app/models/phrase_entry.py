@@ -1,11 +1,15 @@
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from sqlalchemy import DateTime, Float, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.schema_names import lexicon_table_args
+
+if TYPE_CHECKING:
+    from app.models.phrase_sense import PhraseSense
 
 
 class PhraseEntry(Base):
@@ -29,6 +33,12 @@ class PhraseEntry(Base):
     source_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    phrase_senses: Mapped[list["PhraseSense"]] = relationship(
+        "PhraseSense",
+        back_populates="phrase_entry",
+        cascade="all, delete-orphan",
+        order_by="PhraseSense.order_index",
     )
 
     __table_args__ = lexicon_table_args(

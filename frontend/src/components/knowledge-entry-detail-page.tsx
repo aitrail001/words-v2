@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { startTransition, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   getKnowledgeMapEntryDetail,
+  normalizeLearnerTranslation,
   type KnowledgeEntryType,
   type KnowledgeMapEntryDetail,
   type KnowledgeStatus,
@@ -181,7 +182,7 @@ function getTranslationForOverlay(
   translationLocale: UserPreferences["translation_locale"],
 ) {
   if (detail.entry_type === "word") {
-    return (
+    return normalizeLearnerTranslation(
       detail.meanings[0]?.translations.find((translation) => translation.language === translationLocale)
         ?.translation ??
       detail.meanings[0]?.localized_definition ??
@@ -189,7 +190,7 @@ function getTranslationForOverlay(
     );
   }
 
-  return detail.senses[0]?.localized_definition ?? detail.translation;
+  return normalizeLearnerTranslation(detail.senses[0]?.localized_definition ?? detail.translation);
 }
 
 export function getKnowledgeEntryHref(entryType: KnowledgeEntryType, entryId: string): string {
@@ -248,6 +249,70 @@ export function KnowledgeEntryDetailPage({
       active = false;
     };
   }, [entryId, entryType]);
+
+  const activeTranslation = useMemo(() => {
+    if (!detail) {
+      return null;
+    }
+
+    const activeIndex = Math.min(meaningIndex, Math.max(detail.entry_type === "word" ? detail.meanings.length : detail.senses.length, 1) - 1);
+
+    if (detail.entry_type === "word") {
+      const activeWordMeaning = detail.meanings[activeIndex] ?? null;
+      return normalizeLearnerTranslation(
+        activeWordMeaning?.translations.find(
+          (translation) => translation.language === preferences.translation_locale,
+        )?.translation ??
+          activeWordMeaning?.localized_definition ??
+          detail.translation,
+      );
+    }
+
+    const activePhraseSense = detail.senses[activeIndex] ?? null;
+    return normalizeLearnerTranslation(activePhraseSense?.localized_definition ?? detail.translation);
+  }, [detail, meaningIndex, preferences.translation_locale]);
+
+  const activeUsageNote = useMemo(() => {
+    if (!detail) {
+      return null;
+    }
+
+    const activeIndex = Math.min(
+      meaningIndex,
+      Math.max(detail.entry_type === "word" ? detail.meanings.length : detail.senses.length, 1) - 1,
+    );
+    const activeContent =
+      detail.entry_type === "word" ? detail.meanings[activeIndex] ?? null : detail.senses[activeIndex] ?? null;
+
+    if (showTranslations) {
+      return activeContent?.localized_usage_note ?? activeContent?.usage_note ?? null;
+    }
+
+    return activeContent?.usage_note ?? null;
+  }, [detail, meaningIndex, showTranslations]);
+
+  const overlayTranslation = useMemo(() => {
+    if (!overlayDetail) {
+      return null;
+    }
+
+    return getTranslationForOverlay(overlayDetail, preferences.translation_locale);
+  }, [overlayDetail, preferences.translation_locale]);
+
+  const overlayUsageNote = useMemo(() => {
+    if (!overlayDetail) {
+      return null;
+    }
+
+    const overlayContent =
+      overlayDetail.entry_type === "word" ? overlayDetail.meanings[0] ?? null : overlayDetail.senses[0] ?? null;
+
+    if (showTranslations) {
+      return overlayContent?.localized_usage_note ?? overlayContent?.usage_note ?? null;
+    }
+
+    return overlayContent?.usage_note ?? null;
+  }, [overlayDetail, showTranslations]);
 
   const openOverlay = (target: LinkedEntryTarget) => {
     const cacheKey = `${target.entry_type}:${target.entry_id}`;
@@ -323,12 +388,7 @@ export function KnowledgeEntryDetailPage({
   const activeDefinition =
     activeContent?.definition ?? detail.primary_definition ?? "No learner definition has been generated yet.";
   const activePartOfSpeech = activeContent?.part_of_speech ?? null;
-  const activeExample = activeContent?.examples[0]?.sentence ?? null;
-  const activeExampleTranslation = showTranslations ? activeContent?.examples[0]?.translation ?? null : null;
-  const activeExampleLinks = activeContent?.examples[0]?.linked_entries ?? [];
-  const activeUsageNote = showTranslations
-    ? activeContent?.localized_usage_note ?? activeContent?.usage_note ?? null
-    : activeContent?.usage_note ?? null;
+  const activeExamples = activeContent?.examples.slice(0, 2) ?? [];
   const activeRegister = activeContent?.register ?? null;
   const activePrimaryDomain = activeContent?.primary_domain ?? null;
   const activeSecondaryDomains = activeContent?.secondary_domains ?? [];
@@ -336,14 +396,6 @@ export function KnowledgeEntryDetailPage({
   const activeSynonyms = activeWordMeaning?.synonyms ?? activePhraseSense?.synonyms ?? [];
   const activeAntonyms = activeWordMeaning?.antonyms ?? activePhraseSense?.antonyms ?? [];
   const activeCollocations = activeWordMeaning?.collocations ?? activePhraseSense?.collocations ?? [];
-  const activeTranslation =
-    detail.entry_type === "word"
-      ? activeWordMeaning?.translations.find(
-          (translation) => translation.language === preferences.translation_locale,
-        )?.translation ??
-        activeWordMeaning?.localized_definition ??
-        detail.translation
-      : activePhraseSense?.localized_definition ?? detail.translation;
   const translationLanguageLabel = TRANSLATION_LANGUAGE_LABELS[preferences.translation_locale];
   const accentLabel = detail.pronunciation ? `${ACCENT_LABELS[preferences.accent_preference]} Accent` : null;
   const statusActions =
@@ -358,12 +410,6 @@ export function KnowledgeEntryDetailPage({
       : overlayDetail.senses
     : [];
   const overlayContent = overlayContentItems[0] ?? null;
-  const overlayTranslation = overlayDetail
-    ? getTranslationForOverlay(overlayDetail, preferences.translation_locale)
-    : null;
-  const overlayUsageNote = showTranslations
-    ? overlayContent?.localized_usage_note ?? overlayContent?.usage_note ?? null
-    : overlayContent?.usage_note ?? null;
   const overlayExample = overlayContent?.examples[0] ?? null;
   const hasWordLevelForms = Boolean(
     detail.forms &&
@@ -439,7 +485,7 @@ export function KnowledgeEntryDetailPage({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-[1.04rem] font-semibold leading-6 text-[#4d295f]">{activeDefinition}</p>
-                {showTranslations && activeTranslation && (
+                {activeTranslation && (
                   <p className="mt-2 text-sm font-semibold text-[#9a39f2]">{activeTranslation}</p>
                 )}
               </div>
@@ -454,14 +500,29 @@ export function KnowledgeEntryDetailPage({
               </button>
             </div>
 
-            {activeExample && (
+            {activeExamples.length > 0 && (
               <div className="border-t border-[#ebedf5] pt-2">
-                <p className="text-[0.92rem] italic leading-6 text-[#5e4a74]">
-                  {renderInlineLinkedSentence(activeExample, activeExampleLinks, openOverlay)}
-                </p>
-                {activeExampleTranslation && (
-                  <p className="mt-2 text-sm leading-6 text-[#9a39f2]">{activeExampleTranslation}</p>
-                )}
+                <div className="space-y-3">
+                  {activeExamples.map((example) => {
+                    const exampleTranslation = showTranslations
+                      ? normalizeLearnerTranslation(example.translation ?? null)
+                      : null;
+                    return (
+                      <div key={example.id} className="space-y-2">
+                        <p className="text-[0.92rem] italic leading-6 text-[#5e4a74]">
+                          {renderInlineLinkedSentence(
+                            example.sentence,
+                            example.linked_entries ?? [],
+                            openOverlay,
+                          )}
+                        </p>
+                        {exampleTranslation && (
+                          <p className="text-sm leading-6 text-[#9a39f2]">{exampleTranslation}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -769,8 +830,10 @@ export function KnowledgeEntryDetailPage({
                   {overlayExample && (
                     <div className="rounded-[0.65rem] bg-[#eef8ff] px-3 py-3">
                       <p className="text-sm italic leading-6 text-[#4c4f72]">{overlayExample.sentence}</p>
-                      {showTranslations && overlayExample.translation && (
-                        <p className="mt-2 text-sm leading-6 text-[#1687a6]">{overlayExample.translation}</p>
+                      {showTranslations && normalizeLearnerTranslation(overlayExample.translation) && (
+                        <p className="mt-2 text-sm leading-6 text-[#1687a6]">
+                          {normalizeLearnerTranslation(overlayExample.translation)}
+                        </p>
                       )}
                     </div>
                   )}

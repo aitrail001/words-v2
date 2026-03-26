@@ -170,6 +170,19 @@ export type KnowledgeMapSearchHistoryList = {
 export type KnowledgeMapListStatus = "new" | "to_learn" | "learning" | "known";
 export type KnowledgeMapListSort = "rank" | "rank_desc" | "alpha";
 
+export function normalizeLearnerTranslation(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "Translation unavailable") {
+    return null;
+  }
+
+  return trimmed;
+}
+
 export const getKnowledgeMapOverview = (): Promise<KnowledgeMapOverview> =>
   apiClient.get<KnowledgeMapOverview>("/knowledge-map/overview");
 

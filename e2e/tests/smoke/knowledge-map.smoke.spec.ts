@@ -53,6 +53,10 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page.getByText("depender de").first()).toBeVisible();
   await expect(page.getByText("You can bank on me when the deadline gets tight.").first()).toBeVisible();
   await expect(page.getByText("Puedes depender de mi cuando el plazo es corto.")).toBeVisible();
+  await expect(page.getByText("Investors bank on steady demand in the winter season.")).toBeVisible();
+  await expect(
+    page.getByText("Los inversores dependen de una demanda estable en la temporada de invierno."),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: /spanish on/i })).toBeVisible();
   await expect(page.getByText("Status: Learning")).toBeVisible();
 

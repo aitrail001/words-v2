@@ -6,6 +6,12 @@ const KNOWLEDGE_MEANING_ID = "44444444-4444-4444-4444-444444444444";
 const KNOWLEDGE_TRANSLATION_ID = "55555555-5555-5555-5555-555555555555";
 const KNOWLEDGE_EXAMPLE_ID = "66666666-6666-6666-6666-666666666666";
 const KNOWLEDGE_PHRASE_ID = "77777777-7777-7777-7777-777777777777";
+const KNOWLEDGE_PHRASE_SENSE_ID = "77777777-7777-7777-7777-777777777778";
+const KNOWLEDGE_PHRASE_SENSE_LOCALIZATION_ID = "77777777-7777-7777-7777-777777777779";
+const KNOWLEDGE_PHRASE_EXAMPLE_ID = "77777777-7777-7777-7777-777777777780";
+const KNOWLEDGE_PHRASE_EXAMPLE_LOCALIZATION_ID = "77777777-7777-7777-7777-777777777781";
+const KNOWLEDGE_PHRASE_EXAMPLE_TWO_ID = "77777777-7777-7777-7777-777777777782";
+const KNOWLEDGE_PHRASE_EXAMPLE_TWO_LOCALIZATION_ID = "77777777-7777-7777-7777-777777777783";
 const LEARN_WORD_ID = "88888888-8888-8888-8888-888888888888";
 const LEARN_MEANING_ID = "99999999-9999-9999-9999-999999999999";
 const LEARN_TRANSLATION_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -311,11 +317,19 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
                   sentence: "You can bank on me when the deadline gets tight.",
                   difficulty: "B1",
                 },
+                {
+                  id: "phrase-example-2",
+                  sentence: "Investors bank on steady demand in the winter season.",
+                  difficulty: "B2",
+                },
               ],
               translations: {
                 es: {
                   definition: "depender de",
-                  examples: ["Puedes depender de mi cuando el plazo es corto."],
+                  examples: [
+                    "Puedes depender de mi cuando el plazo es corto.",
+                    "Los inversores dependen de una demanda estable en la temporada de invierno.",
+                  ],
                   usage_note: "common",
                 },
               },
@@ -328,6 +342,210 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
     if (!phraseId) {
       throw new Error("Failed to upsert learner knowledge-map phrase fixture");
     }
+
+    await client.query(
+      `
+      DELETE FROM lexicon.phrase_senses
+      WHERE phrase_entry_id = $1::uuid
+      `,
+      [phraseId],
+    );
+
+    const phraseSenseResult = await client.query<{ id: string }>(
+      `
+      INSERT INTO lexicon.phrase_senses (
+        id,
+        phrase_entry_id,
+        definition,
+        usage_note,
+        part_of_speech,
+        register,
+        primary_domain,
+        secondary_domains,
+        grammar_patterns,
+        synonyms,
+        antonyms,
+        collocations,
+        order_index,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        'To depend on someone or something.',
+        'common',
+        'phrasal verb',
+        'neutral',
+        'general',
+        '[]'::jsonb,
+        '[]'::jsonb,
+        '[]'::jsonb,
+        '[]'::jsonb,
+        '[]'::jsonb,
+        0,
+        now()
+      )
+      ON CONFLICT (phrase_entry_id, order_index)
+      DO UPDATE SET
+        definition = EXCLUDED.definition,
+        usage_note = EXCLUDED.usage_note,
+        part_of_speech = EXCLUDED.part_of_speech,
+        register = EXCLUDED.register,
+        primary_domain = EXCLUDED.primary_domain,
+        secondary_domains = EXCLUDED.secondary_domains,
+        grammar_patterns = EXCLUDED.grammar_patterns,
+        synonyms = EXCLUDED.synonyms,
+        antonyms = EXCLUDED.antonyms,
+        collocations = EXCLUDED.collocations,
+        order_index = EXCLUDED.order_index
+      RETURNING id::text AS id
+      `,
+      [KNOWLEDGE_PHRASE_SENSE_ID, phraseId],
+    );
+    const phraseSenseId = phraseSenseResult.rows[0]?.id;
+    if (!phraseSenseId) {
+      throw new Error("Failed to upsert learner knowledge-map phrase sense fixture");
+    }
+
+    await client.query(
+      `
+      INSERT INTO lexicon.phrase_sense_localizations (
+        id,
+        phrase_sense_id,
+        locale,
+        localized_definition,
+        localized_usage_note,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        'es',
+        'depender de',
+        'common',
+        now()
+      )
+      ON CONFLICT (phrase_sense_id, locale)
+      DO UPDATE SET
+        localized_definition = EXCLUDED.localized_definition,
+        localized_usage_note = EXCLUDED.localized_usage_note
+      `,
+      [KNOWLEDGE_PHRASE_SENSE_LOCALIZATION_ID, phraseSenseId],
+    );
+
+    const phraseExampleResult = await client.query<{ id: string }>(
+      `
+      INSERT INTO lexicon.phrase_sense_examples (
+        id,
+        phrase_sense_id,
+        sentence,
+        difficulty,
+        order_index,
+        source,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        'You can bank on me when the deadline gets tight.',
+        'B1',
+        0,
+        'e2e-fixture',
+        now()
+      )
+      ON CONFLICT (phrase_sense_id, sentence)
+      DO UPDATE SET
+        difficulty = EXCLUDED.difficulty,
+        order_index = EXCLUDED.order_index,
+        source = EXCLUDED.source
+      RETURNING id::text AS id
+      `,
+      [KNOWLEDGE_PHRASE_EXAMPLE_ID, phraseSenseId],
+    );
+    const phraseExampleId = phraseExampleResult.rows[0]?.id;
+    if (!phraseExampleId) {
+      throw new Error("Failed to upsert learner knowledge-map phrase example fixture");
+    }
+
+    await client.query(
+      `
+      INSERT INTO lexicon.phrase_sense_example_localizations (
+        id,
+        phrase_sense_example_id,
+        locale,
+        translation,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        'es',
+        'Puedes depender de mi cuando el plazo es corto.',
+        now()
+      )
+      ON CONFLICT (phrase_sense_example_id, locale)
+      DO UPDATE SET
+        translation = EXCLUDED.translation
+      `,
+      [KNOWLEDGE_PHRASE_EXAMPLE_LOCALIZATION_ID, phraseExampleId],
+    );
+
+    const secondPhraseExampleResult = await client.query<{ id: string }>(
+      `
+      INSERT INTO lexicon.phrase_sense_examples (
+        id,
+        phrase_sense_id,
+        sentence,
+        difficulty,
+        order_index,
+        source,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        'Investors bank on steady demand in the winter season.',
+        'B2',
+        1,
+        'e2e-fixture',
+        now()
+      )
+      ON CONFLICT (phrase_sense_id, sentence)
+      DO UPDATE SET
+        difficulty = EXCLUDED.difficulty,
+        order_index = EXCLUDED.order_index,
+        source = EXCLUDED.source
+      RETURNING id::text AS id
+      `,
+      [KNOWLEDGE_PHRASE_EXAMPLE_TWO_ID, phraseSenseId],
+    );
+    const secondPhraseExampleId = secondPhraseExampleResult.rows[0]?.id;
+    if (!secondPhraseExampleId) {
+      throw new Error("Failed to upsert learner knowledge-map second phrase example fixture");
+    }
+
+    await client.query(
+      `
+      INSERT INTO lexicon.phrase_sense_example_localizations (
+        id,
+        phrase_sense_example_id,
+        locale,
+        translation,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        'es',
+        'Los inversores dependen de una demanda estable en la temporada de invierno.',
+        now()
+      )
+      ON CONFLICT (phrase_sense_example_id, locale)
+      DO UPDATE SET
+        translation = EXCLUDED.translation
+      `,
+      [KNOWLEDGE_PHRASE_EXAMPLE_TWO_LOCALIZATION_ID, secondPhraseExampleId],
+    );
 
     await client.query(
       `

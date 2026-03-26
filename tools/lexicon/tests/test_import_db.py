@@ -1,16 +1,26 @@
 import json
+import os
+import socket
 import sys
+import subprocess
 import tempfile
 import unittest
 import uuid
+from contextlib import contextmanager
+import time
 from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Optional
 from unittest.mock import MagicMock
 from pathlib import Path
 
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
+
 from tools.lexicon.import_db import (
     ImportSummary,
+    _ensure_backend_path,
     _load_existing_examples,
     _load_existing_relations,
     import_compiled_rows,
@@ -63,6 +73,160 @@ def _install_fake_sqlalchemy_module() -> None:
     sys.modules["sqlalchemy"] = module
 
 
+def _load_real_models():
+    _ensure_backend_path()
+    from app.models.meaning import Meaning
+    from app.models.meaning_example import MeaningExample
+    from app.models.phrase_entry import PhraseEntry
+    from app.models.phrase_sense import PhraseSense
+    from app.models.phrase_sense_example import PhraseSenseExample
+    from app.models.phrase_sense_example_localization import PhraseSenseExampleLocalization
+    from app.models.phrase_sense_localization import PhraseSenseLocalization
+    from app.models.reference_entry import ReferenceEntry
+    from app.models.reference_localization import ReferenceLocalization
+    from app.models.translation import Translation
+    from app.models.word import Word
+    from app.models.word_relation import WordRelation
+    from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
+    from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+
+    return {
+        "Word": Word,
+        "Meaning": Meaning,
+        "MeaningExample": MeaningExample,
+        "Translation": Translation,
+        "WordRelation": WordRelation,
+        "LexiconEnrichmentJob": LexiconEnrichmentJob,
+        "LexiconEnrichmentRun": LexiconEnrichmentRun,
+        "PhraseEntry": PhraseEntry,
+        "PhraseSense": PhraseSense,
+        "PhraseSenseLocalization": PhraseSenseLocalization,
+        "PhraseSenseExample": PhraseSenseExample,
+        "PhraseSenseExampleLocalization": PhraseSenseExampleLocalization,
+        "ReferenceEntry": ReferenceEntry,
+        "ReferenceLocalization": ReferenceLocalization,
+    }
+
+
+@contextmanager
+def _temporary_postgres_lexicon_connection():
+    container_name = None
+    database_url = ""
+    if os.environ.get("LEXICON_TEST_USE_EXISTING_POSTGRES") == "1":
+        database_url = os.environ.get(
+            "LEXICON_TEST_POSTGRES_URL",
+            os.environ.get(
+                "DATABASE_URL_SYNC",
+                os.environ.get("DATABASE_URL", "postgresql://vocabapp:devpassword@localhost:5432/vocabapp_dev"),
+            ),
+        )
+
+    engine = None
+    if database_url:
+        engine = create_engine(database_url, future=True)
+        try:
+            connection = engine.connect()
+        except OperationalError:
+            engine.dispose()
+            engine = None
+            database_url = ""
+        else:
+            transaction = connection.begin()
+            try:
+                connection.execute(text("DROP SCHEMA IF EXISTS lexicon CASCADE"))
+                connection.execute(text("CREATE SCHEMA lexicon"))
+                yield connection
+            finally:
+                transaction.rollback()
+                connection.close()
+                engine.dispose()
+            return
+
+    container_name, database_url = _start_temporary_postgres_container()
+    engine = create_engine(database_url, future=True)
+    connection = engine.connect()
+
+    transaction = connection.begin()
+    try:
+        connection.execute(text("DROP SCHEMA IF EXISTS lexicon CASCADE"))
+        connection.execute(text("CREATE SCHEMA lexicon"))
+        yield connection
+    finally:
+        transaction.rollback()
+        connection.close()
+        engine.dispose()
+        if container_name is not None:
+            subprocess.run(["docker", "rm", "-f", container_name], check=False, capture_output=True)
+
+
+def _start_temporary_postgres_container():
+    port = _find_free_port()
+    container_name = f"words-v2-test-postgres-{uuid.uuid4().hex[:8]}"
+    database_url = f"postgresql://vocabapp:devpassword@127.0.0.1:{port}/vocabapp_dev"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            container_name,
+            "-e",
+            "POSTGRES_USER=vocabapp",
+            "-e",
+            "POSTGRES_PASSWORD=devpassword",
+            "-e",
+            "POSTGRES_DB=vocabapp_dev",
+            "-p",
+            f"{port}:5432",
+            "postgres:18-alpine",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        _wait_for_postgres(database_url)
+    except Exception:
+        subprocess.run(["docker", "rm", "-f", container_name], check=False, capture_output=True)
+        raise
+    return container_name, database_url
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _wait_for_postgres(database_url: str) -> None:
+    deadline = time.time() + 60
+    last_error: Exception | None = None
+    while time.time() < deadline:
+        engine = create_engine(database_url, future=True)
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            engine.dispose()
+            return
+        except OperationalError as exc:
+            last_error = exc
+            engine.dispose()
+            time.sleep(0.5)
+    raise RuntimeError("temporary postgres container did not become ready") from last_error
+
+
+def _create_real_lexicon_tables(connection, models) -> None:
+    for name in [
+        "PhraseEntry",
+        "PhraseSense",
+        "PhraseSenseLocalization",
+        "PhraseSenseExample",
+        "PhraseSenseExampleLocalization",
+    ]:
+        models[name].__table__.create(connection, checkfirst=True)
+
+
 class SqlMeaningExample:
     __tablename__ = "meaning_examples"
     __table__ = object()
@@ -92,6 +256,7 @@ class FakeWord:
     confusable_words: object = None
     learner_generated_at: object = None
     word_forms: object = None
+    form_entries: object = field(default_factory=list)
     source_type: object = None
     source_reference: object = None
     phonetic_source: object = None
@@ -112,6 +277,7 @@ class FakeMeaning:
     register_label: object = None
     grammar_patterns: object = None
     usage_note: object = None
+    metadata_entries: object = field(default_factory=list)
     learner_generated_at: object = None
     order_index: int = 0
     source: object = None
@@ -138,6 +304,24 @@ class FakeTranslation:
     translation: str
     usage_note: object = None
     examples: object = None
+    example_entries: object = field(default_factory=list)
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeTranslationExample:
+    translation_id: uuid.UUID
+    text: str
+    order_index: int = 0
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeMeaningMetadata:
+    meaning_id: uuid.UUID
+    metadata_kind: str
+    value: str
+    order_index: int = 0
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -181,6 +365,25 @@ class FakeLexiconEnrichmentRun:
 
 
 @dataclass
+class FakeWordConfusable:
+    word_id: uuid.UUID
+    confusable_word: str
+    note: object = None
+    order_index: int = 0
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeWordForm:
+    word_id: uuid.UUID
+    form_kind: str
+    value: str
+    form_slot: object = None
+    order_index: int = 0
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
 class FakePhraseEntry:
     phrase_text: str
     normalized_form: str
@@ -196,6 +399,54 @@ class FakePhraseEntry:
     source_type: object = None
     source_reference: object = None
     created_at: object = None
+    phrase_senses: object = field(default_factory=list)
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakePhraseSenseLocalization:
+    phrase_sense_id: uuid.UUID
+    locale: str
+    localized_definition: object = None
+    localized_usage_note: object = None
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakePhraseSenseExampleLocalization:
+    phrase_sense_example_id: uuid.UUID
+    locale: str
+    translation: object = None
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakePhraseSenseExample:
+    phrase_sense_id: uuid.UUID
+    sentence: str
+    difficulty: object = None
+    order_index: int = 0
+    source: object = None
+    localizations: object = field(default_factory=list)
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakePhraseSense:
+    phrase_entry_id: uuid.UUID
+    definition: str
+    usage_note: object = None
+    part_of_speech: object = None
+    register: object = None
+    primary_domain: object = None
+    secondary_domains: object = field(default_factory=list)
+    grammar_patterns: object = field(default_factory=list)
+    synonyms: object = field(default_factory=list)
+    antonyms: object = field(default_factory=list)
+    collocations: object = field(default_factory=list)
+    order_index: int = 0
+    localizations: object = field(default_factory=list)
+    examples: object = field(default_factory=list)
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -380,6 +631,121 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_meanings[0].usage_note, "Common everyday verb.")
         self.assertEqual(imported_meanings[0].source_reference, "snapshot-20260307:sn_lx_run_run_v_01_abcd1234")
         self.assertEqual(imported_meanings[1].order_index, 1)
+
+    def test_import_replaces_normalized_word_confusable_rows(self) -> None:
+        session = MagicMock()
+        existing_word = FakeWord(word="run")
+        existing_word.confusable_entries = [
+            FakeWordConfusable(
+                word_id=existing_word.id,
+                confusable_word="old",
+                note="stale",
+                order_index=0,
+            )
+        ]
+        session.execute.side_effect = [
+            _ScalarResult(existing_word),
+            _ListResult([]),
+            _ScalarResult(None),
+        ]
+        session.add.side_effect = lambda _: None
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.0.0",
+                "word": "run",
+                "part_of_speech": ["verb"],
+                "cefr_level": "A1",
+                "frequency_rank": 5,
+                "forms": {},
+                "senses": [],
+                "confusable_words": [
+                    {"word": "ran", "note": "Past tense form."},
+                    {"word": "sprint", "note": "Related but different."},
+                ],
+            }
+        ]
+
+        import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260307",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            word_confusable_model=FakeWordConfusable,
+        )
+
+        self.assertEqual(
+            [(item.confusable_word, item.note, item.order_index) for item in existing_word.confusable_entries],
+            [
+                ("ran", "Past tense form.", 0),
+                ("sprint", "Related but different.", 1),
+            ],
+        )
+
+    def test_import_replaces_normalized_word_form_rows(self) -> None:
+        session = MagicMock()
+        existing_word = FakeWord(
+            word="run",
+            word_forms={"verb_forms": {"base": "stale"}},
+            form_entries=[
+                FakeWordForm(word_id=uuid.uuid4(), form_kind="plural", value="stales", order_index=0),
+            ],
+        )
+        session.execute.side_effect = [
+            _ScalarResult(existing_word),
+            _ListResult([]),
+            _ScalarResult(None),
+        ]
+        session.add.side_effect = lambda _: None
+        session.flush.side_effect = lambda: None
+
+        import_compiled_rows(
+            session,
+            [
+                {
+                    "schema_version": "1.0.0",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
+                    "cefr_level": "A1",
+                    "frequency_rank": 5,
+                    "forms": {
+                        "plural_forms": ["runs"],
+                        "verb_forms": {
+                            "base": "run",
+                            "past": "ran",
+                            "gerund": "running",
+                        },
+                        "comparative": None,
+                        "superlative": None,
+                        "derivations": ["runner"],
+                    },
+                    "senses": [],
+                    "confusable_words": [],
+                }
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260307",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            word_form_model=FakeWordForm,
+        )
+
+        self.assertEqual(
+            [(item.form_kind, item.form_slot, item.value, item.order_index) for item in existing_word.form_entries],
+            [
+                ("verb", "base", "run", 0),
+                ("verb", "past", "ran", 1),
+                ("verb", "gerund", "running", 2),
+                ("plural", "", "runs", 0),
+                ("derivation", "", "runner", 0),
+            ],
+        )
+        self.assertEqual(existing_word.word_forms["verb_forms"]["base"], "run")
 
 
     def test_import_applies_word_level_fields_even_without_senses(self) -> None:
@@ -577,6 +943,148 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_translation.translation, "tempo")
         self.assertEqual(imported_translation.usage_note, "Muito comum em contextos abstratos e práticos.")
         self.assertEqual(imported_translation.examples, ["Eu não tenho tempo hoje."])
+
+    def test_import_replaces_normalized_translation_example_rows(self) -> None:
+        session = MagicMock()
+        existing_word = FakeWord(word="time")
+        existing_meaning = FakeMeaning(
+            word_id=existing_word.id,
+            definition="the thing measured in minutes and hours",
+            part_of_speech="noun",
+            order_index=0,
+        )
+        existing_translation = FakeTranslation(
+            meaning_id=existing_meaning.id,
+            language="pt-BR",
+            translation="tempo",
+            examples=["stale translated example"],
+            example_entries=[
+                FakeTranslationExample(
+                    translation_id=uuid.uuid4(),
+                    text="stale translated example",
+                    order_index=0,
+                )
+            ],
+        )
+        session.execute.side_effect = [
+            _ScalarResult(existing_word),
+            _ListResult([existing_meaning]),
+            _ListResult([]),
+            _ListResult([existing_translation]),
+            _ListResult([]),
+        ]
+        session.add.side_effect = lambda _: None
+        session.flush.side_effect = lambda: None
+
+        import_compiled_rows(
+            session,
+            [
+                {
+                    "schema_version": "1.1.0",
+                    "entry_type": "word",
+                    "word": "time",
+                    "language": "en",
+                    "forms": {},
+                    "senses": [
+                        {
+                            "sense_id": "sense-001",
+                            "definition": "the thing measured in minutes and hours",
+                            "pos": "noun",
+                            "examples": [{"sentence": "I do not have time today.", "difficulty": "A1"}],
+                            "translations": {
+                                "pt-BR": {
+                                    "definition": "tempo",
+                                    "usage_note": "Muito comum em contextos abstratos e práticos.",
+                                    "examples": ["Eu não tenho tempo hoje."],
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260324",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            meaning_example_model=FakeMeaningExample,
+            translation_model=FakeTranslation,
+            translation_example_model=FakeTranslationExample,
+            word_relation_model=FakeWordRelation,
+        )
+
+        self.assertEqual(existing_translation.examples, ["Eu não tenho tempo hoje."])
+        self.assertEqual(
+            [(item.text, item.order_index) for item in existing_translation.example_entries],
+            [("Eu não tenho tempo hoje.", 0)],
+        )
+
+    def test_import_replaces_normalized_meaning_metadata_rows(self) -> None:
+        session = MagicMock()
+        existing_word = FakeWord(word="run")
+        existing_meaning = FakeMeaning(
+            word_id=existing_word.id,
+            definition="to move quickly on foot",
+            secondary_domains=["stale-domain"],
+            grammar_patterns=["stale-pattern"],
+            metadata_entries=[
+                FakeMeaningMetadata(meaning_id=uuid.uuid4(), metadata_kind="secondary_domain", value="stale-domain", order_index=0),
+                FakeMeaningMetadata(meaning_id=uuid.uuid4(), metadata_kind="grammar_pattern", value="stale-pattern", order_index=0),
+            ],
+        )
+        session.execute.side_effect = [
+            _ScalarResult(existing_word),
+            _ListResult([existing_meaning]),
+            _ListResult([]),
+            _ListResult([]),
+        ]
+        session.add.side_effect = lambda _: None
+        session.flush.side_effect = lambda: None
+
+        import_compiled_rows(
+            session,
+            [
+                {
+                    "schema_version": "1.0.0",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
+                    "cefr_level": "A1",
+                    "frequency_rank": 5,
+                    "forms": {},
+                    "senses": [
+                        {
+                            "sense_id": "sn_lx_run_run_v_01_abcd1234",
+                            "pos": "verb",
+                            "definition": "to move quickly on foot",
+                            "primary_domain": "general",
+                            "secondary_domains": ["general", "movement"],
+                            "register": "neutral",
+                            "grammar_patterns": ["run + adverb"],
+                            "usage_note": "Common everyday verb.",
+                            "examples": [],
+                        }
+                    ],
+                    "confusable_words": [],
+                }
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260307",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            meaning_metadata_model=FakeMeaningMetadata,
+        )
+
+        self.assertEqual(existing_meaning.secondary_domains, ["general", "movement"])
+        self.assertEqual(existing_meaning.grammar_patterns, ["run + adverb"])
+        self.assertEqual(
+            [(item.metadata_kind, item.value, item.order_index) for item in existing_meaning.metadata_entries],
+            [
+                ("secondary_domain", "general", 0),
+                ("secondary_domain", "movement", 1),
+                ("grammar_pattern", "run + adverb", 0),
+            ],
+        )
 
     def test_import_updates_existing_word_and_meanings_without_duplication(self) -> None:
         existing_word = FakeWord(
@@ -935,15 +1443,24 @@ class ImportCompiledRowsTests(unittest.TestCase):
                     "sense_id": "phrase-1",
                     "definition": "leave the ground",
                     "part_of_speech": "verb",
-                    "examples": [{"sentence": "The plane took off.", "difficulty": "A1"}],
+                    "register": "neutral",
+                    "primary_domain": "general",
+                    "secondary_domains": ["general", "transport"],
+                    "examples": [
+                        {"sentence": "The plane took off.", "difficulty": "A1"},
+                        {"sentence": "We took off early.", "difficulty": "A2"},
+                    ],
                     "grammar_patterns": ["subject + take off"],
                     "usage_note": "Common for planes.",
+                    "synonyms": ["depart", "set off"],
+                    "antonyms": ["land"],
+                    "collocations": ["take off quickly"],
                     "translations": {
-                        "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。"]},
-                        "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó."]},
-                        "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة."]},
-                        "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou."]},
-                        "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。"]},
+                        "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。", "我们很早起飞了。"]},
+                        "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó.", "Despegamos temprano."]},
+                        "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة.", "أقلعنا مبكرًا."]},
+                        "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou.", "Decolamos cedo."]},
+                        "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。", "私たちは早く離陸した。"]},
                     },
                 }],
                 "confusable_words": [],
@@ -989,6 +1506,10 @@ class ImportCompiledRowsTests(unittest.TestCase):
             word_model=FakeWord,
             meaning_model=FakeMeaning,
             phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
             reference_model=FakeReferenceEntry,
             reference_localization_model=FakeReferenceLocalization,
         )
@@ -1000,9 +1521,503 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(any(isinstance(item, FakeReferenceEntry) for item in added), True)
         self.assertEqual(any(isinstance(item, FakeReferenceLocalization) for item in added), True)
         imported_phrase = next(item for item in added if isinstance(item, FakePhraseEntry))
-        self.assertEqual(imported_phrase.compiled_payload["entry_id"], "ph_take_off")
+        imported_sense = next(item for item in added if isinstance(item, FakePhraseSense))
+        imported_phrase.compiled_payload = None
         self.assertEqual(imported_phrase.seed_metadata["raw_reviewed_as"], "phrasal verb")
         self.assertEqual(imported_phrase.confidence_score, 0.91)
+        self.assertEqual(imported_phrase.phrase_senses[0], imported_sense)
+        self.assertEqual(imported_sense.definition, "leave the ground")
+        self.assertEqual(imported_sense.usage_note, "Common for planes.")
+        self.assertEqual([row.locale for row in imported_sense.localizations], ["ar", "es", "ja", "pt-BR", "zh-Hans"])
+        self.assertEqual(next(row.localized_definition for row in imported_sense.localizations if row.locale == "ja"), "離陸する")
+        self.assertEqual(
+            [row.localized_usage_note for row in imported_sense.localizations if row.locale == "zh-Hans"],
+            ["常见用法"],
+        )
+        self.assertEqual([row.sentence for row in imported_sense.examples], ["The plane took off.", "We took off early."])
+        self.assertEqual(imported_sense.part_of_speech, "verb")
+        self.assertEqual(imported_sense.register, "neutral")
+        self.assertEqual(imported_sense.primary_domain, "general")
+        self.assertEqual(imported_sense.secondary_domains, ["general", "transport"])
+        self.assertEqual(imported_sense.grammar_patterns, ["subject + take off"])
+        self.assertEqual(imported_sense.synonyms, ["depart", "set off"])
+        self.assertEqual(imported_sense.antonyms, ["land"])
+        self.assertEqual(imported_sense.collocations, ["take off quickly"])
+        self.assertEqual(
+            [row.translation for row in imported_sense.examples[0].localizations],
+            ["أقلعت الطائرة.", "El avión despegó.", "飛行機が離陸した。", "O avião decolou.", "飞机起飞了。"],
+        )
+        self.assertEqual(
+            [row.translation for row in imported_sense.examples[1].localizations],
+            ["أقلعنا مبكرًا.", "Despegamos temprano.", "私たちは早く離陸した。", "Decolamos cedo.", "我们很早起飞了。"],
+        )
+
+    def test_import_compiled_rows_replaces_normalized_phrase_children_on_repeat_import_with_real_sqlalchemy_models(self) -> None:
+        models = _load_real_models()
+
+        first_row = {
+            "schema_version": "1.1.0",
+            "entry_id": "ph_take_off",
+            "entry_type": "phrase",
+            "normalized_form": "take off",
+            "source_provenance": [{"source": "phrase_seed"}],
+            "entity_category": "general",
+            "word": "take off",
+            "part_of_speech": ["phrasal_verb"],
+            "cefr_level": "B1",
+            "frequency_rank": 0,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "senses": [{
+                "sense_id": "phrase-1",
+                "definition": "leave the ground",
+                "part_of_speech": "verb",
+                "register": "neutral",
+                "primary_domain": "general",
+                "secondary_domains": ["general", "transport"],
+                "examples": [
+                    {"sentence": "The plane took off.", "difficulty": "A1"},
+                    {"sentence": "We took off early.", "difficulty": "A2"},
+                ],
+                "grammar_patterns": ["subject + take off"],
+                "usage_note": "Common for planes.",
+                "synonyms": ["depart", "set off"],
+                "antonyms": ["land"],
+                "collocations": ["take off quickly"],
+                "translations": {
+                    "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。", "我们很早起飞了。"]},
+                    "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó.", "Despegamos temprano."]},
+                    "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة.", "أقلعنا مبكرًا."]},
+                    "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou.", "Decolamos cedo."]},
+                    "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。", "私たちは早く離陸した。"]},
+                },
+            }],
+            "confusable_words": [],
+            "generated_at": "2026-03-20T00:00:00Z",
+            "phrase_kind": "phrasal_verb",
+            "display_form": "take off",
+            "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+            "confidence": 0.91,
+        }
+        empty_row = {**first_row, "senses": []}
+
+        with _temporary_postgres_lexicon_connection() as connection:
+            _create_real_lexicon_tables(connection, models)
+            session = Session(bind=connection, expire_on_commit=False)
+            try:
+                import_compiled_rows(
+                    session,
+                    [first_row],
+                    source_type="lexicon_snapshot",
+                    source_reference="snapshot-20260320",
+                    language="en",
+                    word_model=models["Word"],
+                    meaning_model=models["Meaning"],
+                    meaning_example_model=models["MeaningExample"],
+                    word_relation_model=models["WordRelation"],
+                    lexicon_enrichment_job_model=models["LexiconEnrichmentJob"],
+                    lexicon_enrichment_run_model=models["LexiconEnrichmentRun"],
+                    translation_model=models["Translation"],
+                    phrase_model=models["PhraseEntry"],
+                    phrase_sense_model=models["PhraseSense"],
+                    phrase_sense_localization_model=models["PhraseSenseLocalization"],
+                    phrase_sense_example_model=models["PhraseSenseExample"],
+                    phrase_sense_example_localization_model=models["PhraseSenseExampleLocalization"],
+                    reference_model=models["ReferenceEntry"],
+                    reference_localization_model=models["ReferenceLocalization"],
+                )
+                session.flush()
+
+                assert connection.execute(text("SELECT count(*) FROM lexicon.phrase_senses")).scalar_one() == 1
+                assert connection.execute(text("SELECT count(*) FROM lexicon.phrase_sense_localizations")).scalar_one() == 5
+                assert connection.execute(text("SELECT count(*) FROM lexicon.phrase_sense_examples")).scalar_one() == 2
+                assert connection.execute(text("SELECT count(*) FROM lexicon.phrase_sense_example_localizations")).scalar_one() == 10
+
+                import_compiled_rows(
+                    session,
+                    [empty_row],
+                    source_type="lexicon_snapshot",
+                    source_reference="snapshot-20260320",
+                    language="en",
+                    word_model=models["Word"],
+                    meaning_model=models["Meaning"],
+                    meaning_example_model=models["MeaningExample"],
+                    word_relation_model=models["WordRelation"],
+                    lexicon_enrichment_job_model=models["LexiconEnrichmentJob"],
+                    lexicon_enrichment_run_model=models["LexiconEnrichmentRun"],
+                    translation_model=models["Translation"],
+                    phrase_model=models["PhraseEntry"],
+                    phrase_sense_model=models["PhraseSense"],
+                    phrase_sense_localization_model=models["PhraseSenseLocalization"],
+                    phrase_sense_example_model=models["PhraseSenseExample"],
+                    phrase_sense_example_localization_model=models["PhraseSenseExampleLocalization"],
+                    reference_model=models["ReferenceEntry"],
+                    reference_localization_model=models["ReferenceLocalization"],
+                )
+                session.flush()
+
+                assert connection.execute(text("SELECT count(*) FROM lexicon.phrase_senses")).scalar_one() == 0
+                assert connection.execute(text("SELECT count(*) FROM lexicon.phrase_sense_localizations")).scalar_one() == 0
+                assert connection.execute(text("SELECT count(*) FROM lexicon.phrase_sense_examples")).scalar_one() == 0
+                assert connection.execute(text("SELECT count(*) FROM lexicon.phrase_sense_example_localizations")).scalar_one() == 0
+            finally:
+                session.close()
+
+    def test_import_compiled_rows_replaces_normalized_phrase_children_on_repeat_import(self) -> None:
+        row = {
+            "schema_version": "1.1.0",
+            "entry_id": "ph_take_off",
+            "entry_type": "phrase",
+            "normalized_form": "take off",
+            "source_provenance": [{"source": "phrase_seed"}],
+            "entity_category": "general",
+            "word": "take off",
+            "part_of_speech": ["phrasal_verb"],
+            "cefr_level": "B1",
+            "frequency_rank": 0,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [{
+                    "sense_id": "phrase-1",
+                    "definition": "leave the ground",
+                    "part_of_speech": "verb",
+                    "register": "neutral",
+                    "primary_domain": "general",
+                    "secondary_domains": ["general", "transport"],
+                    "examples": [
+                        {"sentence": "The plane took off.", "difficulty": "A1"},
+                        {"sentence": "We took off early.", "difficulty": "A2"},
+                    ],
+                    "grammar_patterns": ["subject + take off"],
+                    "usage_note": "Common for planes.",
+                    "synonyms": ["depart", "set off"],
+                    "antonyms": ["land"],
+                    "collocations": ["take off quickly"],
+                    "translations": {
+                        "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。", "我们很早起飞了。"]},
+                        "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó.", "Despegamos temprano."]},
+                        "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة.", "أقلعنا مبكرًا."]},
+                        "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou.", "Decolamos cedo."]},
+                        "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。", "私たちは早く離陸した。"]},
+                    },
+                }],
+            "confusable_words": [],
+            "generated_at": "2026-03-20T00:00:00Z",
+            "phrase_kind": "phrasal_verb",
+            "display_form": "take off",
+            "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+            "confidence": 0.91,
+        }
+        added = []
+        first_session = MagicMock()
+        first_session.execute.return_value = _ScalarResult(None)
+        first_session.add.side_effect = added.append
+        first_session.flush.side_effect = lambda: None
+
+        import_compiled_rows(
+            first_session,
+            [row],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260320",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+        )
+
+        created_phrase = next(item for item in added if isinstance(item, FakePhraseEntry))
+        stale_sense = FakePhraseSense(
+            phrase_entry_id=created_phrase.id,
+            definition="stale definition",
+            usage_note="stale",
+            order_index=99,
+            localizations=[FakePhraseSenseLocalization(phrase_sense_id=uuid.uuid4(), locale="fr", localized_definition="ancien")],
+            examples=[FakePhraseSenseExample(
+                phrase_sense_id=uuid.uuid4(),
+                sentence="Stale sentence.",
+                order_index=0,
+                source="legacy",
+                localizations=[FakePhraseSenseExampleLocalization(phrase_sense_example_id=uuid.uuid4(), locale="fr", translation="ancienne phrase")],
+            )],
+        )
+        created_phrase.phrase_senses = [stale_sense]
+        second_session = MagicMock()
+        second_session.execute.return_value = _ScalarResult(created_phrase)
+        second_session.add.side_effect = added.append
+        second_session.flush.side_effect = lambda: None
+
+        import_compiled_rows(
+            second_session,
+            [row],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260320",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+        )
+
+        self.assertEqual(len(created_phrase.phrase_senses), 1)
+        self.assertIsNot(created_phrase.phrase_senses[0], stale_sense)
+        self.assertEqual(
+            [row.locale for row in created_phrase.phrase_senses[0].localizations],
+            ["ar", "es", "ja", "pt-BR", "zh-Hans"],
+        )
+        self.assertEqual(created_phrase.phrase_senses[0].part_of_speech, "verb")
+        self.assertEqual(created_phrase.phrase_senses[0].register, "neutral")
+        self.assertEqual(created_phrase.phrase_senses[0].primary_domain, "general")
+        self.assertEqual(created_phrase.phrase_senses[0].secondary_domains, ["general", "transport"])
+        self.assertEqual(created_phrase.phrase_senses[0].grammar_patterns, ["subject + take off"])
+        self.assertEqual(created_phrase.phrase_senses[0].synonyms, ["depart", "set off"])
+        self.assertEqual(created_phrase.phrase_senses[0].antonyms, ["land"])
+        self.assertEqual(created_phrase.phrase_senses[0].collocations, ["take off quickly"])
+        self.assertEqual(
+            next(row.localized_definition for row in created_phrase.phrase_senses[0].localizations if row.locale == "zh-Hans"),
+            "起飞",
+        )
+        self.assertEqual(
+            [row.translation for row in created_phrase.phrase_senses[0].examples[0].localizations],
+            ["أقلعت الطائرة.", "El avión despegó.", "飛行機が離陸した。", "O avião decolou.", "飞机起飞了。"],
+        )
+
+    def test_import_compiled_rows_clears_normalized_phrase_children_on_empty_senses_reimport(self) -> None:
+        row = {
+            "schema_version": "1.1.0",
+            "entry_id": "ph_take_off",
+            "entry_type": "phrase",
+            "normalized_form": "take off",
+            "source_provenance": [{"source": "phrase_seed"}],
+            "entity_category": "general",
+            "word": "take off",
+            "part_of_speech": ["phrasal_verb"],
+            "cefr_level": "B1",
+            "frequency_rank": 0,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "senses": [{
+                "sense_id": "phrase-1",
+                "definition": "leave the ground",
+                "part_of_speech": "verb",
+                "examples": [
+                    {"sentence": "The plane took off.", "difficulty": "A1"},
+                ],
+                "grammar_patterns": ["subject + take off"],
+                "usage_note": "Common for planes.",
+                "translations": {
+                    "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。"]},
+                    "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó."]},
+                    "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة."]},
+                    "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou."]},
+                    "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。"]},
+                },
+            }],
+            "confusable_words": [],
+            "generated_at": "2026-03-20T00:00:00Z",
+            "phrase_kind": "phrasal_verb",
+            "display_form": "take off",
+            "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+            "confidence": 0.91,
+        }
+        added = []
+        first_session = MagicMock()
+        first_session.execute.return_value = _ScalarResult(None)
+        first_session.add.side_effect = added.append
+        first_session.flush.side_effect = lambda: None
+
+        import_compiled_rows(
+            first_session,
+            [row],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260320",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+        )
+
+        created_phrase = next(item for item in added if isinstance(item, FakePhraseEntry))
+        self.assertEqual(len(created_phrase.phrase_senses), 1)
+
+        created_phrase.phrase_senses = [
+            FakePhraseSense(
+                phrase_entry_id=created_phrase.id,
+                definition="stale definition",
+                usage_note="stale",
+                part_of_speech="noun",
+                register="formal",
+                primary_domain="general",
+                secondary_domains=["general"],
+                grammar_patterns=["stale pattern"],
+                synonyms=["stale synonym"],
+                antonyms=["stale antonym"],
+                collocations=["stale collocation"],
+                order_index=99,
+                localizations=[FakePhraseSenseLocalization(phrase_sense_id=uuid.uuid4(), locale="fr", localized_definition="ancien")],
+                examples=[FakePhraseSenseExample(
+                    phrase_sense_id=uuid.uuid4(),
+                    sentence="Stale sentence.",
+                    order_index=0,
+                    source="legacy",
+                    localizations=[FakePhraseSenseExampleLocalization(phrase_sense_example_id=uuid.uuid4(), locale="fr", translation="ancienne phrase")],
+                )],
+            )
+        ]
+
+        second_session = MagicMock()
+        second_session.execute.return_value = _ScalarResult(created_phrase)
+        second_session.add.side_effect = added.append
+        second_session.flush.side_effect = lambda: None
+
+        import_compiled_rows(
+            second_session,
+            [{
+                **row,
+                "senses": [],
+            }],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260320",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+        )
+
+        self.assertEqual(created_phrase.phrase_senses, [])
+
+    def test_import_compiled_rows_prefers_richer_duplicate_phrase_examples(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ScalarResult(None)
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [{
+            "schema_version": "1.1.0",
+            "entry_id": "ph_take_off",
+            "entry_type": "phrase",
+            "normalized_form": "take off",
+            "source_provenance": [{"source": "phrase_seed"}],
+            "entity_category": "general",
+            "word": "take off",
+            "part_of_speech": ["phrasal_verb"],
+            "cefr_level": "B1",
+            "frequency_rank": 0,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "senses": [{
+                "sense_id": "phrase-1",
+                "definition": "leave the ground",
+                "part_of_speech": "verb",
+                "examples": [
+                    {"sentence": "The plane took off.", "difficulty": "A1"},
+                    {"sentence": "The plane took off.", "difficulty": "A2"},
+                ],
+                "grammar_patterns": ["subject + take off"],
+                "usage_note": "Common for planes.",
+                "translations": {
+                    "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。", "飞机已经起飞了。"]},
+                    "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó.", "El avión despegó hace un momento."]},
+                    "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة.", "أقلعت الطائرة قبل لحظات."]},
+                    "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou.", "O avião decolou há pouco."]},
+                    "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。", "飛行機はたった今離陸した。"]},
+                },
+            }],
+            "confusable_words": [],
+            "generated_at": "2026-03-20T00:00:00Z",
+            "phrase_kind": "phrasal_verb",
+            "display_form": "take off",
+            "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+            "confidence": 0.91,
+        }]
+
+        import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260320",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+        )
+
+        imported_phrase = next(item for item in added if isinstance(item, FakePhraseEntry))
+        imported_sense = imported_phrase.phrase_senses[0]
+        imported_example = imported_sense.examples[0]
+        self.assertEqual(imported_example.difficulty, "A2")
+        self.assertEqual(
+            [row.translation for row in imported_example.localizations],
+            ["أقلعت الطائرة قبل لحظات.", "El avión despegó hace un momento.", "飛行機はたった今離陸した。", "O avião decolou há pouco.", "飞机已经起飞了。"],
+        )
+
+    def test_import_compiled_rows_rejects_phrase_rows_missing_translation_examples(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ScalarResult(None)
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_id": "ph_take_off",
+                "entry_type": "phrase",
+                "normalized_form": "take off",
+                "source_provenance": [{"source": "phrase_seed"}],
+                "entity_category": "general",
+                "word": "take off",
+                "part_of_speech": ["phrasal_verb"],
+                "cefr_level": "B1",
+                "frequency_rank": 0,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [{
+                    "sense_id": "phrase-1",
+                    "definition": "leave the ground",
+                    "part_of_speech": "verb",
+                    "examples": [{"sentence": "The plane took off.", "difficulty": "A1"}],
+                    "grammar_patterns": ["subject + take off"],
+                    "usage_note": "Common for planes.",
+                    "translations": {
+                        "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。"]},
+                        "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó."]},
+                        "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة."]},
+                        "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou."]},
+                        "ja": {"definition": "離陸する", "usage_note": "よくある用法"},
+                    },
+                }],
+                "confusable_words": [],
+                "generated_at": "2026-03-20T00:00:00Z",
+                "phrase_kind": "phrasal_verb",
+                "display_form": "take off",
+                "seed_metadata": {"raw_reviewed_as": "phrasal verb"},
+                "confidence": 0.91,
+            },
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "translations\\.ja\\.examples must be a non-empty list"):
+            import_compiled_rows(
+                session,
+                rows,
+                source_type="lexicon_snapshot",
+                source_reference="snapshot-20260320",
+                language="en",
+                word_model=FakeWord,
+                meaning_model=FakeMeaning,
+                phrase_model=FakePhraseEntry,
+            )
 
     def test_load_compiled_rows_reads_family_directory_and_dry_run_counts(self) -> None:
         from tools.lexicon.import_db import load_compiled_rows, summarize_compiled_rows

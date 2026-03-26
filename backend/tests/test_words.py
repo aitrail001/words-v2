@@ -3,11 +3,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import MissingGreenlet
 
 from app.core.database import get_db
 from app.core.redis import get_redis
 from app.core.security import create_access_token, hash_password
 from app.main import app
+from app.services.knowledge_map import normalize_confusable_words
 from app.models.user import User
 from app.models.word import Word
 from app.models.meaning import Meaning
@@ -118,6 +120,19 @@ def make_enrichment_run() -> LexiconEnrichmentRun:
         token_output=45,
         estimated_cost=0.01,
     )
+
+
+def test_normalize_confusable_words_falls_back_when_relationship_would_lazy_load():
+    class LazyConfusableWord:
+        confusable_words = [{"word": "drum", "note": "Instrument, not verb."}]
+
+        @property
+        def confusable_entries(self):
+            raise MissingGreenlet("lazy load attempted", None, None)
+
+    assert normalize_confusable_words(LazyConfusableWord()) == [
+        {"word": "drum", "note": "Instrument, not verb."}
+    ]
 
 
 class TestWordSearch:
@@ -268,11 +283,15 @@ class TestWordEnrichmentDetail:
         word.learner_generated_at = run.created_at
         meaning.wn_synset_id = "bank.n.09"
         meaning.primary_domain = "business"
-        meaning.secondary_domains = ["finance"]
+        meaning.secondary_domains = ["stale-domain"]
         meaning.register_label = "neutral"
-        meaning.grammar_patterns = ["bank + on"]
+        meaning.grammar_patterns = ["stale-pattern"]
         meaning.usage_note = "Common everyday noun."
         meaning.learner_generated_at = run.created_at
+        meaning.metadata_entries = [
+            MagicMock(metadata_kind="secondary_domain", value="finance", order_index=0),
+            MagicMock(metadata_kind="grammar_pattern", value="bank + on", order_index=0),
+        ]
         example = make_meaning_example(meaning.id, "I deposited cash at the bank.")
         example.difficulty = "A2"
         example.enrichment_run_id = run.id
@@ -328,6 +347,42 @@ class TestWordEnrichmentDetail:
         assert len(data["enrichment_runs"]) == 1
         assert data["enrichment_runs"][0]["generator_model"] == "gpt-5.1"
         assert data["enrichment_runs"][0]["verdict"] == "imported"
+
+    @pytest.mark.asyncio
+    async def test_get_word_enrichment_prefers_normalized_confusable_rows(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = make_word("bank")
+        meaning = make_meaning(word.id, "A financial institution")
+        word.confusable_words = None
+        word.confusable_entries = [
+            MagicMock(confusable_word="bench", note="Different object.", order_index=0),
+            MagicMock(confusable_word="river bank", note=None, order_index=1),
+        ]
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = word
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [meaning]
+        examples_result = MagicMock()
+        examples_result.scalars.return_value.all.return_value = []
+        relations_result = MagicMock()
+        relations_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result]
+
+        response = await client.get(
+            f"/api/words/{word.id}/enrichment",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["confusable_words"] == [
+            {"word": "bench", "note": "Different object."},
+            {"word": "river bank", "note": None},
+        ]
 
     @pytest.mark.asyncio
     async def test_get_word_enrichment_not_found(self, client, mock_db, auth_token):

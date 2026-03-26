@@ -12,16 +12,24 @@ from app.models.lexicon_review_batch import LexiconReviewBatch
 from app.models.lexicon_review_item import LexiconReviewItem
 from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.phrase_entry import PhraseEntry
+from app.models.phrase_sense import PhraseSense
+from app.models.phrase_sense_example import PhraseSenseExample
+from app.models.phrase_sense_example_localization import PhraseSenseExampleLocalization
+from app.models.phrase_sense_localization import PhraseSenseLocalization
 from app.models.meaning import Meaning
+from app.models.meaning_metadata import MeaningMetadata
 from app.models.meaning_example import MeaningExample
 from app.models.reference_entry import ReferenceEntry
 from app.models.reference_localization import ReferenceLocalization
 from app.models.review import LearningQueueItem, ReviewCard, ReviewHistory, ReviewSession
 from app.models.search_history import SearchHistory
 from app.models.translation import Translation
+from app.models.translation_example import TranslationExample
 from app.models.user import User
 from app.models.user_preference import UserPreference
 from app.models.word import Word
+from app.models.word_confusable import WordConfusable
+from app.models.word_form import WordForm
 from app.models.word_list import WordList
 from app.models.word_list_item import WordListItem
 from app.models.word_relation import WordRelation
@@ -29,10 +37,14 @@ from app.models.word_relation import WordRelation
 __all__ = [
     "User",
     "Word",
+    "WordConfusable",
+    "WordForm",
     "Meaning",
+    "MeaningMetadata",
     "MeaningExample",
     "WordRelation",
     "Translation",
+    "TranslationExample",
     "EpubImport",
     "Book",
     "WordList",
@@ -51,6 +63,10 @@ __all__ = [
     "LexiconReviewItem",
     "LearnerEntryStatus",
     "PhraseEntry",
+    "PhraseSense",
+    "PhraseSenseExample",
+    "PhraseSenseLocalization",
+    "PhraseSenseExampleLocalization",
     "ReferenceEntry",
     "ReferenceLocalization",
     "SearchHistory",

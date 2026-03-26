@@ -177,7 +177,7 @@ describe("PhraseEntryPage", () => {
     expect(screen.queryByPlaceholderText(/search your knowledge map/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Pronunciation unavailable")).not.toBeInTheDocument();
     expect(screen.getByText("口语中常见。")).toBeInTheDocument();
-    expect(screen.getByText("你可以指望我的支持。")).toBeInTheDocument();
+    expect(screen.getByText("You can bank on")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "depend on" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /learning/i }));
