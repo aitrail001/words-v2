@@ -309,7 +309,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: [e2e-smoke]
-    if: github.event_name != 'pull_request'
 
     steps:
       - uses: actions/checkout@v4

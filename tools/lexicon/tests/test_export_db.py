@@ -15,6 +15,7 @@ class FakeTranslation:
     translation: str
     usage_note: str | None = None
     examples: list[str] | None = None
+    example_entries: list[Any] = field(default_factory=list)
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -28,6 +29,7 @@ class FakeMeaning:
     secondary_domains: list[str] | None = None
     register_label: str | None = None
     grammar_patterns: list[str] | None = None
+    metadata_entries: list[Any] = field(default_factory=list)
     usage_note: str | None = None
     learner_generated_at: datetime | None = None
     order_index: int = 0
@@ -59,8 +61,11 @@ class FakeWord:
     cefr_level: str | None = None
     frequency_rank: int | None = None
     learner_part_of_speech: list[str] | None = None
+    part_of_speech_entries: list[Any] = field(default_factory=list)
     word_forms: dict[str, Any] | None = None
+    form_entries: list[Any] = field(default_factory=list)
     confusable_words: list[dict[str, Any]] | None = None
+    confusable_entries: list[Any] = field(default_factory=list)
     phonetics: dict[str, Any] | None = None
     phonetic: str | None = None
     phonetic_confidence: float | None = None
@@ -87,14 +92,17 @@ class FakePhrase:
 
 class ExportDbTests(unittest.TestCase):
     def test_serialize_word_row_preserves_provenance_and_sense_details(self) -> None:
+        translation_example = type("FakeTranslationExample", (), {"text": "Corro cada mañana.", "order_index": 0, "id": uuid.uuid4()})()
         meaning = FakeMeaning(
             definition="to move quickly on foot",
             part_of_speech="verb",
             source_reference="fixture-run:sense-001",
             primary_domain="general",
-            secondary_domains=["movement"],
             register_label="neutral",
-            grammar_patterns=["run + adverb"],
+            metadata_entries=[
+                type("FakeMeaningMetadata", (), {"metadata_kind": "secondary_domain", "value": "movement", "order_index": 0})(),
+                type("FakeMeaningMetadata", (), {"metadata_kind": "grammar_pattern", "value": "run + adverb", "order_index": 0})(),
+            ],
             usage_note="Common learner verb.",
             learner_generated_at=datetime(2026, 3, 24, tzinfo=timezone.utc),
             translations=[
@@ -102,7 +110,7 @@ class ExportDbTests(unittest.TestCase):
                     language="es",
                     translation="correr",
                     usage_note="Verbo común de aprendizaje.",
-                    examples=["Corro cada mañana."],
+                    example_entries=[translation_example],
                 )
             ],
         )
@@ -112,9 +120,9 @@ class ExportDbTests(unittest.TestCase):
             source_reference="fixture-run",
             cefr_level="A1",
             frequency_rank=5,
-            learner_part_of_speech=["verb"],
-            word_forms={"verb_forms": {"past": "ran"}},
-            confusable_words=[{"word": "ran", "note": "Past tense form."}],
+            part_of_speech_entries=[type("FakeWordPartOfSpeech", (), {"value": "verb", "order_index": 0})()],
+            form_entries=[type("FakeWordForm", (), {"form_kind": "verb", "form_slot": "past", "value": "ran", "order_index": 0})()],
+            confusable_entries=[type("FakeWordConfusable", (), {"confusable_word": "ran", "note": "Past tense form.", "order_index": 0})()],
             phonetics={"us": {"ipa": "/rʌn/", "confidence": 0.99}},
             phonetic="/rʌn/",
             phonetic_confidence=0.99,

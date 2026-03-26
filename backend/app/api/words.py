@@ -18,6 +18,7 @@ from app.models.word import Word
 from app.models.word_relation import WordRelation
 from app.services.knowledge_map import normalize_confusable_words
 from app.services.knowledge_map import normalize_meaning_metadata
+from app.services.knowledge_map import normalize_word_part_of_speech
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -158,9 +159,10 @@ async def search_words(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[WordResponse]:
+    normalized_query = q.strip()
     result = await db.execute(
         select(Word)
-        .where(Word.word.ilike(f"{q}%"))
+        .where(Word.word.ilike(f"{normalized_query}%"))
         .order_by(Word.frequency_rank.asc().nullslast())
         .limit(20)
     )
@@ -175,7 +177,11 @@ async def get_word_enrichment(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> WordEnrichmentDetailResponse:
-    result = await db.execute(select(Word).where(Word.id == word_id))
+    result = await db.execute(
+        select(Word)
+        .options(selectinload(Word.confusable_entries), selectinload(Word.part_of_speech_entries))
+        .where(Word.id == word_id)
+    )
     word = result.scalar_one_or_none()
 
     if word is None:
@@ -244,7 +250,7 @@ async def get_word_enrichment(
         phonetic_confidence=word.phonetic_confidence,
         phonetic_enrichment_run_id=str(word.phonetic_enrichment_run_id) if word.phonetic_enrichment_run_id else None,
         cefr_level=word.cefr_level,
-        part_of_speech=word.learner_part_of_speech,
+        part_of_speech=normalize_word_part_of_speech(word),
         confusable_words=normalize_confusable_words(word),
         learner_generated_at=word.learner_generated_at.isoformat() if word.learner_generated_at else None,
         meanings=[

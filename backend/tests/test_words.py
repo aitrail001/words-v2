@@ -122,7 +122,7 @@ def make_enrichment_run() -> LexiconEnrichmentRun:
     )
 
 
-def test_normalize_confusable_words_falls_back_when_relationship_would_lazy_load():
+def test_normalize_confusable_words_returns_empty_when_relationship_would_lazy_load():
     class LazyConfusableWord:
         confusable_words = [{"word": "drum", "note": "Instrument, not verb."}]
 
@@ -130,9 +130,7 @@ def test_normalize_confusable_words_falls_back_when_relationship_would_lazy_load
         def confusable_entries(self):
             raise MissingGreenlet("lazy load attempted", None, None)
 
-    assert normalize_confusable_words(LazyConfusableWord()) == [
-        {"word": "drum", "note": "Instrument, not verb."}
-    ]
+    assert normalize_confusable_words(LazyConfusableWord()) == []
 
 
 class TestWordSearch:
@@ -278,8 +276,9 @@ class TestWordEnrichmentDetail:
         word.phonetic_confidence = 0.95
         word.phonetic_enrichment_run_id = run.id
         word.cefr_level = "B1"
-        word.learner_part_of_speech = ["noun"]
-        word.confusable_words = [{"word": "bench", "note": "Different object."}]
+        word.learner_part_of_speech = ["stale"]
+        word.part_of_speech_entries = [MagicMock(value="noun", order_index=0)]
+        word.confusable_entries = [MagicMock(confusable_word="bench", note="Different object.", order_index=0)]
         word.learner_generated_at = run.created_at
         meaning.wn_synset_id = "bank.n.09"
         meaning.primary_domain = "business"
@@ -347,6 +346,39 @@ class TestWordEnrichmentDetail:
         assert len(data["enrichment_runs"]) == 1
         assert data["enrichment_runs"][0]["generator_model"] == "gpt-5.1"
         assert data["enrichment_runs"][0]["verdict"] == "imported"
+
+    @pytest.mark.asyncio
+    async def test_get_word_enrichment_prefers_normalized_part_of_speech_rows(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = make_word("bank")
+        meaning = make_meaning(word.id, "A financial institution")
+        word.learner_part_of_speech = ["stale"]
+        word.part_of_speech_entries = [
+            MagicMock(value="noun", order_index=0),
+            MagicMock(value="verb", order_index=1),
+        ]
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = word
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [meaning]
+        examples_result = MagicMock()
+        examples_result.scalars.return_value.all.return_value = []
+        relations_result = MagicMock()
+        relations_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result]
+
+        response = await client.get(
+            f"/api/words/{word.id}/enrichment",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["part_of_speech"] == ["noun", "verb"]
 
     @pytest.mark.asyncio
     async def test_get_word_enrichment_prefers_normalized_confusable_rows(self, client, mock_db, auth_token):

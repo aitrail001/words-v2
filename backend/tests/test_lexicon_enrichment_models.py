@@ -6,7 +6,10 @@ from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
+from app.models.meaning_metadata import MeaningMetadata
 from app.models.word import Word
+from app.models.word_confusable import WordConfusable
+from app.models.word_part_of_speech import WordPartOfSpeech
 from app.models.word_relation import WordRelation
 from app.models.schema_names import LEXICON_SCHEMA
 
@@ -24,16 +27,16 @@ class TestWordEnrichmentFields:
             phonetic_source="llm",
             phonetic_confidence=0.9,
             cefr_level="B1",
-            learner_part_of_speech=["noun"],
-            confusable_words=[{"word": "bench", "note": "Different object."}],
         )
+        word.part_of_speech_entries = [WordPartOfSpeech(word_id=uuid.uuid4(), value="noun", order_index=0)]
+        word.confusable_entries = [WordConfusable(word_id=uuid.uuid4(), confusable_word="bench", note="Different object.", order_index=0)]
         assert word.phonetics["us"]["ipa"] == "/bæŋk/"
         assert word.phonetic_source == "llm"
         assert word.phonetic_confidence == 0.9
         assert word.phonetic_enrichment_run_id is None
         assert word.cefr_level == "B1"
-        assert word.learner_part_of_speech == ["noun"]
-        assert word.confusable_words == [{"word": "bench", "note": "Different object."}]
+        assert [row.value for row in word.part_of_speech_entries] == ["noun"]
+        assert [row.confusable_word for row in word.confusable_entries] == ["bench"]
         assert word.learner_generated_at is None
         constraints = [c for c in Word.__table__.constraints if isinstance(c, CheckConstraint)]
         assert any(c.name == "ck_words_phonetic_confidence_range" for c in constraints)
@@ -46,16 +49,18 @@ class TestMeaningLearnerFields:
             definition="A financial institution",
             wn_synset_id="bank.n.09",
             primary_domain="business",
-            secondary_domains=["finance"],
             register_label="neutral",
-            grammar_patterns=["bank + on"],
             usage_note="Common everyday noun.",
         )
+        meaning.metadata_entries = [
+            MeaningMetadata(meaning_id=meaning.id, metadata_kind="secondary_domain", value="finance", order_index=0),
+            MeaningMetadata(meaning_id=meaning.id, metadata_kind="grammar_pattern", value="bank + on", order_index=0),
+        ]
         assert meaning.wn_synset_id == "bank.n.09"
         assert meaning.primary_domain == "business"
-        assert meaning.secondary_domains == ["finance"]
+        assert [row.value for row in meaning.metadata_entries if row.metadata_kind == "secondary_domain"] == ["finance"]
         assert meaning.register_label == "neutral"
-        assert meaning.grammar_patterns == ["bank + on"]
+        assert [row.value for row in meaning.metadata_entries if row.metadata_kind == "grammar_pattern"] == ["bank + on"]
         assert meaning.usage_note == "Common everyday noun."
         assert meaning.learner_generated_at is None
 

@@ -56,6 +56,23 @@ def _serialize_examples(examples: Iterable[Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _normalize_translation_examples(translation: Any) -> list[str]:
+    example_entries = getattr(translation, "example_entries", None)
+    if not isinstance(example_entries, list):
+        return []
+    return [
+        str(getattr(item, "text", "") or "").strip()
+        for item in sorted(
+            example_entries,
+            key=lambda item: (
+                getattr(item, "order_index", 0),
+                str(getattr(item, "id", "")),
+            ),
+        )
+        if str(getattr(item, "text", "") or "").strip()
+    ]
+
+
 def _serialize_translations(translations: Iterable[Any]) -> dict[str, dict[str, Any]]:
     payload: dict[str, dict[str, Any]] = {}
     for translation in sorted(
@@ -73,11 +90,7 @@ def _serialize_translations(translations: Iterable[Any]) -> dict[str, dict[str, 
         usage_note = getattr(translation, "usage_note", None)
         if isinstance(usage_note, str) and usage_note.strip():
             payload[locale]["usage_note"] = usage_note.strip()
-        examples = [
-            str(example).strip()
-            for example in (getattr(translation, "examples", None) or [])
-            if str(example).strip()
-        ]
+        examples = _normalize_translation_examples(translation)
         if examples:
             payload[locale]["examples"] = examples
     return payload
@@ -112,6 +125,111 @@ def _serialize_relations(relations: Iterable[Any]) -> dict[str, list[str]]:
     return buckets
 
 
+def _normalize_word_part_of_speech(word: Any) -> list[str]:
+    part_of_speech_entries = getattr(word, "part_of_speech_entries", None)
+    if not isinstance(part_of_speech_entries, list):
+        return []
+    return [
+        str(getattr(item, "value", "") or "").strip()
+        for item in sorted(
+            part_of_speech_entries,
+            key=lambda item: (
+                getattr(item, "order_index", 0),
+                str(getattr(item, "id", "")),
+            ),
+        )
+        if str(getattr(item, "value", "") or "").strip()
+    ]
+
+
+def _normalize_confusable_words(word: Any) -> list[dict[str, str | None]]:
+    confusable_entries = getattr(word, "confusable_entries", None)
+    if not isinstance(confusable_entries, list):
+        return []
+    rows: list[dict[str, str | None]] = []
+    for item in sorted(
+        confusable_entries,
+        key=lambda entry: (
+            getattr(entry, "order_index", 0),
+            str(getattr(entry, "id", "")),
+        ),
+    ):
+        confusable_word = str(getattr(item, "confusable_word", "") or "").strip()
+        if not confusable_word:
+            continue
+        note = str(getattr(item, "note", "") or "").strip() or None
+        rows.append({"word": confusable_word, "note": note})
+    return rows
+
+
+def _normalize_word_forms(word: Any) -> dict[str, Any]:
+    form_entries = getattr(word, "form_entries", None)
+    payload: dict[str, Any] = {
+        "plural_forms": [],
+        "verb_forms": {},
+        "comparative": None,
+        "superlative": None,
+        "derivations": [],
+    }
+    if not isinstance(form_entries, list):
+        return payload
+    for item in sorted(
+        form_entries,
+        key=lambda entry: (
+            getattr(entry, "form_kind", ""),
+            getattr(entry, "order_index", 0),
+            str(getattr(entry, "id", "")),
+        ),
+    ):
+        form_kind = str(getattr(item, "form_kind", "") or "").strip()
+        form_slot = str(getattr(item, "form_slot", "") or "").strip()
+        value = str(getattr(item, "value", "") or "").strip()
+        if not form_kind or not value:
+            continue
+        if form_kind == "verb" and form_slot:
+            payload["verb_forms"][form_slot] = value
+        elif form_kind == "plural":
+            payload["plural_forms"].append(value)
+        elif form_kind == "derivation":
+            payload["derivations"].append(value)
+        elif form_kind == "comparative":
+            payload["comparative"] = value
+        elif form_kind == "superlative":
+            payload["superlative"] = value
+    return payload
+
+
+def _normalize_meaning_metadata(meaning: Any) -> dict[str, list[str]]:
+    metadata_entries = getattr(meaning, "metadata_entries", None)
+    secondary_domains: list[str] = []
+    grammar_patterns: list[str] = []
+    if not isinstance(metadata_entries, list):
+        return {
+            "secondary_domains": secondary_domains,
+            "grammar_patterns": grammar_patterns,
+        }
+    for item in sorted(
+        metadata_entries,
+        key=lambda entry: (
+            getattr(entry, "metadata_kind", ""),
+            getattr(entry, "order_index", 0),
+            str(getattr(entry, "id", "")),
+        ),
+    ):
+        metadata_kind = str(getattr(item, "metadata_kind", "") or "").strip()
+        value = str(getattr(item, "value", "") or "").strip()
+        if not value:
+            continue
+        if metadata_kind == "secondary_domain":
+            secondary_domains.append(value)
+        elif metadata_kind == "grammar_pattern":
+            grammar_patterns.append(value)
+    return {
+        "secondary_domains": secondary_domains,
+        "grammar_patterns": grammar_patterns,
+    }
+
+
 def serialize_word_row(
     word: Any,
     *,
@@ -128,9 +246,9 @@ def serialize_word_row(
         "language": getattr(word, "language", "en") or "en",
         "cefr_level": getattr(word, "cefr_level", None),
         "frequency_rank": getattr(word, "frequency_rank", None),
-        "part_of_speech": list(getattr(word, "learner_part_of_speech", None) or []),
-        "forms": deepcopy(getattr(word, "word_forms", None) or {}),
-        "confusable_words": deepcopy(getattr(word, "confusable_words", None) or []),
+        "part_of_speech": _normalize_word_part_of_speech(word),
+        "forms": deepcopy(_normalize_word_forms(word)),
+        "confusable_words": deepcopy(_normalize_confusable_words(word)),
         "phonetics": deepcopy(getattr(word, "phonetics", None) or {}),
         "phonetic": getattr(word, "phonetic", None),
         "phonetic_confidence": getattr(word, "phonetic_confidence", None),
@@ -149,15 +267,16 @@ def serialize_word_row(
     )
     for index, meaning in enumerate(meanings):
         relation_payload = _serialize_relations(relations_by_meaning_id.get(getattr(meaning, "id", None), []))
+        meaning_metadata = _normalize_meaning_metadata(meaning)
         sense_payload: dict[str, Any] = {
             "sense_id": _sense_id_for_meaning(meaning, row_source_reference, index),
             "definition": getattr(meaning, "definition", ""),
             "pos": getattr(meaning, "part_of_speech", None),
             "wn_synset_id": getattr(meaning, "wn_synset_id", None),
             "primary_domain": getattr(meaning, "primary_domain", None),
-            "secondary_domains": list(getattr(meaning, "secondary_domains", None) or []),
+            "secondary_domains": meaning_metadata["secondary_domains"],
             "register": getattr(meaning, "register_label", None),
-            "grammar_patterns": list(getattr(meaning, "grammar_patterns", None) or []),
+            "grammar_patterns": meaning_metadata["grammar_patterns"],
             "usage_note": getattr(meaning, "usage_note", None),
             "generated_at": _created_iso(
                 getattr(meaning, "learner_generated_at", None) or getattr(word, "learner_generated_at", None)
@@ -210,6 +329,7 @@ def load_export_rows(
     from app.models.meaning import Meaning
     from app.models.meaning_example import MeaningExample
     from app.models.phrase_entry import PhraseEntry
+    from app.models.translation import Translation
     from app.models.word import Word
     from app.models.word_relation import WordRelation
     from sqlalchemy import create_engine
@@ -221,7 +341,13 @@ def load_export_rows(
         words = list(
             session.execute(
                 select(Word).options(
-                    selectinload(Word.meanings).selectinload(Meaning.translations),
+                    selectinload(Word.form_entries),
+                    selectinload(Word.confusable_entries),
+                    selectinload(Word.part_of_speech_entries),
+                    selectinload(Word.meanings).selectinload(Meaning.metadata_entries),
+                    selectinload(Word.meanings)
+                    .selectinload(Meaning.translations)
+                    .selectinload(Translation.example_entries),
                 )
             ).scalars().all()
         )

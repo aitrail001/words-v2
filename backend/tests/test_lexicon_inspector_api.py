@@ -8,12 +8,16 @@ from app.core.security import create_access_token
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
+from app.models.meaning_metadata import MeaningMetadata
 from app.models.phrase_entry import PhraseEntry
 from app.models.reference_entry import ReferenceEntry
 from app.models.reference_localization import ReferenceLocalization
 from app.models.translation import Translation
 from app.models.user import User
 from app.models.word import Word
+from app.models.word_confusable import WordConfusable
+from app.models.word_form import WordForm
+from app.models.word_part_of_speech import WordPartOfSpeech
 from app.models.word_relation import WordRelation
 
 
@@ -169,14 +173,21 @@ class TestLexiconInspectorApi:
             phonetic_confidence=0.98,
             cefr_level="B1",
             frequency_rank=100,
-            learner_part_of_speech=["noun", "verb"],
-            confusable_words=[{"word": "bench", "reason": "form"}],
-            word_forms={"plural_forms": ["banks"]},
             source_type="lexicon_snapshot",
             source_reference="snapshot-001",
             learner_generated_at=datetime(2026, 3, 21, 0, 0, tzinfo=timezone.utc),
             created_at=datetime.now(timezone.utc),
         )
+        word.part_of_speech_entries = [
+            WordPartOfSpeech(word_id=word.id, value="noun", order_index=0),
+            WordPartOfSpeech(word_id=word.id, value="verb", order_index=1),
+        ]
+        word.confusable_entries = [
+            WordConfusable(word_id=word.id, confusable_word="bench", note="form", order_index=0),
+        ]
+        word.form_entries = [
+            WordForm(word_id=word.id, form_kind="plural", form_slot="", value="banks", order_index=0),
+        ]
         word_result = MagicMock()
         word_result.scalar_one_or_none.return_value = word
 
@@ -186,9 +197,7 @@ class TestLexiconInspectorApi:
             definition="a financial institution",
             part_of_speech="noun",
             primary_domain="money",
-            secondary_domains=["finance"],
             register_label="neutral",
-            grammar_patterns=["countable noun"],
             usage_note="Common everyday sense.",
             example_sentence="She went to the bank.",
             source="compiled",
@@ -197,6 +206,10 @@ class TestLexiconInspectorApi:
             order_index=0,
             created_at=datetime.now(timezone.utc),
         )
+        meaning.metadata_entries = [
+            MeaningMetadata(meaning_id=meaning.id, metadata_kind="secondary_domain", value="finance", order_index=0),
+            MeaningMetadata(meaning_id=meaning.id, metadata_kind="grammar_pattern", value="countable noun", order_index=0),
+        ]
         meanings_result = MagicMock()
         meanings_result.scalars.return_value.all.return_value = [meaning]
 

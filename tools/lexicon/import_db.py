@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Type
 import hashlib
@@ -26,7 +26,7 @@ def _ensure_backend_path() -> None:
         sys.path.insert(0, backend_str)
 
 
-def _default_models() -> tuple[type, type, type, type, type, type, type, type, type, type, type]:
+def _default_models() -> tuple[type, type, type, type, type, type, type, type, type, type, type, type]:
     _ensure_backend_path()
     from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
@@ -38,9 +38,10 @@ def _default_models() -> tuple[type, type, type, type, type, type, type, type, t
     from app.models.word import Word
     from app.models.word_confusable import WordConfusable
     from app.models.word_form import WordForm
+    from app.models.word_part_of_speech import WordPartOfSpeech
     from app.models.word_relation import WordRelation
 
-    return Word, Meaning, MeaningMetadata, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun, Translation, TranslationExample, WordConfusable, WordForm
+    return Word, Meaning, MeaningMetadata, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun, Translation, TranslationExample, WordConfusable, WordForm, WordPartOfSpeech
 
 
 def _default_phrase_models() -> tuple[type, type, type, type, type]:
@@ -339,15 +340,16 @@ def _sense_run_group_key(sense: dict[str, Any]) -> tuple[str | None, str | None,
     )
 
 
-def _sync_word_level_enrichment_fields(word: Any, row: dict[str, Any], run: Any | None, source_type: str) -> None:
+def _sync_word_level_enrichment_fields(
+    word: Any,
+    row: dict[str, Any],
+    run: Any | None,
+    source_type: str,
+) -> None:
     if row.get("cefr_level") is not None and hasattr(word, "cefr_level"):
         word.cefr_level = row.get("cefr_level")
-    if row.get("part_of_speech") is not None and hasattr(word, "learner_part_of_speech"):
-        word.learner_part_of_speech = list(row.get("part_of_speech") or [])
     if row.get("part_of_speech") is not None and hasattr(word, "part_of_speech"):
         word.part_of_speech = list(row.get("part_of_speech") or [])
-    if row.get("confusable_words") is not None and hasattr(word, "confusable_words"):
-        word.confusable_words = list(row.get("confusable_words") or [])
     if row.get("generated_at") is not None and hasattr(word, "learner_generated_at"):
         word.learner_generated_at = _parse_timestamp(row.get("generated_at"))
     if row.get("generated_at") is not None and hasattr(word, "generated_at"):
@@ -475,6 +477,25 @@ def _sync_word_form_rows(word: Any, row: dict[str, Any], word_form_model: Type[A
     _replace_collection(word, "form_entries", normalized_rows)
 
 
+def _sync_word_part_of_speech_rows(word: Any, row: dict[str, Any], word_part_of_speech_model: Type[Any] | None) -> None:
+    if word_part_of_speech_model is None or not hasattr(word, "part_of_speech_entries"):
+        return
+
+    normalized_rows: list[Any] = []
+    for index, item in enumerate(list(row.get("part_of_speech") or [])):
+        value = str(item or "").strip()
+        if not value:
+            continue
+        normalized_rows.append(
+            word_part_of_speech_model(
+                word_id=word.id,
+                value=value,
+                order_index=index,
+            )
+        )
+    _replace_collection(word, "part_of_speech_entries", normalized_rows)
+
+
 def _sync_translation_example_rows(
     translation: Any,
     translated_examples: list[str],
@@ -525,14 +546,10 @@ def _sync_meaning_level_learner_fields(meaning: Any, sense: dict[str, Any], row:
         meaning.wn_synset_id = sense.get("wn_synset_id")
     if sense.get("primary_domain") is not None and hasattr(meaning, "primary_domain"):
         meaning.primary_domain = sense.get("primary_domain")
-    if sense.get("secondary_domains") is not None and hasattr(meaning, "secondary_domains"):
-        meaning.secondary_domains = list(sense.get("secondary_domains") or [])
     if sense.get("register") is not None and hasattr(meaning, "register_label"):
         meaning.register_label = sense.get("register")
     if sense.get("register") is not None and hasattr(meaning, "register"):
         meaning.register = sense.get("register")
-    if sense.get("grammar_patterns") is not None and hasattr(meaning, "grammar_patterns"):
-        meaning.grammar_patterns = list(sense.get("grammar_patterns") or [])
     if sense.get("usage_note") is not None and hasattr(meaning, "usage_note"):
         meaning.usage_note = sense.get("usage_note")
     meaning_generated_at = sense.get("generated_at") or row.get("generated_at")
@@ -579,6 +596,7 @@ def import_compiled_rows(
     reference_localization_model: Optional[Type[Any]] = None,
     word_confusable_model: Optional[Type[Any]] = None,
     word_form_model: Optional[Type[Any]] = None,
+    word_part_of_speech_model: Optional[Type[Any]] = None,
     progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
 ) -> ImportSummary:
     if word_model is None or meaning_model is None:
@@ -594,6 +612,7 @@ def import_compiled_rows(
             default_translation_example_model,
             default_word_confusable_model,
             default_word_form_model,
+            default_word_part_of_speech_model,
         ) = _default_models()
         if meaning_example_model is None:
             meaning_example_model = default_meaning_example_model
@@ -613,6 +632,8 @@ def import_compiled_rows(
             word_confusable_model = default_word_confusable_model
         if word_form_model is None:
             word_form_model = default_word_form_model
+        if word_part_of_speech_model is None:
+            word_part_of_speech_model = default_word_part_of_speech_model
     resolved_phrase_model = phrase_model
     resolved_phrase_sense_model = phrase_sense_model
     resolved_phrase_sense_localization_model = phrase_sense_localization_model
@@ -886,7 +907,6 @@ def import_compiled_rows(
                 word=row["word"],
                 language=row_language,
                 frequency_rank=row.get("frequency_rank"),
-                word_forms=row.get("forms"),
                 source_type=row_source_type,
                 source_reference=row_source_reference,
             )
@@ -895,16 +915,21 @@ def import_compiled_rows(
             summary = _increment(summary, created_words=1)
         else:
             word.frequency_rank = row.get("frequency_rank")
-            word.word_forms = row.get("forms")
             if hasattr(word, "source_type"):
                 word.source_type = row_source_type
             if hasattr(word, "source_reference"):
                 word.source_reference = row_source_reference
             summary = _increment(summary, updated_words=1)
 
-        _sync_word_level_enrichment_fields(word, row, None, row_source_type)
+        _sync_word_level_enrichment_fields(
+            word,
+            row,
+            None,
+            row_source_type,
+        )
         _sync_word_confusable_rows(word, row, word_confusable_model)
         _sync_word_form_rows(word, row, word_form_model)
+        _sync_word_part_of_speech_rows(word, row, word_part_of_speech_model)
 
         existing_meanings = _load_existing_meanings(session, meaning_model, word.id)
         matched_meaning_ids: set[Any] = set()
@@ -1027,7 +1052,12 @@ def import_compiled_rows(
             if enrichment_job is not None and lexicon_enrichment_run_model is not None:
                 enrichment_run = enrichment_run_by_group.get(_sense_run_group_key(sense))
 
-            _sync_word_level_enrichment_fields(word, row, enrichment_run, row_source_type)
+            _sync_word_level_enrichment_fields(
+                word,
+                row,
+                enrichment_run,
+                row_source_type,
+            )
 
             if meaning_example_model is not None:
                 existing_examples = _load_existing_examples(session, meaning_example_model, meaning.id, row_source_type)
@@ -1085,8 +1115,6 @@ def import_compiled_rows(
                         summary = _increment(summary, updated_translations=1)
                     if hasattr(translation, "usage_note"):
                         translation.usage_note = translated_usage_note
-                    if hasattr(translation, "examples"):
-                        translation.examples = translated_examples
                     _sync_translation_example_rows(translation, translated_examples, translation_example_model)
 
             if word_relation_model is not None:

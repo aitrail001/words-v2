@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.meaning import Meaning
     from app.models.word_confusable import WordConfusable
     from app.models.word_form import WordForm
+    from app.models.word_part_of_speech import WordPartOfSpeech
     from app.models.word_list_item import WordListItem
     from app.models.word_relation import WordRelation
 
@@ -38,11 +39,8 @@ class Word(Base):
         index=True,
     )
     cefr_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    learner_part_of_speech: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    confusable_words: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     learner_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     frequency_rank: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    word_forms: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -65,6 +63,12 @@ class Word(Base):
         "WordForm",
         back_populates="word",
         cascade="all, delete-orphan",
+    )
+    part_of_speech_entries: Mapped[list["WordPartOfSpeech"]] = relationship(
+        "WordPartOfSpeech",
+        back_populates="word",
+        cascade="all, delete-orphan",
+        order_by="WordPartOfSpeech.order_index",
     )
     relations: Mapped[list["WordRelation"]] = relationship(
         "WordRelation",

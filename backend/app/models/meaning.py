@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -29,9 +29,7 @@ class Meaning(Base):
     part_of_speech: Mapped[str | None] = mapped_column(String(50), nullable=True)
     wn_synset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     primary_domain: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    secondary_domains: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     register_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    grammar_patterns: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     usage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     learner_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     example_sentence: Mapped[str | None] = mapped_column(Text, nullable=True)

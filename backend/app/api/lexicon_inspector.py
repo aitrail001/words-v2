@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only, selectinload
 
 from app.api.auth import get_current_admin_user
 from app.core.database import get_db
@@ -20,6 +21,12 @@ from app.models.translation import Translation
 from app.models.user import User
 from app.models.word import Word
 from app.models.word_relation import WordRelation
+from app.services.knowledge_map import (
+    normalize_confusable_words,
+    normalize_meaning_metadata,
+    normalize_word_forms,
+    normalize_word_part_of_speech,
+)
 
 router = APIRouter()
 
@@ -229,7 +236,20 @@ def _sort_entries(items: list[LexiconInspectorListEntry], sort: InspectorSort) -
 
 
 async def _browse_word_entries(db: AsyncSession, q: str | None) -> list[LexiconInspectorListEntry]:
-    result = await db.execute(select(Word))
+    result = await db.execute(
+        select(Word).options(
+            load_only(
+                Word.id,
+                Word.word,
+                Word.language,
+                Word.source_reference,
+                Word.cefr_level,
+                Word.frequency_rank,
+                Word.phonetic,
+                Word.created_at,
+            )
+        )
+    )
     words = result.scalars().all()
     items: list[LexiconInspectorListEntry] = []
     for word in words:
@@ -253,7 +273,20 @@ async def _browse_word_entries(db: AsyncSession, q: str | None) -> list[LexiconI
 
 
 async def _browse_phrase_entries(db: AsyncSession, q: str | None) -> list[LexiconInspectorListEntry]:
-    result = await db.execute(select(PhraseEntry))
+    result = await db.execute(
+        select(PhraseEntry).options(
+            load_only(
+                PhraseEntry.id,
+                PhraseEntry.phrase_text,
+                PhraseEntry.normalized_form,
+                PhraseEntry.language,
+                PhraseEntry.source_reference,
+                PhraseEntry.cefr_level,
+                PhraseEntry.phrase_kind,
+                PhraseEntry.created_at,
+            )
+        )
+    )
     entries = result.scalars().all()
     items: list[LexiconInspectorListEntry] = []
     for entry in entries:
@@ -337,12 +370,25 @@ async def get_word_inspector_detail(
     _current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Word).where(Word.id == entry_id))
+    result = await db.execute(
+        select(Word)
+        .options(
+            selectinload(Word.part_of_speech_entries),
+            selectinload(Word.confusable_entries),
+            selectinload(Word.form_entries),
+        )
+        .where(Word.id == entry_id)
+    )
     word = result.scalar_one_or_none()
     if word is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lexicon inspector entry not found")
 
-    meanings_result = await db.execute(select(Meaning).where(Meaning.word_id == entry_id).order_by(Meaning.order_index))
+    meanings_result = await db.execute(
+        select(Meaning)
+        .options(selectinload(Meaning.metadata_entries))
+        .where(Meaning.word_id == entry_id)
+        .order_by(Meaning.order_index)
+    )
     meanings = meanings_result.scalars().all()
     meaning_ids = [meaning.id for meaning in meanings]
 
@@ -403,9 +449,9 @@ async def get_word_inspector_detail(
         phonetic=word.phonetic,
         phonetic_source=word.phonetic_source,
         phonetic_confidence=word.phonetic_confidence,
-        learner_part_of_speech=word.learner_part_of_speech,
-        confusable_words=word.confusable_words,
-        word_forms=word.word_forms,
+        learner_part_of_speech=normalize_word_part_of_speech(word),
+        confusable_words=normalize_confusable_words(word),
+        word_forms=normalize_word_forms(word),
         source_type=word.source_type,
         source_reference=word.source_reference,
         learner_generated_at=_created_iso(word.learner_generated_at),
@@ -416,9 +462,9 @@ async def get_word_inspector_detail(
                 definition=meaning.definition,
                 part_of_speech=meaning.part_of_speech,
                 primary_domain=meaning.primary_domain,
-                secondary_domains=meaning.secondary_domains,
+                secondary_domains=normalize_meaning_metadata(meaning)["secondary_domains"],
                 register_label=meaning.register_label,
-                grammar_patterns=meaning.grammar_patterns,
+                grammar_patterns=normalize_meaning_metadata(meaning)["grammar_patterns"],
                 usage_note=meaning.usage_note,
                 example_sentence=meaning.example_sentence,
                 source=meaning.source,

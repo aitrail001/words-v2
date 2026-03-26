@@ -4,10 +4,10 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 import re
 
-from sqlalchemy import and_, cast, func, literal, or_, select, union_all
+from sqlalchemy import and_, case, cast, func, literal, or_, select, union_all
 from sqlalchemy.exc import MissingGreenlet
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from app.models.learner_entry_status import LearnerEntryStatus
@@ -22,6 +22,7 @@ from app.models.search_history import SearchHistory
 from app.models.translation import Translation
 from app.models.user_preference import UserPreference
 from app.models.word import Word
+from app.models.word_part_of_speech import WordPartOfSpeech
 from app.models.word_relation import WordRelation
 
 DEFAULT_ACCENT = "us"
@@ -62,6 +63,8 @@ def _word_cefr_level(row: object) -> str | None:
 
 def _word_part_of_speech(row: object) -> str | None:
     value = _mapping_value(row, "learner_part_of_speech")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
     if isinstance(value, list) and value:
         first = value[0]
         if isinstance(first, str) and first.strip():
@@ -254,18 +257,21 @@ def normalize_confusable_words(word: Word) -> list[dict[str, str | None]]:
             if isinstance(getattr(item, "confusable_word", None), str) and str(item.confusable_word).strip()
         ]
 
-    raw_confusables = word.confusable_words if isinstance(word.confusable_words, list) else []
-    items: list[dict[str, str | None]] = []
-    for raw_item in raw_confusables:
-        if not isinstance(raw_item, dict):
-            continue
-        raw_word = raw_item.get("word")
-        if not isinstance(raw_word, str) or not raw_word.strip():
-            continue
-        raw_note = raw_item.get("note")
-        note = raw_note.strip() if isinstance(raw_note, str) and raw_note.strip() else None
-        items.append({"word": raw_word.strip(), "note": note})
-    return items
+    return []
+
+
+def normalize_word_part_of_speech(word: Word) -> list[str]:
+    try:
+        part_of_speech_entries = getattr(word, "part_of_speech_entries", None)
+    except (MissingGreenlet, DetachedInstanceError):
+        part_of_speech_entries = None
+    if isinstance(part_of_speech_entries, list) and part_of_speech_entries:
+        return [
+            str(getattr(item, "value", "") or "").strip()
+            for item in part_of_speech_entries
+            if str(getattr(item, "value", "") or "").strip()
+        ]
+    return []
 
 
 def normalize_word_forms(word: Word) -> dict[str, object]:
@@ -316,24 +322,18 @@ def normalize_word_forms(word: Word) -> dict[str, object]:
             "superlative": superlative,
         }
 
-    forms = word.word_forms if isinstance(word.word_forms, dict) else {}
-    verb_forms = forms.get("verb_forms") if isinstance(forms.get("verb_forms"), dict) else {}
-    plural_forms = [str(item).strip() for item in forms.get("plural_forms", []) if str(item).strip()]
-    derivations = [str(item).strip() for item in forms.get("derivations", []) if str(item).strip()]
-    comparative = forms.get("comparative")
-    superlative = forms.get("superlative")
     return {
         "verb_forms": {
-            "base": str(verb_forms.get("base") or "").strip(),
-            "past": str(verb_forms.get("past") or "").strip(),
-            "gerund": str(verb_forms.get("gerund") or "").strip(),
-            "past_participle": str(verb_forms.get("past_participle") or "").strip(),
-            "third_person_singular": str(verb_forms.get("third_person_singular") or "").strip(),
+            "base": "",
+            "past": "",
+            "gerund": "",
+            "past_participle": "",
+            "third_person_singular": "",
         },
-        "plural_forms": plural_forms,
-        "derivations": derivations,
-        "comparative": comparative.strip() if isinstance(comparative, str) and comparative.strip() else None,
-        "superlative": superlative.strip() if isinstance(superlative, str) and superlative.strip() else None,
+        "plural_forms": [],
+        "derivations": [],
+        "comparative": None,
+        "superlative": None,
     }
 
 
@@ -349,10 +349,7 @@ def normalize_translation_examples(translation: Translation) -> list[str]:
             if str(getattr(item, "text", "") or "").strip()
         ]
 
-    raw_examples = getattr(translation, "examples", None)
-    if not isinstance(raw_examples, list):
-        return []
-    return [str(item).strip() for item in raw_examples if str(item).strip()]
+    return []
 
 
 def normalize_meaning_metadata(meaning: Meaning) -> dict[str, list[str]]:
@@ -379,9 +376,137 @@ def normalize_meaning_metadata(meaning: Meaning) -> dict[str, list[str]]:
         }
 
     return {
-        "secondary_domains": list(meaning.secondary_domains or []),
-        "grammar_patterns": list(meaning.grammar_patterns or []),
+        "secondary_domains": [],
+        "grammar_patterns": [],
     }
+
+
+def _contains_search_pattern(query: str) -> str:
+    return f"%{query}%"
+
+
+def _word_search_query(
+    user_id: uuid.UUID,
+    lowered_query: str,
+    mapped_status: str | None,
+):
+    status_expr = func.coalesce(LearnerEntryStatus.status, literal("undecided"))
+    max_ranked_word_rank = (
+        select(func.coalesce(func.max(Word.frequency_rank), 0))
+        .where(Word.frequency_rank.is_not(None))
+        .scalar_subquery()
+    )
+    rank_alias = aliased(Word)
+    unranked_offset = (
+        select(func.count())
+        .select_from(rank_alias)
+        .where(
+            rank_alias.frequency_rank.is_(None),
+            or_(
+                func.lower(rank_alias.word) < func.lower(Word.word),
+                and_(func.lower(rank_alias.word) == func.lower(Word.word), rank_alias.id <= Word.id),
+            ),
+        )
+        .scalar_subquery()
+    )
+    browse_rank = case(
+        (Word.frequency_rank.is_not(None), Word.frequency_rank),
+        else_=(max_ranked_word_rank + unranked_offset),
+    )
+    query = (
+        select(
+            literal("word").label("entry_type"),
+            Word.id.label("entry_id"),
+            Word.word.label("display_text"),
+            Word.word.label("normalized_form"),
+            browse_rank.label("browse_rank"),
+            Word.cefr_level.label("cefr_level"),
+            _word_primary_part_of_speech_expr().label("learner_part_of_speech"),
+            cast(literal(None), PhraseEntry.phrase_kind.type).label("phrase_kind"),
+            status_expr.label("status"),
+        )
+        .select_from(
+            Word.__table__.outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == user_id,
+                    LearnerEntryStatus.entry_type == "word",
+                    LearnerEntryStatus.entry_id == Word.id,
+                ),
+            )
+        )
+        .where(Word.word.ilike(_contains_search_pattern(lowered_query)))
+    )
+    if mapped_status:
+        query = query.where(status_expr == mapped_status)
+    return query
+
+
+def _phrase_search_query(
+    user_id: uuid.UUID,
+    lowered_query: str,
+    mapped_status: str | None,
+):
+    status_expr = func.coalesce(LearnerEntryStatus.status, literal("undecided"))
+    max_ranked_word_rank = (
+        select(func.coalesce(func.max(Word.frequency_rank), 0))
+        .where(Word.frequency_rank.is_not(None))
+        .scalar_subquery()
+    )
+    unranked_word_count = (
+        select(func.count())
+        .select_from(Word)
+        .where(Word.frequency_rank.is_(None))
+        .scalar_subquery()
+    )
+    rank_alias = aliased(PhraseEntry)
+    phrase_offset = (
+        select(func.count())
+        .select_from(rank_alias)
+        .where(
+            or_(
+                func.lower(rank_alias.normalized_form) < func.lower(PhraseEntry.normalized_form),
+                and_(
+                    func.lower(rank_alias.normalized_form) == func.lower(PhraseEntry.normalized_form),
+                    rank_alias.id <= PhraseEntry.id,
+                ),
+            )
+        )
+        .scalar_subquery()
+    )
+    browse_rank = max_ranked_word_rank + unranked_word_count + phrase_offset
+    query = (
+        select(
+            literal("phrase").label("entry_type"),
+            PhraseEntry.id.label("entry_id"),
+            PhraseEntry.phrase_text.label("display_text"),
+            PhraseEntry.normalized_form.label("normalized_form"),
+            browse_rank.label("browse_rank"),
+            PhraseEntry.cefr_level.label("cefr_level"),
+            cast(literal(None), Word.word.type).label("learner_part_of_speech"),
+            PhraseEntry.phrase_kind.label("phrase_kind"),
+            status_expr.label("status"),
+        )
+        .select_from(
+            PhraseEntry.__table__.outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == user_id,
+                    LearnerEntryStatus.entry_type == "phrase",
+                    LearnerEntryStatus.entry_id == PhraseEntry.id,
+                ),
+            )
+        )
+        .where(
+            or_(
+                PhraseEntry.phrase_text.ilike(_contains_search_pattern(lowered_query)),
+                PhraseEntry.normalized_form.ilike(_contains_search_pattern(lowered_query)),
+            )
+        )
+    )
+    if mapped_status:
+        query = query.where(status_expr == mapped_status)
+    return query
 
 
 def _clean_text(value: str | None) -> str | None:
@@ -394,6 +519,16 @@ def _normalize_string_list(values: object) -> list[str]:
     if not isinstance(values, list):
         return []
     return [str(item).strip() for item in values if isinstance(item, str) and str(item).strip()]
+
+
+def _word_primary_part_of_speech_expr():
+    return (
+        select(WordPartOfSpeech.value)
+        .where(WordPartOfSpeech.word_id == Word.id)
+        .order_by(WordPartOfSpeech.order_index.asc())
+        .limit(1)
+        .scalar_subquery()
+    )
 
 
 async def load_phrase_summary_map(
@@ -599,6 +734,111 @@ def build_entry_lookup(
     return lookup
 
 
+def collect_exact_lookup_terms(
+    *,
+    values: Sequence[str | None] = (),
+    sentences: Sequence[str | None] = (),
+) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        normalized = value.strip().lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        terms.append(normalized)
+    for sentence in sentences:
+        if not isinstance(sentence, str) or not sentence.strip():
+            continue
+        for token in re.findall(r"[A-Za-z]+(?:[-'][A-Za-z]+)*", sentence):
+            normalized = token.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            terms.append(normalized)
+    return terms
+
+
+async def load_entry_lookup_for_terms(
+    db: AsyncSession,
+    terms: Sequence[str],
+) -> dict[str, dict[str, object]]:
+    normalized_terms = [term.strip().lower() for term in terms if isinstance(term, str) and term.strip()]
+    if not normalized_terms:
+        return {}
+
+    words_result = await db.execute(
+        select(
+            Word.id.label("id"),
+            Word.word.label("word"),
+            Word.frequency_rank.label("frequency_rank"),
+            Word.cefr_level.label("cefr_level"),
+            _word_primary_part_of_speech_expr().label("learner_part_of_speech"),
+        ).where(func.lower(Word.word).in_(normalized_terms))
+    )
+    phrases_result = await db.execute(
+        select(
+            PhraseEntry.id.label("id"),
+            PhraseEntry.phrase_text.label("phrase_text"),
+            PhraseEntry.normalized_form.label("normalized_form"),
+            PhraseEntry.cefr_level.label("cefr_level"),
+            PhraseEntry.phrase_kind.label("phrase_kind"),
+        ).where(
+            or_(
+                func.lower(PhraseEntry.normalized_form).in_(normalized_terms),
+                func.lower(PhraseEntry.phrase_text).in_(normalized_terms),
+            )
+        )
+    )
+    words = _result_rows(words_result, _catalog_word_row)
+    phrases = _result_rows(phrases_result, _catalog_phrase_row)
+    return build_entry_lookup(words, phrases)
+
+
+async def load_catalog_neighbors(
+    db: AsyncSession,
+    entry_type: str,
+    entry_id: uuid.UUID,
+) -> tuple[dict[str, object] | None, dict[str, object] | None, dict[str, object] | None]:
+    catalog = _catalog_projection_cte()
+    current_result = await db.execute(
+        select(catalog).where(
+            catalog.c.entry_type == entry_type,
+            catalog.c.entry_id == entry_id,
+        )
+    )
+    current = current_result.mappings().one_or_none()
+    if current is None:
+        return None, None, None
+
+    current_rank = int(current["browse_rank"])
+    neighbors_result = await db.execute(
+        select(catalog)
+        .where(
+            or_(
+                catalog.c.browse_rank == select(func.max(catalog.c.browse_rank))
+                .where(catalog.c.browse_rank < current_rank)
+                .scalar_subquery(),
+                catalog.c.browse_rank == select(func.min(catalog.c.browse_rank))
+                .where(catalog.c.browse_rank > current_rank)
+                .scalar_subquery(),
+            )
+        )
+        .order_by(catalog.c.browse_rank.asc())
+    )
+    previous_item: dict[str, object] | None = None
+    next_item: dict[str, object] | None = None
+    for item in neighbors_result.mappings().all():
+        browse_rank = int(item["browse_rank"])
+        if browse_rank < current_rank:
+            previous_item = dict(item)
+        elif browse_rank > current_rank and next_item is None:
+            next_item = dict(item)
+    return dict(current), previous_item, next_item
+
+
 def resolve_exact_match_target(
     value: str | None,
     lookup: dict[str, dict[str, object]],
@@ -746,12 +986,34 @@ async def build_catalog(
 
     lowered = q.strip().lower() if isinstance(q, str) and q.strip() else None
     if lowered:
-        query = query.where(
-            or_(
-                func.lower(catalog.c.display_text).contains(lowered),
-                func.lower(catalog.c.normalized_form).contains(lowered),
+        word_rows_result = await db.execute(_word_search_query(user_id, lowered, mapped_status))
+        phrase_rows_result = await db.execute(_phrase_search_query(user_id, lowered, mapped_status))
+        raw_rows = [*word_rows_result.mappings().all(), *phrase_rows_result.mappings().all()]
+        items: list[dict] = []
+        for raw_item in raw_rows:
+            items.append(
+                {
+                    "entry_type": str(raw_item["entry_type"]),
+                    "entry_id": raw_item["entry_id"],
+                    "display_text": str(raw_item["display_text"]),
+                    "normalized_form": raw_item["normalized_form"],
+                    "browse_rank": int(raw_item["browse_rank"]),
+                    "status": str(raw_item["status"]),
+                    "cefr_level": raw_item.get("cefr_level"),
+                    "pronunciation": None,
+                    "translation": None,
+                    "primary_definition": None,
+                    "part_of_speech": _word_part_of_speech(raw_item),
+                    "phrase_kind": raw_item.get("phrase_kind"),
+                }
             )
-        )
+        if sort == "rank_desc":
+            items.sort(key=lambda item: (-int(item["browse_rank"]), str(item["display_text"]).lower()))
+        elif sort == "alpha":
+            items.sort(key=lambda item: (str(item["display_text"]).lower(), int(item["browse_rank"])))
+        else:
+            items.sort(key=lambda item: (int(item["browse_rank"]), str(item["display_text"]).lower()))
+        return items[:limit] if limit is not None else items
 
     if sort == "rank_desc":
         query = query.order_by(catalog.c.browse_rank.desc(), func.lower(catalog.c.display_text).asc())
@@ -766,8 +1028,6 @@ async def build_catalog(
     result = await db.execute(query)
     items: list[dict] = []
     for raw_item in result.mappings().all():
-        learner_pos = raw_item.get("learner_part_of_speech")
-        part_of_speech = learner_pos[0] if isinstance(learner_pos, list) and learner_pos else None
         items.append(
             {
                 "entry_type": str(raw_item["entry_type"]),
@@ -780,11 +1040,134 @@ async def build_catalog(
                 "pronunciation": None,
                 "translation": None,
                 "primary_definition": None,
-                "part_of_speech": part_of_speech,
+                "part_of_speech": _word_part_of_speech(raw_item),
                 "phrase_kind": raw_item.get("phrase_kind"),
             }
         )
     return items
+
+
+def _catalog_with_status_from(user_id: uuid.UUID):
+    catalog = _catalog_projection_cte()
+    status_expr = func.coalesce(LearnerEntryStatus.status, literal("undecided"))
+    from_clause = catalog.outerjoin(
+        LearnerEntryStatus,
+        and_(
+            LearnerEntryStatus.user_id == user_id,
+            LearnerEntryStatus.entry_type == catalog.c.entry_type,
+            LearnerEntryStatus.entry_id == catalog.c.entry_id,
+        ),
+    )
+    return catalog, status_expr, from_clause
+
+
+async def load_overview_summary(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    catalog, status_expr, from_clause = _catalog_with_status_from(user_id)
+    range_start_expr = (
+        catalog.c.browse_rank - ((catalog.c.browse_rank - 1) % BUCKET_SIZE)
+    ).label("range_start")
+    result = await db.execute(
+        select(
+            range_start_expr,
+            status_expr.label("status"),
+            func.count().label("entry_count"),
+        )
+        .select_from(from_clause)
+        .group_by(range_start_expr, status_expr)
+        .order_by(range_start_expr.asc(), status_expr.asc())
+    )
+    buckets: dict[int, dict] = {}
+    total_entries = 0
+    for row in result.mappings().all():
+        range_start = int(row["range_start"])
+        status = str(row["status"])
+        entry_count = int(row["entry_count"])
+        bucket = buckets.setdefault(
+            range_start,
+            {
+                "range_start": range_start,
+                "range_end": range_start + BUCKET_SIZE - 1,
+                "total_entries": 0,
+                "counts": {value: 0 for value in STATUS_VALUES},
+            },
+        )
+        bucket["counts"][status] = entry_count
+        bucket["total_entries"] += entry_count
+        total_entries += entry_count
+    return {
+        "bucket_size": BUCKET_SIZE,
+        "total_entries": total_entries,
+        "ranges": [buckets[key] for key in sorted(buckets)],
+    }
+
+
+async def load_dashboard_summary(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    catalog, status_expr, from_clause = _catalog_with_status_from(user_id)
+    counts_result = await db.execute(
+        select(
+            status_expr.label("status"),
+            func.count().label("entry_count"),
+        )
+        .select_from(from_clause)
+        .group_by(status_expr)
+    )
+    counts = {status: 0 for status in STATUS_VALUES}
+    total_entries = 0
+    for row in counts_result.mappings().all():
+        status = str(row["status"])
+        entry_count = int(row["entry_count"])
+        counts[status] = entry_count
+        total_entries += entry_count
+
+    entry_query = (
+        select(
+            catalog.c.entry_type,
+            catalog.c.entry_id,
+            catalog.c.display_text,
+            catalog.c.browse_rank,
+            status_expr.label("status"),
+        )
+        .select_from(from_clause)
+    )
+
+    discovery_result = await db.execute(
+        entry_query.where(status_expr != "known").order_by(catalog.c.browse_rank.asc()).limit(1)
+    )
+    discovery_row = discovery_result.mappings().one_or_none()
+    discovery_entry = dict(discovery_row) if discovery_row is not None else None
+
+    next_learn_result = await db.execute(
+        entry_query.where(status_expr.in_(("to_learn", "learning"))).order_by(
+            case((status_expr == "to_learn", 0), else_=1).asc(),
+            catalog.c.browse_rank.asc(),
+        ).limit(1)
+    )
+    next_learn_row = next_learn_result.mappings().one_or_none()
+    next_learn_entry = dict(next_learn_row) if next_learn_row is not None else None
+
+    if discovery_entry is None and total_entries > 0:
+        first_result = await db.execute(entry_query.order_by(catalog.c.browse_rank.asc()).limit(1))
+        first_row = first_result.mappings().one_or_none()
+        discovery_entry = dict(first_row) if first_row is not None else None
+
+    discovery_range_start = (
+        bucket_start_for_rank(int(discovery_entry["browse_rank"]))
+        if discovery_entry is not None
+        else None
+    )
+
+    return {
+        "total_entries": total_entries,
+        "counts": counts,
+        "discovery_range_start": discovery_range_start,
+        "discovery_range_end": (
+            discovery_range_start + BUCKET_SIZE - 1
+            if discovery_range_start is not None
+            else None
+        ),
+        "discovery_entry": discovery_entry,
+        "next_learn_entry": next_learn_entry or discovery_entry,
+    }
 
 
 async def load_catalog_rows(
@@ -796,7 +1179,7 @@ async def load_catalog_rows(
             Word.word.label("word"),
             Word.frequency_rank.label("frequency_rank"),
             Word.cefr_level.label("cefr_level"),
-            Word.learner_part_of_speech.label("learner_part_of_speech"),
+            _word_primary_part_of_speech_expr().label("learner_part_of_speech"),
         )
     )
     phrases_result = await db.execute(
@@ -844,7 +1227,7 @@ def _catalog_projection_cte():
         Word.word.label("normalized_form"),
         Word.frequency_rank.label("browse_rank"),
         Word.cefr_level.label("cefr_level"),
-        Word.learner_part_of_speech.label("learner_part_of_speech"),
+        _word_primary_part_of_speech_expr().label("learner_part_of_speech"),
         cast(literal(None), PhraseEntry.phrase_kind.type).label("phrase_kind"),
     ).where(Word.frequency_rank.is_not(None))
 
@@ -855,7 +1238,7 @@ def _catalog_projection_cte():
         Word.word.label("normalized_form"),
         (max_ranked_word_rank + unranked_word_offset).label("browse_rank"),
         Word.cefr_level.label("cefr_level"),
-        Word.learner_part_of_speech.label("learner_part_of_speech"),
+        _word_primary_part_of_speech_expr().label("learner_part_of_speech"),
         cast(literal(None), PhraseEntry.phrase_kind.type).label("phrase_kind"),
     ).where(Word.frequency_rank.is_(None))
 
@@ -866,7 +1249,7 @@ def _catalog_projection_cte():
         PhraseEntry.normalized_form.label("normalized_form"),
         (max_ranked_word_rank + unranked_word_count + phrase_offset).label("browse_rank"),
         PhraseEntry.cefr_level.label("cefr_level"),
-        cast(literal(None), Word.learner_part_of_speech.type).label("learner_part_of_speech"),
+        cast(literal(None), Word.word.type).label("learner_part_of_speech"),
         PhraseEntry.phrase_kind.label("phrase_kind"),
     )
 
@@ -907,8 +1290,6 @@ async def load_range_catalog_items(
     status_map = await load_status_map_for_entries(db, user_id, raw_items)
     items: list[dict[str, object]] = []
     for raw_item in raw_items:
-        learner_pos = raw_item.get("learner_part_of_speech")
-        part_of_speech = learner_pos[0] if isinstance(learner_pos, list) and learner_pos else None
         items.append(
             {
                 "entry_type": str(raw_item["entry_type"]),
@@ -921,7 +1302,7 @@ async def load_range_catalog_items(
                 "pronunciation": None,
                 "translation": None,
                 "primary_definition": None,
-                "part_of_speech": part_of_speech,
+                "part_of_speech": _word_part_of_speech(raw_item),
                 "phrase_kind": raw_item.get("phrase_kind"),
             }
         )
