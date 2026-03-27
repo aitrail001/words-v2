@@ -292,7 +292,7 @@ jobs:
 
       - name: Upload Playwright smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: playwright-smoke-artifacts
           path: |
@@ -410,7 +410,7 @@ jobs:
 
       - name: Upload Playwright full artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: playwright-full-artifacts
           path: |
