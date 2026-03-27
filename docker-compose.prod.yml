@@ -1,0 +1,207 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: words-prod-postgres
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.max=10000
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.save=on
+      -c log_min_duration_statement=250
+      -c log_lock_waits=on
+      -c log_temp_files=0
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vocabapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password_in_production}
+      POSTGRES_DB: ${POSTGRES_DB:-vocabapp_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vocabapp -d ${POSTGRES_DB:-vocabapp_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    cpus: 1.5
+    mem_limit: 4g
+    networks:
+      - words-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: words-prod-redis
+    command: redis-server --appendonly yes --maxmemory 384mb --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_prod_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    cpus: 0.25
+    mem_limit: 512m
+    networks:
+      - words-network
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: words-prod-migrate
+    command: sh -lc "cd /app && alembic upgrade head"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-change_this_password_in_production}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-change_this_password_in_production}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      REDIS_URL: redis://redis:6379
+      ENVIRONMENT: production
+      DEV_TEST_USERS_ENABLED: "false"
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - words-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: words-prod-backend
+    command: gunicorn -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8000 app.main:app
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-change_this_password_in_production}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-change_this_password_in_production}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      REDIS_URL: redis://redis:6379
+      ENVIRONMENT: production
+      DEV_TEST_USERS_ENABLED: "false"
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8088,http://localhost:3001}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    cpus: 1.0
+    mem_limit: 2g
+    networks:
+      - words-network
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: words-prod-worker
+    command: celery -A app.celery_app:celery_app worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-change_this_password_in_production}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-change_this_password_in_production}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
+      REDIS_URL: redis://redis:6379
+      ENVIRONMENT: production
+      DEV_TEST_USERS_ENABLED: "false"
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    cpus: 0.5
+    mem_limit: 1536m
+    networks:
+      - words-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: words-prod-frontend
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: /api
+      BACKEND_URL: http://backend:8000/api
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/register || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    cpus: 0.375
+    mem_limit: 1g
+    networks:
+      - words-network
+
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+      dockerfile: Dockerfile.prod
+    container_name: words-prod-admin-frontend
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: http://localhost:8088/api
+      BACKEND_URL: http://backend:8000/api
+    ports:
+      - "3001:3001"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3001/login || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    cpus: 0.25
+    mem_limit: 1g
+    networks:
+      - words-network
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: words-prod-nginx
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8088:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    cpus: 0.125
+    mem_limit: 256m
+    networks:
+      - words-network
+
+volumes:
+  postgres_prod_data:
+    driver: local
+  redis_prod_data:
+    driver: local
+
+networks:
+  words-network:
+    driver: bridge

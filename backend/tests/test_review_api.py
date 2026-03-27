@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
 from app.core.database import get_db
@@ -12,6 +13,7 @@ from app.main import app
 from app.models.user import User
 from app.models.meaning import Meaning
 from app.models.review import ReviewSession, ReviewCard
+from app.api.request_db_metrics import instrument_session_for_request, restore_session_after_request
 
 
 @pytest.fixture
@@ -20,6 +22,7 @@ def mock_db():
     session.execute = AsyncMock()
     session.commit = AsyncMock()
     session.add = MagicMock()
+    session.info = {}
     return session
 
 
@@ -32,8 +35,12 @@ def mock_redis():
 
 @pytest.fixture
 async def client(mock_db, mock_redis):
-    async def override_get_db():
-        yield mock_db
+    async def override_get_db(request: Request):
+        instrument_session_for_request(request, mock_db)
+        try:
+            yield mock_db
+        finally:
+            restore_session_after_request(mock_db)
 
     def override_get_redis():
         return mock_redis
@@ -243,6 +250,32 @@ class TestQueueDue:
         assert data[0]["id"] == str(due_item.id)
         assert data[0]["word"] == "ephemeral"
         assert data[0]["definition"] == "lasting a short time"
+        assert int(response.headers["X-Reviews-Query-Count"]) >= 2
+        assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
+
+    @pytest.mark.asyncio
+    async def test_get_queue_stats_emits_query_metrics_headers(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 3
+        due_result = MagicMock()
+        due_result.scalar_one.return_value = 2
+        aggregate_result = MagicMock()
+        aggregate_result.one.return_value = (10, 7)
+        mock_db.execute.side_effect = [user_result, total_result, due_result, aggregate_result]
+
+        response = await client.get(
+            "/api/reviews/queue/stats",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert int(response.headers["X-Reviews-Query-Count"]) >= 2
+        assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
 
     @pytest.mark.asyncio
     async def test_get_due_queue_items_requires_auth(self, client):

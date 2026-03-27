@@ -100,12 +100,64 @@ const seedFixture = async (): Promise<FixtureIds> => {
       ],
     );
 
-    await client.query("COMMIT");
-
     const row = result.rows[0];
     if (!row) {
       throw new Error("Failed to create resilience vocabulary fixture");
     }
+
+    await client.query(`DELETE FROM lexicon.word_part_of_speech WHERE word_id = $1::uuid`, [
+      row.word_id,
+    ]);
+    await client.query(
+      `
+      INSERT INTO lexicon.word_part_of_speech (id, word_id, value, order_index, created_at)
+      VALUES (gen_random_uuid(), $1::uuid, 'noun', 0, now())
+      `,
+      [row.word_id],
+    );
+    await client.query(
+      `
+      INSERT INTO lexicon.learner_catalog_entries (
+        id,
+        entry_type,
+        entry_id,
+        display_text,
+        normalized_form,
+        browse_rank,
+        bucket_start,
+        cefr_level,
+        primary_part_of_speech,
+        phrase_kind,
+        is_ranked
+      )
+      VALUES (
+        gen_random_uuid(),
+        'word',
+        $1::uuid,
+        $2::text,
+        lower($2::text),
+        $3::integer,
+        1,
+        NULL,
+        'noun',
+        NULL,
+        true
+      )
+      ON CONFLICT (entry_type, entry_id)
+      DO UPDATE SET
+        display_text = EXCLUDED.display_text,
+        normalized_form = EXCLUDED.normalized_form,
+        browse_rank = EXCLUDED.browse_rank,
+        bucket_start = EXCLUDED.bucket_start,
+        cefr_level = EXCLUDED.cefr_level,
+        primary_part_of_speech = EXCLUDED.primary_part_of_speech,
+        phrase_kind = EXCLUDED.phrase_kind,
+        is_ranked = EXCLUDED.is_ranked
+      `,
+      [row.word_id, RESILIENCE_WORD, RESILIENCE_FREQUENCY_RANK],
+    );
+
+    await client.query("COMMIT");
 
     return {
       wordId: row.word_id,

@@ -3,12 +3,14 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
 from app.core.database import get_db
 from app.core.redis import get_redis
 from app.core.security import create_access_token, hash_password
 from app.main import app
+from app.api.request_db_metrics import instrument_session_for_request, restore_session_after_request
 from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
@@ -31,6 +33,7 @@ def mock_db():
     session.execute = AsyncMock()
     session.commit = AsyncMock()
     session.add = MagicMock()
+    session.info = {}
     return session
 
 
@@ -43,8 +46,12 @@ def mock_redis():
 
 @pytest.fixture
 async def client(mock_db, mock_redis):
-    async def override_get_db():
-        yield mock_db
+    async def override_get_db(request: Request):
+        instrument_session_for_request(request, mock_db)
+        try:
+            yield mock_db
+        finally:
+            restore_session_after_request(mock_db)
 
     def override_get_redis():
         return mock_redis
@@ -116,7 +123,7 @@ class TestKnowledgeMapOverview:
         )
 
         assert response.status_code == 200
-        assert response.headers["X-Knowledge-Map-Query-Count"] == "1"
+        assert response.headers["X-Knowledge-Map-Query-Count"] == "2"
         assert float(response.headers["X-Knowledge-Map-Query-Time-Ms"]) >= 0.0
 
     @pytest.mark.asyncio
@@ -594,7 +601,6 @@ class TestKnowledgeMapList:
                     }
                 ]
             ),
-            mappings_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
@@ -975,30 +981,26 @@ class TestKnowledgeMapDetail:
             mappings_all_result(
                 [
                     {
-                        "id": word.id,
-                        "word": "time",
-                        "frequency_rank": 60,
-                        "cefr_level": None,
-                        "learner_part_of_speech": "noun",
+                        "entry_type": "word",
+                        "entry_id": word.id,
+                        "display_text": "time",
+                        "normalized_form": "time",
+                        "browse_rank": 60,
                     },
                     {
-                        "id": linked_word.id,
-                        "word": "duration",
-                        "frequency_rank": 500,
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
+                        "entry_type": "word",
+                        "entry_id": linked_word.id,
+                        "display_text": "duration",
+                        "normalized_form": "duration",
+                        "browse_rank": 500,
                     },
-                ]
-            ),
-            mappings_all_result(
-                [
                     {
-                        "id": linked_phrase.id,
-                        "phrase_text": "have time",
+                        "entry_type": "phrase",
+                        "entry_id": linked_phrase.id,
+                        "display_text": "have time",
                         "normalized_form": "have time",
-                        "cefr_level": None,
-                        "phrase_kind": "phrase",
-                    }
+                        "browse_rank": 1001,
+                    },
                 ]
             ),
         ]
@@ -1286,22 +1288,18 @@ class TestKnowledgeMapDetail:
             mappings_all_result(
                 [
                     {
-                        "id": linked_word.id,
-                        "word": "support",
-                        "frequency_rank": 320,
-                        "cefr_level": None,
-                        "learner_part_of_speech": None,
-                    }
-                ]
-            ),
-            mappings_all_result(
-                [
+                        "entry_type": "word",
+                        "entry_id": linked_word.id,
+                        "display_text": "support",
+                        "normalized_form": "support",
+                        "browse_rank": 320,
+                    },
                     {
-                        "id": linked_phrase.id,
-                        "phrase_text": "depend on",
+                        "entry_type": "phrase",
+                        "entry_id": linked_phrase.id,
+                        "display_text": "depend on",
                         "normalized_form": "depend on",
-                        "cefr_level": None,
-                        "phrase_kind": "phrasal_verb",
+                        "browse_rank": 1001,
                     }
                 ]
             ),
@@ -1629,10 +1627,6 @@ class TestKnowledgeMapSearchAndHistory:
                         "learner_part_of_speech": None,
                         "phrase_kind": None,
                     },
-                ]
-            ),
-            mappings_all_result(
-                [
                     {
                         "entry_type": "phrase",
                         "entry_id": phrase.id,

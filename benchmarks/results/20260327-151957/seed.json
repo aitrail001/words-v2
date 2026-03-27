@@ -1,0 +1,9 @@
+{
+  "host_base_url": "http://localhost:8088/api",
+  "k6_base_url": "http://host.docker.internal:8088/api",
+  "bench_user_email": "bench-user@example.com",
+  "bench_admin_email": "bench-admin@example.com",
+  "bench_word_id": "f2075985-5429-46c1-b833-4b6c28ef354c",
+  "bench_phrase_id": "84b30fab-270d-4d88-a5de-db803cc34332",
+  "bench_meaning_ids": "24e3bf0a-10b9-4387-9ac0-4c91b610cd1c,cd3f46d3-f2ac-4e37-a2d4-fd3c75bfc480,6c7a0290-b1b2-4be8-9578-81b9f9317549,5d669582-570c-475c-aa3f-3aa79e8b40af,7e73d285-310a-463d-a388-3d5a68c09e27,dbb28108-dad8-4863-bd82-f724dcf6c6cf,f910e785-c384-451a-9905-b23a6a4547ec,48159399-9c1b-4c3f-8bcc-1a01655da706,0ec1101d-5ec3-46d8-a2e6-cc892fcb0c3d,bacab4b2-a939-4857-9881-aafb3224e9c9,d75701f3-0ea3-4220-8a71-5d4ac4870cd4,455b7790-2cbe-4f6e-a0bc-4c681917873e,1d3be9bc-8e74-4040-87c5-e9f64ca1046d,53bc5381-a727-4ebd-8eea-0e9c259ce77c,6c22ca69-012a-4802-be5b-698dd615cf76,a3df03a4-2082-431e-8b62-5389c71f729c,130a1655-9ae6-4ab5-be82-0d737281170f,2e79c283-1ada-476e-933b-6e360f0d173f,a7234c11-c9f7-4553-ad92-9c8f575a2ee1,d130cac2-f83b-4ef8-bd88-158e7aad321f,cdf29294-c291-4829-89fa-e8d4a59dcd75,e3936658-b69b-4b6c-b466-cf06a8a3f130,4a06598e-ad7b-49df-904e-9a4bcc41239c,2a6bd44d-f540-479f-9475-f3b27e3d4784,3b2f764f-b409-493d-9635-3043a025f5a0"
+}

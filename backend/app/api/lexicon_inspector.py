@@ -1,17 +1,21 @@
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
+from time import perf_counter
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import load_only, selectinload
+from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_admin_user
+from app.api.request_db_metrics import finalize_request_db_metrics
 from app.core.database import get_db
+from app.core.logging import get_logger
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+from app.models.learner_catalog_entry import LearnerCatalogEntry
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.phrase_entry import PhraseEntry
@@ -29,6 +33,7 @@ from app.services.knowledge_map import (
 )
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 InspectorFamily = Literal["word", "phrase", "reference"]
 InspectorFamilyFilter = Literal["all", "word", "phrase", "reference"]
@@ -235,106 +240,271 @@ def _sort_entries(items: list[LexiconInspectorListEntry], sort: InspectorSort) -
     )
 
 
-async def _browse_word_entries(db: AsyncSession, q: str | None) -> list[LexiconInspectorListEntry]:
-    result = await db.execute(
-        select(Word).options(
-            load_only(
-                Word.id,
-                Word.word,
-                Word.language,
-                Word.source_reference,
-                Word.cefr_level,
-                Word.frequency_rank,
-                Word.phonetic,
-                Word.created_at,
-            )
-        )
+def _browse_word_entries_query(q: str | None):
+    query = select(
+        literal("word").label("family"),
+        Word.id.label("id"),
+        Word.word.label("display_text"),
+        Word.word.label("normalized_form"),
+        Word.language.label("language"),
+        Word.source_reference.label("source_reference"),
+        Word.cefr_level.label("cefr_level"),
+        Word.frequency_rank.label("frequency_rank"),
+        Word.phonetic.label("secondary_label"),
+        Word.created_at.label("created_at"),
     )
-    words = result.scalars().all()
-    items: list[LexiconInspectorListEntry] = []
-    for word in words:
-        if not _entry_matches(q, word.word, word.source_reference):
-            continue
-        items.append(
-            LexiconInspectorListEntry(
-                id=str(word.id),
-                family="word",
-                display_text=word.word,
-                normalized_form=word.word,
-                language=word.language,
-                source_reference=word.source_reference,
-                cefr_level=word.cefr_level,
-                frequency_rank=word.frequency_rank,
-                secondary_label=word.phonetic,
-                created_at=_created_iso(word.created_at),
+    if q:
+        lowered = q.strip().lower()
+        if lowered:
+            query = query.where(
+                or_(
+                    func.lower(Word.word).contains(lowered),
+                    func.lower(Word.source_reference).contains(lowered),
+                )
             )
-        )
-    return items
+    return query
 
 
-async def _browse_phrase_entries(db: AsyncSession, q: str | None) -> list[LexiconInspectorListEntry]:
-    result = await db.execute(
-        select(PhraseEntry).options(
-            load_only(
-                PhraseEntry.id,
-                PhraseEntry.phrase_text,
-                PhraseEntry.normalized_form,
-                PhraseEntry.language,
-                PhraseEntry.source_reference,
-                PhraseEntry.cefr_level,
-                PhraseEntry.phrase_kind,
-                PhraseEntry.created_at,
-            )
-        )
+def _browse_phrase_entries_query(q: str | None):
+    query = select(
+        literal("phrase").label("family"),
+        PhraseEntry.id.label("id"),
+        PhraseEntry.phrase_text.label("display_text"),
+        PhraseEntry.normalized_form.label("normalized_form"),
+        PhraseEntry.language.label("language"),
+        PhraseEntry.source_reference.label("source_reference"),
+        PhraseEntry.cefr_level.label("cefr_level"),
+        literal(None).label("frequency_rank"),
+        PhraseEntry.phrase_kind.label("secondary_label"),
+        PhraseEntry.created_at.label("created_at"),
     )
-    entries = result.scalars().all()
-    items: list[LexiconInspectorListEntry] = []
-    for entry in entries:
-        if not _entry_matches(q, entry.phrase_text, entry.normalized_form, entry.source_reference):
-            continue
-        items.append(
-            LexiconInspectorListEntry(
-                id=str(entry.id),
-                family="phrase",
-                display_text=entry.phrase_text,
-                normalized_form=entry.normalized_form,
-                language=entry.language,
-                source_reference=entry.source_reference,
-                cefr_level=entry.cefr_level,
-                frequency_rank=None,
-                secondary_label=entry.phrase_kind,
-                created_at=_created_iso(entry.created_at),
+    if q:
+        lowered = q.strip().lower()
+        if lowered:
+            query = query.where(
+                or_(
+                    func.lower(PhraseEntry.phrase_text).contains(lowered),
+                    func.lower(PhraseEntry.normalized_form).contains(lowered),
+                    func.lower(PhraseEntry.source_reference).contains(lowered),
+                )
             )
-        )
-    return items
+    return query
 
 
-async def _browse_reference_entries(db: AsyncSession, q: str | None) -> list[LexiconInspectorListEntry]:
-    result = await db.execute(select(ReferenceEntry))
-    entries = result.scalars().all()
-    items: list[LexiconInspectorListEntry] = []
-    for entry in entries:
-        if not _entry_matches(q, entry.display_form, entry.normalized_form, entry.source_reference):
-            continue
-        items.append(
-            LexiconInspectorListEntry(
-                id=str(entry.id),
-                family="reference",
-                display_text=entry.display_form,
-                normalized_form=entry.normalized_form,
-                language=entry.language,
-                source_reference=entry.source_reference,
-                cefr_level=None,
-                frequency_rank=None,
-                secondary_label=entry.reference_type,
-                created_at=_created_iso(entry.created_at),
+def _browse_reference_entries_query(q: str | None):
+    query = select(
+        literal("reference").label("family"),
+        ReferenceEntry.id.label("id"),
+        ReferenceEntry.display_form.label("display_text"),
+        ReferenceEntry.normalized_form.label("normalized_form"),
+        ReferenceEntry.language.label("language"),
+        ReferenceEntry.source_reference.label("source_reference"),
+        literal(None).label("cefr_level"),
+        literal(None).label("frequency_rank"),
+        ReferenceEntry.reference_type.label("secondary_label"),
+        ReferenceEntry.created_at.label("created_at"),
+    )
+    if q:
+        lowered = q.strip().lower()
+        if lowered:
+            query = query.where(
+                or_(
+                    func.lower(ReferenceEntry.display_form).contains(lowered),
+                    func.lower(ReferenceEntry.normalized_form).contains(lowered),
+                    func.lower(ReferenceEntry.source_reference).contains(lowered),
+                )
             )
+    return query
+
+
+def _browse_entries_order_by(entries, sort: InspectorSort):
+    if sort == "alpha_asc":
+        return [
+            func.lower(entries.c.display_text).asc(),
+            entries.c.family.asc(),
+            entries.c.id.asc(),
+        ]
+    if sort == "rank_asc":
+        return [
+            entries.c.frequency_rank.asc().nullslast(),
+            func.lower(entries.c.display_text).asc(),
+            entries.c.family.asc(),
+            entries.c.id.asc(),
+        ]
+    return [
+        entries.c.created_at.desc().nullslast(),
+        entries.c.family.asc(),
+        entries.c.id.asc(),
+    ]
+
+
+async def _browse_word_entries_alpha_page(
+    db: AsyncSession,
+    *,
+    page_size: int,
+) -> list[LexiconInspectorListEntry]:
+    seed = (
+        select(
+            LearnerCatalogEntry.entry_id.label("entry_id"),
+            LearnerCatalogEntry.display_text.label("display_text"),
         )
-    return items
+        .where(LearnerCatalogEntry.entry_type == "word")
+        .order_by(func.lower(LearnerCatalogEntry.display_text).asc(), LearnerCatalogEntry.entry_id.asc())
+        .limit(page_size)
+        .subquery()
+    )
+    result = await db.execute(
+        select(
+            seed.c.entry_id.label("id"),
+            seed.c.display_text.label("display_text"),
+            Word.word.label("normalized_form"),
+            Word.language.label("language"),
+            Word.source_reference.label("source_reference"),
+            Word.cefr_level.label("cefr_level"),
+            Word.frequency_rank.label("frequency_rank"),
+            Word.phonetic.label("secondary_label"),
+            Word.created_at.label("created_at"),
+        )
+        .join(Word, Word.id == seed.c.entry_id)
+        .order_by(func.lower(seed.c.display_text).asc(), seed.c.entry_id.asc())
+    )
+    return [
+        LexiconInspectorListEntry(
+            id=str(row["id"]),
+            family="word",
+            display_text=row["display_text"],
+            normalized_form=row["normalized_form"],
+            language=row["language"],
+            source_reference=row["source_reference"],
+            cefr_level=row["cefr_level"],
+            frequency_rank=row["frequency_rank"],
+            secondary_label=row["secondary_label"],
+            created_at=_created_iso(row["created_at"]),
+        )
+        for row in result.mappings().all()
+    ]
+
+
+async def _browse_phrase_entries_alpha_page(
+    db: AsyncSession,
+    *,
+    page_size: int,
+) -> list[LexiconInspectorListEntry]:
+    seed = (
+        select(
+            LearnerCatalogEntry.entry_id.label("entry_id"),
+            LearnerCatalogEntry.display_text.label("display_text"),
+        )
+        .where(LearnerCatalogEntry.entry_type == "phrase")
+        .order_by(func.lower(LearnerCatalogEntry.display_text).asc(), LearnerCatalogEntry.entry_id.asc())
+        .limit(page_size)
+        .subquery()
+    )
+    result = await db.execute(
+        select(
+            seed.c.entry_id.label("id"),
+            seed.c.display_text.label("display_text"),
+            PhraseEntry.normalized_form.label("normalized_form"),
+            PhraseEntry.language.label("language"),
+            PhraseEntry.source_reference.label("source_reference"),
+            PhraseEntry.cefr_level.label("cefr_level"),
+            PhraseEntry.phrase_kind.label("secondary_label"),
+            PhraseEntry.created_at.label("created_at"),
+        )
+        .join(PhraseEntry, PhraseEntry.id == seed.c.entry_id)
+        .order_by(func.lower(seed.c.display_text).asc(), seed.c.entry_id.asc())
+    )
+    return [
+        LexiconInspectorListEntry(
+            id=str(row["id"]),
+            family="phrase",
+            display_text=row["display_text"],
+            normalized_form=row["normalized_form"],
+            language=row["language"],
+            source_reference=row["source_reference"],
+            cefr_level=row["cefr_level"],
+            frequency_rank=None,
+            secondary_label=row["secondary_label"],
+            created_at=_created_iso(row["created_at"]),
+        )
+        for row in result.mappings().all()
+    ]
+
+
+async def _browse_reference_entries_alpha_page(
+    db: AsyncSession,
+    *,
+    page_size: int,
+) -> list[LexiconInspectorListEntry]:
+    result = await db.execute(
+        select(
+            ReferenceEntry.id.label("id"),
+            ReferenceEntry.display_form.label("display_text"),
+            ReferenceEntry.normalized_form.label("normalized_form"),
+            ReferenceEntry.language.label("language"),
+            ReferenceEntry.source_reference.label("source_reference"),
+            ReferenceEntry.reference_type.label("secondary_label"),
+            ReferenceEntry.created_at.label("created_at"),
+        )
+        .order_by(func.lower(ReferenceEntry.display_form).asc(), ReferenceEntry.id.asc())
+        .limit(page_size)
+    )
+    return [
+        LexiconInspectorListEntry(
+            id=str(row["id"]),
+            family="reference",
+            display_text=row["display_text"],
+            normalized_form=row["normalized_form"],
+            language=row["language"],
+            source_reference=row["source_reference"],
+            cefr_level=None,
+            frequency_rank=None,
+            secondary_label=row["secondary_label"],
+            created_at=_created_iso(row["created_at"]),
+        )
+        for row in result.mappings().all()
+    ]
+
+
+async def _browse_entries_alpha_fast_path(
+    db: AsyncSession,
+    *,
+    family: InspectorFamilyFilter,
+    limit: int,
+    offset: int,
+) -> tuple[list[LexiconInspectorListEntry], int]:
+    page_size = limit + offset
+    items: list[LexiconInspectorListEntry] = []
+    total = 0
+    if family in {"all", "word"}:
+        total += (
+            await db.execute(
+                select(func.count())
+                .select_from(LearnerCatalogEntry)
+                .where(LearnerCatalogEntry.entry_type == "word")
+            )
+        ).scalar_one()
+        items.extend(await _browse_word_entries_alpha_page(db, page_size=page_size))
+    if family in {"all", "phrase"}:
+        total += (
+            await db.execute(
+                select(func.count())
+                .select_from(LearnerCatalogEntry)
+                .where(LearnerCatalogEntry.entry_type == "phrase")
+            )
+        ).scalar_one()
+        items.extend(await _browse_phrase_entries_alpha_page(db, page_size=page_size))
+    if family in {"all", "reference"}:
+        total += (await db.execute(select(func.count()).select_from(ReferenceEntry))).scalar_one()
+        items.extend(await _browse_reference_entries_alpha_page(db, page_size=page_size))
+    sorted_items = _sort_entries(items, "alpha_asc")
+    return sorted_items[offset: offset + limit], total
 
 
 @router.get("/entries", response_model=LexiconInspectorListResponse)
 async def browse_lexicon_entries(
+    request: Request,
+    response: Response,
     family: InspectorFamilyFilter = Query(default="all"),
     q: str | None = Query(default=None),
     sort: InspectorSort = Query(default="updated_desc"),
@@ -343,33 +513,72 @@ async def browse_lexicon_entries(
     _current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    items: list[LexiconInspectorListEntry] = []
-    if family in {"all", "word"}:
-        items.extend(await _browse_word_entries(db, q))
-    if family in {"all", "phrase"}:
-        items.extend(await _browse_phrase_entries(db, q))
-    if family in {"all", "reference"}:
-        items.extend(await _browse_reference_entries(db, q))
+    request_start = perf_counter()
+    if not q and sort == "alpha_asc":
+        paged_items, total = await _browse_entries_alpha_fast_path(
+            db,
+            family=family,
+            limit=limit,
+            offset=offset,
+        )
+    else:
+        union_queries = []
+        if family in {"all", "word"}:
+            union_queries.append(_browse_word_entries_query(q))
+        if family in {"all", "phrase"}:
+            union_queries.append(_browse_phrase_entries_query(q))
+        if family in {"all", "reference"}:
+            union_queries.append(_browse_reference_entries_query(q))
 
-    sorted_items = _sort_entries(items, sort)
-    paged_items = sorted_items[offset: offset + limit]
-    return LexiconInspectorListResponse(
+        entries = union_all(*union_queries).subquery()
+        total_result = await db.execute(select(func.count()).select_from(entries))
+        total = total_result.scalar_one()
+        page_result = await db.execute(
+            select(entries).order_by(*_browse_entries_order_by(entries, sort)).offset(offset).limit(limit)
+        )
+        paged_items = [
+            LexiconInspectorListEntry(
+                id=str(row["id"]),
+                family=row["family"],
+                display_text=row["display_text"],
+                normalized_form=row["normalized_form"],
+                language=row["language"],
+                source_reference=row["source_reference"],
+                cefr_level=row["cefr_level"],
+                frequency_rank=row["frequency_rank"],
+                secondary_label=row["secondary_label"],
+                created_at=_created_iso(row["created_at"]),
+            )
+            for row in page_result.mappings().all()
+        ]
+    result = LexiconInspectorListResponse(
         items=paged_items,
-        total=len(sorted_items),
+        total=total,
         family=family,
         q=q,
         limit=limit,
         offset=offset,
-        has_more=offset + limit < len(sorted_items),
+        has_more=offset + limit < total,
     )
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Lexicon-Inspector",
+        request_start=request_start,
+    )
+    logger.info("lexicon_inspector_request", route_name="browse_entries", result_count=total, **metrics)
+    return result
 
 
 @router.get("/entries/word/{entry_id}", response_model=LexiconInspectorWordDetail)
 async def get_word_inspector_detail(
     entry_id: uuid.UUID,
+    request: Request,
+    response: Response,
     _current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
+    request_start = perf_counter()
     result = await db.execute(
         select(Word)
         .options(
@@ -437,7 +646,7 @@ async def get_word_inspector_detail(
         )
         enrichment_runs = runs_result.scalars().all()
 
-    return LexiconInspectorWordDetail(
+    result = LexiconInspectorWordDetail(
         family="word",
         id=str(word.id),
         display_text=word.word,
@@ -511,14 +720,25 @@ async def get_word_inspector_detail(
             for run in enrichment_runs
         ],
     )
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Lexicon-Inspector",
+        request_start=request_start,
+    )
+    logger.info("lexicon_inspector_request", route_name="word_detail", **metrics)
+    return result
 
 
 @router.get("/entries/phrase/{entry_id}", response_model=LexiconInspectorPhraseDetail)
 async def get_phrase_inspector_detail(
     entry_id: uuid.UUID,
+    request: Request,
+    response: Response,
     _current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
+    request_start = perf_counter()
     result = await db.execute(select(PhraseEntry).where(PhraseEntry.id == entry_id))
     entry = result.scalar_one_or_none()
     if entry is None:
@@ -560,7 +780,7 @@ async def get_phrase_inspector_detail(
             )
         )
 
-    return LexiconInspectorPhraseDetail(
+    result = LexiconInspectorPhraseDetail(
         family="phrase",
         id=str(entry.id),
         display_text=entry.phrase_text,
@@ -579,6 +799,14 @@ async def get_phrase_inspector_detail(
         senses=senses,
         created_at=_created_iso(entry.created_at),
     )
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Lexicon-Inspector",
+        request_start=request_start,
+    )
+    logger.info("lexicon_inspector_request", route_name="phrase_detail", **metrics)
+    return result
 
 
 @router.get("/entries/reference/{entry_id}", response_model=LexiconInspectorReferenceDetail)

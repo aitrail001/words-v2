@@ -2,17 +2,20 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.redis import get_redis
 from app.main import app
+from app.api.request_db_metrics import instrument_session_for_request, restore_session_after_request
 
 
 @pytest.fixture
 def mock_db():
     session = AsyncMock(spec=AsyncSession)
     session.execute = AsyncMock(return_value=MagicMock())
+    session.info = {}
     return session
 
 
@@ -28,8 +31,12 @@ def mock_redis():
 
 @pytest.fixture
 async def client(mock_db, mock_redis):
-    async def override_get_db():
-        yield mock_db
+    async def override_get_db(request: Request):
+        instrument_session_for_request(request, mock_db)
+        try:
+            yield mock_db
+        finally:
+            restore_session_after_request(mock_db)
 
     def override_get_redis():
         return mock_redis

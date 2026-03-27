@@ -35,46 +35,63 @@ class TestLexiconInspectorApi:
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
 
-        word = Word(
-          id=uuid.uuid4(),
-          word="bank",
-          language="en",
-          phonetic="bæŋk",
-          cefr_level="B1",
-          frequency_rank=100,
-          source_reference="snapshot-001",
-          created_at=datetime.now(timezone.utc),
-        )
-        phrase = PhraseEntry(
-          id=uuid.uuid4(),
-          phrase_text="break a leg",
-          normalized_form="break a leg",
-          phrase_kind="idiom",
-          language="en",
-          cefr_level="B2",
-          source_reference="snapshot-001",
-          created_at=datetime.now(timezone.utc),
-        )
-        reference = ReferenceEntry(
-          id=uuid.uuid4(),
-          reference_type="name",
-          display_form="London",
-          normalized_form="london",
-          translation_mode="borrowed",
-          brief_description="city",
-          pronunciation="ˈlʌndən",
-          language="en",
-          source_reference="snapshot-001",
-          created_at=datetime.now(timezone.utc),
-        )
-
-        word_result = MagicMock()
-        word_result.scalars.return_value.all.return_value = [word]
-        phrase_result = MagicMock()
-        phrase_result.scalars.return_value.all.return_value = [phrase]
-        reference_result = MagicMock()
-        reference_result.scalars.return_value.all.return_value = [reference]
-        mock_db.execute.side_effect = [user_result, word_result, phrase_result, reference_result]
+        word_page_result = MagicMock()
+        word_page_result.mappings.return_value.all.return_value = [
+            {
+                "id": str(uuid.uuid4()),
+                "display_text": "bank",
+                "normalized_form": "bank",
+                "language": "en",
+                "source_reference": "snapshot-001",
+                "cefr_level": "B1",
+                "frequency_rank": 100,
+                "secondary_label": "bæŋk",
+                "created_at": datetime.now(timezone.utc),
+            }
+        ]
+        phrase_page_result = MagicMock()
+        phrase_page_result.mappings.return_value.all.return_value = [
+            {
+                "id": str(uuid.uuid4()),
+                "display_text": "break a leg",
+                "normalized_form": "break a leg",
+                "language": "en",
+                "source_reference": "snapshot-001",
+                "cefr_level": "B2",
+                "frequency_rank": None,
+                "secondary_label": "idiom",
+                "created_at": datetime.now(timezone.utc),
+            }
+        ]
+        reference_page_result = MagicMock()
+        reference_page_result.mappings.return_value.all.return_value = [
+            {
+                "id": str(uuid.uuid4()),
+                "display_text": "London",
+                "normalized_form": "london",
+                "language": "en",
+                "source_reference": "snapshot-001",
+                "cefr_level": None,
+                "frequency_rank": None,
+                "secondary_label": "name",
+                "created_at": datetime.now(timezone.utc),
+            },
+        ]
+        word_count_result = MagicMock()
+        word_count_result.scalar_one.return_value = 1
+        phrase_count_result = MagicMock()
+        phrase_count_result.scalar_one.return_value = 1
+        reference_count_result = MagicMock()
+        reference_count_result.scalar_one.return_value = 1
+        mock_db.execute.side_effect = [
+            user_result,
+            word_count_result,
+            word_page_result,
+            phrase_count_result,
+            phrase_page_result,
+            reference_count_result,
+            reference_page_result,
+        ]
 
         response = await client.get(
           "/api/lexicon-inspector/entries?family=all&sort=alpha_asc&limit=25&offset=0",
@@ -82,6 +99,8 @@ class TestLexiconInspectorApi:
         )
 
         assert response.status_code == 200
+        assert int(response.headers["X-Lexicon-Inspector-Query-Count"]) >= 3
+        assert float(response.headers["X-Lexicon-Inspector-Query-Time-Ms"]) >= 0.0
         data = response.json()
         assert data["total"] == 3
         assert {item["family"] for item in data["items"]} == {"word", "phrase", "reference"}

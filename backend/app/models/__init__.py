@@ -10,6 +10,7 @@ from app.models.lexicon_job import LexiconJob
 from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
 from app.models.lexicon_review_batch import LexiconReviewBatch
 from app.models.lexicon_review_item import LexiconReviewItem
+from app.models.learner_catalog_entry import LearnerCatalogEntry
 from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.phrase_entry import PhraseEntry
 from app.models.phrase_sense import PhraseSense
@@ -63,6 +64,7 @@ __all__ = [
     "LexiconRegenerationRequest",
     "LexiconReviewBatch",
     "LexiconReviewItem",
+    "LearnerCatalogEntry",
     "LearnerEntryStatus",
     "PhraseEntry",
     "PhraseSense",

@@ -1,6 +1,7 @@
 import uuid
+from time import perf_counter
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, field_validator
 from redis.asyncio import Redis
@@ -17,6 +18,7 @@ from app.core.security import (
 )
 from app.models.user import User
 from app.services.auth_tokens import AuthTokenService
+from app.api.request_db_metrics import finalize_request_db_metrics
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -160,9 +162,12 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: LoginRequest,
+    http_request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ) -> TokenResponse:
+    request_start = perf_counter()
     # Find user
     result = await db.execute(select(User).where(User.email == request.email))
     user = result.scalar_one_or_none()
@@ -186,6 +191,13 @@ async def login(
     tokens = await token_service.issue_token_pair(
         subject=str(user.id), extra={"email": user.email, "role": user.role}
     )
+    metrics = finalize_request_db_metrics(
+        response,
+        http_request,
+        header_prefix="X-Auth",
+        request_start=request_start,
+    )
+    logger.info("auth_request", route_name="login", **metrics)
 
     return TokenResponse(**tokens)
 
@@ -193,8 +205,11 @@ async def login(
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_tokens(
     request: RefreshRequest,
+    http_request: Request,
+    response: Response,
     redis: Redis = Depends(get_redis),
 ) -> TokenResponse:
+    request_start = perf_counter()
     token_service = AuthTokenService(redis)
     tokens = await token_service.rotate_refresh_token(request.refresh_token)
     if tokens is None:
@@ -202,6 +217,13 @@ async def refresh_tokens(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         )
+    metrics = finalize_request_db_metrics(
+        response,
+        http_request,
+        header_prefix="X-Auth",
+        request_start=request_start,
+    )
+    logger.info("auth_request", route_name="refresh", **metrics)
     return TokenResponse(**tokens)
 
 
@@ -239,8 +261,18 @@ async def logout(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
+    request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
 ) -> UserResponse:
+    request_start = perf_counter()
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Auth",
+        request_start=request_start,
+    )
+    logger.info("auth_request", route_name="me", **metrics)
     return UserResponse(
         id=str(current_user.id),
         email=current_user.email,

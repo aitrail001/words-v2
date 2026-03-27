@@ -3,3 +3,5 @@
 
 SELECT 'CREATE DATABASE vocabapp_test'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'vocabapp_test')\gexec
+
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
