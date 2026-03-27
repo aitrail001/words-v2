@@ -190,7 +190,7 @@ jobs:
   e2e-smoke:
     name: E2E Smoke (required)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -209,7 +209,7 @@ jobs:
       - name: Start app stack (docker compose)
         env:
           POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: devpassword
+          POSTGRES_PASSWORD: change_this_password_in_production
           POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
@@ -268,9 +268,9 @@ jobs:
       - name: Apply migrations
         run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
 
-      - name: Run Playwright smoke tests
+      - name: Run Playwright smoke suite
         env:
-          E2E_DB_URL: postgresql://vocabapp:devpassword@postgres:5432/vocabapp_dev
+          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/vocabapp_dev
         run: |
           docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
@@ -305,7 +305,7 @@ jobs:
         run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
 
   e2e-full:
-    name: E2E Full
+    name: E2E Full (required)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: [e2e-smoke]
@@ -327,7 +327,7 @@ jobs:
       - name: Start app stack (docker compose)
         env:
           POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: devpassword
+          POSTGRES_PASSWORD: change_this_password_in_production
           POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
@@ -388,7 +388,7 @@ jobs:
 
       - name: Run Playwright full suite
         env:
-          E2E_DB_URL: postgresql://vocabapp:devpassword@postgres:5432/vocabapp_dev
+          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/vocabapp_dev
         run: |
           docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \

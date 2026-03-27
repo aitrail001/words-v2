@@ -1,4 +1,5 @@
 from app.models.book import Book
+from app.models.entry_review import EntryReviewEvent, EntryReviewState
 from app.models.epub_import import EpubImport
 from app.models.import_job import ImportJob
 from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
@@ -38,6 +39,8 @@ from app.models.word_relation import WordRelation
 
 __all__ = [
     "User",
+    "EntryReviewState",
+    "EntryReviewEvent",
     "Word",
     "WordConfusable",
     "WordForm",

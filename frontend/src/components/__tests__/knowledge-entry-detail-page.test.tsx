@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useRouter } from "next/navigation";
 import { KnowledgeEntryDetailPage } from "@/components/knowledge-entry-detail-page";
 import { getKnowledgeMapEntryDetail } from "@/lib/knowledge-map-client";
 import { getUserPreferences } from "@/lib/user-preferences-client";
+
+jest.mock("next/navigation", () => ({
+  useRouter: jest.fn(),
+}));
 
 jest.mock("@/lib/knowledge-map-client", () => {
   const actual = jest.requireActual("@/lib/knowledge-map-client");
@@ -15,6 +20,7 @@ jest.mock("@/lib/knowledge-map-client", () => {
 jest.mock("@/lib/user-preferences-client");
 
 describe("KnowledgeEntryDetailPage", () => {
+  const mockUseRouter = useRouter as jest.MockedFunction<typeof useRouter>;
   const mockGetKnowledgeMapEntryDetail = getKnowledgeMapEntryDetail as jest.MockedFunction<
     typeof getKnowledgeMapEntryDetail
   >;
@@ -26,6 +32,7 @@ describe("KnowledgeEntryDetailPage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUseRouter.mockReturnValue({ push: jest.fn() } as never);
     mockGetUserPreferences.mockResolvedValue({
       accent_preference: "uk",
       translation_locale: "zh-Hans",

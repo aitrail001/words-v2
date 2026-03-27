@@ -16,6 +16,7 @@ import {
 } from "@/lib/lexicon-jobs-client";
 
 const ACTIVE_JOB_STORAGE_KEY = "lexicon-import-db-active-job";
+const LAST_JOB_STORAGE_KEY = "lexicon-import-db-last-job";
 
 function searchParam(name: string): string {
   if (typeof window === "undefined") return "";
@@ -100,6 +101,7 @@ export default function LexiconImportDbPage() {
         setResult(null);
         if (typeof window !== "undefined") {
           window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, nextJob.id);
+          window.localStorage.setItem(LAST_JOB_STORAGE_KEY, nextJob.id);
         }
         setMessage("Import started. The queued job keeps running if you browse away from this page.");
       }
@@ -119,9 +121,11 @@ export default function LexiconImportDbPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const activeJobId = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
-    if (!activeJobId) return;
-    void getLexiconJob(activeJobId)
+    const persistedJobId =
+      window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY) ??
+      window.localStorage.getItem(LAST_JOB_STORAGE_KEY);
+    if (!persistedJobId) return;
+    void getLexiconJob(persistedJobId)
       .then((nextJob) => {
         setJob(nextJob);
         if (nextJob.status === "completed") {
@@ -130,6 +134,7 @@ export default function LexiconImportDbPage() {
       })
       .catch(() => {
         window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+        window.localStorage.removeItem(LAST_JOB_STORAGE_KEY);
       });
   }, [importResultFromJob]);
 
@@ -145,9 +150,11 @@ export default function LexiconImportDbPage() {
             setResult(importResultFromJob(nextJob));
             setMessage("Import completed.");
             window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+            window.localStorage.setItem(LAST_JOB_STORAGE_KEY, nextJob.id);
           } else if (nextJob.status === "failed") {
             setMessage(nextJob.error_message || "Import failed.");
             window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+            window.localStorage.setItem(LAST_JOB_STORAGE_KEY, nextJob.id);
           }
         })
         .catch((error) => {

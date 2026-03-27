@@ -135,4 +135,14 @@ describe("LexiconImportDbPage", () => {
     await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Done1"));
     expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
   });
+
+  it("restores the last completed import job when the active key is gone", async () => {
+    window.localStorage.setItem("lexicon-import-db-last-job", "job-1");
+    render(<LexiconImportDbPage />);
+
+    await waitFor(() => expect(getLexiconJob).toHaveBeenCalledWith("job-1"));
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Done1"));
+    expect(screen.getByTestId("lexicon-import-db-summary-rows")).toHaveTextContent("Rows");
+    expect(screen.getByTestId("lexicon-import-db-summary-rows")).toHaveTextContent("1");
+  });
 });
