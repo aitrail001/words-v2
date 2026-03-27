@@ -23,6 +23,7 @@ from tools.lexicon.import_db import (
     _ensure_backend_path,
     _load_existing_examples,
     _load_existing_relations,
+    _rebuild_learner_catalog_projection,
     import_compiled_rows,
 )
 
@@ -244,6 +245,35 @@ class SqlWordRelation:
     source = _FakeColumn("word_relations", "source")
 
 
+class FakeLearnerCatalogEntry:
+    __table__ = object()
+
+    def __init__(
+        self,
+        *,
+        entry_type: str,
+        entry_id: uuid.UUID,
+        display_text: str,
+        normalized_form: str,
+        browse_rank: int,
+        bucket_start: int,
+        cefr_level: str | None,
+        primary_part_of_speech: str | None,
+        phrase_kind: str | None,
+        is_ranked: bool,
+    ) -> None:
+        self.entry_type = entry_type
+        self.entry_id = entry_id
+        self.display_text = display_text
+        self.normalized_form = normalized_form
+        self.browse_rank = browse_rank
+        self.bucket_start = bucket_start
+        self.cefr_level = cefr_level
+        self.primary_part_of_speech = primary_part_of_speech
+        self.phrase_kind = phrase_kind
+        self.is_ranked = is_ranked
+
+
 @dataclass
 class FakeWord:
     word: str
@@ -264,6 +294,83 @@ class FakeWord:
     phonetic_confidence: object = None
     phonetic_enrichment_run_id: object = None
     id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass
+class FakeProjectionWordPartOfSpeech:
+    value: str
+    order_index: int = 0
+
+
+@dataclass
+class FakePhraseEntry:
+    id: uuid.UUID
+    phrase_text: str
+    normalized_form: str
+    phrase_kind: str | None = None
+    cefr_level: str | None = None
+
+
+class _FakeProjectionSession:
+    def __init__(self, words: list[FakeWord], phrases: list[FakePhraseEntry]) -> None:
+        self.words = words
+        self.phrases = phrases
+        self.added: list[FakeLearnerCatalogEntry] = []
+        self.deleted = 0
+
+    def query(self, model):
+        session = self
+
+        class _FakeQuery:
+            def delete(self, synchronize_session: bool = False):
+                session.deleted += 1
+                return 0
+
+        return _FakeQuery()
+
+    def add_all(self, rows):
+        self.added.extend(list(rows))
+
+
+def test_rebuild_learner_catalog_projection_replaces_rows_with_ranked_words_and_phrases():
+    ranked_word = FakeWord(
+        word="alpha",
+        frequency_rank=1,
+        cefr_level="A1",
+        part_of_speech_entries=[FakeProjectionWordPartOfSpeech(value="noun", order_index=0)],
+    )
+    ranked_word.id = uuid.uuid4()
+    unranked_word = FakeWord(
+        word="zeta",
+        frequency_rank=None,
+        cefr_level="B1",
+        part_of_speech_entries=[FakeProjectionWordPartOfSpeech(value="verb", order_index=0)],
+    )
+    unranked_word.id = uuid.uuid4()
+    phrase = FakePhraseEntry(
+        id=uuid.uuid4(),
+        phrase_text="bank on",
+        normalized_form="bank on",
+        phrase_kind="phrasal_verb",
+        cefr_level="B2",
+    )
+    session = _FakeProjectionSession([ranked_word, unranked_word], [phrase])
+
+    _rebuild_learner_catalog_projection(
+        session,
+        learner_catalog_entry_model=FakeLearnerCatalogEntry,
+    )
+
+    assert session.deleted == 1
+    assert [(row.entry_type, row.display_text, row.browse_rank) for row in session.added] == [
+        ("word", "alpha", 1),
+        ("word", "zeta", 2),
+        ("phrase", "bank on", 3),
+    ]
+    assert [row.bucket_start for row in session.added] == [1, 1, 1]
+    assert session.added[0].primary_part_of_speech == "noun"
+    assert session.added[1].primary_part_of_speech == "verb"
+    assert session.added[2].phrase_kind == "phrasal_verb"
 
 
 @dataclass

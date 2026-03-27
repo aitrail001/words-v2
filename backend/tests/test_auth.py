@@ -2,6 +2,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
 from app.core.database import get_db
@@ -9,6 +10,7 @@ from app.core.redis import get_redis
 from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.main import app
 from app.models.user import User
+from app.api.request_db_metrics import instrument_session_for_request, restore_session_after_request
 
 
 class InMemoryRedis:
@@ -42,6 +44,7 @@ def mock_db():
     session.execute = AsyncMock()
     session.commit = AsyncMock()
     session.add = MagicMock()  # db.add is sync in SQLAlchemy
+    session.info = {}
     return session
 
 
@@ -52,8 +55,12 @@ def mock_redis():
 
 @pytest.fixture
 async def client(mock_db, mock_redis):
-    async def override_get_db():
-        yield mock_db
+    async def override_get_db(request: Request):
+        instrument_session_for_request(request, mock_db)
+        try:
+            yield mock_db
+        finally:
+            restore_session_after_request(mock_db)
 
     def override_get_redis():
         return mock_redis
@@ -149,6 +156,8 @@ class TestLogin:
         assert "access_token" in data
         assert "refresh_token" in data
         assert data["token_type"] == "bearer"
+        assert response.headers["X-Auth-Query-Count"] == "1"
+        assert float(response.headers["X-Auth-Query-Time-Ms"]) >= 0.0
 
     @pytest.mark.asyncio
     async def test_login_wrong_password(self, client, mock_db):
@@ -206,6 +215,8 @@ class TestMe:
         assert response.status_code == 200
         data = response.json()
         assert data["email"] == "me@example.com"
+        assert response.headers["X-Auth-Query-Count"] == "1"
+        assert float(response.headers["X-Auth-Query-Time-Ms"]) >= 0.0
 
     @pytest.mark.asyncio
     async def test_me_no_token(self, client):

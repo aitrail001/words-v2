@@ -82,6 +82,10 @@ class TestWordModel:
         assert "lexicon.word_part_of_speech" in Base.metadata.tables
         assert Word(word="bank").part_of_speech_entries == []
 
+    def test_word_models_register_learner_catalog_projection(self):
+        assert hasattr(model_registry, "LearnerCatalogEntry")
+        assert "lexicon.learner_catalog_entries" in Base.metadata.tables
+
 
 class TestPhraseEntryModel:
     def test_phrase_entry_keeps_compiled_payload_and_phrase_senses_relationship(self):
@@ -217,3 +221,15 @@ class TestLexiconJobModel:
         assert job.result_payload is None
         assert job.error_message is None
         assert LexiconJob.__table__.schema == LEXICON_SCHEMA
+
+
+class TestLearnerCatalogEntryModel:
+    def test_projection_table_uses_lexicon_schema_and_unique_entry_key(self):
+        learner_catalog_entries = Base.metadata.tables["lexicon.learner_catalog_entries"]
+
+        assert learner_catalog_entries.schema == LEXICON_SCHEMA
+        assert {"entry_type", "entry_id"} in [
+            {column.name for column in constraint.columns}
+            for constraint in learner_catalog_entries.constraints
+            if getattr(constraint, "columns", None)
+        ]

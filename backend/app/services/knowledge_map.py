@@ -11,6 +11,7 @@ from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from app.models.learner_entry_status import LearnerEntryStatus
+from app.models.learner_catalog_entry import LearnerCatalogEntry
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.phrase_entry import PhraseEntry
@@ -63,6 +64,8 @@ def _word_cefr_level(row: object) -> str | None:
 
 def _word_part_of_speech(row: object) -> str | None:
     value = _mapping_value(row, "learner_part_of_speech")
+    if value is None:
+        value = _mapping_value(row, "primary_part_of_speech")
     if isinstance(value, str) and value.strip():
         return value.strip()
     if isinstance(value, list) and value:
@@ -769,32 +772,46 @@ async def load_entry_lookup_for_terms(
     if not normalized_terms:
         return {}
 
-    words_result = await db.execute(
+    result = await db.execute(
         select(
-            Word.id.label("id"),
-            Word.word.label("word"),
-            Word.frequency_rank.label("frequency_rank"),
-            Word.cefr_level.label("cefr_level"),
-            _word_primary_part_of_speech_expr().label("learner_part_of_speech"),
-        ).where(func.lower(Word.word).in_(normalized_terms))
-    )
-    phrases_result = await db.execute(
-        select(
-            PhraseEntry.id.label("id"),
-            PhraseEntry.phrase_text.label("phrase_text"),
-            PhraseEntry.normalized_form.label("normalized_form"),
-            PhraseEntry.cefr_level.label("cefr_level"),
-            PhraseEntry.phrase_kind.label("phrase_kind"),
+            LearnerCatalogEntry.entry_type.label("entry_type"),
+            LearnerCatalogEntry.entry_id.label("entry_id"),
+            LearnerCatalogEntry.display_text.label("display_text"),
+            LearnerCatalogEntry.normalized_form.label("normalized_form"),
         ).where(
             or_(
-                func.lower(PhraseEntry.normalized_form).in_(normalized_terms),
-                func.lower(PhraseEntry.phrase_text).in_(normalized_terms),
+                func.lower(LearnerCatalogEntry.normalized_form).in_(normalized_terms),
+                func.lower(LearnerCatalogEntry.display_text).in_(normalized_terms),
             )
         )
     )
-    words = _result_rows(words_result, _catalog_word_row)
-    phrases = _result_rows(phrases_result, _catalog_phrase_row)
-    return build_entry_lookup(words, phrases)
+    lookup: dict[str, dict[str, object]] = {}
+    for row in result.mappings().all():
+        if "display_text" in row and "entry_type" in row and "entry_id" in row:
+            display_text = str(row["display_text"]).strip()
+            normalized_form = str(row["normalized_form"]).strip().lower()
+            entry_type = str(row["entry_type"])
+            entry_id = str(row["entry_id"])
+        elif "word" in row and "id" in row:
+            display_text = str(row["word"]).strip()
+            normalized_form = display_text.lower()
+            entry_type = "word"
+            entry_id = str(row["id"])
+        elif "phrase_text" in row and "id" in row:
+            display_text = str(row["phrase_text"]).strip()
+            normalized_form = str(row.get("normalized_form") or display_text).strip().lower()
+            entry_type = "phrase"
+            entry_id = str(row["id"])
+        else:
+            continue
+        for key in {normalized_form, display_text.lower()}:
+            if key and key not in lookup:
+                lookup[key] = {
+                    "entry_type": entry_type,
+                    "entry_id": entry_id,
+                    "display_text": display_text,
+                }
+    return lookup
 
 
 async def load_catalog_neighbors(
@@ -802,11 +819,19 @@ async def load_catalog_neighbors(
     entry_type: str,
     entry_id: uuid.UUID,
 ) -> tuple[dict[str, object] | None, dict[str, object] | None, dict[str, object] | None]:
-    catalog = _catalog_projection_cte()
     current_result = await db.execute(
-        select(catalog).where(
-            catalog.c.entry_type == entry_type,
-            catalog.c.entry_id == entry_id,
+        select(
+            LearnerCatalogEntry.entry_type,
+            LearnerCatalogEntry.entry_id,
+            LearnerCatalogEntry.display_text,
+            LearnerCatalogEntry.normalized_form,
+            LearnerCatalogEntry.browse_rank,
+            LearnerCatalogEntry.cefr_level,
+            LearnerCatalogEntry.primary_part_of_speech,
+            LearnerCatalogEntry.phrase_kind,
+        ).where(
+            LearnerCatalogEntry.entry_type == entry_type,
+            LearnerCatalogEntry.entry_id == entry_id,
         )
     )
     current = current_result.mappings().one_or_none()
@@ -815,18 +840,27 @@ async def load_catalog_neighbors(
 
     current_rank = int(current["browse_rank"])
     neighbors_result = await db.execute(
-        select(catalog)
+        select(
+            LearnerCatalogEntry.entry_type,
+            LearnerCatalogEntry.entry_id,
+            LearnerCatalogEntry.display_text,
+            LearnerCatalogEntry.normalized_form,
+            LearnerCatalogEntry.browse_rank,
+            LearnerCatalogEntry.cefr_level,
+            LearnerCatalogEntry.primary_part_of_speech,
+            LearnerCatalogEntry.phrase_kind,
+        )
         .where(
             or_(
-                catalog.c.browse_rank == select(func.max(catalog.c.browse_rank))
-                .where(catalog.c.browse_rank < current_rank)
+                LearnerCatalogEntry.browse_rank == select(func.max(LearnerCatalogEntry.browse_rank))
+                .where(LearnerCatalogEntry.browse_rank < current_rank)
                 .scalar_subquery(),
-                catalog.c.browse_rank == select(func.min(catalog.c.browse_rank))
-                .where(catalog.c.browse_rank > current_rank)
+                LearnerCatalogEntry.browse_rank == select(func.min(LearnerCatalogEntry.browse_rank))
+                .where(LearnerCatalogEntry.browse_rank > current_rank)
                 .scalar_subquery(),
             )
         )
-        .order_by(catalog.c.browse_rank.asc())
+        .order_by(LearnerCatalogEntry.browse_rank.asc())
     )
     previous_item: dict[str, object] | None = None
     next_item: dict[str, object] | None = None
@@ -954,27 +988,26 @@ async def build_catalog(
     sort: str = "rank",
     limit: int | None = None,
 ) -> list[dict]:
-    catalog = _catalog_projection_cte()
     status_expr = func.coalesce(LearnerEntryStatus.status, literal("undecided"))
     query = (
         select(
-            catalog.c.entry_type,
-            catalog.c.entry_id,
-            catalog.c.display_text,
-            catalog.c.normalized_form,
-            catalog.c.browse_rank,
-            catalog.c.cefr_level,
-            catalog.c.learner_part_of_speech,
-            catalog.c.phrase_kind,
+            LearnerCatalogEntry.entry_type,
+            LearnerCatalogEntry.entry_id,
+            LearnerCatalogEntry.display_text,
+            LearnerCatalogEntry.normalized_form,
+            LearnerCatalogEntry.browse_rank,
+            LearnerCatalogEntry.cefr_level,
+            LearnerCatalogEntry.primary_part_of_speech,
+            LearnerCatalogEntry.phrase_kind,
             status_expr.label("status"),
         )
         .select_from(
-            catalog.outerjoin(
+            LearnerCatalogEntry.__table__.outerjoin(
                 LearnerEntryStatus,
                 and_(
                     LearnerEntryStatus.user_id == user_id,
-                    LearnerEntryStatus.entry_type == catalog.c.entry_type,
-                    LearnerEntryStatus.entry_id == catalog.c.entry_id,
+                    LearnerEntryStatus.entry_type == LearnerCatalogEntry.entry_type,
+                    LearnerEntryStatus.entry_id == LearnerCatalogEntry.entry_id,
                 ),
             )
         )
@@ -986,41 +1019,19 @@ async def build_catalog(
 
     lowered = q.strip().lower() if isinstance(q, str) and q.strip() else None
     if lowered:
-        word_rows_result = await db.execute(_word_search_query(user_id, lowered, mapped_status))
-        phrase_rows_result = await db.execute(_phrase_search_query(user_id, lowered, mapped_status))
-        raw_rows = [*word_rows_result.mappings().all(), *phrase_rows_result.mappings().all()]
-        items: list[dict] = []
-        for raw_item in raw_rows:
-            items.append(
-                {
-                    "entry_type": str(raw_item["entry_type"]),
-                    "entry_id": raw_item["entry_id"],
-                    "display_text": str(raw_item["display_text"]),
-                    "normalized_form": raw_item["normalized_form"],
-                    "browse_rank": int(raw_item["browse_rank"]),
-                    "status": str(raw_item["status"]),
-                    "cefr_level": raw_item.get("cefr_level"),
-                    "pronunciation": None,
-                    "translation": None,
-                    "primary_definition": None,
-                    "part_of_speech": _word_part_of_speech(raw_item),
-                    "phrase_kind": raw_item.get("phrase_kind"),
-                }
+        query = query.where(
+            or_(
+                func.lower(LearnerCatalogEntry.display_text).contains(lowered),
+                func.lower(LearnerCatalogEntry.normalized_form).contains(lowered),
             )
-        if sort == "rank_desc":
-            items.sort(key=lambda item: (-int(item["browse_rank"]), str(item["display_text"]).lower()))
-        elif sort == "alpha":
-            items.sort(key=lambda item: (str(item["display_text"]).lower(), int(item["browse_rank"])))
-        else:
-            items.sort(key=lambda item: (int(item["browse_rank"]), str(item["display_text"]).lower()))
-        return items[:limit] if limit is not None else items
+        )
 
     if sort == "rank_desc":
-        query = query.order_by(catalog.c.browse_rank.desc(), func.lower(catalog.c.display_text).asc())
+        query = query.order_by(LearnerCatalogEntry.browse_rank.desc(), func.lower(LearnerCatalogEntry.display_text).asc())
     elif sort == "alpha":
-        query = query.order_by(func.lower(catalog.c.display_text).asc(), catalog.c.browse_rank.asc())
+        query = query.order_by(func.lower(LearnerCatalogEntry.display_text).asc(), LearnerCatalogEntry.browse_rank.asc())
     else:
-        query = query.order_by(catalog.c.browse_rank.asc(), func.lower(catalog.c.display_text).asc())
+        query = query.order_by(LearnerCatalogEntry.browse_rank.asc(), func.lower(LearnerCatalogEntry.display_text).asc())
 
     if limit is not None:
         query = query.limit(limit)
@@ -1048,23 +1059,22 @@ async def build_catalog(
 
 
 def _catalog_with_status_from(user_id: uuid.UUID):
-    catalog = _catalog_projection_cte()
     status_expr = func.coalesce(LearnerEntryStatus.status, literal("undecided"))
-    from_clause = catalog.outerjoin(
+    from_clause = LearnerCatalogEntry.__table__.outerjoin(
         LearnerEntryStatus,
         and_(
             LearnerEntryStatus.user_id == user_id,
-            LearnerEntryStatus.entry_type == catalog.c.entry_type,
-            LearnerEntryStatus.entry_id == catalog.c.entry_id,
+            LearnerEntryStatus.entry_type == LearnerCatalogEntry.entry_type,
+            LearnerEntryStatus.entry_id == LearnerCatalogEntry.entry_id,
         ),
     )
-    return catalog, status_expr, from_clause
+    return LearnerCatalogEntry, status_expr, from_clause
 
 
 async def load_overview_summary(db: AsyncSession, user_id: uuid.UUID) -> dict:
     catalog, status_expr, from_clause = _catalog_with_status_from(user_id)
     range_start_expr = (
-        catalog.c.browse_rank - ((catalog.c.browse_rank - 1) % BUCKET_SIZE)
+        catalog.browse_rank - ((catalog.browse_rank - 1) % BUCKET_SIZE)
     ).label("range_start")
     result = await db.execute(
         select(
@@ -1121,17 +1131,17 @@ async def load_dashboard_summary(db: AsyncSession, user_id: uuid.UUID) -> dict:
 
     entry_query = (
         select(
-            catalog.c.entry_type,
-            catalog.c.entry_id,
-            catalog.c.display_text,
-            catalog.c.browse_rank,
+            catalog.entry_type,
+            catalog.entry_id,
+            catalog.display_text,
+            catalog.browse_rank,
             status_expr.label("status"),
         )
         .select_from(from_clause)
     )
 
     discovery_result = await db.execute(
-        entry_query.where(status_expr != "known").order_by(catalog.c.browse_rank.asc()).limit(1)
+        entry_query.where(status_expr != "known").order_by(catalog.browse_rank.asc()).limit(1)
     )
     discovery_row = discovery_result.mappings().one_or_none()
     discovery_entry = dict(discovery_row) if discovery_row is not None else None
@@ -1139,14 +1149,14 @@ async def load_dashboard_summary(db: AsyncSession, user_id: uuid.UUID) -> dict:
     next_learn_result = await db.execute(
         entry_query.where(status_expr.in_(("to_learn", "learning"))).order_by(
             case((status_expr == "to_learn", 0), else_=1).asc(),
-            catalog.c.browse_rank.asc(),
+            catalog.browse_rank.asc(),
         ).limit(1)
     )
     next_learn_row = next_learn_result.mappings().one_or_none()
     next_learn_entry = dict(next_learn_row) if next_learn_row is not None else None
 
     if discovery_entry is None and total_entries > 0:
-        first_result = await db.execute(entry_query.order_by(catalog.c.browse_rank.asc()).limit(1))
+        first_result = await db.execute(entry_query.order_by(catalog.browse_rank.asc()).limit(1))
         first_row = first_result.mappings().one_or_none()
         discovery_entry = dict(first_row) if first_row is not None else None
 
@@ -1262,25 +1272,33 @@ async def load_range_catalog_items(
     range_start: int,
 ) -> dict[str, object]:
     range_end = range_start + BUCKET_SIZE - 1
-    catalog = _catalog_projection_cte()
     items_result = await db.execute(
-        select(catalog)
-        .where(
-            catalog.c.browse_rank >= range_start,
-            catalog.c.browse_rank <= range_end,
+        select(
+            LearnerCatalogEntry.entry_type,
+            LearnerCatalogEntry.entry_id,
+            LearnerCatalogEntry.display_text,
+            LearnerCatalogEntry.normalized_form,
+            LearnerCatalogEntry.browse_rank,
+            LearnerCatalogEntry.cefr_level,
+            LearnerCatalogEntry.primary_part_of_speech,
+            LearnerCatalogEntry.phrase_kind,
         )
-        .order_by(catalog.c.browse_rank.asc(), catalog.c.display_text.asc())
+        .where(
+            LearnerCatalogEntry.browse_rank >= range_start,
+            LearnerCatalogEntry.browse_rank <= range_end,
+        )
+        .order_by(LearnerCatalogEntry.browse_rank.asc(), LearnerCatalogEntry.display_text.asc())
     )
     raw_items = [dict(row) for row in items_result.mappings().all()]
 
     bounds_result = await db.execute(
         select(
-            select(func.max(catalog.c.browse_rank))
-            .where(catalog.c.browse_rank < range_start)
+            select(func.max(LearnerCatalogEntry.browse_rank))
+            .where(LearnerCatalogEntry.browse_rank < range_start)
             .scalar_subquery()
             .label("previous_rank"),
-            select(func.min(catalog.c.browse_rank))
-            .where(catalog.c.browse_rank > range_end)
+            select(func.min(LearnerCatalogEntry.browse_rank))
+            .where(LearnerCatalogEntry.browse_rank > range_end)
             .scalar_subquery()
             .label("next_rank"),
         )

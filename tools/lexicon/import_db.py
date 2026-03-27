@@ -28,6 +28,7 @@ def _ensure_backend_path() -> None:
 
 def _default_models() -> tuple[type, type, type, type, type, type, type, type, type, type, type, type]:
     _ensure_backend_path()
+    from app.models.learner_catalog_entry import LearnerCatalogEntry
     from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
     from app.models.meaning import Meaning
@@ -41,7 +42,135 @@ def _default_models() -> tuple[type, type, type, type, type, type, type, type, t
     from app.models.word_part_of_speech import WordPartOfSpeech
     from app.models.word_relation import WordRelation
 
-    return Word, Meaning, MeaningMetadata, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun, Translation, TranslationExample, WordConfusable, WordForm, WordPartOfSpeech
+    return Word, Meaning, MeaningMetadata, MeaningExample, WordRelation, LexiconEnrichmentJob, LexiconEnrichmentRun, Translation, TranslationExample, WordConfusable, WordForm, WordPartOfSpeech, LearnerCatalogEntry
+
+
+def _bucket_start_for_rank(rank: int, bucket_size: int = 100) -> int:
+    return ((rank - 1) // bucket_size) * bucket_size + 1
+
+
+def _rebuild_learner_catalog_projection(
+    session: Any,
+    *,
+    learner_catalog_entry_model: Type[Any],
+    word_model: Type[Any] | None = None,
+    phrase_model: Type[Any] | None = None,
+) -> None:
+    if hasattr(session, "query"):
+        session.query(learner_catalog_entry_model).delete(synchronize_session=False)
+
+    if word_model is not None and _is_sqlalchemy_model(word_model):
+        from sqlalchemy import select
+
+        word_rows = list(
+            session.execute(select(word_model))
+            .scalars()
+            .all()
+        )
+    else:
+        word_rows = list(getattr(session, "words", []))
+
+    if phrase_model is not None and _is_sqlalchemy_model(phrase_model):
+        from sqlalchemy import select
+
+        phrase_rows = list(
+            session.execute(select(phrase_model))
+            .scalars()
+            .all()
+        )
+    else:
+        phrase_rows = list(getattr(session, "phrases", []))
+
+    ranked_words = sorted(
+        [word for word in word_rows if getattr(word, "frequency_rank", None) is not None],
+        key=lambda word: (int(getattr(word, "frequency_rank")), str(getattr(word, "word", "")).lower(), str(getattr(word, "id"))),
+    )
+    unranked_words = sorted(
+        [word for word in word_rows if getattr(word, "frequency_rank", None) is None],
+        key=lambda word: (str(getattr(word, "word", "")).lower(), str(getattr(word, "id"))),
+    )
+    phrases = sorted(
+        phrase_rows,
+        key=lambda phrase: (str(getattr(phrase, "normalized_form", "")).lower(), str(getattr(phrase, "id"))),
+    )
+
+    rows: list[Any] = []
+    next_rank = 1
+
+    for word in ranked_words:
+        rank = int(getattr(word, "frequency_rank"))
+        next_rank = max(next_rank, rank + 1)
+        part_of_speech_entries = sorted(
+            list(getattr(word, "part_of_speech_entries", [])),
+            key=lambda entry: int(getattr(entry, "order_index", 0)),
+        )
+        primary_part_of_speech = (
+            str(getattr(part_of_speech_entries[0], "value")).strip()
+            if part_of_speech_entries and str(getattr(part_of_speech_entries[0], "value", "")).strip()
+            else None
+        )
+        rows.append(
+            learner_catalog_entry_model(
+                entry_type="word",
+                entry_id=getattr(word, "id"),
+                display_text=str(getattr(word, "word", "")),
+                normalized_form=str(getattr(word, "word", "")).strip().lower(),
+                browse_rank=rank,
+                bucket_start=_bucket_start_for_rank(rank),
+                cefr_level=getattr(word, "cefr_level", None),
+                primary_part_of_speech=primary_part_of_speech,
+                phrase_kind=None,
+                is_ranked=True,
+            )
+        )
+
+    for word in unranked_words:
+        rank = next_rank
+        next_rank += 1
+        part_of_speech_entries = sorted(
+            list(getattr(word, "part_of_speech_entries", [])),
+            key=lambda entry: int(getattr(entry, "order_index", 0)),
+        )
+        primary_part_of_speech = (
+            str(getattr(part_of_speech_entries[0], "value")).strip()
+            if part_of_speech_entries and str(getattr(part_of_speech_entries[0], "value", "")).strip()
+            else None
+        )
+        rows.append(
+            learner_catalog_entry_model(
+                entry_type="word",
+                entry_id=getattr(word, "id"),
+                display_text=str(getattr(word, "word", "")),
+                normalized_form=str(getattr(word, "word", "")).strip().lower(),
+                browse_rank=rank,
+                bucket_start=_bucket_start_for_rank(rank),
+                cefr_level=getattr(word, "cefr_level", None),
+                primary_part_of_speech=primary_part_of_speech,
+                phrase_kind=None,
+                is_ranked=False,
+            )
+        )
+
+    for phrase in phrases:
+        rank = next_rank
+        next_rank += 1
+        rows.append(
+            learner_catalog_entry_model(
+                entry_type="phrase",
+                entry_id=getattr(phrase, "id"),
+                display_text=str(getattr(phrase, "phrase_text", "")),
+                normalized_form=str(getattr(phrase, "normalized_form", "")).strip().lower(),
+                browse_rank=rank,
+                bucket_start=_bucket_start_for_rank(rank),
+                cefr_level=getattr(phrase, "cefr_level", None),
+                primary_part_of_speech=None,
+                phrase_kind=getattr(phrase, "phrase_kind", None),
+                is_ranked=False,
+            )
+        )
+
+    if rows:
+        session.add_all(rows)
 
 
 def _default_phrase_models() -> tuple[type, type, type, type, type]:
@@ -597,6 +726,7 @@ def import_compiled_rows(
     word_confusable_model: Optional[Type[Any]] = None,
     word_form_model: Optional[Type[Any]] = None,
     word_part_of_speech_model: Optional[Type[Any]] = None,
+    learner_catalog_entry_model: Optional[Type[Any]] = None,
     progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
 ) -> ImportSummary:
     if word_model is None or meaning_model is None:
@@ -613,6 +743,7 @@ def import_compiled_rows(
             default_word_confusable_model,
             default_word_form_model,
             default_word_part_of_speech_model,
+            default_learner_catalog_entry_model,
         ) = _default_models()
         if meaning_example_model is None:
             meaning_example_model = default_meaning_example_model
@@ -634,6 +765,8 @@ def import_compiled_rows(
             word_form_model = default_word_form_model
         if word_part_of_speech_model is None:
             word_part_of_speech_model = default_word_part_of_speech_model
+        if learner_catalog_entry_model is None:
+            learner_catalog_entry_model = default_learner_catalog_entry_model
     resolved_phrase_model = phrase_model
     resolved_phrase_sense_model = phrase_sense_model
     resolved_phrase_sense_localization_model = phrase_sense_localization_model
@@ -1156,6 +1289,17 @@ def import_compiled_rows(
 
         if progress_callback is not None:
             progress_callback(row, row_index, total_rows)
+
+    if learner_catalog_entry_model is not None:
+        resolved_phrase_model_for_projection = resolved_phrase_model
+        if resolved_phrase_model_for_projection is None:
+            resolved_phrase_model_for_projection = _default_phrase_models()[0]
+        _rebuild_learner_catalog_projection(
+            session,
+            learner_catalog_entry_model=learner_catalog_entry_model,
+            word_model=word_model,
+            phrase_model=resolved_phrase_model_for_projection,
+        )
 
     return summary
 

@@ -1,12 +1,14 @@
 import uuid
 from datetime import datetime
+from time import perf_counter
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.api.request_db_metrics import finalize_request_db_metrics
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.user import User
@@ -177,10 +179,13 @@ async def submit_review(
 @router.post("/queue", response_model=QueueItemResponse, status_code=status.HTTP_201_CREATED)
 async def add_to_queue(
     request: QueueAddRequest,
+    http_request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> QueueItemResponse:
     """Add a meaning to the user's review queue."""
+    request_start = perf_counter()
     service = ReviewService(db)
 
     try:
@@ -188,20 +193,30 @@ async def add_to_queue(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
+    metrics = finalize_request_db_metrics(
+        response,
+        http_request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_add", **metrics)
     return _to_queue_item_response(queue_item)
 
 
 @router.get("/queue/due", response_model=list[QueueItemResponse])
 async def get_due_queue_items(
     limit: int = Query(default=20, ge=1, le=100),
+    request: Request = None,
+    response: Response = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[QueueItemResponse]:
     """Get due items from the review queue with prompt metadata."""
+    request_start = perf_counter()
     service = ReviewService(db)
     due_items = await service.get_due_queue_items(current_user.id, limit=limit)
 
-    return [
+    items = [
         _to_queue_item_response(
             due_entry["item"],
             word=due_entry["word"],
@@ -209,16 +224,27 @@ async def get_due_queue_items(
         )
         for due_entry in due_items
     ]
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_due", result_count=len(items), **metrics)
+    return items
 
 
 @router.post("/queue/{item_id}/submit", response_model=QueueItemResponse)
 async def submit_queue_review(
     item_id: uuid.UUID,
     request: QueueSubmitRequest,
+    http_request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> QueueItemResponse:
     """Submit a review result for a queue item."""
+    request_start = perf_counter()
     service = ReviewService(db)
 
     try:
@@ -232,17 +258,34 @@ async def submit_queue_review(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
+    metrics = finalize_request_db_metrics(
+        response,
+        http_request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_submit", **metrics)
     return _to_queue_item_response(item)
 
 
 @router.get("/queue/stats", response_model=QueueStatsResponse)
 async def get_queue_stats(
+    request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> QueueStatsResponse:
     """Get queue-level review stats for the current user."""
+    request_start = perf_counter()
     service = ReviewService(db)
     stats = await service.get_queue_stats(current_user.id)
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_stats", **metrics)
     return QueueStatsResponse(**stats)
 
 
