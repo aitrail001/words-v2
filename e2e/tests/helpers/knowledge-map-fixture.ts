@@ -557,6 +557,102 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
 
     await client.query(
       `
+      DELETE FROM lexicon.learner_catalog_entries
+      WHERE (entry_type = 'word' AND entry_id IN ($1::uuid, $2::uuid))
+         OR (entry_type = 'phrase' AND entry_id = $3::uuid)
+      `,
+      [wordId, learnWordId, phraseId],
+    );
+
+    await client.query(
+      `
+      INSERT INTO lexicon.learner_catalog_entries (
+        id,
+        entry_type,
+        entry_id,
+        display_text,
+        normalized_form,
+        browse_rank,
+        bucket_start,
+        cefr_level,
+        primary_part_of_speech,
+        phrase_kind,
+        is_ranked,
+        created_at
+      )
+      VALUES
+        (
+          gen_random_uuid(),
+          'word',
+          $1::uuid,
+          $2::text,
+          lower($2::text),
+          20,
+          1,
+          NULL,
+          'noun',
+          NULL,
+          true,
+          now()
+        ),
+        (
+          gen_random_uuid(),
+          'word',
+          $3::uuid,
+          $4::text,
+          lower($4::text),
+          2616,
+          2601,
+          NULL,
+          'noun',
+          NULL,
+          true,
+          now()
+        )
+      `,
+      [wordId, KNOWLEDGE_WORD, learnWordId, LEARN_WORD],
+    );
+
+    await client.query(
+      `
+      WITH next_rank AS (
+        SELECT COALESCE(MAX(browse_rank), 0) + 1 AS browse_rank
+        FROM lexicon.learner_catalog_entries
+      )
+      INSERT INTO lexicon.learner_catalog_entries (
+        id,
+        entry_type,
+        entry_id,
+        display_text,
+        normalized_form,
+        browse_rank,
+        bucket_start,
+        cefr_level,
+        primary_part_of_speech,
+        phrase_kind,
+        is_ranked,
+        created_at
+      )
+      SELECT
+        gen_random_uuid(),
+        'phrase',
+        $1::uuid,
+        $2::text,
+        lower($3::text),
+        next_rank.browse_rank,
+        ((next_rank.browse_rank - 1) / 100) * 100 + 1,
+        'B1',
+        NULL,
+        'phrasal_verb',
+        false,
+        now()
+      FROM next_rank
+      `,
+      [phraseId, KNOWLEDGE_PHRASE, KNOWLEDGE_PHRASE],
+    );
+
+    await client.query(
+      `
       INSERT INTO user_preferences (id, user_id, accent_preference, translation_locale, knowledge_view_preference)
       VALUES ($1::uuid, $2::uuid, 'uk', 'es', 'cards')
       ON CONFLICT (user_id)
