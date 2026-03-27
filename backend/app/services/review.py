@@ -668,7 +668,7 @@ class ReviewService:
             )
 
         if prompt_type == self.PROMPT_TYPE_DEFINITION_TO_ENTRY:
-            correct = self._prompt_value_for_options(definition)
+            correct = self._prompt_value_for_options(word)
         elif prompt_type == self.PROMPT_TYPE_MEANING_DISCRIMINATION:
             correct = self._prompt_value_for_options(definition)
             question = self._prompt_value_for_options(word)
@@ -678,7 +678,7 @@ class ReviewService:
                 sentence_masked = self._mask_sentence(sentence, word)
                 expected_input = self._prompt_value_for_options(word)
         else:
-            correct = self._prompt_value_for_options(word)
+            correct = self._prompt_value_for_options(definition)
 
         distractors_source = alternative_definitions if prompt_type == self.PROMPT_TYPE_MEANING_DISCRIMINATION else distractors
         distractors = [self._prompt_value_for_options(item) for item in (distractors_source or [])]
@@ -1518,11 +1518,13 @@ class ReviewService:
     async def _build_learning_cards_for_phrase(
         self,
         user_id: uuid.UUID,
+        entry_state_id: uuid.UUID,
         phrase: PhraseEntry,
         senses: list[PhraseSense],
     ) -> tuple[list[dict[str, Any]], list[str], list[str], dict[str, Any]]:
         cards: list[dict[str, Any]] = []
         meaning_ids: list[str] = []
+        queue_item_ids: list[str] = []
         source_text = self._normalize_prompt_text(phrase.phrase_text) or "Unavailable"
         alternative_definitions = [
             self._normalize_prompt_text(sense.definition) or "No definition available."
@@ -1556,7 +1558,7 @@ class ReviewService:
 
             cards.append(
                 {
-                    "queue_item_id": None,
+                    "queue_item_id": str(entry_state_id),
                     "meaning_id": str(sense.id),
                     "word": source_text,
                     "definition": self._normalize_prompt_text(sense.definition)
@@ -1566,8 +1568,9 @@ class ReviewService:
                 }
             )
             meaning_ids.append(str(sense.id))
+            queue_item_ids.append(str(entry_state_id))
 
-        return cards, meaning_ids, [], detail
+        return cards, meaning_ids, queue_item_ids, detail
 
     async def start_learning_entry(
         self,
@@ -1634,6 +1637,7 @@ class ReviewService:
 
         cards, meaning_ids, queue_item_ids, detail = await self._build_learning_cards_for_phrase(
             user_id=user_id,
+            entry_state_id=state.id,
             phrase=phrase,
             senses=senses,
         )

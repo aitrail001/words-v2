@@ -507,6 +507,62 @@ class TestAnalyticsSummary:
 
 class TestPromptFamilies:
     @pytest.mark.asyncio
+    async def test_build_review_prompt_sets_definition_to_entry_answer_to_entry(
+        self, review_service, mock_db
+    ):
+        distractor_result = MagicMock()
+        distractor_result.scalars.return_value.all.return_value = [
+            "bravely",
+            "rarely",
+            "boldly",
+        ]
+        mock_db.execute.return_value = distractor_result
+
+        prompt = await review_service._build_mandated_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            prompt_type=ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+            word="barely",
+            definition="Only just, by a very small margin.",
+            distractors=["bravely", "rarely", "boldly"],
+            sentence=None,
+            target_is_word=True,
+            alternative_definitions=None,
+        )
+
+        correct = next(option for option in prompt["options"] if option["is_correct"])
+        assert correct["label"] == "barely"
+
+    @pytest.mark.asyncio
+    async def test_build_review_prompt_sets_entry_to_definition_answer_to_definition(
+        self, review_service, mock_db
+    ):
+        distractor_result = MagicMock()
+        distractor_result.scalars.return_value.all.return_value = [
+            "Acting with courage.",
+            "Almost never.",
+            "With full confidence.",
+        ]
+        mock_db.execute.return_value = distractor_result
+
+        prompt = await review_service._build_mandated_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            prompt_type=ReviewService.PROMPT_TYPE_ENTRY_TO_DEFINITION,
+            word="barely",
+            definition="Only just, by a very small margin.",
+            distractors=[
+                "Acting with courage.",
+                "Almost never.",
+                "With full confidence.",
+            ],
+            sentence=None,
+            target_is_word=False,
+            alternative_definitions=None,
+        )
+
+        correct = next(option for option in prompt["options"] if option["is_correct"])
+        assert correct["label"] == "Only just, by a very small margin."
+
+    @pytest.mark.asyncio
     async def test_build_card_prompt_supports_meaning_discrimination(
         self, review_service, mock_db
     ):
@@ -717,6 +773,72 @@ class TestQueueStats:
         assert stats["review_count"] == 10
         assert stats["correct_count"] == 7
         assert stats["accuracy"] == 0.7
+
+
+class TestLearningStart:
+    @pytest.mark.asyncio
+    async def test_start_learning_entry_for_phrase_uses_entry_state_as_queue_item_id(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        phrase_id = uuid.uuid4()
+        state_id = uuid.uuid4()
+        sense_id = uuid.uuid4()
+        phrase = MagicMock()
+        phrase.id = phrase_id
+        phrase.phrase_text = "jump the gun"
+
+        state = EntryReviewState(
+            id=state_id,
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=phrase_id,
+            stability=3,
+            difficulty=0.5,
+        )
+        sense = MagicMock()
+        sense.id = sense_id
+        sense.definition = "To do something too soon."
+        sense.order_index = 0
+
+        phrase_result = MagicMock()
+        phrase_result.scalar_one_or_none.return_value = phrase
+        senses_result = MagicMock()
+        senses_result.scalars.return_value.all.return_value = [sense]
+
+        review_service._ensure_entry_review_state = AsyncMock(return_value=state)
+        review_service._build_phrase_detail_payload = AsyncMock(
+            return_value={
+                "entry_type": "phrase",
+                "entry_id": str(phrase_id),
+                "display_text": "jump the gun",
+                "meaning_count": 1,
+                "remembered_count": 0,
+                "compare_with": [],
+                "meanings": [],
+            }
+        )
+        review_service._fetch_first_sense_sentence = AsyncMock(
+            return_value="They jumped the gun and announced it early."
+        )
+        review_service._build_card_prompt = AsyncMock(
+            return_value={
+                "mode": "mcq",
+                "prompt_type": "definition_to_entry",
+                "question": "To do something too soon.",
+                "options": [],
+            }
+        )
+        mock_db.execute.side_effect = [phrase_result, senses_result]
+
+        payload = await review_service.start_learning_entry(
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=phrase_id,
+        )
+
+        assert payload["queue_item_ids"] == [str(state_id)]
+        assert payload["cards"][0]["queue_item_id"] == str(state_id)
 
 
 class TestCompleteSession:

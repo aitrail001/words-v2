@@ -405,4 +405,70 @@ describe("ReviewPage", () => {
     expect(prompt).toHaveTextContent(/voice answer coming soon/i);
     expect(screen.getByPlaceholderText(/type the word or phrase/i)).toBeInTheDocument();
   });
+
+  it("submits phrase learning answers using the entry review state id", async () => {
+    window.history.pushState({}, "", "/review?entry_type=phrase&entry_id=phrase-9");
+    mockPost
+      .mockResolvedValueOnce({
+        entry_type: "phrase",
+        entry_id: "phrase-9",
+        entry_word: "jump the gun",
+        meaning_ids: ["sense-9"],
+        queue_item_ids: ["state-phrase-9"],
+        cards: [
+          {
+            queue_item_id: "state-phrase-9",
+            meaning_id: "sense-9",
+            word: "jump the gun",
+            definition: "To do something too soon.",
+            prompt: {
+              mode: "mcq",
+              prompt_type: "definition_to_entry",
+              stem: "Choose the word or phrase that matches this definition.",
+              question: "To do something too soon.",
+              options: [
+                { option_id: "A", label: "Jump the gun", is_correct: true },
+                { option_id: "B", label: "Miss the boat", is_correct: false },
+              ],
+              audio_state: "not_available",
+            },
+          },
+        ],
+        requires_lookup_hint: false,
+        detail: {
+          entry_type: "phrase",
+          entry_id: "phrase-9",
+          display_text: "jump the gun",
+          primary_definition: "To do something too soon.",
+          primary_example: "They jumped the gun and announced it early.",
+          meaning_count: 1,
+          remembered_count: 0,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+        },
+        schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
+      } as never)
+      .mockResolvedValueOnce({} as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /a jump the gun/i }));
+    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    });
+
+    expect(mockPost).toHaveBeenNthCalledWith(1, "/reviews/entry/phrase/phrase-9/learning/start");
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
+      "/reviews/queue/state-phrase-9/submit",
+      expect.objectContaining({
+        outcome: "correct_tested",
+        selected_option_id: "A",
+      }),
+    );
+    window.history.pushState({}, "", "/review");
+  });
 });

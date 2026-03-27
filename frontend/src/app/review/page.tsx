@@ -77,8 +77,12 @@ const defaultScheduleValue = (options: ReviewScheduleOption[]): string =>
 
 const toLearningCards = (payload: LearningStartResponse): ReviewQueueCard[] =>
   payload.cards.map((card, index) => ({
-    id: card.queue_item_id || `${payload.entry_type}-${payload.entry_id}-${index}`,
-    queue_item_id: card.queue_item_id || null,
+    id:
+      card.queue_item_id ||
+      payload.queue_item_ids[index] ||
+      payload.queue_item_ids[0] ||
+      `${payload.entry_type}-${payload.entry_id}-${index}`,
+    queue_item_id: card.queue_item_id || payload.queue_item_ids[index] || payload.queue_item_ids[0] || null,
     word: card.word,
     definition: card.definition,
     prompt: card.prompt,
