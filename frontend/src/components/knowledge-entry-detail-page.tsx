@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   getKnowledgeMapEntryDetail,
@@ -204,6 +205,7 @@ export function KnowledgeEntryDetailPage({
   entryType: KnowledgeEntryType;
   entryId: string;
 }) {
+  const router = useRouter();
   const [detail, setDetail] = useState<KnowledgeMapEntryDetail | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences>({
     accent_preference: "us",
@@ -351,6 +353,9 @@ export function KnowledgeEntryDetailPage({
     startTransition(() => {
       setDetail((current) => (current ? { ...current, status: response.status } : current));
     });
+    if (detail.status === "to_learn" && status === "learning") {
+      router.push(`/review?entry_type=${detail.entry_type}&entry_id=${detail.entry_id}`);
+    }
   };
 
   if (loadState === "loading") {

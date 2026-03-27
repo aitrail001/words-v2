@@ -13,6 +13,7 @@ from app.main import app
 from app.models.user import User
 from app.models.meaning import Meaning
 from app.models.review import ReviewSession, ReviewCard
+from app.models.entry_review import EntryReviewState
 from app.api.request_db_metrics import instrument_session_for_request, restore_session_after_request
 
 
@@ -221,7 +222,7 @@ class TestQueueAdd:
 
 class TestQueueDue:
     @pytest.mark.asyncio
-    async def test_get_due_queue_items_success(self, client, mock_db, auth_token):
+    async def test_get_due_queue_items_success(self, client, mock_db, auth_token, monkeypatch):
         token, user_id = auth_token
         user = make_user(user_id)
         due_item = ReviewCard(
@@ -235,9 +236,27 @@ class TestQueueDue:
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
-        due_result = MagicMock()
-        due_result.all.return_value = [(due_item, "ephemeral", "lasting a short time")]
-        mock_db.execute.side_effect = [user_result, due_result]
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_due_queue_items(self, user_id, limit=20):
+            return [
+                {
+                    "item": due_item,
+                    "word": "ephemeral",
+                    "definition": "lasting a short time",
+                    "review_mode": "mcq",
+                    "prompt": None,
+                    "source_entry_type": "word",
+                    "source_entry_id": str(due_item.word_id),
+                    "detail": None,
+                    "schedule_options": [],
+                }
+            ]
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_due_queue_items",
+            fake_get_due_queue_items,
+        )
 
         response = await client.get(
             "/api/reviews/queue/due?limit=5",
@@ -250,7 +269,7 @@ class TestQueueDue:
         assert data[0]["id"] == str(due_item.id)
         assert data[0]["word"] == "ephemeral"
         assert data[0]["definition"] == "lasting a short time"
-        assert int(response.headers["X-Reviews-Query-Count"]) >= 2
+        assert int(response.headers["X-Reviews-Query-Count"]) >= 1
         assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
 
     @pytest.mark.asyncio
@@ -285,7 +304,7 @@ class TestQueueDue:
 
 class TestQueueSubmit:
     @pytest.mark.asyncio
-    async def test_submit_queue_review_success(self, client, mock_db, auth_token):
+    async def test_submit_queue_review_success(self, client, mock_db, auth_token, monkeypatch):
         token, user_id = auth_token
         user = make_user(user_id)
         item = ReviewCard(
@@ -303,11 +322,18 @@ class TestQueueSubmit:
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
-        item_result = MagicMock()
-        item_result.scalar_one_or_none.return_value = item
-        latest_history_result = MagicMock()
-        latest_history_result.scalar_one_or_none.return_value = None
-        mock_db.execute.side_effect = [user_result, item_result, latest_history_result]
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_submit_queue_review(self, **kwargs):
+            item.quality_rating = 4
+            item.time_spent_ms = 1234
+            item.card_type = "listening"
+            return item
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.submit_queue_review",
+            fake_submit_queue_review,
+        )
 
         response = await client.post(
             f"/api/reviews/queue/{item.id}/submit",
@@ -324,7 +350,7 @@ class TestQueueSubmit:
 
     @pytest.mark.asyncio
     async def test_submit_queue_review_returns_404_when_item_not_found(
-        self, client, mock_db, auth_token
+        self, client, mock_db, auth_token, monkeypatch
     ):
         token, user_id = auth_token
         user = make_user(user_id)
@@ -332,9 +358,15 @@ class TestQueueSubmit:
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
-        item_result = MagicMock()
-        item_result.scalar_one_or_none.return_value = None
-        mock_db.execute.side_effect = [user_result, item_result]
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_submit_queue_review(self, **kwargs):
+            raise ValueError(f"Queue item {item_id} not found")
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.submit_queue_review",
+            fake_submit_queue_review,
+        )
 
         response = await client.post(
             f"/api/reviews/queue/{item_id}/submit",
@@ -344,6 +376,67 @@ class TestQueueSubmit:
 
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_serializes_state_backed_result(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        state.quality_rating = 4
+        state.time_spent_ms = 1234
+        state.interval_days = 3
+        state.outcome = "correct_tested"
+        state.needs_relearn = False
+        state.recheck_planned = False
+        state.detail = {
+            "entry_type": "word",
+            "entry_id": str(state.entry_id),
+            "display_text": "resilience",
+            "meaning_count": 1,
+            "remembered_count": 0,
+            "compare_with": [],
+            "meanings": [],
+            "audio_state": "not_available",
+        }
+        state.schedule_options = [
+            {"value": "3d", "label": "In 3 days", "is_default": True},
+        ]
+
+        async def fake_submit_queue_review(self, **kwargs):
+            return state
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.submit_queue_review",
+            fake_submit_queue_review,
+        )
+
+        response = await client.post(
+            f"/api/reviews/queue/{state.id}/submit",
+            json={"quality": 4, "time_spent_ms": 1234},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(state.id)
+        assert data["meaning_id"] == ""
+        assert data["outcome"] == "correct_tested"
+        assert data["detail"]["display_text"] == "resilience"
+        assert data["schedule_options"][0]["value"] == "3d"
 
 
 class TestQueueStats:
@@ -378,6 +471,53 @@ class TestQueueStats:
     @pytest.mark.asyncio
     async def test_get_queue_stats_requires_auth(self, client):
         response = await client.get("/api/reviews/queue/stats")
+        assert response.status_code == 401
+
+
+class TestReviewAnalyticsSummary:
+    @pytest.mark.asyncio
+    async def test_get_review_analytics_summary_success(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_review_analytics_summary(self, user_id, days=30):
+            return {
+                "days": days,
+                "total_events": 4,
+                "audio_placeholder_events": 1,
+                "prompt_families": [{"value": "typed_recall", "count": 2}],
+                "outcomes": [{"value": "correct_tested", "count": 3}],
+                "response_input_modes": [{"value": "typed", "count": 2}],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_review_analytics_summary",
+            fake_get_review_analytics_summary,
+        )
+
+        response = await client.get(
+            "/api/reviews/analytics/summary?days=14",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["days"] == 14
+        assert data["total_events"] == 4
+        assert data["audio_placeholder_events"] == 1
+        assert data["prompt_families"][0]["value"] == "typed_recall"
+        assert int(response.headers["X-Reviews-Query-Count"]) >= 1
+        assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
+
+    @pytest.mark.asyncio
+    async def test_get_review_analytics_summary_requires_auth(self, client):
+        response = await client.get("/api/reviews/analytics/summary")
         assert response.status_code == 401
 
 

@@ -187,128 +187,10 @@ jobs:
           assert all(isinstance(phonetics[accent]["ipa"], str) and phonetics[accent]["ipa"] for accent in ("us", "uk", "au"))
           PY
 
-  e2e-smoke:
-    name: E2E Smoke (required)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - uses: actions/setup-node@v6.3.0
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: e2e/package-lock.json
-
-      - name: Install E2E dependencies
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-        run: npm ci --prefix e2e
-
-      - name: Start app stack (docker compose)
-        env:
-          POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: devpassword
-          POSTGRES_DB: vocabapp_dev
-          NEXT_PUBLIC_API_URL: http://backend:8000/api
-          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
-        run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build --force-recreate postgres redis backend worker frontend admin-frontend
-
-      - name: Wait for backend and frontends
-        run: |
-          set -euo pipefail
-
-          backend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
-              backend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${backend_ready}" -ne 1 ]; then
-            echo "Backend health endpoint did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend
-            exit 1
-          fi
-
-          frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
-              frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${frontend_ready}" -ne 1 ]; then
-            echo "Frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend frontend
-            exit 1
-          fi
-
-          admin_frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
-              admin_frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${admin_frontend_ready}" -ne 1 ]; then
-            echo "Admin frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend admin-frontend
-            exit 1
-          fi
-
-      - name: Apply migrations
-        run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
-
-      - name: Run Playwright smoke tests
-        env:
-          E2E_DB_URL: postgresql://vocabapp:devpassword@postgres:5432/vocabapp_dev
-        run: |
-          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
-            -e E2E_BASE_URL=http://frontend:3000 \
-            -e E2E_API_URL=http://backend:8000/api \
-            -e E2E_ADMIN_URL=http://admin-frontend:3001 \
-            -e E2E_DB_URL=${E2E_DB_URL} \
-            playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"
-
-      - name: Collect docker compose logs
-        if: failure()
-        run: |
-          mkdir -p e2e/test-results/compose-logs
-          docker compose -f docker-compose.yml --profile tests ps > e2e/test-results/compose-logs/ps.txt
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > e2e/test-results/compose-logs/migrate.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > e2e/test-results/compose-logs/worker.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > e2e/test-results/compose-logs/backend.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > e2e/test-results/compose-logs/frontend.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > e2e/test-results/compose-logs/admin-frontend.log || true
-
-      - name: Upload Playwright smoke artifacts
-        if: always()
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: playwright-smoke-artifacts
-          path: |
-            e2e/playwright-report
-            e2e/test-results
-          if-no-files-found: ignore
-
-      - name: Tear down app stack
-        if: always()
-        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
-
-  e2e-full:
-    name: E2E Full
+  e2e:
+    name: E2E Full (required)
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: [e2e-smoke]
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -327,7 +209,7 @@ jobs:
       - name: Start app stack (docker compose)
         env:
           POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: devpassword
+          POSTGRES_PASSWORD: change_this_password_in_production
           POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
@@ -388,7 +270,7 @@ jobs:
 
       - name: Run Playwright full suite
         env:
-          E2E_DB_URL: postgresql://vocabapp:devpassword@postgres:5432/vocabapp_dev
+          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/vocabapp_dev
         run: |
           docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \

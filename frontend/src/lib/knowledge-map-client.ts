@@ -58,6 +58,77 @@ export type KnowledgeMapRange = {
   items: KnowledgeMapEntrySummary[];
 };
 
+export type ReviewPromptOption = {
+  option_id: string;
+  label: string;
+  is_correct?: boolean;
+};
+
+export type ReviewPromptPayload = {
+  mode: string;
+  prompt_type: string;
+  stem?: string | null;
+  question: string;
+  options?: ReviewPromptOption[];
+  expected_input?: string | null;
+  input_mode?: string | null;
+  voice_placeholder_text?: string | null;
+  sentence_masked?: string | null;
+  source_word_id?: string | null;
+  source_meaning_id?: string | null;
+  audio_state?: string;
+};
+
+export type ReviewDetailMeaning = {
+  id: string;
+  definition: string;
+  example?: string | null;
+  part_of_speech?: string | null;
+};
+
+export type ReviewDetailPayload = {
+  entry_type: KnowledgeEntryType;
+  entry_id: string;
+  display_text: string;
+  pronunciation?: string | null;
+  part_of_speech?: string | null;
+  primary_definition?: string | null;
+  primary_example?: string | null;
+  meaning_count: number;
+  remembered_count: number;
+  pro_tip?: string | null;
+  compare_with: string[];
+  meanings: ReviewDetailMeaning[];
+  audio_state?: string;
+};
+
+export type ReviewScheduleOption = {
+  value: string;
+  label: string;
+  is_default: boolean;
+};
+
+export type LearningStartCard = {
+  queue_item_id: string | null;
+  meaning_id: string;
+  word: string;
+  definition: string | null;
+  prompt: ReviewPromptPayload;
+  detail?: ReviewDetailPayload | null;
+};
+
+export type LearningStartResponse = {
+  entry_type: KnowledgeEntryType;
+  entry_id: string;
+  entry_word: string;
+  meaning_ids: string[];
+  queue_item_ids: string[];
+  cards: LearningStartCard[];
+  requires_lookup_hint: boolean;
+  detail?: ReviewDetailPayload | null;
+  schedule_options?: ReviewScheduleOption[];
+};
+
 export type KnowledgeMapMeaning = {
   id: string;
   definition: string;
@@ -207,6 +278,12 @@ export const updateKnowledgeEntryStatus = (
 
 export const searchKnowledgeMap = (query: string): Promise<{ items: KnowledgeMapEntrySummary[] }> =>
   apiClient.get<{ items: KnowledgeMapEntrySummary[] }>(`/knowledge-map/search?q=${encodeURIComponent(query)}`);
+
+export const startLearningEntry = (
+  entryType: KnowledgeEntryType,
+  entryId: string,
+): Promise<LearningStartResponse> =>
+  apiClient.post(`/reviews/entry/${entryType}/${entryId}/learning/start`);
 
 export const getKnowledgeMapList = (params: {
   status: KnowledgeMapListStatus;

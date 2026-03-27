@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import HomePage from "@/app/page";
 import WordEntryPage from "@/app/word/[entryId]/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
@@ -13,6 +13,7 @@ import { getUserPreferences } from "@/lib/user-preferences-client";
 
 jest.mock("next/navigation", () => ({
   useParams: jest.fn(),
+  useRouter: jest.fn(),
 }));
 
 jest.mock("@/lib/knowledge-map-client");
@@ -26,6 +27,7 @@ jest.mock("@/lib/user-preferences-client", () => {
 
 describe("WordEntryPage", () => {
   const mockUseParams = useParams as jest.MockedFunction<typeof useParams>;
+  const mockUseRouter = useRouter as jest.MockedFunction<typeof useRouter>;
   const mockGetKnowledgeMapDashboard = getKnowledgeMapDashboard as jest.MockedFunction<typeof getKnowledgeMapDashboard>;
   const mockGetKnowledgeMapEntryDetail = getKnowledgeMapEntryDetail as jest.MockedFunction<typeof getKnowledgeMapEntryDetail>;
   const mockUpdateKnowledgeEntryStatus = updateKnowledgeEntryStatus as jest.MockedFunction<typeof updateKnowledgeEntryStatus>;
@@ -34,6 +36,7 @@ describe("WordEntryPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseParams.mockReturnValue({ entryId: "word-1" } as never);
+    mockUseRouter.mockReturnValue({ push: jest.fn() } as never);
     mockGetKnowledgeMapDashboard.mockResolvedValue({
       total_entries: 13760,
       counts: {

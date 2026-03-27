@@ -1,104 +1,358 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  startLearningEntry,
+  type LearningStartResponse,
+  type ReviewDetailPayload,
+  type ReviewPromptPayload,
+  type ReviewScheduleOption,
+} from "@/lib/knowledge-map-client";
 import { apiClient } from "@/lib/api-client";
 
-type DueQueueItem = {
-  item_id?: string;
+type ReviewQueueCard = {
   id?: string;
-  card_type?: string;
-  prompt?: {
-    word?: string;
-    definition?: string;
-  };
+  queue_item_id?: string | null;
   word?: string;
-  definition?: string;
-  meaning?: {
-    definition?: string;
-    word?: string | { word?: string };
-  };
+  definition?: string | null;
+  card_type?: string;
+  review_mode?: string | null;
+  prompt?: ReviewPromptPayload | null;
+  source_entry_type?: "word" | "phrase" | null;
+  source_entry_id?: string | null;
+  detail?: ReviewDetailPayload | null;
+  schedule_options?: ReviewScheduleOption[];
 };
 
-const getPromptWord = (item: DueQueueItem): string => {
-  if (item.prompt?.word) return item.prompt.word;
-  if (item.word) return item.word;
-  if (typeof item.meaning?.word === "string") return item.meaning.word;
-  if (item.meaning?.word && typeof item.meaning.word === "object" && item.meaning.word.word) {
-    return item.meaning.word.word;
+type ReviewPhase = "challenge" | "relearn" | "reveal";
+type ReviewOutcome = "correct_tested" | "remember" | "lookup" | "wrong";
+
+type RevealState = {
+  outcome: ReviewOutcome;
+  detail: ReviewDetailPayload | null;
+  scheduleOptions: ReviewScheduleOption[];
+  selectedSchedule: string;
+  selectedOptionId?: string;
+  typedResponseValue?: string;
+};
+
+const TIME_SPENT_MS = 5000;
+
+const normalizeCards = (items: ReviewQueueCard[]): ReviewQueueCard[] =>
+  items.map((item) => ({
+    ...item,
+    queue_item_id: item.queue_item_id ?? item.id ?? null,
+    detail: item.detail ?? null,
+    schedule_options: item.schedule_options ?? [],
+  }));
+
+const getLearningEntryFromUrl = (): { entryType: "word" | "phrase"; entryId: string } | null => {
+  if (typeof window === "undefined") {
+    return null;
   }
-  return "Unknown word";
+
+  const search = new URLSearchParams(window.location.search);
+  const entryType = search.get("entry_type");
+  const entryId = search.get("entry_id");
+  if ((entryType === "word" || entryType === "phrase") && entryId) {
+    return { entryType, entryId };
+  }
+  return null;
 };
 
-const getPromptDefinition = (item: DueQueueItem): string => {
-  if (item.prompt?.definition) return item.prompt.definition;
-  if (item.definition) return item.definition;
-  if (item.meaning?.definition) return item.meaning.definition;
-  return "No definition available.";
+const formatPromptQuestion = (card: ReviewQueueCard): string => {
+  const prompt = card.prompt;
+  if (!prompt) {
+    return card.definition ?? card.word ?? "Review item";
+  }
+  if (prompt.prompt_type === "sentence_gap" && prompt.sentence_masked) {
+    return prompt.sentence_masked;
+  }
+  return prompt.question || card.definition || card.word || "Review item";
 };
+
+const defaultScheduleValue = (options: ReviewScheduleOption[]): string =>
+  options.find((option) => option.is_default)?.value ?? "";
+
+const toLearningCards = (payload: LearningStartResponse): ReviewQueueCard[] =>
+  payload.cards.map((card, index) => ({
+    id: card.queue_item_id || `${payload.entry_type}-${payload.entry_id}-${index}`,
+    queue_item_id: card.queue_item_id || null,
+    word: card.word,
+    definition: card.definition,
+    prompt: card.prompt,
+    source_entry_type: payload.entry_type,
+    source_entry_id: payload.entry_id,
+    detail: card.detail ?? payload.detail ?? null,
+    schedule_options: payload.schedule_options ?? [],
+  }));
 
 export default function ReviewPage() {
   const router = useRouter();
   const [started, setStarted] = useState(false);
-  const [cards, setCards] = useState<DueQueueItem[]>([]);
+  const [cards, setCards] = useState<ReviewQueueCard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [phase, setPhase] = useState<ReviewPhase>("challenge");
+  const [revealState, setRevealState] = useState<RevealState | null>(null);
+  const [typedAnswer, setTypedAnswer] = useState("");
 
-  const startReview = async () => {
+  useEffect(() => {
+    const source = getLearningEntryFromUrl();
+    if (!started && !loading && source) {
+      void startLearningMode(source.entryType, source.entryId);
+    }
+  }, [started, loading]);
+
+  const currentCard = cards[currentIndex] ?? null;
+  const prompt = currentCard?.prompt ?? null;
+  const promptText = currentCard ? formatPromptQuestion(currentCard) : "";
+  const isCollocationPrompt = prompt?.prompt_type === "collocation_check";
+  const isSituationPrompt = prompt?.prompt_type === "situation_matching";
+  const isSpeechPlaceholderPrompt = prompt?.input_mode === "speech_placeholder";
+  const scheduleOptions = useMemo(
+    () => currentCard?.schedule_options ?? [],
+    [currentCard],
+  );
+
+  const startQueueReview = async () => {
     setLoading(true);
     try {
-      const dueCards = await apiClient.get<DueQueueItem[]>("/reviews/queue/due");
-      setCards(dueCards);
+      const dueCards = await apiClient.get<ReviewQueueCard[]>("/reviews/queue/due");
+      setCards(normalizeCards(dueCards));
       setCurrentIndex(0);
+      setPhase("challenge");
+      setRevealState(null);
+      setTypedAnswer("");
       setCompleted(false);
       setStarted(true);
-    } catch (error) {
-      console.error("Failed to start review:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const submitRating = async (quality: number) => {
-    if (currentIndex >= cards.length) return;
-
-    const card = cards[currentIndex];
-    const itemId = card.item_id ?? card.id;
-    if (!itemId) return;
+  const startLearningMode = async (entryType: "word" | "phrase", entryId: string) => {
     setLoading(true);
-
     try {
-      await apiClient.post(`/reviews/queue/${itemId}/submit`, {
-        quality,
-        time_spent_ms: 5000,
-      });
-
-      if (currentIndex + 1 < cards.length) {
-        setCurrentIndex(currentIndex + 1);
-      } else {
-        setCompleted(true);
-      }
-    } catch (error) {
-      console.error("Failed to submit review:", error);
+      const payload = await startLearningEntry(entryType, entryId);
+      setCards(normalizeCards(toLearningCards(payload)));
+      setCurrentIndex(0);
+      setPhase("challenge");
+      setRevealState(null);
+      setTypedAnswer("");
+      setCompleted(false);
+      setStarted(true);
     } finally {
       setLoading(false);
     }
+  };
+
+  const startReview = async () => {
+    const source = getLearningEntryFromUrl();
+    if (source) {
+      await startLearningMode(source.entryType, source.entryId);
+      return;
+    }
+    await startQueueReview();
+  };
+
+  const advanceCard = () => {
+    if (currentIndex + 1 < cards.length) {
+      setCurrentIndex((value) => value + 1);
+      setPhase("challenge");
+      setRevealState(null);
+      setTypedAnswer("");
+      return;
+    }
+    setCompleted(true);
+  };
+
+  const buildRevealState = (
+    card: ReviewQueueCard,
+    outcome: ReviewOutcome,
+    detail: ReviewDetailPayload | null,
+    options: ReviewScheduleOption[],
+    answerState?: {
+      selectedOptionId?: string;
+      typedResponseValue?: string;
+    },
+  ): RevealState => ({
+    outcome,
+    detail,
+    scheduleOptions: options,
+    selectedSchedule: defaultScheduleValue(options),
+    selectedOptionId: answerState?.selectedOptionId,
+    typedResponseValue: answerState?.typedResponseValue,
+  });
+
+  const submitOutcome = async (card: ReviewQueueCard, outcome: ReviewOutcome) => {
+    if (!card.queue_item_id) {
+      return {
+        detail: card.detail ?? null,
+        schedule_options: card.schedule_options ?? [],
+      };
+    }
+
+    return apiClient.post<{
+      detail?: ReviewDetailPayload | null;
+      schedule_options?: ReviewScheduleOption[];
+    }>(`/reviews/queue/${card.queue_item_id}/submit`, {
+      quality: outcome === "wrong" || outcome === "lookup" ? 1 : 4,
+      time_spent_ms: TIME_SPENT_MS,
+      card_type: card.card_type,
+        review_mode: card.review_mode,
+        prompt: card.prompt,
+        outcome,
+        typed_answer: typedAnswer.trim() || undefined,
+      });
+  };
+
+  const onSubmitTypedAnswer = async () => {
+    if (!currentCard?.prompt?.expected_input || loading) {
+      return;
+    }
+    const normalizedTyped = typedAnswer.trim().toLowerCase();
+    const normalizedExpected = currentCard.prompt.expected_input.trim().toLowerCase();
+    if (!normalizedTyped) {
+      return;
+    }
+
+    const outcome: ReviewOutcome =
+      normalizedTyped === normalizedExpected ? "correct_tested" : "wrong";
+
+    if (outcome === "correct_tested") {
+      setRevealState(
+        buildRevealState(
+          currentCard,
+          outcome,
+          currentCard.detail ?? null,
+          currentCard.schedule_options ?? [],
+          { typedResponseValue: typedAnswer.trim() || undefined },
+        ),
+      );
+      setPhase("reveal");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await submitOutcome(currentCard, outcome);
+      const detail = response.detail ?? currentCard.detail ?? null;
+      const options = response.schedule_options ?? currentCard.schedule_options ?? [];
+      setRevealState(buildRevealState(currentCard, outcome, detail, options));
+      setPhase("relearn");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onChooseOption = async (optionId: string) => {
+    if (!currentCard?.prompt?.options || loading) {
+      return;
+    }
+    const matched = currentCard.prompt.options.find((option) => option.option_id === optionId);
+    const outcome: ReviewOutcome = matched?.is_correct ? "correct_tested" : "wrong";
+    if (outcome === "correct_tested") {
+      setRevealState(
+        buildRevealState(
+          currentCard,
+          outcome,
+          currentCard.detail ?? null,
+          currentCard.schedule_options ?? [],
+          { selectedOptionId: optionId },
+        ),
+      );
+      setPhase("reveal");
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await submitOutcome(currentCard, outcome);
+      const detail = response.detail ?? currentCard.detail ?? null;
+      const options = response.schedule_options ?? currentCard.schedule_options ?? [];
+      setRevealState(buildRevealState(currentCard, outcome, detail, options));
+      setPhase("relearn");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onLookup = async () => {
+    if (!currentCard || loading) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await submitOutcome(currentCard, "lookup");
+      setRevealState(
+        buildRevealState(
+          currentCard,
+          "lookup",
+          response.detail ?? currentCard.detail ?? null,
+          response.schedule_options ?? currentCard.schedule_options ?? [],
+        ),
+      );
+      setPhase("relearn");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRemember = async () => {
+    if (!currentCard || loading) {
+      return;
+    }
+    setRevealState(
+      buildRevealState(
+        currentCard,
+        "remember",
+        currentCard.detail ?? null,
+        currentCard.schedule_options ?? [],
+      ),
+    );
+    setPhase("reveal");
+  };
+
+  const onContinueReveal = async () => {
+    if (!currentCard || !revealState) {
+      return;
+    }
+    if (
+      currentCard.queue_item_id &&
+      revealState.selectedSchedule &&
+      revealState.outcome !== "wrong" &&
+      revealState.outcome !== "lookup"
+    ) {
+      setLoading(true);
+      try {
+        await apiClient.post(`/reviews/queue/${currentCard.queue_item_id}/submit`, {
+          quality: 4,
+          time_spent_ms: TIME_SPENT_MS,
+          card_type: currentCard.card_type,
+          review_mode: currentCard.review_mode,
+          prompt: currentCard.prompt,
+          outcome: revealState.outcome,
+          selected_option_id: revealState.selectedOptionId,
+          typed_answer: revealState.typedResponseValue,
+          schedule_override: revealState.selectedSchedule,
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+    advanceCard();
   };
 
   if (completed) {
     return (
       <div className="space-y-4" data-testid="review-complete-state">
-        <h2 className="text-2xl font-bold" data-testid="review-complete-title">
-          Session Complete!
-        </h2>
-        <p className="text-gray-600" data-testid="review-complete-summary">
-          You reviewed {cards.length} cards.
-        </p>
+        <h2 className="text-2xl font-bold">Session Complete</h2>
+        <p className="text-sm text-slate-600">You reviewed {cards.length} entries.</p>
         <button
           onClick={() => router.push("/")}
-          data-testid="review-back-home-button"
-          className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          className="rounded-md bg-fuchsia-600 px-4 py-2 text-white"
         >
           Back to Home
         </button>
@@ -109,14 +363,12 @@ export default function ReviewPage() {
   if (!started) {
     return (
       <div className="space-y-4" data-testid="review-start-state">
-        <h2 className="text-2xl font-bold" data-testid="review-page-title">
-          Review Session
-        </h2>
+        <h2 className="text-2xl font-bold">Review Session</h2>
         <button
-          onClick={startReview}
-          disabled={loading}
           data-testid="review-start-button"
-          className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+          onClick={() => void startReview()}
+          disabled={loading}
+          className="rounded-md bg-fuchsia-600 px-4 py-2 text-white disabled:opacity-50"
         >
           {loading ? "Starting..." : "Start Review"}
         </button>
@@ -124,19 +376,16 @@ export default function ReviewPage() {
     );
   }
 
-  if (cards.length === 0) {
+  if (!currentCard) {
     return (
       <div className="space-y-4" data-testid="review-empty-state">
-        <h2 className="text-2xl font-bold" data-testid="review-empty-title">
-          No Cards Due
-        </h2>
-        <p className="text-gray-600" data-testid="review-empty-description">
-          You have no cards to review right now.
+        <h2 className="text-2xl font-bold" data-testid="review-empty-title">No Entries Due</h2>
+        <p className="text-sm text-slate-600" data-testid="review-empty-description">
+          There are no cards to review right now.
         </p>
         <button
           onClick={() => router.push("/")}
-          data-testid="review-empty-back-home-button"
-          className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          className="rounded-md bg-fuchsia-600 px-4 py-2 text-white"
         >
           Back to Home
         </button>
@@ -144,50 +393,225 @@ export default function ReviewPage() {
     );
   }
 
-  const currentCard = cards[currentIndex];
-  const promptWord = getPromptWord(currentCard);
-  const promptDefinition = getPromptDefinition(currentCard);
+  if (phase === "reveal" && revealState) {
+    const detail = revealState.detail;
+    return (
+      <div className="space-y-4" data-testid="review-reveal-state">
+        <div className="text-sm text-slate-500">
+          Review {currentIndex + 1}/{cards.length}
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-slate-500">
+            {revealState.outcome === "correct_tested" ? "Remembered" : "Kept in memory"}
+          </div>
+          <h2 className="mt-2 text-2xl font-semibold">{detail?.display_text ?? currentCard.word}</h2>
+          {detail?.pronunciation ? <p className="text-sm text-slate-500">{detail.pronunciation}</p> : null}
+          <p className="mt-3 text-base text-slate-800">{detail?.primary_definition ?? currentCard.definition}</p>
+          {detail?.primary_example ? (
+            <p className="mt-2 text-sm italic text-slate-600">{detail.primary_example}</p>
+          ) : null}
+          {detail?.meaning_count ? (
+            <p className="mt-3 text-sm text-slate-500">
+              {detail.meaning_count} meanings, remembered {detail.remembered_count} times
+            </p>
+          ) : null}
+          {detail?.pro_tip ? (
+            <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+              {detail.pro_tip}
+            </div>
+          ) : null}
+          {detail?.compare_with?.length ? (
+            <div className="mt-4 text-sm text-slate-700">
+              Compare with: {detail.compare_with.join(", ")}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="review-override" className="text-sm font-medium text-slate-700">
+            Review in
+          </label>
+          <select
+            id="review-override"
+            value={revealState.selectedSchedule}
+            onChange={(event) =>
+              setRevealState((state) =>
+                state ? { ...state, selectedSchedule: event.target.value } : state,
+              )
+            }
+            className="w-full rounded-md border border-slate-300 px-3 py-2"
+          >
+            {revealState.scheduleOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => void onContinueReveal()}
+            disabled={loading}
+            className="w-full rounded-md bg-fuchsia-600 px-4 py-2 text-white disabled:opacity-50"
+          >
+            {loading ? "Saving..." : "Continue"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "relearn" && revealState) {
+    const detail = revealState.detail;
+    return (
+      <div className="space-y-4" data-testid="review-relearn-state">
+        <div className="text-sm text-slate-500">
+          Review {currentIndex + 1}/{cards.length}
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-amber-600">Relearn</div>
+          <h2 className="mt-2 text-2xl font-semibold">{detail?.display_text ?? currentCard.word}</h2>
+          <p className="mt-3 text-base text-slate-800">{detail?.primary_definition ?? currentCard.definition}</p>
+          <div className="mt-4 space-y-3">
+            {detail?.meanings?.map((meaning, index) => (
+              <div key={meaning.id} className="rounded-xl bg-slate-50 p-3">
+                <div className="text-sm font-medium text-slate-900">
+                  Meaning {index + 1}
+                  {meaning.part_of_speech ? ` · ${meaning.part_of_speech}` : ""}
+                </div>
+                <div className="mt-1 text-sm text-slate-700">{meaning.definition}</div>
+                {meaning.example ? (
+                  <div className="mt-1 text-xs italic text-slate-500">{meaning.example}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {detail?.pro_tip ? (
+            <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+              {detail.pro_tip}
+            </div>
+          ) : null}
+          <p className="mt-4 text-sm text-slate-500">We will bring this entry back sooner.</p>
+        </div>
+        <button
+          onClick={advanceCard}
+          className="w-full rounded-md bg-fuchsia-600 px-4 py-2 text-white"
+        >
+          Continue
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4" data-testid="review-active-state">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold" data-testid="review-active-title">
-          Review Session
-        </h2>
-        <span className="text-sm text-gray-500" data-testid="review-progress">
-          Card {currentIndex + 1} of {cards.length}
+        <h2 className="text-2xl font-bold">Review Session</h2>
+        <span className="text-sm text-slate-500">
+          Review {currentIndex + 1}/{cards.length}
         </span>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6" data-testid="review-card">
-        <p className="mb-2 text-2xl font-semibold" data-testid="review-card-word">
-          {promptWord}
-        </p>
-        <p className="mb-4 text-base text-gray-700" data-testid="review-card-definition">
-          {promptDefinition}
-        </p>
-        <p className="text-sm text-gray-500" data-testid="review-card-type">
-          Type: {currentCard.card_type ?? "review"}
-        </p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        {prompt?.stem ? <p className="mb-2 text-sm text-slate-500">{prompt.stem}</p> : null}
+        {prompt?.prompt_type === "audio_to_definition" ? (
+          <div className="mb-4 flex justify-center">
+            <button
+              type="button"
+              className="rounded-full bg-cyan-500 px-5 py-4 text-sm font-semibold text-white"
+            >
+              Play audio
+            </button>
+          </div>
+        ) : null}
+        {isCollocationPrompt ? (
+          <div className="space-y-3" data-testid="review-collocation-prompt">
+            <div className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
+              Common expression
+            </div>
+            <p className="text-xl font-semibold text-slate-900">{promptText}</p>
+          </div>
+        ) : isSituationPrompt ? (
+          <div className="space-y-3" data-testid="review-situation-prompt">
+            <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+              Situation
+            </div>
+            <p className="rounded-xl bg-emerald-50 p-4 text-lg text-slate-900">{promptText}</p>
+          </div>
+        ) : (
+          <p className="text-xl font-semibold text-slate-900">{promptText}</p>
+        )}
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium text-gray-700">How well did you know this?</p>
-        <div className="flex gap-2" data-testid="review-rating-buttons">
-          {[0, 1, 2, 3, 4, 5].map((quality) => (
+        {prompt?.options?.map((option) => (
+          <button
+            key={option.option_id}
+            onClick={() => void onChooseOption(option.option_id)}
+            disabled={loading}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-left text-slate-800 disabled:opacity-50"
+          >
+            <span className="mr-2 font-semibold">{option.option_id}</span>
+            {option.label}
+          </button>
+        ))}
+        {!prompt?.options?.length && prompt?.expected_input ? (
+          <div className="space-y-2">
+            {isSpeechPlaceholderPrompt ? (
+              <div
+                className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4"
+                data-testid="review-speech-placeholder"
+              >
+                <button
+                  type="button"
+                  disabled
+                  className="mb-3 w-full rounded-md bg-slate-300 px-4 py-2 text-slate-700"
+                >
+                  Voice answer coming soon
+                </button>
+                <p className="text-sm text-slate-600">
+                  {prompt?.voice_placeholder_text ?? "Type the answer for now."}
+                </p>
+              </div>
+            ) : null}
+            <input
+              type="text"
+              value={typedAnswer}
+              onChange={(event) => setTypedAnswer(event.target.value)}
+              placeholder="Type the word or phrase"
+              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
+            />
             <button
-              key={quality}
-              onClick={() => submitRating(quality)}
-              disabled={loading}
-              data-testid={`review-rating-${quality}`}
-              className="flex-1 rounded-md border border-gray-300 px-4 py-2 hover:bg-gray-100 disabled:opacity-50"
+              onClick={() => void onSubmitTypedAnswer()}
+              disabled={loading || !typedAnswer.trim()}
+              className="w-full rounded-md bg-fuchsia-600 px-4 py-2 text-white disabled:opacity-50"
             >
-              {quality}
+              {loading ? "Checking..." : "Check answer"}
             </button>
-          ))}
-        </div>
-        <p className="text-xs text-gray-500">0 = Didn&apos;t know, 5 = Perfect recall</p>
+          </div>
+        ) : null}
       </div>
+
+      <div className="space-y-2 pt-2">
+        <button
+          onClick={() => void onRemember()}
+          disabled={loading}
+          className="w-full rounded-md bg-emerald-600 px-4 py-2 text-white disabled:opacity-50"
+        >
+          I remember it
+        </button>
+        <button
+          onClick={() => void onLookup()}
+          disabled={loading}
+          className="w-full rounded-md bg-amber-500 px-4 py-2 text-white disabled:opacity-50"
+        >
+          Show meaning
+        </button>
+      </div>
+
+      {scheduleOptions.length > 0 ? (
+        <p className="text-center text-xs text-slate-500">
+          Default next review: {scheduleOptions.find((option) => option.is_default)?.label}
+        </p>
+      ) : null}
     </div>
   );
 }
