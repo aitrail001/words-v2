@@ -1,91 +1,96 @@
 import logging
-from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
+OUTCOME_FACTORS = {
+    "correct_tested": 2.2,
+    "remember": 1.6,
+    "lookup": 0.6,
+    "wrong": 0.35,
+}
+
+CONTEXT_FACTORS = {
+    "sentence_gap": 1.10,
+    "definition_to_entry": 1.05,
+    "audio_to_definition": 1.00,
+    "entry_to_definition": 0.95,
+    "meaning_discrimination": 1.08,
+    "typed_recall": 1.15,
+    "collocation_check": 1.07,
+    "situation_matching": 1.09,
+}
+
 
 @dataclass
-class SM2Result:
-    """Result of SM-2 algorithm calculation."""
-    ease_factor: float
+class EntryReviewResult:
+    outcome: str
+    stability: float
+    difficulty: float
     interval_days: int
-    repetitions: int
     next_review: datetime
-    is_mastered: bool
+    is_fragile: bool
 
 
 def calculate_next_review(
-    quality: int,
-    ease_factor: float = 2.5,
-    interval_days: int = 0,
-    repetitions: int = 0,
-) -> SM2Result:
-    """
-    Calculate the next review date using the SM-2 algorithm.
-
-    The SuperMemo 2 (SM-2) algorithm determines optimal review intervals
-    based on how well the user recalls the information.
-
-    Args:
-        quality: User's rating of recall quality (0-5)
-            - 0: Complete blackout, no recall
-            - 1: Incorrect response, but upon seeing the answer, remembered
-            - 2: Incorrect response, but seemed easy to recall after seeing answer
-            - 3: Correct response with serious difficulty
-            - 4: Correct response after hesitation
-            - 5: Perfect response with no hesitation
-        ease_factor: Current ease factor (difficulty multiplier, starts at 2.5)
-        interval_days: Current interval in days
-        repetitions: Number of successful repetitions
-
-    Returns:
-        SM2Result with updated values and next review date
-    """
-    # Minimum ease factor (prevents items from becoming too easy)
-    MIN_EASE_FACTOR = 1.3
-
-    # Quality threshold for a "correct" answer
-    QUALITY_THRESHOLD = 3
-
-    if quality >= QUALITY_THRESHOLD:
-        # Correct response
-        if repetitions == 0:
-            new_interval = 1
-        elif repetitions == 1:
-            new_interval = 6
-        else:
-            new_interval = round(interval_days * ease_factor)
-
-        new_repetitions = repetitions + 1
-
-        # Update ease factor based on quality
-        # EF' = EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
-        new_ease_factor = ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
-    else:
-        # Incorrect response - reset
-        new_interval = 1
-        new_repetitions = 0
-        new_ease_factor = max(MIN_EASE_FACTOR, ease_factor - 0.2)
-
-    # Ensure ease factor doesn't go below minimum
-    new_ease_factor = max(MIN_EASE_FACTOR, new_ease_factor)
-
-    # Calculate next review date
-    next_review = datetime.now(timezone.utc) + timedelta(days=new_interval)
-
-    # Consider mastered if interval is > 21 days (3 weeks)
-    is_mastered = new_interval > 21 and quality >= QUALITY_THRESHOLD
-
-    logger.debug(
-        "SM-2 calculation: quality=%d interval=%d->%d ef=%.2f->%.2f mastered=%s",
-        quality, interval_days, new_interval, ease_factor, new_ease_factor, is_mastered,
+    *,
+    outcome: str,
+    prompt_type: str,
+    stability: float = 0.3,
+    difficulty: float = 0.5,
+) -> EntryReviewResult:
+    normalized_outcome = outcome if outcome in OUTCOME_FACTORS else "wrong"
+    normalized_prompt_type = (
+        prompt_type if prompt_type in CONTEXT_FACTORS else "definition_to_entry"
     )
 
-    return SM2Result(
-        ease_factor=round(new_ease_factor, 2),
-        interval_days=new_interval,
-        repetitions=new_repetitions,
+    clamped_stability = max(0.15, float(stability or 0.3))
+    clamped_difficulty = min(0.95, max(0.15, float(difficulty or 0.5)))
+    difficulty_factor = 1.3 - clamped_difficulty
+
+    if normalized_outcome in {"lookup", "wrong"}:
+        next_stability = max(
+            0.2 if normalized_outcome == "lookup" else 0.15,
+            clamped_stability * OUTCOME_FACTORS[normalized_outcome],
+        )
+        next_difficulty = min(
+            0.95,
+            clamped_difficulty + (0.08 if normalized_outcome == "lookup" else 0.12),
+        )
+    else:
+        candidate_interval = (
+            clamped_stability
+            * OUTCOME_FACTORS[normalized_outcome]
+            * difficulty_factor
+            * CONTEXT_FACTORS[normalized_prompt_type]
+        )
+        next_stability = max(0.15, candidate_interval)
+        next_difficulty = max(
+            0.15,
+            clamped_difficulty - (0.03 if normalized_outcome == "correct_tested" else 0.01),
+        )
+
+    interval_days = max(0, int(round(min(next_stability, 180))))
+    next_review = datetime.now(timezone.utc) + timedelta(days=next_stability)
+    is_fragile = normalized_outcome in {"lookup", "wrong"}
+
+    logger.debug(
+        "entry_review_schedule outcome=%s prompt_type=%s stability=%.2f->%.2f difficulty=%.2f->%.2f interval_days=%d",
+        normalized_outcome,
+        normalized_prompt_type,
+        clamped_stability,
+        next_stability,
+        clamped_difficulty,
+        next_difficulty,
+        interval_days,
+    )
+
+    return EntryReviewResult(
+        outcome=normalized_outcome,
+        stability=round(next_stability, 2),
+        difficulty=round(next_difficulty, 2),
+        interval_days=interval_days,
         next_review=next_review,
-        is_mastered=is_mastered,
+        is_fragile=is_fragile,
     )

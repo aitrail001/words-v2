@@ -1,11 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { useRouter } from "next/navigation";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import ReviewPage from "@/app/review/page";
-import { getAuthRedirectPath } from "@/lib/auth-route-guard";
+import { apiClient } from "@/lib/api-client";
 
 jest.mock("next/navigation", () => ({
-  useRouter: jest.fn(),
+  useRouter: jest.fn(() => ({ push: jest.fn() })),
 }));
 
 jest.mock("@/lib/api-client", () => ({
@@ -16,148 +14,461 @@ jest.mock("@/lib/api-client", () => ({
 }));
 
 describe("ReviewPage", () => {
-  const mockPush = jest.fn();
-  const mockApiClient = require("@/lib/api-client").apiClient;
-  const queueItem = {
-    item_id: "queue-item-1",
-    card_type: "word_to_definition",
-    prompt: {
-      word: "bank",
-      definition: "A financial institution that manages money.",
-    },
-  };
+  const mockGet = apiClient.get as jest.MockedFunction<typeof apiClient.get>;
+  const mockPost = apiClient.post as jest.MockedFunction<typeof apiClient.post>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (useRouter as jest.Mock).mockReturnValue({ push: mockPush });
   });
 
-  it("renders start review button", () => {
-    render(<ReviewPage />);
-    expect(screen.getByRole("button", { name: /start review/i })).toBeInTheDocument();
-  });
-
-  it("loads due queue items when review starts", async () => {
-    const user = userEvent.setup();
-    mockApiClient.get.mockResolvedValue([queueItem]);
-
-    render(<ReviewPage />);
-
-    await user.click(screen.getByRole("button", { name: /start review/i }));
-
-    await waitFor(() => {
-      expect(mockApiClient.get).toHaveBeenCalledWith("/reviews/queue/due");
-    });
-
-    expect(mockApiClient.post).not.toHaveBeenCalledWith("/reviews/sessions");
-  });
-
-  it("displays prompt metadata from due queue item", async () => {
-    const user = userEvent.setup();
-    mockApiClient.get.mockResolvedValue([queueItem]);
-
-    render(<ReviewPage />);
-
-    await user.click(screen.getByRole("button", { name: /start review/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText("bank")).toBeInTheDocument();
-      expect(
-        screen.getByText("A financial institution that manages money.")
-      ).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /1/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /5/i })).toBeInTheDocument();
-    });
-  });
-
-  it("submits rating to queue endpoint and moves to next card", async () => {
-    const user = userEvent.setup();
-    mockApiClient.get.mockResolvedValue([
+  it("shows the reveal step for a correct answer and submits the chosen schedule", async () => {
+    mockGet.mockResolvedValue([
       {
-        item_id: "queue-item-1",
-        card_type: "word_to_definition",
+        id: "state-1",
+        queue_item_id: "state-1",
+        word: "barely",
+        definition: "Only just, by a very small margin.",
+        review_mode: "mcq",
         prompt: {
-          word: "bank",
-          definition: "A financial institution that manages money.",
+          mode: "mcq",
+          prompt_type: "definition_to_entry",
+          stem: "Choose the word or phrase that matches this definition.",
+          question: "Only just, by a very small margin.",
+          options: [
+            { option_id: "A", label: "Barely", is_correct: true },
+            { option_id: "B", label: "Bravely", is_correct: false },
+          ],
+          audio_state: "not_available",
         },
-      },
-      {
-        item_id: "queue-item-2",
-        card_type: "word_to_definition",
-        prompt: {
-          word: "branch",
-          definition: "A local office of a larger bank.",
+        detail: {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "barely",
+          primary_definition: "Only just, by a very small margin.",
+          primary_example: "He barely made it through the door.",
+          meaning_count: 1,
+          remembered_count: 4,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
         },
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
       },
-    ]);
-    mockApiClient.post.mockResolvedValue({ quality_rating: 4 });
+    ] as never);
+    mockPost.mockResolvedValue({} as never);
 
     render(<ReviewPage />);
 
-    await user.click(screen.getByRole("button", { name: /start review/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /a barely/i }));
 
-    await waitFor(() => {
-      expect(screen.getByText(/card 1 of 2/i)).toBeInTheDocument();
-      expect(screen.getByText("bank")).toBeInTheDocument();
+    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
+    expect(screen.getByText("barely")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "7d" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     });
 
-    await user.click(screen.getByRole("button", { name: /^4$/i }));
-
-    await waitFor(() => {
-      expect(mockApiClient.post).toHaveBeenCalledWith(
-        "/reviews/queue/queue-item-1/submit",
-        expect.objectContaining({ quality: 4 })
-      );
-      expect(screen.getByText(/card 2 of 2/i)).toBeInTheDocument();
-      expect(screen.getByText("branch")).toBeInTheDocument();
-    });
-  });
-
-  it("shows completion state when all queue items are reviewed", async () => {
-    const user = userEvent.setup();
-    mockApiClient.get.mockResolvedValue([queueItem]);
-    mockApiClient.post.mockResolvedValue({ quality_rating: 5 });
-
-    render(<ReviewPage />);
-
-    await user.click(screen.getByRole("button", { name: /start review/i }));
-    await waitFor(() => screen.getByRole("button", { name: /^5$/i }));
-    await user.click(screen.getByRole("button", { name: /^5$/i }));
-
-    await waitFor(() => {
-      expect(mockApiClient.post).toHaveBeenCalledWith(
-        "/reviews/queue/queue-item-1/submit",
-        expect.objectContaining({ quality: 5 })
-      );
-      expect(screen.getByText(/session complete/i)).toBeInTheDocument();
-    });
-  });
-
-  it("shows no cards due state when queue is empty", async () => {
-    const user = userEvent.setup();
-    mockApiClient.get.mockResolvedValue([]);
-
-    render(<ReviewPage />);
-
-    await user.click(screen.getByRole("button", { name: /start review/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/no cards due/i)).toBeInTheDocument();
-      expect(
-        screen.getByText(/you have no cards to review right now/i)
-      ).toBeInTheDocument();
-    });
-  });
-});
-
-describe("Auth middleware for /review", () => {
-  it("redirects unauthenticated review route requests to /login", () => {
-    expect(getAuthRedirectPath("/review", false)).toBe(
-      "/login?next=%2Freview",
+    expect(mockPost).toHaveBeenCalledWith(
+      "/reviews/queue/state-1/submit",
+      expect.objectContaining({
+        outcome: "correct_tested",
+        selected_option_id: "A",
+        schedule_override: "7d",
+      }),
     );
   });
 
-  it("allows authenticated review route requests", () => {
-    expect(getAuthRedirectPath("/review", true)).toBeNull();
+  it("shows the relearn step after a wrong answer", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-2",
+        queue_item_id: "state-2",
+        word: "jump the gun",
+        definition: "To do something too soon.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "definition_to_entry",
+          stem: "Choose the word or phrase that matches this definition.",
+          question: "To do something too soon.",
+          options: [
+            { option_id: "A", label: "Miss the boat", is_correct: false },
+            { option_id: "B", label: "Jump the gun", is_correct: true },
+          ],
+          audio_state: "not_available",
+        },
+        detail: {
+          entry_type: "phrase",
+          entry_id: "phrase-1",
+          display_text: "jump the gun",
+          primary_definition: "To do something too soon.",
+          primary_example: "They jumped the gun and announced it early.",
+          meaning_count: 2,
+          remembered_count: 1,
+          compare_with: [],
+          meanings: [
+            {
+              id: "sense-1",
+              definition: "To do something too soon.",
+              example: "They jumped the gun and announced it early.",
+            },
+          ],
+          audio_state: "not_available",
+        },
+        schedule_options: [
+          { value: "10m", label: "Later today", is_default: true },
+        ],
+      },
+    ] as never);
+    mockPost.mockResolvedValue({
+      detail: {
+        entry_type: "phrase",
+        entry_id: "phrase-1",
+        display_text: "jump the gun",
+        primary_definition: "To do something too soon.",
+        primary_example: "They jumped the gun and announced it early.",
+        meaning_count: 2,
+        remembered_count: 1,
+        compare_with: [],
+        meanings: [
+          {
+            id: "sense-1",
+            definition: "To do something too soon.",
+            example: "They jumped the gun and announced it early.",
+          },
+        ],
+        audio_state: "not_available",
+      },
+      schedule_options: [{ value: "10m", label: "Later today", is_default: true }],
+    } as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /a miss the boat/i }));
+
+    expect(await screen.findByTestId("review-relearn-state")).toBeInTheDocument();
+    expect(screen.getByText("jump the gun")).toBeInTheDocument();
+    expect(mockPost).toHaveBeenCalledWith(
+      "/reviews/queue/state-2/submit",
+      expect.objectContaining({
+        outcome: "wrong",
+      }),
+    );
+  });
+
+  it("shows the reveal step for a correct typed recall answer", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-3",
+        queue_item_id: "state-3",
+        word: "resilience",
+        definition: "The capacity to recover quickly from difficulties.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "typed_recall",
+          stem: "Type the word or phrase that matches this definition.",
+          question: "The capacity to recover quickly from difficulties.",
+          options: null,
+          expected_input: "resilience",
+          audio_state: "not_available",
+        },
+        detail: {
+          entry_type: "word",
+          entry_id: "word-3",
+          display_text: "resilience",
+          primary_definition: "The capacity to recover quickly from difficulties.",
+          primary_example: "Resilience helps teams adapt to change.",
+          meaning_count: 1,
+          remembered_count: 2,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+        },
+        schedule_options: [
+          { value: "3d", label: "In 3 days", is_default: true },
+        ],
+      },
+    ] as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    fireEvent.change(await screen.findByPlaceholderText(/type the word or phrase/i), {
+      target: { value: "resilience" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /check answer/i }));
+
+    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
+    expect(screen.getByText("resilience")).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+
+    mockPost.mockResolvedValue({} as never);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    });
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/reviews/queue/state-3/submit",
+      expect.objectContaining({
+        outcome: "correct_tested",
+        typed_answer: "resilience",
+      }),
+    );
+  });
+
+  it("shows the relearn step after a wrong typed recall answer", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-4",
+        queue_item_id: "state-4",
+        word: "resilience",
+        definition: "The capacity to recover quickly from difficulties.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "typed_recall",
+          stem: "Type the word or phrase that matches this definition.",
+          question: "The capacity to recover quickly from difficulties.",
+          options: null,
+          expected_input: "resilience",
+          audio_state: "not_available",
+        },
+        detail: {
+          entry_type: "word",
+          entry_id: "word-4",
+          display_text: "resilience",
+          primary_definition: "The capacity to recover quickly from difficulties.",
+          primary_example: "Resilience helps teams adapt to change.",
+          meaning_count: 1,
+          remembered_count: 2,
+          compare_with: [],
+          meanings: [
+            {
+              id: "meaning-4",
+              definition: "The capacity to recover quickly from difficulties.",
+              example: "Resilience helps teams adapt to change.",
+            },
+          ],
+          audio_state: "not_available",
+        },
+        schedule_options: [
+          { value: "10m", label: "Later today", is_default: true },
+        ],
+      },
+    ] as never);
+    mockPost.mockResolvedValue({
+      detail: {
+        entry_type: "word",
+        entry_id: "word-4",
+        display_text: "resilience",
+        primary_definition: "The capacity to recover quickly from difficulties.",
+        primary_example: "Resilience helps teams adapt to change.",
+        meaning_count: 1,
+        remembered_count: 2,
+        compare_with: [],
+        meanings: [
+          {
+            id: "meaning-4",
+            definition: "The capacity to recover quickly from difficulties.",
+            example: "Resilience helps teams adapt to change.",
+          },
+        ],
+        audio_state: "not_available",
+      },
+      schedule_options: [{ value: "10m", label: "Later today", is_default: true }],
+    } as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    fireEvent.change(await screen.findByPlaceholderText(/type the word or phrase/i), {
+      target: { value: "reliance" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /check answer/i }));
+
+    expect(await screen.findByTestId("review-relearn-state")).toBeInTheDocument();
+    expect(mockPost).toHaveBeenCalledWith(
+      "/reviews/queue/state-4/submit",
+      expect.objectContaining({
+        outcome: "wrong",
+        typed_answer: "reliance",
+      }),
+    );
+  });
+
+  it("renders the collocation prompt treatment", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-5",
+        queue_item_id: "state-5",
+        word: "jump the gun",
+        definition: "To do something too soon.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "collocation_check",
+          stem: "Choose the word or phrase that completes this common expression.",
+          question: "They ___ whenever a draft appears.",
+          options: [
+            { option_id: "A", label: "jump the gun", is_correct: true },
+            { option_id: "B", label: "miss the boat", is_correct: false },
+          ],
+          sentence_masked: "They ___ whenever a draft appears.",
+          audio_state: "not_available",
+        },
+        detail: null,
+        schedule_options: [],
+      },
+    ] as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+
+    const prompt = await screen.findByTestId("review-collocation-prompt");
+    expect(prompt).toBeInTheDocument();
+    expect(prompt).toHaveTextContent(/common expression/i);
+    expect(prompt).toHaveTextContent("They ___ whenever a draft appears.");
+  });
+
+  it("renders the situation prompt treatment", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-6",
+        queue_item_id: "state-6",
+        word: "resilience",
+        definition: "The capacity to recover quickly from difficulties.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "situation_matching",
+          stem: "Which word or phrase best fits this situation?",
+          question: "Resilience helps teams adapt after major setbacks.",
+          options: [
+            { option_id: "A", label: "resilience", is_correct: true },
+            { option_id: "B", label: "overreaction", is_correct: false },
+          ],
+          audio_state: "not_available",
+        },
+        detail: null,
+        schedule_options: [],
+      },
+    ] as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+
+    const prompt = await screen.findByTestId("review-situation-prompt");
+    expect(prompt).toBeInTheDocument();
+    expect(prompt).toHaveTextContent(/situation/i);
+    expect(prompt).toHaveTextContent("Resilience helps teams adapt after major setbacks.");
+  });
+
+  it("renders the speech placeholder treatment with typed fallback", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-7",
+        queue_item_id: "state-7",
+        word: "resilience",
+        definition: "The capacity to recover quickly from difficulties.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "speak_recall",
+          stem: "Say the word or phrase that matches this definition.",
+          question: "The capacity to recover quickly from difficulties.",
+          options: null,
+          expected_input: "resilience",
+          input_mode: "speech_placeholder",
+          voice_placeholder_text: "Voice answer coming soon. Type the answer for now.",
+          audio_state: "placeholder",
+        },
+        detail: null,
+        schedule_options: [],
+      },
+    ] as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+
+    const prompt = await screen.findByTestId("review-speech-placeholder");
+    expect(prompt).toBeInTheDocument();
+    expect(prompt).toHaveTextContent(/voice answer coming soon/i);
+    expect(screen.getByPlaceholderText(/type the word or phrase/i)).toBeInTheDocument();
+  });
+
+  it("submits phrase learning answers using the entry review state id", async () => {
+    window.history.pushState({}, "", "/review?entry_type=phrase&entry_id=phrase-9");
+    mockPost
+      .mockResolvedValueOnce({
+        entry_type: "phrase",
+        entry_id: "phrase-9",
+        entry_word: "jump the gun",
+        meaning_ids: ["sense-9"],
+        queue_item_ids: ["state-phrase-9"],
+        cards: [
+          {
+            queue_item_id: "state-phrase-9",
+            meaning_id: "sense-9",
+            word: "jump the gun",
+            definition: "To do something too soon.",
+            prompt: {
+              mode: "mcq",
+              prompt_type: "definition_to_entry",
+              stem: "Choose the word or phrase that matches this definition.",
+              question: "To do something too soon.",
+              options: [
+                { option_id: "A", label: "Jump the gun", is_correct: true },
+                { option_id: "B", label: "Miss the boat", is_correct: false },
+              ],
+              audio_state: "not_available",
+            },
+          },
+        ],
+        requires_lookup_hint: false,
+        detail: {
+          entry_type: "phrase",
+          entry_id: "phrase-9",
+          display_text: "jump the gun",
+          primary_definition: "To do something too soon.",
+          primary_example: "They jumped the gun and announced it early.",
+          meaning_count: 1,
+          remembered_count: 0,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+        },
+        schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
+      } as never)
+      .mockResolvedValueOnce({} as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /a jump the gun/i }));
+    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    });
+
+    expect(mockPost).toHaveBeenNthCalledWith(1, "/reviews/entry/phrase/phrase-9/learning/start");
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
+      "/reviews/queue/state-phrase-9/submit",
+      expect.objectContaining({
+        outcome: "correct_tested",
+        selected_option_id: "A",
+      }),
+    );
+    window.history.pushState({}, "", "/review");
   });
 });

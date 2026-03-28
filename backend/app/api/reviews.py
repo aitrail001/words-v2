@@ -4,7 +4,7 @@ from time import perf_counter
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -53,6 +53,92 @@ class QueueSubmitRequest(BaseModel):
     quality: int = Field(..., ge=0, le=5)
     time_spent_ms: int = Field(..., ge=0)
     card_type: str | None = Field(default=None, min_length=1, max_length=32)
+    review_mode: str | None = None
+    outcome: str | None = Field(default=None, max_length=32)
+    selected_option_id: str | None = Field(default=None, min_length=1, max_length=1)
+    typed_answer: str | None = Field(default=None, max_length=256)
+    prompt: dict[str, Any] | None = Field(default=None)
+    schedule_override: str | None = Field(default=None, max_length=32)
+
+    @field_validator("schedule_override")
+    @classmethod
+    def validate_schedule_override(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value not in ReviewService.SCHEDULE_OVERRIDE_VALUES:
+            raise ValueError("Invalid schedule_override")
+        return value
+
+
+class ReviewOption(BaseModel):
+    option_id: str
+    label: str
+    is_correct: bool = False
+
+
+class ReviewPrompt(BaseModel):
+    mode: str
+    prompt_type: str
+    stem: str | None = None
+    question: str
+    options: list[ReviewOption] | None = None
+    expected_input: str | None = None
+    input_mode: str | None = None
+    voice_placeholder_text: str | None = None
+    sentence_masked: str | None = None
+    source_word_id: str | None = None
+    source_meaning_id: str | None = None
+    audio_state: str = "not_available"
+
+
+class ReviewDetailMeaning(BaseModel):
+    id: str
+    definition: str
+    example: str | None = None
+    part_of_speech: str | None = None
+
+
+class ReviewDetailResponse(BaseModel):
+    entry_type: str
+    entry_id: str
+    display_text: str
+    pronunciation: str | None = None
+    part_of_speech: str | None = None
+    primary_definition: str | None = None
+    primary_example: str | None = None
+    meaning_count: int = 0
+    remembered_count: int = 0
+    pro_tip: str | None = None
+    compare_with: list[str] = []
+    meanings: list[ReviewDetailMeaning] = []
+    audio_state: str = "not_available"
+
+
+class ScheduleOptionResponse(BaseModel):
+    value: str
+    label: str
+    is_default: bool = False
+
+
+class LearningStartCard(BaseModel):
+    queue_item_id: str | None
+    meaning_id: str
+    word: str
+    definition: str | None
+    prompt: ReviewPrompt
+    detail: ReviewDetailResponse | None = None
+
+
+class LearningStartResponse(BaseModel):
+    entry_type: str
+    entry_id: str
+    entry_word: str
+    meaning_ids: list[str]
+    queue_item_ids: list[str]
+    cards: list[LearningStartCard]
+    requires_lookup_hint: bool = False
+    detail: ReviewDetailResponse | None = None
+    schedule_options: list[ScheduleOptionResponse] = []
 
 
 class QueueItemResponse(BaseModel):
@@ -71,6 +157,17 @@ class QueueItemResponse(BaseModel):
     correct_count: int | None = None
     word: str | None = None
     definition: str | None = None
+    review_mode: str | None = None
+    prompt: dict[str, Any] | ReviewPrompt | None = None
+    source_word_id: str | None = None
+    source_meaning_id: str | None = None
+    source_entry_type: str | None = None
+    source_entry_id: str | None = None
+    outcome: str | None = None
+    needs_relearn: bool = False
+    recheck_planned: bool = False
+    detail: ReviewDetailResponse | None = None
+    schedule_options: list[ScheduleOptionResponse] = []
 
 
 class QueueStatsResponse(BaseModel):
@@ -79,6 +176,20 @@ class QueueStatsResponse(BaseModel):
     review_count: int
     correct_count: int
     accuracy: float
+
+
+class ReviewAnalyticsBucketResponse(BaseModel):
+    value: str
+    count: int
+
+
+class ReviewAnalyticsSummaryResponse(BaseModel):
+    days: int
+    total_events: int
+    audio_placeholder_events: int
+    prompt_families: list[ReviewAnalyticsBucketResponse] = []
+    outcomes: list[ReviewAnalyticsBucketResponse] = []
+    response_input_modes: list[ReviewAnalyticsBucketResponse] = []
 
 
 def _to_card_response(card: Any) -> CardResponse:
@@ -100,14 +211,24 @@ def _to_queue_item_response(
     item: Any,
     word: str | None = None,
     definition: str | None = None,
+    review_mode: str | None = None,
+    prompt: dict[str, Any] | ReviewPrompt | None = None,
+    source_entry_type: str | None = None,
+    source_entry_id: str | None = None,
+    outcome: str | None = None,
+    needs_relearn: bool = False,
+    recheck_planned: bool = False,
+    detail: dict[str, Any] | None = None,
+    schedule_options: list[dict[str, Any]] | None = None,
 ) -> QueueItemResponse:
+    item_meaning_id = getattr(item, "meaning_id", None)
     return QueueItemResponse(
         id=str(item.id),
         session_id=str(getattr(item, "session_id", ""))
         if getattr(item, "session_id", None)
         else None,
         word_id=str(getattr(item, "word_id", "")) if getattr(item, "word_id", None) else None,
-        meaning_id=str(item.meaning_id),
+        meaning_id=str(item_meaning_id) if item_meaning_id else "",
         card_type=getattr(item, "card_type", None),
         quality_rating=getattr(item, "quality_rating", None),
         time_spent_ms=getattr(item, "time_spent_ms", None),
@@ -119,6 +240,17 @@ def _to_queue_item_response(
         correct_count=getattr(item, "correct_count", None),
         word=word,
         definition=definition,
+        review_mode=review_mode,
+        prompt=prompt,
+        source_word_id=str(getattr(item, "word_id", "")) if getattr(item, "word_id", None) else None,
+        source_meaning_id=str(item_meaning_id) if item_meaning_id else None,
+        source_entry_type=source_entry_type,
+        source_entry_id=source_entry_id,
+        outcome=outcome,
+        needs_relearn=needs_relearn,
+        recheck_planned=recheck_planned,
+        detail=ReviewDetailResponse(**detail) if detail else None,
+        schedule_options=[ScheduleOptionResponse(**option) for option in (schedule_options or [])],
     )
 
 
@@ -221,6 +353,12 @@ async def get_due_queue_items(
             due_entry["item"],
             word=due_entry["word"],
             definition=due_entry["definition"],
+            review_mode=due_entry.get("review_mode"),
+            prompt=due_entry.get("prompt"),
+            source_entry_type=due_entry.get("source_entry_type"),
+            source_entry_id=due_entry.get("source_entry_id"),
+            detail=due_entry.get("detail"),
+            schedule_options=due_entry.get("schedule_options"),
         )
         for due_entry in due_items
     ]
@@ -253,6 +391,12 @@ async def submit_queue_review(
             quality=request.quality,
             time_spent_ms=request.time_spent_ms,
             card_type=request.card_type,
+            review_mode=request.review_mode,
+            outcome=request.outcome,
+            prompt=request.prompt,
+            selected_option_id=request.selected_option_id,
+            typed_answer=request.typed_answer,
+            schedule_override=request.schedule_override,
             user_id=current_user.id,
         )
     except ValueError as e:
@@ -265,7 +409,49 @@ async def submit_queue_review(
         request_start=request_start,
     )
     logger.info("reviews_request", route_name="queue_submit", **metrics)
-    return _to_queue_item_response(item)
+    return _to_queue_item_response(
+        item,
+        outcome=getattr(item, "outcome", None),
+        needs_relearn=bool(getattr(item, "needs_relearn", False)),
+        recheck_planned=bool(getattr(item, "recheck_planned", False)),
+        detail=getattr(item, "detail", None),
+        schedule_options=getattr(item, "schedule_options", None),
+    )
+
+
+@router.post(
+    "/entry/{entry_type}/{entry_id}/learning/start",
+    response_model=LearningStartResponse,
+)
+async def start_learning_entry(
+    entry_type: str,
+    entry_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LearningStartResponse:
+    """Start a per-entry learning flow and return all cards for review."""
+    request_start = perf_counter()
+    service = ReviewService(db)
+
+    try:
+        payload = await service.start_learning_entry(
+            user_id=current_user.id,
+            entry_type=entry_type,
+            entry_id=entry_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="learning_start", **metrics)
+    return LearningStartResponse(**payload)
 
 
 @router.get("/queue/stats", response_model=QueueStatsResponse)
@@ -287,6 +473,28 @@ async def get_queue_stats(
     )
     logger.info("reviews_request", route_name="queue_stats", **metrics)
     return QueueStatsResponse(**stats)
+
+
+@router.get("/analytics/summary", response_model=ReviewAnalyticsSummaryResponse)
+async def get_review_analytics_summary(
+    days: int = Query(default=30, ge=1, le=365),
+    request: Request = None,
+    response: Response = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReviewAnalyticsSummaryResponse:
+    """Get a lightweight summary of recent entry-review analytics for the current user."""
+    request_start = perf_counter()
+    service = ReviewService(db)
+    summary = await service.get_review_analytics_summary(current_user.id, days=days)
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="analytics_summary", **metrics)
+    return ReviewAnalyticsSummaryResponse(**summary)
 
 
 @router.post("/sessions/{session_id}/complete", response_model=SessionResponse)

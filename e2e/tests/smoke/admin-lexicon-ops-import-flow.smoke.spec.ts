@@ -65,11 +65,31 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   await writeFile(compiledHostPath, row, "utf-8");
   await writeFile(approvedHostPath, row, "utf-8");
 
+  await expect
+    .poll(
+      async () => {
+        const response = await request.get(`${apiUrl}/lexicon-ops/snapshots`, {
+          headers: authHeaders(user.token),
+        });
+        if (!response.ok()) {
+          return false;
+        }
+        const snapshots = (await response.json()) as Array<{ snapshot: string }>;
+        return snapshots.some((snapshot) => snapshot.snapshot === snapshotName);
+      },
+      {
+        timeout: 15_000,
+        intervals: [250, 500, 1_000],
+      },
+    )
+    .toBeTruthy();
+
   await waitForAppReady(request, adminUrl);
   await injectAdminToken(page, user.token, adminUrl);
-  await page.goto(`${adminUrl}/lexicon/ops`);
+  await page.goto(`${adminUrl}/lexicon/ops?q=${encodeURIComponent(snapshotName)}`);
   await expect(page.getByTestId("lexicon-ops-page")).toBeVisible();
 
+  await expect(page.getByTestId(`lexicon-ops-snapshot-${snapshotName}`)).toBeVisible();
   await page.getByTestId(`lexicon-ops-snapshot-${snapshotName}`).click();
   await expect(page.getByTestId("lexicon-ops-open-import-db")).toBeVisible();
   await page.getByTestId("lexicon-ops-open-import-db").click();
