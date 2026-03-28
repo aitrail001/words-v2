@@ -5,7 +5,7 @@ export type LexiconJobStatus = "queued" | "running" | "completed" | "failed";
 export type LexiconJob = {
   id: string;
   created_by: string | null;
-  job_type: "import_db" | "jsonl_materialize" | "compiled_materialize";
+  job_type: "import_db" | "jsonl_materialize" | "compiled_materialize" | "compiled_review_bulk_update";
   status: LexiconJobStatus;
   target_key: string;
   request_payload: Record<string, unknown>;
@@ -37,6 +37,13 @@ export type CreateCompiledMaterializeLexiconJobInput = {
   outputDir?: string;
 };
 
+export type CreateCompiledReviewBulkUpdateLexiconJobInput = {
+  batchId: string;
+  reviewStatus: "pending" | "approved" | "rejected";
+  decisionReason?: string;
+  scope?: "all_pending";
+};
+
 export const createImportDbLexiconJob = (
   input: CreateImportDbLexiconJobInput,
 ): Promise<LexiconJob> =>
@@ -62,6 +69,16 @@ export const createCompiledMaterializeLexiconJob = (
   apiClient.post<LexiconJob>("/lexicon-jobs/compiled-materialize", {
     batch_id: input.batchId,
     output_dir: input.outputDir,
+  });
+
+export const createCompiledReviewBulkUpdateLexiconJob = (
+  input: CreateCompiledReviewBulkUpdateLexiconJobInput,
+): Promise<LexiconJob> =>
+  apiClient.post<LexiconJob>("/lexicon-jobs/compiled-review-bulk-update", {
+    batch_id: input.batchId,
+    review_status: input.reviewStatus,
+    decision_reason: input.decisionReason,
+    scope: input.scope ?? "all_pending",
   });
 
 export const getLexiconJob = (jobId: string): Promise<LexiconJob> =>

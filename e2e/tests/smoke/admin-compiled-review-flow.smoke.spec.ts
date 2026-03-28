@@ -23,6 +23,14 @@ type CompiledReviewItem = {
   regen_requested: boolean;
 };
 
+type CompiledReviewItemsPage = {
+  items: CompiledReviewItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
 const buildCompiledWordRow = (runId: string, word: string) => ({
@@ -139,10 +147,11 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
     headers: authHeaders(user.token),
   });
   expect(itemsResponse.status()).toBe(200);
-  const items = (await itemsResponse.json()) as CompiledReviewItem[];
-  expect(items).toHaveLength(2);
-  const approvedItem = items.find((item) => item.entry_id === `word:${normalized}:${uniqueSuffix}`);
-  const pendingItem = items.find((item) => item.entry_id === `word:${secondary}:${uniqueSuffix}-2`);
+  const itemsPage = (await itemsResponse.json()) as CompiledReviewItemsPage;
+  expect(itemsPage.total).toBe(2);
+  expect(itemsPage.items).toHaveLength(2);
+  const approvedItem = itemsPage.items.find((item) => item.entry_id === `word:${normalized}:${uniqueSuffix}`);
+  const pendingItem = itemsPage.items.find((item) => item.entry_id === `word:${secondary}:${uniqueSuffix}-2`);
   expect(approvedItem?.review_status).toBe("approved");
   expect(approvedItem?.decision_reason).toBe("approved in compiled review smoke");
   expect(approvedItem?.import_eligible).toBe(true);

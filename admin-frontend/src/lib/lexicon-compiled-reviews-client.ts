@@ -77,6 +77,21 @@ export type LexiconCompiledReviewBulkUpdateResult = {
   items: LexiconCompiledReviewItem[];
 };
 
+export type LexiconCompiledReviewItemsPage = {
+  items: LexiconCompiledReviewItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
+export type ListLexiconCompiledReviewItemsInput = {
+  limit?: number;
+  offset?: number;
+  reviewStatus?: "pending" | "approved" | "rejected";
+  search?: string;
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 async function downloadExport(path: string): Promise<string> {
@@ -99,8 +114,20 @@ export const getLexiconCompiledReviewBatch = (batchId: string): Promise<LexiconC
 export const deleteLexiconCompiledReviewBatch = (batchId: string): Promise<void> =>
   apiClient.delete<void>(`/lexicon-compiled-reviews/batches/${batchId}`);
 
-export const listLexiconCompiledReviewItems = (batchId: string): Promise<LexiconCompiledReviewItem[]> =>
-  apiClient.get<LexiconCompiledReviewItem[]>(`/lexicon-compiled-reviews/batches/${batchId}/items`);
+export const listLexiconCompiledReviewItems = (
+  batchId: string,
+  input?: ListLexiconCompiledReviewItemsInput,
+): Promise<LexiconCompiledReviewItemsPage> => {
+  const params = new URLSearchParams();
+  if (input?.limit !== undefined) params.set("limit", String(input.limit));
+  if (input?.offset !== undefined) params.set("offset", String(input.offset));
+  if (input?.reviewStatus) params.set("review_status", input.reviewStatus);
+  if (input?.search?.trim()) params.set("search", input.search.trim());
+  const query = params.toString();
+  return apiClient.get<LexiconCompiledReviewItemsPage>(
+    `/lexicon-compiled-reviews/batches/${batchId}/items${query ? `?${query}` : ""}`,
+  );
+};
 
 export const updateLexiconCompiledReviewItem = (
   itemId: string,
