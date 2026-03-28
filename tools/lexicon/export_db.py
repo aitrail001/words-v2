@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 import json
 
-from tools.lexicon.import_db import _ensure_backend_path, summarize_compiled_rows
+from tools.lexicon.import_db import _ensure_backend_path
 
 SCHEMA_VERSION = "1.1.0"
 
@@ -316,13 +316,15 @@ def serialize_phrase_row(phrase: Any) -> dict[str, Any]:
     return row
 
 
-def load_export_rows(
+def iter_export_rows(
     *,
     max_words: int | None = None,
     max_phrases: int | None = None,
-) -> list[dict[str, Any]]:
+    word_batch_size: int = 500,
+    phrase_batch_size: int = 500,
+) -> Iterable[dict[str, Any]]:
     _ensure_backend_path()
-    from sqlalchemy import select
+    from sqlalchemy import func, select
     from sqlalchemy.orm import Session, selectinload
 
     from app.core.config import get_settings
@@ -336,71 +338,98 @@ def load_export_rows(
 
     settings = get_settings()
     engine = create_engine(settings.database_url_sync)
-
-    with Session(engine) as session:
-        words = list(
-            session.execute(
-                select(Word).options(
-                    selectinload(Word.form_entries),
-                    selectinload(Word.confusable_entries),
-                    selectinload(Word.part_of_speech_entries),
-                    selectinload(Word.meanings).selectinload(Meaning.metadata_entries),
-                    selectinload(Word.meanings)
-                    .selectinload(Meaning.translations)
-                    .selectinload(Translation.example_entries),
+    try:
+        with Session(engine) as session:
+            word_offset = 0
+            remaining_words = max_words
+            while remaining_words is None or remaining_words > 0:
+                current_word_batch_size = word_batch_size if remaining_words is None else min(word_batch_size, remaining_words)
+                words = list(
+                    session.execute(
+                        select(Word)
+                        .options(
+                            selectinload(Word.form_entries),
+                            selectinload(Word.confusable_entries),
+                            selectinload(Word.part_of_speech_entries),
+                            selectinload(Word.meanings).selectinload(Meaning.metadata_entries),
+                            selectinload(Word.meanings)
+                            .selectinload(Meaning.translations)
+                            .selectinload(Translation.example_entries),
+                        )
+                        .order_by(
+                            Word.frequency_rank.is_(None),
+                            Word.frequency_rank.asc(),
+                            func.lower(Word.word).asc(),
+                            Word.id.asc(),
+                        )
+                        .limit(current_word_batch_size)
+                        .offset(word_offset)
+                    ).scalars().all()
                 )
-            ).scalars().all()
-        )
-        words.sort(
-            key=lambda item: (
-                getattr(item, "frequency_rank", None) is None,
-                getattr(item, "frequency_rank", 10**9) or 10**9,
-                str(getattr(item, "word", "")).lower(),
-            )
-        )
-        if max_words is not None:
-            words = words[:max_words]
+                if not words:
+                    break
 
-        meaning_ids = [
-            meaning.id
-            for word in words
-            for meaning in list(getattr(word, "meanings", []) or [])
-        ]
-        examples_by_meaning_id: dict[Any, list[Any]] = defaultdict(list)
-        relations_by_meaning_id: dict[Any, list[Any]] = defaultdict(list)
+                meaning_ids = [
+                    meaning.id
+                    for word in words
+                    for meaning in list(getattr(word, "meanings", []) or [])
+                ]
+                examples_by_meaning_id: dict[Any, list[Any]] = defaultdict(list)
+                relations_by_meaning_id: dict[Any, list[Any]] = defaultdict(list)
+                if meaning_ids:
+                    for example in session.execute(
+                        select(MeaningExample).where(MeaningExample.meaning_id.in_(meaning_ids))
+                    ).scalars().all():
+                        examples_by_meaning_id[example.meaning_id].append(example)
+                    for relation in session.execute(
+                        select(WordRelation).where(WordRelation.meaning_id.in_(meaning_ids))
+                    ).scalars().all():
+                        relations_by_meaning_id[relation.meaning_id].append(relation)
 
-        if meaning_ids:
-            for example in session.execute(
-                select(MeaningExample).where(MeaningExample.meaning_id.in_(meaning_ids))
-            ).scalars().all():
-                examples_by_meaning_id[example.meaning_id].append(example)
+                for word in words:
+                    yield serialize_word_row(
+                        word,
+                        examples_by_meaning_id=examples_by_meaning_id,
+                        relations_by_meaning_id=relations_by_meaning_id,
+                    )
 
-            for relation in session.execute(
-                select(WordRelation).where(WordRelation.meaning_id.in_(meaning_ids))
-            ).scalars().all():
-                relations_by_meaning_id[relation.meaning_id].append(relation)
+                word_offset += len(words)
+                if remaining_words is not None:
+                    remaining_words -= len(words)
 
-        phrases = list(session.execute(select(PhraseEntry)).scalars().all())
-        phrases.sort(
-            key=lambda item: (
-                str(getattr(item, "normalized_form", "")).lower(),
-                str(getattr(item, "phrase_text", "")).lower(),
-            )
-        )
-        if max_phrases is not None:
-            phrases = phrases[:max_phrases]
-    engine.dispose()
+            phrase_offset = 0
+            remaining_phrases = max_phrases
+            while remaining_phrases is None or remaining_phrases > 0:
+                current_phrase_batch_size = phrase_batch_size if remaining_phrases is None else min(phrase_batch_size, remaining_phrases)
+                phrases = list(
+                    session.execute(
+                        select(PhraseEntry)
+                        .order_by(
+                            func.lower(PhraseEntry.normalized_form).asc(),
+                            func.lower(PhraseEntry.phrase_text).asc(),
+                            PhraseEntry.id.asc(),
+                        )
+                        .limit(current_phrase_batch_size)
+                        .offset(phrase_offset)
+                    ).scalars().all()
+                )
+                if not phrases:
+                    break
+                for phrase in phrases:
+                    yield serialize_phrase_row(phrase)
+                phrase_offset += len(phrases)
+                if remaining_phrases is not None:
+                    remaining_phrases -= len(phrases)
+    finally:
+        engine.dispose()
 
-    rows = [
-        serialize_word_row(
-            word,
-            examples_by_meaning_id=examples_by_meaning_id,
-            relations_by_meaning_id=relations_by_meaning_id,
-        )
-        for word in words
-    ]
-    rows.extend(serialize_phrase_row(phrase) for phrase in phrases)
-    return rows
+
+def load_export_rows(
+    *,
+    max_words: int | None = None,
+    max_phrases: int | None = None,
+) -> list[dict[str, Any]]:
+    return list(iter_export_rows(max_words=max_words, max_phrases=max_phrases))
 
 
 def write_export_rows(output_path: str | Path, rows: Iterable[dict[str, Any]]) -> Path:
@@ -419,9 +448,27 @@ def export_db_fixture(
     max_words: int | None = None,
     max_phrases: int | None = None,
 ) -> dict[str, Any]:
-    rows = load_export_rows(max_words=max_words, max_phrases=max_phrases)
-    written_path = write_export_rows(output_path, rows)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "row_count": 0,
+        "word_count": 0,
+        "phrase_count": 0,
+        "reference_count": 0,
+    }
+    with path.open("w", encoding="utf-8") as handle:
+        for row in iter_export_rows(max_words=max_words, max_phrases=max_phrases):
+            handle.write(json.dumps(row, ensure_ascii=False))
+            handle.write("\n")
+            summary["row_count"] += 1
+            entry_type = str(row.get("entry_type") or "word").strip() or "word"
+            if entry_type == "word":
+                summary["word_count"] += 1
+            elif entry_type == "phrase":
+                summary["phrase_count"] += 1
+            elif entry_type == "reference":
+                summary["reference_count"] += 1
     return {
-        "output_path": str(written_path),
-        **summarize_compiled_rows(rows),
+        "output_path": str(path),
+        **summary,
     }

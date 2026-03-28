@@ -7,6 +7,7 @@ from typing import Any, Callable, Iterable, Optional, Type
 import hashlib
 import json
 import sys
+import uuid
 from collections import Counter
 
 from tools.lexicon.validate import validate_compiled_record
@@ -266,6 +267,89 @@ def _is_sqlalchemy_model(model: Type[Any]) -> bool:
     return hasattr(model, "__table__")
 
 
+def _is_real_mapped_model(model: Type[Any]) -> bool:
+    return _is_sqlalchemy_model(model) and hasattr(model, "__mapper__")
+
+
+def _ensure_object_id(instance: Any) -> None:
+    if getattr(instance, "id", None) is None:
+        setattr(instance, "id", uuid.uuid4())
+
+
+def _preload_existing_words(
+    session: Any,
+    word_model: Type[Any],
+    rows: Iterable[dict[str, Any]],
+    default_language: str,
+) -> dict[tuple[str, str], Any]:
+    if not _is_real_mapped_model(word_model):
+        return {}
+
+    from sqlalchemy import select
+
+    lemmas_by_language: dict[str, set[str]] = {}
+    for row in rows:
+        if str(row.get("entry_type") or "word").strip().lower() not in {"", "word"}:
+            continue
+        lemma = str(row.get("word") or "").strip()
+        if not lemma:
+            continue
+        row_language = _effective_row_language(row, default_language)
+        lemmas_by_language.setdefault(row_language, set()).add(lemma)
+
+    existing: dict[tuple[str, str], Any] = {}
+    for row_language, lemmas in lemmas_by_language.items():
+        if not lemmas:
+            continue
+        result = session.execute(
+            select(word_model).where(
+                word_model.language == row_language,
+                word_model.word.in_(sorted(lemmas)),
+            )
+        )
+        for item in result.scalars().all():
+            existing[(str(getattr(item, "word", "")), str(getattr(item, "language", default_language)))] = item
+    return existing
+
+
+def _preload_existing_by_normalized_form(
+    session: Any,
+    model: Type[Any],
+    rows: Iterable[dict[str, Any]],
+    default_language: str,
+    *,
+    entry_type: str,
+) -> dict[tuple[str, str], Any]:
+    if not _is_real_mapped_model(model):
+        return {}
+
+    from sqlalchemy import select
+
+    normalized_by_language: dict[str, set[str]] = {}
+    for row in rows:
+        if str(row.get("entry_type") or "word").strip().lower() != entry_type:
+            continue
+        normalized_form = str(row.get("normalized_form") or "").strip()
+        if not normalized_form:
+            continue
+        row_language = _effective_row_language(row, default_language)
+        normalized_by_language.setdefault(row_language, set()).add(normalized_form)
+
+    existing: dict[tuple[str, str], Any] = {}
+    for row_language, normalized_forms in normalized_by_language.items():
+        if not normalized_forms:
+            continue
+        result = session.execute(
+            select(model).where(
+                model.language == row_language,
+                model.normalized_form.in_(sorted(normalized_forms)),
+            )
+        )
+        for item in result.scalars().all():
+            existing[(str(getattr(item, "normalized_form", "")), str(getattr(item, "language", default_language)))] = item
+    return existing
+
+
 def _parse_timestamp(value: Any) -> datetime | None:
     if not value:
         return None
@@ -508,8 +592,6 @@ def _sync_word_level_enrichment_fields(
         word.phonetic_source = source_type
     if phonetic_confidence is not None and hasattr(word, "phonetic_confidence"):
         word.phonetic_confidence = _normalize_confidence(phonetic_confidence)
-    if run is not None and phonetic is not None and hasattr(word, "phonetic_enrichment_run_id"):
-        word.phonetic_enrichment_run_id = run.id
 
 
 def _sync_word_confusable_rows(word: Any, row: dict[str, Any], word_confusable_model: Type[Any] | None) -> None:
@@ -633,14 +715,17 @@ def _sync_translation_example_rows(
     if translation_example_model is None or not hasattr(translation, "example_entries"):
         return
 
-    example_rows = [
-        translation_example_model(
+    example_rows = []
+    for index, text in enumerate(translated_examples):
+        example_row = translation_example_model(
             translation_id=translation.id,
             text=text,
             order_index=index,
         )
-        for index, text in enumerate(translated_examples)
-    ]
+        _ensure_object_id(example_row)
+        if _is_real_mapped_model(translation_example_model):
+            example_row.translation = translation
+        example_rows.append(example_row)
     _replace_collection(translation, "example_entries", example_rows)
 
 
@@ -700,6 +785,90 @@ def _effective_row_source_reference(row: dict[str, Any], default_source_referenc
     return str(row.get("source_reference") or default_source_reference).strip() or default_source_reference
 
 
+def _supports_cascaded_phrase_import(
+    phrase_model: Type[Any] | None,
+    phrase_sense_model: Type[Any] | None,
+    phrase_sense_localization_model: Type[Any] | None,
+    phrase_sense_example_model: Type[Any] | None,
+    phrase_sense_example_localization_model: Type[Any] | None,
+) -> bool:
+    models = (
+        phrase_model,
+        phrase_sense_model,
+        phrase_sense_localization_model,
+        phrase_sense_example_model,
+        phrase_sense_example_localization_model,
+    )
+    return all(model is not None and _is_real_mapped_model(model) for model in models)
+
+
+def _supports_cascaded_word_import(
+    word_model: Type[Any] | None,
+    meaning_model: Type[Any] | None,
+    translation_model: Type[Any] | None,
+    word_relation_model: Type[Any] | None,
+    lexicon_enrichment_job_model: Type[Any] | None,
+    lexicon_enrichment_run_model: Type[Any] | None,
+) -> bool:
+    models = (
+        word_model,
+        meaning_model,
+        translation_model,
+        word_relation_model,
+        lexicon_enrichment_job_model,
+        lexicon_enrichment_run_model,
+    )
+    return all(model is not None and _is_real_mapped_model(model) for model in models)
+
+
+def _append_collection_item(parent: Any, attribute: str, item: Any) -> None:
+    collection = getattr(parent, attribute, None)
+    append = getattr(collection, "append", None)
+    if callable(append) and item not in collection:
+        append(item)
+
+
+def _attach_child(parent: Any, collection_attribute: str, child: Any, child_attribute: str) -> None:
+    _append_collection_item(parent, collection_attribute, child)
+    if getattr(child, child_attribute, None) is None:
+        setattr(child, child_attribute, parent)
+
+
+def _supports_bulk_insert_model(session: Any, model: Type[Any] | None) -> bool:
+    return (
+        model is not None
+        and _is_sqlalchemy_model(model)
+        and _is_real_mapped_model(model)
+        and hasattr(session, "execute")
+    )
+
+
+def _bulk_insert_mapped_rows(session: Any, model: Type[Any], rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    from sqlalchemy import insert
+
+    session.execute(insert(model), rows)
+
+
+def _delete_rows_for_foreign_keys(
+    session: Any,
+    model: Type[Any] | None,
+    foreign_key_column: str,
+    ids: set[Any],
+) -> None:
+    if (
+        not ids
+        or model is None
+        or not _is_sqlalchemy_model(model)
+        or not _supports_bulk_insert_model(session, model)
+    ):
+        return
+    from sqlalchemy import delete
+
+    session.execute(delete(model).where(getattr(model, foreign_key_column).in_(sorted(ids))))
+
+
 def import_compiled_rows(
     session: Any,
     rows: Iterable[dict[str, Any]],
@@ -727,6 +896,7 @@ def import_compiled_rows(
     word_form_model: Optional[Type[Any]] = None,
     word_part_of_speech_model: Optional[Type[Any]] = None,
     learner_catalog_entry_model: Optional[Type[Any]] = None,
+    rebuild_learner_catalog: bool = True,
     progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
 ) -> ImportSummary:
     if word_model is None or meaning_model is None:
@@ -778,6 +948,36 @@ def import_compiled_rows(
     summary = ImportSummary()
     row_list = list(rows)
     total_rows = len(row_list)
+    preloaded_words = _preload_existing_words(session, word_model, row_list, language)
+    preloaded_phrases = (
+        _preload_existing_by_normalized_form(
+            session,
+            phrase_model,
+            row_list,
+            language,
+            entry_type="phrase",
+        )
+        if phrase_model is not None
+        else {}
+    )
+    preloaded_references = (
+        _preload_existing_by_normalized_form(
+            session,
+            reference_model,
+            row_list,
+            language,
+            entry_type="reference",
+        )
+        if reference_model is not None
+        else {}
+    )
+    bulk_insert_meaning_examples = _supports_bulk_insert_model(session, meaning_example_model)
+    bulk_insert_translation_examples = _supports_bulk_insert_model(session, translation_example_model)
+    bulk_insert_word_relations = _supports_bulk_insert_model(session, word_relation_model)
+    pending_meaning_example_rows: list[dict[str, Any]] = []
+    pending_translation_example_rows: list[dict[str, Any]] = []
+    pending_word_relation_rows: list[dict[str, Any]] = []
+    translation_example_delete_ids: set[Any] = set()
 
     for row_index, row in enumerate(row_list, start=1):
         entry_type = str(row.get("entry_type") or "word").strip().lower() or "word"
@@ -816,12 +1016,17 @@ def import_compiled_rows(
                     resolved_phrase_sense_example_localization_model = default_phrase_sense_example_localization_model
             if resolved_phrase_model is None:
                 resolved_phrase_model = _default_phrase_models()[0]
-            existing_phrase = _find_existing_by_normalized_form(
-                session,
-                resolved_phrase_model,
-                str(row.get("normalized_form") or "").strip(),
-                row_language,
-            )
+            phrase_key = (str(row.get("normalized_form") or "").strip(), row_language)
+            existing_phrase = preloaded_phrases.get(phrase_key)
+            if existing_phrase is None:
+                existing_phrase = _find_existing_by_normalized_form(
+                    session,
+                    resolved_phrase_model,
+                    phrase_key[0],
+                    row_language,
+                )
+                if existing_phrase is not None:
+                    preloaded_phrases[phrase_key] = existing_phrase
             if existing_phrase is None:
                 phrase = resolved_phrase_model(
                     phrase_text=row.get("display_form") or row.get("word"),
@@ -838,10 +1043,12 @@ def import_compiled_rows(
                     source_type=row_source_type,
                     source_reference=row_source_reference,
                 )
+                _ensure_object_id(phrase)
                 session.add(phrase)
-                session.flush()
+                preloaded_phrases[phrase_key] = phrase
                 summary = _increment(summary, created_phrases=1)
                 current_phrase = phrase
+                is_new_phrase = True
             else:
                 existing_phrase.phrase_text = row.get("display_form") or row.get("word")
                 existing_phrase.normalized_form = row.get("normalized_form") or existing_phrase.normalized_form
@@ -863,10 +1070,15 @@ def import_compiled_rows(
                     existing_phrase.source_reference = row_source_reference
                 summary = _increment(summary, updated_phrases=1)
                 current_phrase = existing_phrase
-            if isinstance(senses, list):
-                _replace_collection(current_phrase, "phrase_senses", [])
+                is_new_phrase = False
             if isinstance(senses, list) and senses and resolved_phrase_sense_model is not None:
-                _replace_collection(current_phrase, "phrase_senses", [])
+                use_cascaded_phrase_graph = is_new_phrase and _supports_cascaded_phrase_import(
+                    resolved_phrase_model,
+                    resolved_phrase_sense_model,
+                    resolved_phrase_sense_localization_model,
+                    resolved_phrase_sense_example_model,
+                    resolved_phrase_sense_example_localization_model,
+                )
                 phrase_senses: list[Any] = []
                 for sense_index, sense in enumerate(senses):
                     phrase_sense = resolved_phrase_sense_model(
@@ -883,8 +1095,11 @@ def import_compiled_rows(
                         collocations=_normalize_string_list((sense or {}).get("collocations")),
                         order_index=sense_index,
                     )
-                    session.add(phrase_sense)
-                    session.flush()
+                    _ensure_object_id(phrase_sense)
+                    if use_cascaded_phrase_graph or _is_real_mapped_model(resolved_phrase_sense_model):
+                        phrase_sense.phrase_entry = current_phrase
+                    if not use_cascaded_phrase_graph:
+                        session.add(phrase_sense)
                     sense_localizations: list[Any] = []
                     translations = (sense or {}).get("translations") or {}
                     for locale in sorted(translations.keys()):
@@ -899,7 +1114,11 @@ def import_compiled_rows(
                             localized_definition=localized_definition,
                             localized_usage_note=localized_usage_note,
                         )
-                        session.add(localization)
+                        _ensure_object_id(localization)
+                        if use_cascaded_phrase_graph or _is_real_mapped_model(resolved_phrase_sense_localization_model):
+                            localization.phrase_sense = phrase_sense
+                        if not use_cascaded_phrase_graph:
+                            session.add(localization)
                         sense_localizations.append(localization)
                     _replace_collection(phrase_sense, "localizations", sense_localizations)
 
@@ -939,8 +1158,11 @@ def import_compiled_rows(
                             order_index=len(phrase_examples),
                             source=row_source_type,
                         )
-                        session.add(phrase_example)
-                        session.flush()
+                        _ensure_object_id(phrase_example)
+                        if use_cascaded_phrase_graph or _is_real_mapped_model(resolved_phrase_sense_example_model):
+                            phrase_example.phrase_sense = phrase_sense
+                        if not use_cascaded_phrase_graph:
+                            session.add(phrase_example)
                         example_localizations: list[Any] = []
                         for locale in sorted(translations.keys()):
                             locale_payload = translations.get(locale) or {}
@@ -955,13 +1177,19 @@ def import_compiled_rows(
                                 locale=locale,
                                 translation=translated_example,
                             )
-                            session.add(example_localization)
+                            _ensure_object_id(example_localization)
+                            if use_cascaded_phrase_graph or _is_real_mapped_model(resolved_phrase_sense_example_localization_model):
+                                example_localization.phrase_sense_example = phrase_example
+                            if not use_cascaded_phrase_graph:
+                                session.add(example_localization)
                             example_localizations.append(example_localization)
                         _replace_collection(phrase_example, "localizations", example_localizations)
                         phrase_examples.append(phrase_example)
                     _replace_collection(phrase_sense, "examples", phrase_examples)
                     phrase_senses.append(phrase_sense)
                 _replace_collection(current_phrase, "phrase_senses", phrase_senses)
+            elif isinstance(senses, list):
+                _replace_collection(current_phrase, "phrase_senses", [])
             continue
         if entry_type == "reference":
             if resolved_reference_model is None or resolved_reference_localization_model is None:
@@ -970,12 +1198,17 @@ def import_compiled_rows(
                     resolved_reference_model = default_reference_model
                 if resolved_reference_localization_model is None:
                     resolved_reference_localization_model = default_reference_localization_model
-            existing_reference = _find_existing_by_normalized_form(
-                session,
-                resolved_reference_model,
-                str(row.get("normalized_form") or "").strip(),
-                row_language,
-            )
+            reference_key = (str(row.get("normalized_form") or "").strip(), row_language)
+            existing_reference = preloaded_references.get(reference_key)
+            if existing_reference is None:
+                existing_reference = _find_existing_by_normalized_form(
+                    session,
+                    resolved_reference_model,
+                    reference_key[0],
+                    row_language,
+                )
+                if existing_reference is not None:
+                    preloaded_references[reference_key] = existing_reference
             if existing_reference is None:
                 reference_entry = resolved_reference_model(
                     reference_type=row.get("reference_type") or "name",
@@ -989,10 +1222,12 @@ def import_compiled_rows(
                     source_type=row_source_type,
                     source_reference=row_source_reference,
                 )
+                _ensure_object_id(reference_entry)
                 session.add(reference_entry)
-                session.flush()
+                preloaded_references[reference_key] = reference_entry
                 current_reference = reference_entry
                 summary = _increment(summary, created_reference_entries=1)
+                is_new_reference = True
             else:
                 current_reference = existing_reference
                 current_reference.reference_type = row.get("reference_type") or current_reference.reference_type
@@ -1007,9 +1242,10 @@ def import_compiled_rows(
                 if hasattr(current_reference, "source_reference"):
                     current_reference.source_reference = row_source_reference
                 summary = _increment(summary, updated_reference_entries=1)
+                is_new_reference = False
             localization_rows = list(row.get("localizations") or [])
             if localization_rows:
-                existing_localizations = _load_existing_reference_localizations(session, resolved_reference_localization_model, current_reference.id)
+                existing_localizations = [] if is_new_reference else _load_existing_reference_localizations(session, resolved_reference_localization_model, current_reference.id)
                 existing_by_locale = {getattr(item, "locale", None): item for item in existing_localizations}
                 for localization in localization_rows:
                     locale = str((localization or {}).get("locale") or "").strip()
@@ -1025,6 +1261,9 @@ def import_compiled_rows(
                             brief_description=(localization or {}).get("brief_description"),
                             translation_mode=(localization or {}).get("translation_mode"),
                         )
+                        _ensure_object_id(locale_row)
+                        if _is_real_mapped_model(resolved_reference_localization_model):
+                            locale_row.reference_entry = current_reference
                         session.add(locale_row)
                         summary = _increment(summary, created_reference_localizations=1)
                     else:
@@ -1034,7 +1273,12 @@ def import_compiled_rows(
                         summary = _increment(summary, updated_reference_localizations=1)
             continue
 
-        word = _find_existing_word(session, word_model, row["word"], row_language)
+        word_key = (str(row["word"]), row_language)
+        word = preloaded_words.get(word_key)
+        if word is None:
+            word = _find_existing_word(session, word_model, row["word"], row_language)
+            if word is not None:
+                preloaded_words[word_key] = word
         if word is None:
             word = word_model(
                 word=row["word"],
@@ -1043,9 +1287,11 @@ def import_compiled_rows(
                 source_type=row_source_type,
                 source_reference=row_source_reference,
             )
+            _ensure_object_id(word)
             session.add(word)
-            session.flush()
+            preloaded_words[word_key] = word
             summary = _increment(summary, created_words=1)
+            is_new_word = True
         else:
             word.frequency_rank = row.get("frequency_rank")
             if hasattr(word, "source_type"):
@@ -1053,6 +1299,15 @@ def import_compiled_rows(
             if hasattr(word, "source_reference"):
                 word.source_reference = row_source_reference
             summary = _increment(summary, updated_words=1)
+            is_new_word = False
+        use_cascaded_word_graph = is_new_word and _supports_cascaded_word_import(
+            word_model,
+            meaning_model,
+            translation_model,
+            word_relation_model,
+            lexicon_enrichment_job_model,
+            lexicon_enrichment_run_model,
+        )
 
         _sync_word_level_enrichment_fields(
             word,
@@ -1064,14 +1319,16 @@ def import_compiled_rows(
         _sync_word_form_rows(word, row, word_form_model)
         _sync_word_part_of_speech_rows(word, row, word_part_of_speech_model)
 
-        existing_meanings = _load_existing_meanings(session, meaning_model, word.id)
+        existing_meanings = [] if is_new_word else _load_existing_meanings(session, meaning_model, word.id)
         matched_meaning_ids: set[Any] = set()
         enrichment_job = None
+        phonetic_enrichment_run = None
 
         enrichment_run_by_group: dict[tuple[str | None, str | None, str | None], Any] = {}
 
         if lexicon_enrichment_job_model is not None and lexicon_enrichment_run_model is not None:
-            enrichment_job = _find_existing_enrichment_job(
+            is_new_enrichment_job = False
+            enrichment_job = None if is_new_word else _find_existing_enrichment_job(
                 session,
                 lexicon_enrichment_job_model,
                 word.id,
@@ -1085,9 +1342,13 @@ def import_compiled_rows(
                     started_at=_parse_timestamp(row.get("generated_at")),
                     completed_at=_parse_timestamp(row.get("generated_at")),
                 )
-                session.add(enrichment_job)
-                session.flush()
+                _ensure_object_id(enrichment_job)
+                if use_cascaded_word_graph or _is_real_mapped_model(lexicon_enrichment_job_model):
+                    _attach_child(word, "enrichment_jobs", enrichment_job, "word")
+                if not use_cascaded_word_graph:
+                    session.add(enrichment_job)
                 summary = _increment(summary, created_enrichment_jobs=1)
+                is_new_enrichment_job = True
             else:
                 if hasattr(enrichment_job, "status"):
                     enrichment_job.status = "completed"
@@ -1108,7 +1369,7 @@ def import_compiled_rows(
                     model_name,
                     prompt_version,
                 )
-                enrichment_run = _find_existing_enrichment_run(
+                enrichment_run = None if is_new_enrichment_job else _find_existing_enrichment_run(
                     session,
                     lexicon_enrichment_run_model,
                     enrichment_job.id,
@@ -1126,8 +1387,11 @@ def import_compiled_rows(
                         confidence=_normalize_confidence(sense.get("confidence")),
                         created_at=_parse_timestamp(sense.get("generated_at") or row.get("generated_at")),
                     )
-                    session.add(enrichment_run)
-                    session.flush()
+                    _ensure_object_id(enrichment_run)
+                    if use_cascaded_word_graph or _is_real_mapped_model(lexicon_enrichment_run_model):
+                        _attach_child(enrichment_job, "runs", enrichment_run, "enrichment_job")
+                    if not use_cascaded_word_graph:
+                        session.add(enrichment_run)
                     summary = _increment(summary, created_enrichment_runs=1)
                 else:
                     if hasattr(enrichment_run, "generator_provider"):
@@ -1163,10 +1427,14 @@ def import_compiled_rows(
                     source=row_source_type,
                     source_reference=sense_source_reference,
                 )
-                session.add(meaning)
-                session.flush()
+                _ensure_object_id(meaning)
+                if use_cascaded_word_graph or _is_real_mapped_model(meaning_model):
+                    _attach_child(word, "meanings", meaning, "word")
+                if not use_cascaded_word_graph:
+                    session.add(meaning)
                 summary = _increment(summary, created_meanings=1)
                 existing_meanings.append(meaning)
+                is_new_meaning = True
             else:
                 meaning.definition = sense["definition"]
                 meaning.part_of_speech = sense.get("pos")
@@ -1177,6 +1445,7 @@ def import_compiled_rows(
                 if hasattr(meaning, "source_reference"):
                     meaning.source_reference = sense_source_reference
                 summary = _increment(summary, updated_meanings=1)
+                is_new_meaning = False
             _sync_meaning_level_learner_fields(meaning, sense, row)
             _sync_meaning_metadata_rows(meaning, sense, meaning_metadata_model)
             matched_meaning_ids.add(meaning.id)
@@ -1184,6 +1453,8 @@ def import_compiled_rows(
             enrichment_run = None
             if enrichment_job is not None and lexicon_enrichment_run_model is not None:
                 enrichment_run = enrichment_run_by_group.get(_sense_run_group_key(sense))
+                if enrichment_run is not None and phonetic_enrichment_run is None:
+                    phonetic_enrichment_run = enrichment_run
 
             _sync_word_level_enrichment_fields(
                 word,
@@ -1193,7 +1464,7 @@ def import_compiled_rows(
             )
 
             if meaning_example_model is not None:
-                existing_examples = _load_existing_examples(session, meaning_example_model, meaning.id, row_source_type)
+                existing_examples = [] if is_new_meaning else _load_existing_examples(session, meaning_example_model, meaning.id, row_source_type)
                 deleted_any_examples = False
                 for existing_example in existing_examples:
                     session.delete(existing_example)
@@ -1207,20 +1478,37 @@ def import_compiled_rows(
                     if not sentence or sentence in seen_example_sentences:
                         continue
                     seen_example_sentences.add(sentence)
-                    meaning_example = meaning_example_model(
-                        meaning_id=meaning.id,
-                        sentence=sentence,
-                        difficulty=(example or {}).get("difficulty"),
-                        order_index=example_index,
-                        source=row_source_type,
-                        confidence=_normalize_confidence(sense.get("confidence")),
-                        enrichment_run_id=getattr(enrichment_run, "id", None),
-                    )
-                    session.add(meaning_example)
+                    if bulk_insert_meaning_examples:
+                        pending_meaning_example_rows.append(
+                            {
+                                "id": uuid.uuid4(),
+                                "meaning_id": meaning.id,
+                                "sentence": sentence,
+                                "difficulty": (example or {}).get("difficulty"),
+                                "order_index": example_index,
+                                "source": row_source_type,
+                                "confidence": _normalize_confidence(sense.get("confidence")),
+                                "enrichment_run_id": getattr(enrichment_run, "id", None),
+                            }
+                        )
+                    else:
+                        meaning_example = meaning_example_model(
+                            meaning_id=meaning.id,
+                            sentence=sentence,
+                            difficulty=(example or {}).get("difficulty"),
+                            order_index=example_index,
+                            source=row_source_type,
+                            confidence=_normalize_confidence(sense.get("confidence")),
+                            enrichment_run_id=getattr(enrichment_run, "id", None),
+                        )
+                        _ensure_object_id(meaning_example)
+                        meaning_example.meaning = meaning
+                        meaning_example.enrichment_run = enrichment_run
+                        session.add(meaning_example)
                     summary = _increment(summary, created_examples=1)
 
             if translation_model is not None:
-                existing_translations = {
+                existing_translations = {} if is_new_meaning else {
                     getattr(item, 'language', None): item
                     for item in _load_existing_translations(session, translation_model, meaning.id)
                 }
@@ -1241,17 +1529,33 @@ def import_compiled_rows(
                             language=locale,
                             translation=translated_definition,
                         )
-                        session.add(translation)
+                        _ensure_object_id(translation)
+                        if use_cascaded_word_graph or _is_real_mapped_model(translation_model):
+                            _attach_child(meaning, "translations", translation, "meaning")
+                        if not use_cascaded_word_graph:
+                            session.add(translation)
                         summary = _increment(summary, created_translations=1)
                     else:
                         translation.translation = translated_definition
                         summary = _increment(summary, updated_translations=1)
                     if hasattr(translation, "usage_note"):
                         translation.usage_note = translated_usage_note
-                    _sync_translation_example_rows(translation, translated_examples, translation_example_model)
+                    if bulk_insert_translation_examples:
+                        translation_example_delete_ids.add(translation.id)
+                        for index, text in enumerate(translated_examples):
+                            pending_translation_example_rows.append(
+                                {
+                                    "id": uuid.uuid4(),
+                                    "translation_id": translation.id,
+                                    "text": text,
+                                    "order_index": index,
+                                }
+                            )
+                    else:
+                        _sync_translation_example_rows(translation, translated_examples, translation_example_model)
 
             if word_relation_model is not None:
-                existing_relations = _load_existing_relations(session, word_relation_model, meaning.id, row_source_type)
+                existing_relations = [] if is_new_meaning else _load_existing_relations(session, word_relation_model, meaning.id, row_source_type)
                 deleted_any_relations = False
                 for existing_relation in existing_relations:
                     session.delete(existing_relation)
@@ -1267,18 +1571,45 @@ def import_compiled_rows(
                         if not related_text or relation_key in seen_relations:
                             continue
                         seen_relations.add(relation_key)
-                        relation = word_relation_model(
-                            word_id=word.id,
-                            meaning_id=meaning.id,
-                            relation_type=relation_type,
-                            related_word=related_text,
-                            related_word_id=None,
-                            source=row_source_type,
-                            confidence=_normalize_confidence(sense.get("confidence")),
-                            enrichment_run_id=getattr(enrichment_run, "id", None),
-                        )
-                        session.add(relation)
+                        if bulk_insert_word_relations:
+                            pending_word_relation_rows.append(
+                                {
+                                    "id": uuid.uuid4(),
+                                    "word_id": word.id,
+                                    "meaning_id": meaning.id,
+                                    "relation_type": relation_type,
+                                    "related_word": related_text,
+                                    "related_word_id": None,
+                                    "source": row_source_type,
+                                    "confidence": _normalize_confidence(sense.get("confidence")),
+                                    "enrichment_run_id": getattr(enrichment_run, "id", None),
+                                }
+                            )
+                        else:
+                            relation = word_relation_model(
+                                word_id=word.id,
+                                meaning_id=meaning.id,
+                                relation_type=relation_type,
+                                related_word=related_text,
+                                related_word_id=None,
+                                source=row_source_type,
+                                confidence=_normalize_confidence(sense.get("confidence")),
+                                enrichment_run_id=getattr(enrichment_run, "id", None),
+                            )
+                            _ensure_object_id(relation)
+                            if use_cascaded_word_graph or _is_real_mapped_model(word_relation_model):
+                                _attach_child(word, "relations", relation, "word")
+                                if getattr(relation, "meaning", None) is None:
+                                    relation.meaning = meaning
+                                if enrichment_run is not None and getattr(relation, "enrichment_run", None) is None:
+                                    _attach_child(enrichment_run, "word_relations", relation, "enrichment_run")
+                            if not use_cascaded_word_graph:
+                                session.add(relation)
                         summary = _increment(summary, created_relations=1)
+
+        if phonetic_enrichment_run is not None and getattr(word, "phonetic", None) is not None and hasattr(word, "phonetic_enrichment_run_id"):
+            session.flush()
+            word.phonetic_enrichment_run_id = phonetic_enrichment_run.id
 
         for existing_meaning in list(existing_meanings):
             if existing_meaning.id in matched_meaning_ids:
@@ -1290,7 +1621,17 @@ def import_compiled_rows(
         if progress_callback is not None:
             progress_callback(row, row_index, total_rows)
 
-    if learner_catalog_entry_model is not None:
+    _delete_rows_for_foreign_keys(
+        session,
+        translation_example_model,
+        "translation_id",
+        translation_example_delete_ids,
+    )
+    _bulk_insert_mapped_rows(session, meaning_example_model, pending_meaning_example_rows)
+    _bulk_insert_mapped_rows(session, translation_example_model, pending_translation_example_rows)
+    _bulk_insert_mapped_rows(session, word_relation_model, pending_word_relation_rows)
+
+    if learner_catalog_entry_model is not None and rebuild_learner_catalog:
         resolved_phrase_model_for_projection = resolved_phrase_model
         if resolved_phrase_model_for_projection is None:
             resolved_phrase_model_for_projection = _default_phrase_models()[0]
@@ -1305,22 +1646,50 @@ def import_compiled_rows(
 
 
 def load_compiled_rows(path: str | Path) -> list[dict[str, Any]]:
+    return list(iter_compiled_rows(path))
+
+
+def iter_compiled_rows(path: str | Path) -> Iterable[dict[str, Any]]:
     source_path = Path(path)
-    rows: list[dict[str, Any]] = []
     if source_path.is_dir():
         compiled_paths = sorted(source_path.glob("*.enriched.jsonl"))
         if not compiled_paths:
             compiled_paths = sorted(source_path.glob("*.jsonl"))
         for compiled_path in compiled_paths:
-            rows.extend(load_compiled_rows(compiled_path))
-        return rows
+            yield from iter_compiled_rows(compiled_path)
+        return
     with source_path.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
             if not line:
                 continue
-            rows.append(json.loads(line))
-    return rows
+            yield json.loads(line)
+
+
+def count_compiled_rows(path: str | Path) -> int:
+    source_path = Path(path)
+    if source_path.is_dir():
+        compiled_paths = sorted(source_path.glob("*.enriched.jsonl"))
+        if not compiled_paths:
+            compiled_paths = sorted(source_path.glob("*.jsonl"))
+        return sum(count_compiled_rows(compiled_path) for compiled_path in compiled_paths)
+    count = 0
+    with source_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
+
+
+def _iter_row_batches(rows: Iterable[dict[str, Any]], batch_size: int) -> Iterable[list[dict[str, Any]]]:
+    batch: list[dict[str, Any]] = []
+    for row in rows:
+        batch.append(row)
+        if len(batch) >= batch_size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 def _default_source_reference(path: str | Path) -> str:
@@ -1335,56 +1704,106 @@ def run_import_file(
     source_reference: str | None = None,
     language: str = "en",
     rows: list[dict[str, Any]] | None = None,
+    import_mode: str = "orm",
+    commit_every_rows: int | None = 250,
     progress_callback: Optional[Callable[..., None]] = None,
 ) -> dict[str, int]:
-    resolved_rows = rows if rows is not None else load_compiled_rows(path)
+    if import_mode == "staging":
+        from tools.lexicon.staging_import import run_staging_import_file
+
+        return run_staging_import_file(
+            path,
+            source_type=source_type,
+            source_reference=source_reference,
+            language=language,
+            rows=rows,
+            commit_every_rows=commit_every_rows,
+            progress_callback=progress_callback,
+        )
+
     _ensure_backend_path()
-    from sqlalchemy import create_engine
+    try:
+        from sqlalchemy import create_engine
+    except ImportError:
+        from sqlalchemy.engine.create import create_engine
     from sqlalchemy.orm import Session
     from app.core.config import get_settings
 
     settings = get_settings()
     engine = create_engine(settings.database_url_sync)
     effective_source_reference = source_reference or _default_source_reference(path)
+    resolved_row_total = len(rows) if rows is not None else count_compiled_rows(path)
+    row_source = iter(rows) if rows is not None else iter_compiled_rows(path)
+    batch_size = commit_every_rows if commit_every_rows is not None and commit_every_rows > 0 else resolved_row_total or 1
+    aggregate_summary = ImportSummary()
+    completed_rows = 0
     with Session(engine) as session:
-        summary = import_compiled_rows(
-            session,
-            resolved_rows,
-            source_type=source_type,
-            source_reference=effective_source_reference,
-            language=language,
-            progress_callback=(
-                (lambda row, completed_rows, total_rows: progress_callback(
-                    row=row,
-                    completed_rows=completed_rows,
-                    total_rows=total_rows,
-                ))
-                if progress_callback is not None
-                else None
-            ),
-        )
-        session.commit()
+        for batch in _iter_row_batches(row_source, batch_size):
+            batch_summary = import_compiled_rows(
+                session,
+                batch,
+                source_type=source_type,
+                source_reference=effective_source_reference,
+                language=language,
+                rebuild_learner_catalog=False,
+                progress_callback=(
+                    (lambda row, batch_completed_rows, _batch_total_rows, base_completed_rows=completed_rows: progress_callback(
+                        row=row,
+                        completed_rows=base_completed_rows + batch_completed_rows,
+                        total_rows=resolved_row_total,
+                    ))
+                    if progress_callback is not None
+                    else None
+                ),
+            )
+            aggregate_summary = _increment(aggregate_summary, **batch_summary.__dict__)
+            completed_rows += len(batch)
+            session.commit()
+        if aggregate_summary != ImportSummary():
+            (
+                word_model,
+                _meaning_model,
+                _meaning_metadata_model,
+                _meaning_example_model,
+                _word_relation_model,
+                _lexicon_enrichment_job_model,
+                _lexicon_enrichment_run_model,
+                _translation_model,
+                _translation_example_model,
+                _word_confusable_model,
+                _word_form_model,
+                _word_part_of_speech_model,
+                learner_catalog_entry_model,
+            ) = _default_models()
+            phrase_model = _default_phrase_models()[0]
+            _rebuild_learner_catalog_projection(
+                session,
+                learner_catalog_entry_model=learner_catalog_entry_model,
+                word_model=word_model,
+                phrase_model=phrase_model,
+            )
+            session.commit()
     return {
-        "created_words": summary.created_words,
-        "updated_words": summary.updated_words,
-        "created_meanings": summary.created_meanings,
-        "updated_meanings": summary.updated_meanings,
-        "created_examples": summary.created_examples,
-        "deleted_examples": summary.deleted_examples,
-        "created_relations": summary.created_relations,
-        "deleted_relations": summary.deleted_relations,
-        "created_translations": summary.created_translations,
-        "updated_translations": summary.updated_translations,
-        "created_enrichment_jobs": summary.created_enrichment_jobs,
-        "reused_enrichment_jobs": summary.reused_enrichment_jobs,
-        "created_enrichment_runs": summary.created_enrichment_runs,
-        "reused_enrichment_runs": summary.reused_enrichment_runs,
-        "created_phrases": summary.created_phrases,
-        "updated_phrases": summary.updated_phrases,
-        "created_reference_entries": summary.created_reference_entries,
-        "updated_reference_entries": summary.updated_reference_entries,
-        "created_reference_localizations": summary.created_reference_localizations,
-        "updated_reference_localizations": summary.updated_reference_localizations,
+        "created_words": aggregate_summary.created_words,
+        "updated_words": aggregate_summary.updated_words,
+        "created_meanings": aggregate_summary.created_meanings,
+        "updated_meanings": aggregate_summary.updated_meanings,
+        "created_examples": aggregate_summary.created_examples,
+        "deleted_examples": aggregate_summary.deleted_examples,
+        "created_relations": aggregate_summary.created_relations,
+        "deleted_relations": aggregate_summary.deleted_relations,
+        "created_translations": aggregate_summary.created_translations,
+        "updated_translations": aggregate_summary.updated_translations,
+        "created_enrichment_jobs": aggregate_summary.created_enrichment_jobs,
+        "reused_enrichment_jobs": aggregate_summary.reused_enrichment_jobs,
+        "created_enrichment_runs": aggregate_summary.created_enrichment_runs,
+        "reused_enrichment_runs": aggregate_summary.reused_enrichment_runs,
+        "created_phrases": aggregate_summary.created_phrases,
+        "updated_phrases": aggregate_summary.updated_phrases,
+        "created_reference_entries": aggregate_summary.created_reference_entries,
+        "updated_reference_entries": aggregate_summary.updated_reference_entries,
+        "created_reference_localizations": aggregate_summary.created_reference_localizations,
+        "updated_reference_localizations": aggregate_summary.updated_reference_localizations,
     }
 
 
