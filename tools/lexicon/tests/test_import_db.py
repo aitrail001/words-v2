@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Optional
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -25,6 +25,7 @@ from tools.lexicon.import_db import (
     _load_existing_relations,
     _rebuild_learner_catalog_projection,
     import_compiled_rows,
+    run_import_file,
 )
 
 
@@ -293,6 +294,9 @@ class FakeWord:
     phonetic_source: object = None
     phonetic_confidence: object = None
     phonetic_enrichment_run_id: object = None
+    meanings: object = field(default_factory=list)
+    relations: object = field(default_factory=list)
+    enrichment_jobs: object = field(default_factory=list)
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -386,6 +390,8 @@ class FakeMeaning:
     grammar_patterns: object = None
     usage_note: object = None
     metadata_entries: object = field(default_factory=list)
+    translations: object = field(default_factory=list)
+    word: object = None
     learner_generated_at: object = None
     order_index: int = 0
     source: object = None
@@ -402,6 +408,8 @@ class FakeMeaningExample:
     source: object = None
     confidence: object = None
     enrichment_run_id: object = None
+    meaning: object = None
+    enrichment_run: object = None
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -412,6 +420,7 @@ class FakeTranslation:
     translation: str
     usage_note: object = None
     examples: object = None
+    meaning: object = None
     example_entries: object = field(default_factory=list)
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
@@ -443,6 +452,9 @@ class FakeWordRelation:
     source: object = None
     confidence: object = None
     enrichment_run_id: object = None
+    word: object = None
+    meaning: object = None
+    enrichment_run: object = None
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -456,6 +468,8 @@ class FakeLexiconEnrichmentJob:
     max_attempts: int = 3
     started_at: object = None
     completed_at: object = None
+    word: object = None
+    runs: object = field(default_factory=list)
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -469,6 +483,9 @@ class FakeLexiconEnrichmentRun:
     verdict: object = None
     confidence: object = None
     created_at: object = None
+    enrichment_job: object = None
+    meaning_examples: object = field(default_factory=list)
+    word_relations: object = field(default_factory=list)
     id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
@@ -1699,6 +1716,83 @@ class ImportCompiledRowsTests(unittest.TestCase):
             ["أقلعنا مبكرًا.", "Despegamos temprano.", "私たちは早く離陸した。", "Decolamos cedo.", "我们很早起飞了。"],
         )
 
+    def test_import_compiled_rows_uses_effective_normalized_form_for_new_phrase_cache_keys(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ScalarResult(None)
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        summary = import_compiled_rows(
+            session,
+            [
+                {
+                    "entry_type": "phrase",
+                    "word": "Take Off",
+                    "display_form": "Take Off",
+                    "senses": [],
+                },
+                {
+                    "entry_type": "phrase",
+                    "word": "By And Large",
+                    "display_form": "By And Large",
+                    "senses": [],
+                },
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260329",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+        )
+
+        phrases = [item for item in added if isinstance(item, FakePhraseEntry)]
+        self.assertEqual(summary.created_phrases, 2)
+        self.assertEqual(len(phrases), 2)
+        self.assertEqual([phrase.normalized_form for phrase in phrases], ["take off", "by and large"])
+
+    def test_import_compiled_rows_uses_effective_normalized_form_for_new_reference_cache_keys(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [_ScalarResult(None), _ScalarResult(None)]
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        summary = import_compiled_rows(
+            session,
+            [
+                {
+                    "entry_type": "reference",
+                    "word": "Australia",
+                    "display_form": "Australia",
+                    "localizations": [],
+                },
+                {
+                    "entry_type": "reference",
+                    "word": "New Zealand",
+                    "display_form": "New Zealand",
+                    "localizations": [],
+                },
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260329",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            reference_model=FakeReferenceEntry,
+            reference_localization_model=FakeReferenceLocalization,
+        )
+
+        references = [item for item in added if isinstance(item, FakeReferenceEntry)]
+        self.assertEqual(summary.created_reference_entries, 2)
+        self.assertEqual(len(references), 2)
+        self.assertEqual([reference.normalized_form for reference in references], ["australia", "new zealand"])
+
     def test_import_compiled_rows_replaces_normalized_phrase_children_on_repeat_import_with_real_sqlalchemy_models(self) -> None:
         models = _load_real_models()
 
@@ -2113,6 +2207,80 @@ class ImportCompiledRowsTests(unittest.TestCase):
             ["أقلعت الطائرة قبل لحظات.", "El avión despegó hace un momento.", "飛行機はたった今離陸した。", "O avião decolou há pouco.", "飞机已经起飞了。"],
         )
 
+    def test_import_compiled_rows_avoids_individual_child_adds_for_new_mapped_phrase_graphs(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ScalarResult(None)
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        row = {
+            "schema_version": "1.1.0",
+            "entry_id": "ph_take_off",
+            "entry_type": "phrase",
+            "normalized_form": "take off",
+            "source_provenance": [{"source": "phrase_seed"}],
+            "entity_category": "general",
+            "word": "take off",
+            "display_form": "take off",
+            "phrase_kind": "phrasal_verb",
+            "part_of_speech": ["phrasal_verb"],
+            "cefr_level": "B1",
+            "frequency_rank": 0,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "confusable_words": [],
+            "generated_at": "2026-03-20T00:00:00Z",
+            "senses": [{
+                "sense_id": "phrase-1",
+                "definition": "leave the ground",
+                "part_of_speech": "verb",
+                "examples": [{"sentence": "The plane took off.", "difficulty": "A1"}],
+                "translations": {
+                    "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。"]},
+                    "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó."]},
+                    "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة."]},
+                    "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou."]},
+                    "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した。"]},
+                },
+            }],
+        }
+
+        real_mapped_phrase_models = {
+            FakePhraseEntry,
+            FakePhraseSense,
+            FakePhraseSenseLocalization,
+            FakePhraseSenseExample,
+            FakePhraseSenseExampleLocalization,
+        }
+
+        with patch(
+            "tools.lexicon.import_db._is_real_mapped_model",
+            side_effect=lambda model: model in real_mapped_phrase_models,
+        ), patch("tools.lexicon.import_db._preload_existing_by_normalized_form", return_value={}), patch(
+            "tools.lexicon.import_db._find_existing_by_normalized_form",
+            return_value=None,
+        ):
+            import_compiled_rows(
+                session,
+                [row],
+                source_type="lexicon_snapshot",
+                source_reference="snapshot-20260328",
+                language="en",
+                word_model=FakeWord,
+                meaning_model=FakeMeaning,
+                phrase_model=FakePhraseEntry,
+                phrase_sense_model=FakePhraseSense,
+                phrase_sense_localization_model=FakePhraseSenseLocalization,
+                phrase_sense_example_model=FakePhraseSenseExample,
+                phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+            )
+
+        self.assertEqual([type(item) for item in added], [FakePhraseEntry])
+        self.assertEqual(len(added[0].phrase_senses), 1)
+        self.assertEqual(len(added[0].phrase_senses[0].examples), 1)
+        self.assertEqual(len(added[0].phrase_senses[0].localizations), 5)
+        self.assertEqual(len(added[0].phrase_senses[0].examples[0].localizations), 5)
+
     def test_import_compiled_rows_rejects_phrase_rows_missing_translation_examples(self) -> None:
         session = MagicMock()
         session.execute.return_value = _ScalarResult(None)
@@ -2238,6 +2406,384 @@ class ImportCompiledRowsTests(unittest.TestCase):
             self.assertEqual(counts["word_count"], 1)
             self.assertEqual(counts["phrase_count"], 1)
             self.assertEqual(counts["reference_count"], 1)
+
+    def test_import_skips_existing_child_loaders_for_brand_new_rows(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [_ScalarResult(None)]
+        session.add.side_effect = lambda _: None
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "word",
+                "word": "time",
+                "language": "en",
+                "forms": {},
+                "senses": [
+                    {
+                        "sense_id": "sense-001",
+                        "definition": "the thing measured in minutes and hours",
+                        "pos": "noun",
+                        "examples": [{"sentence": "I do not have time today.", "difficulty": "A1"}],
+                        "translations": {
+                            "pt-BR": {
+                                "definition": "tempo",
+                                "examples": ["Eu não tenho tempo hoje."],
+                            }
+                        },
+                        "synonyms": ["duration"],
+                    }
+                ],
+            }
+        ]
+
+        with patch("tools.lexicon.import_db._load_existing_meanings") as mocked_meanings, \
+             patch("tools.lexicon.import_db._find_existing_enrichment_job") as mocked_jobs, \
+             patch("tools.lexicon.import_db._load_existing_examples") as mocked_examples, \
+             patch("tools.lexicon.import_db._load_existing_translations") as mocked_translations, \
+             patch("tools.lexicon.import_db._load_existing_relations") as mocked_relations:
+            import_compiled_rows(
+                session,
+                rows,
+                source_type="lexicon_snapshot",
+                source_reference="snapshot-20260324",
+                language="en",
+                word_model=FakeWord,
+                meaning_model=FakeMeaning,
+                meaning_example_model=FakeMeaningExample,
+                translation_model=FakeTranslation,
+                translation_example_model=FakeTranslationExample,
+                word_relation_model=FakeWordRelation,
+                lexicon_enrichment_job_model=FakeLexiconEnrichmentJob,
+                lexicon_enrichment_run_model=FakeLexiconEnrichmentRun,
+            )
+
+        mocked_meanings.assert_not_called()
+        mocked_jobs.assert_not_called()
+        mocked_examples.assert_not_called()
+        mocked_translations.assert_not_called()
+        mocked_relations.assert_not_called()
+
+    def test_import_compiled_rows_avoids_individual_child_adds_for_new_mapped_word_graphs(self) -> None:
+        session = MagicMock()
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "word",
+                "word": "time",
+                "language": "en",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 10,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "confusable_words": [],
+                "generated_at": "2026-03-24T00:00:00Z",
+                "senses": [
+                    {
+                        "sense_id": "sense-001",
+                        "definition": "the thing measured in minutes and hours",
+                        "pos": "noun",
+                        "examples": [{"sentence": "I do not have time today.", "difficulty": "A1"}],
+                        "translations": {
+                            "pt-BR": {
+                                "definition": "tempo",
+                                "examples": ["Eu não tenho tempo hoje."],
+                            }
+                        },
+                        "synonyms": ["duration"],
+                        "confidence": 0.8,
+                        "generated_at": "2026-03-24T00:00:00Z",
+                        "model_name": "gpt-5.4",
+                        "prompt_version": "v1",
+                    }
+                ],
+            }
+        ]
+
+        real_mapped_word_models = {
+            FakeWord,
+            FakeMeaning,
+            FakeMeaningMetadata,
+            FakeMeaningExample,
+            FakeTranslation,
+            FakeTranslationExample,
+            FakeWordRelation,
+            FakeLexiconEnrichmentJob,
+            FakeLexiconEnrichmentRun,
+            FakeWordConfusable,
+            FakeWordForm,
+            FakeWordPartOfSpeech,
+        }
+
+        with patch(
+            "tools.lexicon.import_db._is_real_mapped_model",
+            side_effect=lambda model: model in real_mapped_word_models,
+        ), patch("tools.lexicon.import_db._preload_existing_words", return_value={}), patch(
+            "tools.lexicon.import_db._find_existing_word",
+            return_value=None,
+        ):
+            import_compiled_rows(
+                session,
+                rows,
+                source_type="lexicon_snapshot",
+                source_reference="snapshot-20260324",
+                language="en",
+                word_model=FakeWord,
+                meaning_model=FakeMeaning,
+                meaning_metadata_model=FakeMeaningMetadata,
+                meaning_example_model=FakeMeaningExample,
+                translation_model=FakeTranslation,
+                translation_example_model=FakeTranslationExample,
+                word_relation_model=FakeWordRelation,
+                lexicon_enrichment_job_model=FakeLexiconEnrichmentJob,
+                lexicon_enrichment_run_model=FakeLexiconEnrichmentRun,
+                word_confusable_model=FakeWordConfusable,
+                word_form_model=FakeWordForm,
+                word_part_of_speech_model=FakeWordPartOfSpeech,
+            )
+
+        self.assertEqual([type(item) for item in added], [FakeWord, FakeMeaningExample])
+
+    def test_import_compiled_rows_bulk_child_insert_for_new_mapped_word_graphs(self) -> None:
+        session = MagicMock()
+        added = []
+        bulk_calls: list[tuple[type, list[dict[str, object]]]] = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "word",
+                "word": "time",
+                "language": "en",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 10,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "confusable_words": [],
+                "generated_at": "2026-03-24T00:00:00Z",
+                "senses": [
+                    {
+                        "sense_id": "sense-001",
+                        "definition": "the thing measured in minutes and hours",
+                        "pos": "noun",
+                        "examples": [{"sentence": "I do not have time today.", "difficulty": "A1"}],
+                        "translations": {
+                            "pt-BR": {
+                                "definition": "tempo",
+                                "examples": ["Eu não tenho tempo hoje."],
+                            }
+                        },
+                        "synonyms": ["duration"],
+                        "confidence": 0.8,
+                        "generated_at": "2026-03-24T00:00:00Z",
+                        "model_name": "gpt-5.4",
+                        "prompt_version": "v1",
+                    }
+                ],
+            }
+        ]
+
+        real_mapped_word_models = {
+            FakeWord,
+            FakeMeaning,
+            FakeMeaningMetadata,
+            FakeMeaningExample,
+            FakeTranslation,
+            FakeTranslationExample,
+            FakeWordRelation,
+            FakeLexiconEnrichmentJob,
+            FakeLexiconEnrichmentRun,
+            FakeWordConfusable,
+            FakeWordForm,
+            FakeWordPartOfSpeech,
+        }
+
+        def _record_bulk_insert(_session, model, rows):
+            bulk_calls.append((model, list(rows)))
+
+        with patch(
+            "tools.lexicon.import_db._is_real_mapped_model",
+            side_effect=lambda model: model in real_mapped_word_models,
+        ), patch("tools.lexicon.import_db._preload_existing_words", return_value={}), patch(
+            "tools.lexicon.import_db._find_existing_word",
+            return_value=None,
+        ), patch(
+            "tools.lexicon.import_db._supports_bulk_insert_model",
+            side_effect=lambda _session, model: model in {FakeMeaningExample, FakeTranslationExample, FakeWordRelation},
+            create=True,
+        ), patch(
+            "tools.lexicon.import_db._bulk_insert_mapped_rows",
+            side_effect=_record_bulk_insert,
+        ):
+            import_compiled_rows(
+                session,
+                rows,
+                source_type="lexicon_snapshot",
+                source_reference="snapshot-20260324",
+                language="en",
+                word_model=FakeWord,
+                meaning_model=FakeMeaning,
+                meaning_metadata_model=FakeMeaningMetadata,
+                meaning_example_model=FakeMeaningExample,
+                translation_model=FakeTranslation,
+                translation_example_model=FakeTranslationExample,
+                word_relation_model=FakeWordRelation,
+                lexicon_enrichment_job_model=FakeLexiconEnrichmentJob,
+                lexicon_enrichment_run_model=FakeLexiconEnrichmentRun,
+                word_confusable_model=FakeWordConfusable,
+                word_form_model=FakeWordForm,
+                word_part_of_speech_model=FakeWordPartOfSpeech,
+            )
+
+        self.assertEqual([type(item) for item in added], [FakeWord])
+        self.assertEqual(
+            [(model, len(rows)) for model, rows in bulk_calls],
+            [
+                (FakeMeaningExample, 1),
+                (FakeTranslationExample, 1),
+                (FakeWordRelation, 1),
+            ],
+        )
+
+    def test_run_import_file_streams_input_and_commits_per_chunk(self) -> None:
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        rows = iter(
+            [
+                {"entry_type": "word", "word": "alpha"},
+                {"entry_type": "word", "word": "beta"},
+                {"entry_type": "word", "word": "gamma"},
+            ]
+        )
+        import_summaries = [
+            ImportSummary(created_words=2),
+            ImportSummary(created_words=1),
+        ]
+        progress_calls: list[tuple[str, int, int]] = []
+
+        with patch("tools.lexicon.import_db.iter_compiled_rows", return_value=rows), \
+             patch("tools.lexicon.import_db.count_compiled_rows", return_value=3), \
+             patch("tools.lexicon.import_db.import_compiled_rows", side_effect=import_summaries) as mocked_import, \
+             patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+             patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+             patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            summary = run_import_file(
+                "/tmp/fake.jsonl",
+                source_type="repo_fixture",
+                source_reference="fake-fixture",
+                commit_every_rows=2,
+                progress_callback=lambda **kwargs: progress_calls.append(
+                    (str(kwargs["row"].get("word")), int(kwargs["completed_rows"]), int(kwargs["total_rows"]))
+                ),
+            )
+
+        self.assertEqual(summary["created_words"], 3)
+        self.assertEqual(fake_session.commit.call_count, 3)
+        self.assertEqual([len(call.args[1]) for call in mocked_import.call_args_list], [2, 1])
+        self.assertEqual([call.kwargs["source_reference"] for call in mocked_import.call_args_list], ["fake-fixture", "fake-fixture"])
+        self.assertEqual(progress_calls, [])
+
+    def test_run_import_file_rebuilds_learner_catalog_once_after_all_batches(self) -> None:
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        rows = iter(
+            [
+                {"entry_type": "word", "word": "alpha"},
+                {"entry_type": "word", "word": "beta"},
+                {"entry_type": "word", "word": "gamma"},
+            ]
+        )
+
+        with patch("tools.lexicon.import_db.iter_compiled_rows", return_value=rows), \
+             patch("tools.lexicon.import_db.count_compiled_rows", return_value=3), \
+             patch(
+                 "tools.lexicon.import_db.import_compiled_rows",
+                 side_effect=[ImportSummary(created_words=2), ImportSummary(created_words=1)],
+             ) as mocked_import, \
+             patch("tools.lexicon.import_db._rebuild_learner_catalog_projection") as mocked_rebuild_projection, \
+             patch(
+                 "tools.lexicon.import_db._default_models",
+                 return_value=(
+                     FakeWord,
+                     FakeMeaning,
+                     FakeMeaningMetadata,
+                     FakeMeaningExample,
+                     FakeWordRelation,
+                     FakeLexiconEnrichmentJob,
+                     FakeLexiconEnrichmentRun,
+                     FakeTranslation,
+                     FakeTranslationExample,
+                     FakeWordConfusable,
+                     FakeWordForm,
+                     FakeWordPartOfSpeech,
+                     FakeLearnerCatalogEntry,
+                 ),
+             ), \
+             patch("tools.lexicon.import_db._default_phrase_models", return_value=(FakePhraseEntry, FakePhraseSense, FakePhraseSenseLocalization, FakePhraseSenseExample, FakePhraseSenseExampleLocalization)), \
+             patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+             patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+             patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            run_import_file(
+                "/tmp/fake.jsonl",
+                source_type="repo_fixture",
+                source_reference="fake-fixture",
+                commit_every_rows=2,
+            )
+
+        self.assertEqual([call.kwargs["rebuild_learner_catalog"] for call in mocked_import.call_args_list], [False, False])
+        mocked_rebuild_projection.assert_called_once()
+        self.assertEqual(fake_session.commit.call_count, 3)
+
+    def test_run_import_file_staging_mode_delegates_to_staging_import(self) -> None:
+        with patch("tools.lexicon.staging_import.run_staging_import_file", return_value={"created_words": 9}) as mocked_staging:
+            summary = run_import_file(
+                "/tmp/fake.jsonl",
+                source_type="repo_fixture",
+                source_reference="fake-fixture",
+                import_mode="staging",
+            )
+
+        self.assertEqual(summary["created_words"], 9)
+        mocked_staging.assert_called_once_with(
+            "/tmp/fake.jsonl",
+            source_type="repo_fixture",
+            source_reference="fake-fixture",
+            language="en",
+            rows=None,
+            commit_every_rows=250,
+            progress_callback=None,
+        )
 
 
     def test_import_reuses_job_and_run_and_replaces_examples_and_relations(self) -> None:
