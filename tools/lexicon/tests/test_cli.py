@@ -1265,6 +1265,52 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["example_count"], 1)
             self.assertEqual(payload["relation_count"], 3)
 
+    def test_import_db_parser_accepts_import_mode_staging(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["import-db", "--input", "/tmp/compiled.jsonl", "--import-mode", "staging"])
+
+        self.assertEqual(args.import_mode, "staging")
+
+    def test_import_db_command_forwards_import_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compiled_path = Path(tmpdir) / "words.enriched.jsonl"
+            compiled_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordfreq"}],
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "A1",
+                        "frequency_rank": 5,
+                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        "senses": [],
+                        "confusable_words": [],
+                        "generated_at": "2026-03-07T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("tools.lexicon.cli.run_import_file", return_value={"created_words": 1}) as mocked_import:
+                code, stdout, _ = self.run_cli([
+                    "import-db",
+                    "--input",
+                    str(compiled_path),
+                    "--import-mode",
+                    "staging",
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["summary"]["created_words"], 1)
+            self.assertEqual(mocked_import.call_args.kwargs["import_mode"], "staging")
+
     def test_export_db_command_writes_json_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "approved.jsonl"
