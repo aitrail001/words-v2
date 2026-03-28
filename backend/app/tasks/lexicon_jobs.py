@@ -64,12 +64,17 @@ def process_compiled_review_bulk_job(
     if scope != "all_pending":
         raise RuntimeError("Unsupported compiled review bulk scope")
 
+    target_status = "pending" if review_status in {"approved", "rejected"} else None
     items = list(
         db.execute(
             select(LexiconArtifactReviewItem)
             .where(
                 LexiconArtifactReviewItem.batch_id == batch_id,
-                LexiconArtifactReviewItem.review_status == "pending",
+                (
+                    LexiconArtifactReviewItem.review_status == target_status
+                    if target_status is not None
+                    else LexiconArtifactReviewItem.review_status != "pending"
+                ),
             )
             .order_by(
                 LexiconArtifactReviewItem.review_priority.asc(),
@@ -82,17 +87,16 @@ def process_compiled_review_bulk_job(
     reviewed_at = utc_now()
     processed_count = 0
     initial_total_items = batch.total_items
-    initial_approved_count = batch.approved_count
-    initial_rejected_count = batch.rejected_count
-    initial_pending_count = batch.pending_count
+    approved_count = batch.approved_count
+    rejected_count = batch.rejected_count
 
     if total == 0:
         apply_lexicon_job_progress(job, progress_completed=0, progress_total=0, current_label=None)
         recalculate_batch_counts(
             batch,
             total_items=initial_total_items,
-            approved_count=initial_approved_count,
-            rejected_count=initial_rejected_count,
+            approved_count=approved_count,
+            rejected_count=rejected_count,
             updated_at=reviewed_at,
         )
         return {
@@ -116,6 +120,16 @@ def process_compiled_review_bulk_job(
                 actor_user_id=job.created_by,
                 reviewed_at=reviewed_at,
             )
+            if previous_status == "approved":
+                approved_count -= 1
+            elif previous_status == "rejected":
+                rejected_count -= 1
+
+            if review_status == "approved":
+                approved_count += 1
+            elif review_status == "rejected":
+                rejected_count += 1
+
             upsert_regeneration_request_sync(db=db, batch=batch, item=item, actor_user_id=job.created_by)
             db.add(add_review_item_event(
                 item=item,
@@ -125,9 +139,6 @@ def process_compiled_review_bulk_job(
                 reason=decision_reason,
             ))
         processed_count += len(chunk)
-        approved_count = initial_approved_count + (processed_count if review_status == "approved" else 0)
-        rejected_count = initial_rejected_count + (processed_count if review_status == "rejected" else 0)
-        pending_count = initial_pending_count - (processed_count if review_status in {"approved", "rejected"} else 0)
         recalculate_batch_counts(
             batch,
             total_items=initial_total_items,
@@ -135,9 +146,6 @@ def process_compiled_review_bulk_job(
             rejected_count=rejected_count,
             updated_at=reviewed_at,
         )
-        batch.pending_count = pending_count
-        batch.status = "completed" if pending_count == 0 else "pending_review"
-        batch.completed_at = reviewed_at if pending_count == 0 else None
         apply_lexicon_job_progress(
             job,
             progress_completed=processed_count,

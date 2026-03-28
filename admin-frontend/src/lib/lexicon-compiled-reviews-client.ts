@@ -121,7 +121,7 @@ export const listLexiconCompiledReviewItems = (
   const params = new URLSearchParams();
   if (input?.limit !== undefined) params.set("limit", String(input.limit));
   if (input?.offset !== undefined) params.set("offset", String(input.offset));
-  if (input?.reviewStatus) params.set("status", input.reviewStatus);
+  if (input?.reviewStatus) params.set("review_status", input.reviewStatus);
   if (input?.search?.trim()) params.set("search", input.search.trim());
   const query = params.toString();
   return apiClient.get<LexiconCompiledReviewItemsPage>(

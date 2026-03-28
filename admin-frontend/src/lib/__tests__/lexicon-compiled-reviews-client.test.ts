@@ -38,7 +38,7 @@ describe("admin lexicon-compiled-reviews-client", () => {
     mockApiClient.patch.mockResolvedValueOnce({ id: "item-1", review_status: "approved" } as any);
     await listLexiconCompiledReviewItems("batch-1", { limit: 25, offset: 50, reviewStatus: "approved", search: "bank" });
     await updateLexiconCompiledReviewItem("item-1", { review_status: "approved", decision_reason: "ready" });
-    expect(mockApiClient.get).toHaveBeenCalledWith("/lexicon-compiled-reviews/batches/batch-1/items?limit=25&offset=50&status=approved&search=bank");
+    expect(mockApiClient.get).toHaveBeenCalledWith("/lexicon-compiled-reviews/batches/batch-1/items?limit=25&offset=50&review_status=approved&search=bank");
     expect(mockApiClient.patch).toHaveBeenCalledWith("/lexicon-compiled-reviews/items/item-1", { review_status: "approved", decision_reason: "ready" });
   });
 
