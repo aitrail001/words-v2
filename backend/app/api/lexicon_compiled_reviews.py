@@ -3,7 +3,7 @@ import json
 import uuid
 from collections.abc import Sequence
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +18,18 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
 from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
-from app.models.lexicon_artifact_review_item_event import LexiconArtifactReviewItemEvent
-from app.models.lexicon_regeneration_request import LexiconRegenerationRequest
 from app.models.user import User
+from app.services.lexicon_compiled_review_decisions import (
+    DEFAULT_COMPILED_REVIEW_PAGE_SIZE,
+    add_review_item_event,
+    apply_review_decision,
+    build_compiled_review_items_query,
+    count_compiled_review_items,
+    recalculate_batch_counts_from_db,
+    upsert_regeneration_request_async,
+    utc_now,
+    validate_review_status,
+)
 from app.services.lexicon_jsonl_reviews import (
     APPROVED_FILENAME,
     DECISIONS_FILENAME,
@@ -146,6 +155,14 @@ class LexiconCompiledReviewMaterializeResponse(BaseModel):
 class LexiconCompiledReviewBulkUpdateResponse(BaseModel):
     batch: LexiconCompiledReviewBatchResponse
     items: list[LexiconCompiledReviewItemResponse]
+
+
+class LexiconCompiledReviewItemsPageResponse(BaseModel):
+    items: list[LexiconCompiledReviewItemResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
 
 
 def _compiled_meaning_limit(frequency_rank: Any) -> int:
@@ -527,20 +544,6 @@ async def _batch_or_404(batch_id: uuid.UUID, db: AsyncSession) -> LexiconArtifac
     return batch
 
 
-def _refresh_batch_counts(batch: LexiconArtifactReviewBatch, items: Sequence[LexiconArtifactReviewItem]) -> None:
-    approved_count = sum(1 for item in items if item.review_status == "approved")
-    rejected_count = sum(1 for item in items if item.review_status == "rejected")
-    total_items = len(items)
-    pending_count = total_items - approved_count - rejected_count
-    batch.total_items = total_items
-    batch.pending_count = pending_count
-    batch.approved_count = approved_count
-    batch.rejected_count = rejected_count
-    batch.status = "completed" if pending_count == 0 else "pending_review"
-    batch.completed_at = datetime.now(timezone.utc) if pending_count == 0 else None
-    batch.updated_at = datetime.now(timezone.utc)
-
-
 async def _load_batch_items(batch_id: uuid.UUID, db: AsyncSession) -> list[LexiconArtifactReviewItem]:
     result = await db.execute(
         select(LexiconArtifactReviewItem)
@@ -548,52 +551,6 @@ async def _load_batch_items(batch_id: uuid.UUID, db: AsyncSession) -> list[Lexic
         .order_by(LexiconArtifactReviewItem.review_priority.asc(), LexiconArtifactReviewItem.display_text.asc())
     )
     return list(result.scalars().all())
-
-
-async def _upsert_regeneration_request(
-    *,
-    batch: LexiconArtifactReviewBatch,
-    item: LexiconArtifactReviewItem,
-    current_user: User,
-    db: AsyncSession,
-) -> None:
-    existing_result = await db.execute(
-        select(LexiconRegenerationRequest).where(LexiconRegenerationRequest.item_id == item.id)
-    )
-    existing_request = existing_result.scalar_one_or_none()
-
-    if item.review_status != "rejected":
-        if existing_request is not None:
-            await db.delete(existing_request)
-        return
-
-    request_payload = {
-        "schema_version": "lexicon_review_decision.v1",
-        "artifact_sha256": batch.artifact_sha256,
-        "entry_id": item.entry_id,
-        "entry_type": item.entry_type,
-        "normalized_form": item.normalized_form,
-        "compiled_payload_sha256": item.compiled_payload_sha256,
-        "decision_reason": item.decision_reason,
-    }
-    if existing_request is None:
-        db.add(
-            LexiconRegenerationRequest(
-                batch_id=batch.id,
-                item_id=item.id,
-                entry_id=item.entry_id,
-                entry_type=item.entry_type,
-                artifact_sha256=batch.artifact_sha256,
-                request_reason=item.decision_reason,
-                request_payload=request_payload,
-                created_by=current_user.id,
-            )
-        )
-        return
-
-    existing_request.request_status = "pending"
-    existing_request.request_reason = item.decision_reason
-    existing_request.request_payload = request_payload
 
 
 @router.post("/batches/import", response_model=LexiconCompiledReviewBatchResponse, status_code=status.HTTP_201_CREATED)
@@ -673,24 +630,28 @@ async def delete_compiled_review_batch(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/batches/{batch_id}/items", response_model=list[LexiconCompiledReviewItemResponse])
+@router.get("/batches/{batch_id}/items", response_model=LexiconCompiledReviewItemsPageResponse)
 async def list_compiled_review_items(
     batch_id: uuid.UUID,
     review_status: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    limit: int = Query(default=DEFAULT_COMPILED_REVIEW_PAGE_SIZE, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     _current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     await _batch_or_404(batch_id, db)
-    query = select(LexiconArtifactReviewItem).where(LexiconArtifactReviewItem.batch_id == batch_id)
-    if review_status:
-        query = query.where(LexiconArtifactReviewItem.review_status == review_status)
-    if search:
-        search_text = f"%{search.strip().lower()}%"
-        query = query.where(LexiconArtifactReviewItem.search_text.ilike(search_text))
-    query = query.order_by(LexiconArtifactReviewItem.review_priority.asc(), LexiconArtifactReviewItem.display_text.asc())
-    result = await db.execute(query)
-    return [_item_response(item) for item in result.scalars().all()]
+    query = build_compiled_review_items_query(batch_id=batch_id, review_status=review_status, search=search)
+    total = await count_compiled_review_items(db, batch_id=batch_id, review_status=review_status, search=search)
+    result = await db.execute(query.offset(offset).limit(limit))
+    items = list(result.scalars().all())
+    return LexiconCompiledReviewItemsPageResponse(
+        items=[_item_response(item) for item in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=offset + len(items) < total,
+    )
 
 
 @router.patch("/items/{item_id}", response_model=LexiconCompiledReviewItemResponse)
@@ -705,29 +666,26 @@ async def update_compiled_review_item(
     if item is None:
         raise HTTPException(status_code=404, detail="Compiled review item not found")
     batch = await _batch_or_404(item.batch_id, db)
-    if request.review_status not in {"pending", "approved", "rejected"}:
+    try:
+        review_status = validate_review_status(request.review_status)
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid compiled review status")
 
-    previous_status = item.review_status
-    item.review_status = request.review_status
-    item.decision_reason = request.decision_reason
-    item.reviewed_by = current_user.id
-    item.reviewed_at = datetime.now(timezone.utc)
-    item.updated_at = datetime.now(timezone.utc)
-    item.import_eligible = request.review_status == "approved"
-    item.regen_requested = request.review_status == "rejected"
-    await _upsert_regeneration_request(batch=batch, item=item, current_user=current_user, db=db)
-    db.add(
-        LexiconArtifactReviewItemEvent(
-            item_id=item.id,
-            event_type=request.review_status,
-            from_status=previous_status,
-            to_status=request.review_status,
-            actor_user_id=current_user.id,
-            reason=request.decision_reason,
-        )
+    previous_status = apply_review_decision(
+        item,
+        review_status=review_status,
+        decision_reason=request.decision_reason,
+        actor_user_id=current_user.id,
     )
-    _refresh_batch_counts(batch, await _load_batch_items(batch.id, db))
+    await upsert_regeneration_request_async(db=db, batch=batch, item=item, actor_user_id=current_user.id)
+    db.add(add_review_item_event(
+        item=item,
+        previous_status=previous_status,
+        review_status=review_status,
+        actor_user_id=current_user.id,
+        reason=request.decision_reason,
+    ))
+    await recalculate_batch_counts_from_db(db, batch)
     await db.commit()
     return _item_response(item)
 
@@ -739,34 +697,32 @@ async def bulk_update_compiled_review_batch(
     current_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if request.review_status not in {"pending", "approved", "rejected"}:
+    try:
+        review_status = validate_review_status(request.review_status)
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid compiled review status")
 
     batch = await _batch_or_404(batch_id, db)
     items = await _load_batch_items(batch.id, db)
-    reviewed_at = datetime.now(timezone.utc)
+    reviewed_at = utc_now()
     for item in items:
-        previous_status = item.review_status
-        item.review_status = request.review_status
-        item.decision_reason = request.decision_reason
-        item.reviewed_by = current_user.id
-        item.reviewed_at = reviewed_at
-        item.updated_at = reviewed_at
-        item.import_eligible = request.review_status == "approved"
-        item.regen_requested = request.review_status == "rejected"
-        await _upsert_regeneration_request(batch=batch, item=item, current_user=current_user, db=db)
-        db.add(
-            LexiconArtifactReviewItemEvent(
-                item_id=item.id,
-                event_type=request.review_status,
-                from_status=previous_status,
-                to_status=request.review_status,
+        previous_status = apply_review_decision(
+            item,
+            review_status=review_status,
+            decision_reason=request.decision_reason,
+            actor_user_id=current_user.id,
+            reviewed_at=reviewed_at,
+        )
+        await upsert_regeneration_request_async(db=db, batch=batch, item=item, actor_user_id=current_user.id)
+        db.add(add_review_item_event(
+                item=item,
+                previous_status=previous_status,
+                review_status=review_status,
                 actor_user_id=current_user.id,
                 reason=request.decision_reason,
-            )
-        )
+        ))
 
-    _refresh_batch_counts(batch, items)
+    await recalculate_batch_counts_from_db(db, batch)
     await db.commit()
     return LexiconCompiledReviewBulkUpdateResponse(
         batch=_batch_response(batch),

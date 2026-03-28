@@ -18,6 +18,7 @@ from app.models.lexicon_job import LexiconJob
 from app.models.user import User
 from app.services.lexicon_compiled_reviews import default_compiled_review_output_dir
 from app.services.lexicon_jobs import apply_lexicon_job_failed, create_or_reuse_lexicon_job, get_lexicon_job
+from app.services.lexicon_compiled_review_decisions import BULK_REVIEW_CHUNK_SIZE, validate_review_status
 from app.services.lexicon_jsonl_reviews import (
     resolve_compiled_artifact_path,
     resolve_decisions_sidecar_path,
@@ -26,6 +27,7 @@ from app.services.lexicon_jsonl_reviews import (
 )
 from app.services.lexicon_tool_imports import import_lexicon_tool_module
 from app.tasks.lexicon_jobs import (
+    run_lexicon_compiled_review_bulk_update,
     run_lexicon_compiled_materialize,
     run_lexicon_import_db,
     run_lexicon_jsonl_materialize,
@@ -67,6 +69,13 @@ class LexiconJobJsonlMaterializeRequest(BaseModel):
 class LexiconJobCompiledMaterializeRequest(BaseModel):
     batch_id: uuid.UUID
     output_dir: str | None = None
+
+
+class LexiconJobCompiledReviewBulkUpdateRequest(BaseModel):
+    batch_id: uuid.UUID
+    review_status: str
+    decision_reason: str | None = None
+    scope: str = "all_pending"
 
 
 def _import_db_module():
@@ -209,6 +218,40 @@ async def create_compiled_materialize_job(
         await db.refresh(job)
         await db.commit()
         await _enqueue_or_503(db, job, run_lexicon_compiled_materialize)
+    return _serialize_job(job)
+
+
+@router.post("/compiled-review-bulk-update", response_model=LexiconJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def create_compiled_review_bulk_update_job(
+    request: LexiconJobCompiledReviewBulkUpdateRequest,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> LexiconJobResponse:
+    if request.scope != "all_pending":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported compiled review bulk scope")
+    try:
+        review_status = validate_review_status(request.review_status)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid compiled review status") from None
+    await _compiled_batch_or_404(request.batch_id, db)
+    target_key = f"compiled_review_bulk_update:{request.batch_id}:{review_status}:{request.scope}:{request.decision_reason or ''}"
+    job, created = await create_or_reuse_lexicon_job(
+        db,
+        created_by=current_user.id,
+        job_type="compiled_review_bulk_update",
+        target_key=target_key,
+        request_payload={
+            "batch_id": str(request.batch_id),
+            "review_status": review_status,
+            "decision_reason": request.decision_reason,
+            "scope": request.scope,
+            "chunk_size": BULK_REVIEW_CHUNK_SIZE,
+        },
+    )
+    if created:
+        await db.refresh(job)
+        await db.commit()
+        await _enqueue_or_503(db, job, run_lexicon_compiled_review_bulk_update)
     return _serialize_job(job)
 
 

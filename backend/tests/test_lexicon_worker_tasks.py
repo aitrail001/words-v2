@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from app.models.lexicon_job import LexiconJob
 from app.tasks.lexicon_jobs import (
+    run_lexicon_compiled_review_bulk_update,
     run_lexicon_compiled_materialize,
     run_lexicon_import_db,
     run_lexicon_jsonl_materialize,
@@ -116,3 +117,52 @@ class TestLexiconWorkerTasks:
         assert "write failed" in result["error"]
         assert job.status == "failed"
         assert job.error_message == "write failed"
+
+    @patch("app.tasks.lexicon_jobs.process_compiled_review_bulk_job")
+    @patch("app.tasks.lexicon_jobs.Session")
+    def test_compiled_review_bulk_update_task_updates_progress_and_completes(self, mock_session_cls, mock_process_bulk):
+        batch_id = uuid.uuid4()
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=uuid.uuid4(),
+            job_type="compiled_review_bulk_update",
+            target_key=f"compiled_review_bulk_update:{batch_id}:approved:all_pending",
+            request_payload={
+                "batch_id": str(batch_id),
+                "review_status": "approved",
+                "decision_reason": "bulk ready",
+                "scope": "all_pending",
+            },
+        )
+        mock_db = self._mock_session(mock_session_cls, self._job_result(job))
+
+        def fake_process(db, *, job, batch_id, review_status, decision_reason, scope, chunk_size):
+            assert review_status == "approved"
+            assert decision_reason == "bulk ready"
+            assert scope == "all_pending"
+            assert chunk_size == 500
+            job.progress_total = 3
+            job.progress_completed = 3
+            job.progress_current_label = "harbor"
+            return {
+                "batch_id": str(batch_id),
+                "processed_count": 3,
+                "approved_count": 3,
+                "rejected_count": 0,
+                "pending_count": 0,
+                "failed_count": 0,
+                "scope": "all_pending",
+                "review_status": "approved",
+            }
+
+        mock_process_bulk.side_effect = fake_process
+
+        result = run_lexicon_compiled_review_bulk_update(str(job.id))
+
+        assert result["status"] == "completed"
+        assert result["result_payload"]["processed_count"] == 3
+        assert job.status == "completed"
+        assert job.progress_total == 3
+        assert job.progress_completed == 3
+        assert job.progress_current_label == "harbor"
+        assert mock_db.commit.call_count >= 2

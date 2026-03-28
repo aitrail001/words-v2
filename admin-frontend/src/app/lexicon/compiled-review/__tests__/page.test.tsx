@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 
 import LexiconCompiledReviewPage from "@/app/lexicon/compiled-review/page";
 import {
-  bulkUpdateLexiconCompiledReviewBatch,
   deleteLexiconCompiledReviewBatch,
   downloadCompiledReviewDecisionsExport,
   downloadApprovedCompiledReviewExport,
@@ -15,11 +14,11 @@ import {
 } from "@/lib/lexicon-compiled-reviews-client";
 import {
   createCompiledMaterializeLexiconJob,
+  createCompiledReviewBulkUpdateLexiconJob,
   getLexiconJob,
 } from "@/lib/lexicon-jobs-client";
 
 jest.mock("@/lib/lexicon-compiled-reviews-client", () => ({
-  bulkUpdateLexiconCompiledReviewBatch: jest.fn(),
   deleteLexiconCompiledReviewBatch: jest.fn(),
   downloadCompiledReviewDecisionsExport: jest.fn(),
   downloadApprovedCompiledReviewExport: jest.fn(),
@@ -35,6 +34,7 @@ jest.mock("@/lib/lexicon-compiled-reviews-client", () => ({
 
 jest.mock("@/lib/lexicon-jobs-client", () => ({
   createCompiledMaterializeLexiconJob: jest.fn(),
+  createCompiledReviewBulkUpdateLexiconJob: jest.fn(),
   getLexiconJob: jest.fn(),
 }));
 
@@ -50,13 +50,13 @@ describe("LexiconCompiledReviewPage", () => {
   const mockListBatches = listLexiconCompiledReviewBatches as jest.Mock;
   const mockListItems = listLexiconCompiledReviewItems as jest.Mock;
   const mockUpdateItem = updateLexiconCompiledReviewItem as jest.Mock;
-  const mockBulkUpdateBatch = bulkUpdateLexiconCompiledReviewBatch as jest.Mock;
   const mockDeleteBatch = deleteLexiconCompiledReviewBatch as jest.Mock;
   const mockDownloadDecisions = downloadCompiledReviewDecisionsExport as jest.Mock;
   const mockDownloadApproved = downloadApprovedCompiledReviewExport as jest.Mock;
   const mockImportBatch = importLexiconCompiledReviewBatch as jest.Mock;
   const mockImportBatchByPath = importLexiconCompiledReviewBatchByPath as jest.Mock;
   const mockMaterializeOutputs = createCompiledMaterializeLexiconJob as jest.Mock;
+  const mockCreateBulkJob = createCompiledReviewBulkUpdateLexiconJob as jest.Mock;
   const mockGetLexiconJob = getLexiconJob as jest.Mock;
 
   beforeEach(() => {
@@ -86,64 +86,70 @@ describe("LexiconCompiledReviewPage", () => {
         completed_at: null,
       },
     ]);
-    mockListItems.mockResolvedValue([
-      {
-        id: "item-1",
-        batch_id: "batch-1",
-        entry_id: "word:bank",
-        entry_type: "word",
-        normalized_form: "bank",
-        display_text: "bank",
-        entity_category: "general",
-        language: "en",
-        frequency_rank: 100,
-        cefr_level: "B1",
-        review_status: "pending",
-        review_priority: 100,
-        validator_status: "warn",
-        validator_issues: [{ code: "missing_usage_note" }],
-        qc_status: "fail",
-        qc_score: 0.4,
-        qc_issues: [{ code: "example_too_literal" }],
-        regen_requested: false,
-        import_eligible: false,
-        decision_reason: null,
-        reviewed_by: null,
-        reviewed_at: null,
-        compiled_payload: { entry_id: "word:bank", word: "bank" },
-        compiled_payload_sha256: "b".repeat(64),
-        created_at: "2026-03-21T00:00:00Z",
-        updated_at: "2026-03-21T00:00:00Z",
-      },
-      {
-        id: "item-2",
-        batch_id: "batch-1",
-        entry_id: "word:harbor",
-        entry_type: "word",
-        normalized_form: "harbor",
-        display_text: "harbor",
-        entity_category: "general",
-        language: "en",
-        frequency_rank: 120,
-        cefr_level: "B1",
-        review_status: "pending",
-        review_priority: 90,
-        validator_status: "pass",
-        validator_issues: [],
-        qc_status: "pass",
-        qc_score: 0.9,
-        qc_issues: [],
-        regen_requested: false,
-        import_eligible: false,
-        decision_reason: null,
-        reviewed_by: null,
-        reviewed_at: null,
-        compiled_payload: { entry_id: "word:harbor", word: "harbor" },
-        compiled_payload_sha256: "c".repeat(64),
-        created_at: "2026-03-21T00:00:00Z",
-        updated_at: "2026-03-21T00:00:00Z",
-      },
-    ]);
+    mockListItems.mockResolvedValue({
+      items: [
+        {
+          id: "item-1",
+          batch_id: "batch-1",
+          entry_id: "word:bank",
+          entry_type: "word",
+          normalized_form: "bank",
+          display_text: "bank",
+          entity_category: "general",
+          language: "en",
+          frequency_rank: 100,
+          cefr_level: "B1",
+          review_status: "pending",
+          review_priority: 100,
+          validator_status: "warn",
+          validator_issues: [{ code: "missing_usage_note" }],
+          qc_status: "fail",
+          qc_score: 0.4,
+          qc_issues: [{ code: "example_too_literal" }],
+          regen_requested: false,
+          import_eligible: false,
+          decision_reason: null,
+          reviewed_by: null,
+          reviewed_at: null,
+          compiled_payload: { entry_id: "word:bank", word: "bank" },
+          compiled_payload_sha256: "b".repeat(64),
+          created_at: "2026-03-21T00:00:00Z",
+          updated_at: "2026-03-21T00:00:00Z",
+        },
+        {
+          id: "item-2",
+          batch_id: "batch-1",
+          entry_id: "word:harbor",
+          entry_type: "word",
+          normalized_form: "harbor",
+          display_text: "harbor",
+          entity_category: "general",
+          language: "en",
+          frequency_rank: 120,
+          cefr_level: "B1",
+          review_status: "pending",
+          review_priority: 90,
+          validator_status: "pass",
+          validator_issues: [],
+          qc_status: "pass",
+          qc_score: 0.9,
+          qc_issues: [],
+          regen_requested: false,
+          import_eligible: false,
+          decision_reason: null,
+          reviewed_by: null,
+          reviewed_at: null,
+          compiled_payload: { entry_id: "word:harbor", word: "harbor" },
+          compiled_payload_sha256: "c".repeat(64),
+          created_at: "2026-03-21T00:00:00Z",
+          updated_at: "2026-03-21T00:00:00Z",
+        },
+      ],
+      total: 2,
+      limit: 50,
+      offset: 0,
+      has_more: false,
+    });
     mockUpdateItem.mockImplementation(async (itemId: string, payload: { review_status: string; decision_reason: string | null }) => {
       const base =
         itemId === "item-1"
@@ -201,85 +207,26 @@ describe("LexiconCompiledReviewPage", () => {
         reviewed_at: "2026-03-21T01:00:00Z",
       };
     });
-    mockBulkUpdateBatch.mockResolvedValue({
-      batch: {
-        id: "batch-1",
-        artifact_family: "compiled_words",
-        artifact_filename: "words.enriched.jsonl",
-        artifact_sha256: "a".repeat(64),
-        artifact_row_count: 2,
-        compiled_schema_version: "1.1.0",
-        snapshot_id: "snapshot-001",
-        source_type: "lexicon_compiled_export",
-        source_reference: "snapshot-001",
-        status: "completed",
-        total_items: 2,
-        pending_count: 0,
-        approved_count: 2,
-        rejected_count: 0,
-        created_by: "user-1",
-        created_at: "2026-03-21T00:00:00Z",
-        updated_at: "2026-03-21T02:00:00Z",
-        completed_at: "2026-03-21T02:00:00Z",
+    mockCreateBulkJob.mockResolvedValue({
+      id: "job-bulk-1",
+      created_by: "user-1",
+      job_type: "compiled_review_bulk_update",
+      status: "queued",
+      target_key: "compiled_review_bulk_update:batch-1:approved:all_pending",
+      request_payload: {
+        batch_id: "batch-1",
+        review_status: "approved",
+        decision_reason: "bulk ready",
+        scope: "all_pending",
       },
-      items: [
-        {
-          id: "item-1",
-          batch_id: "batch-1",
-          entry_id: "word:bank",
-          entry_type: "word",
-          normalized_form: "bank",
-          display_text: "bank",
-          entity_category: "general",
-          language: "en",
-          frequency_rank: 100,
-          cefr_level: "B1",
-          review_status: "approved",
-          review_priority: 100,
-          validator_status: "warn",
-          validator_issues: [{ code: "missing_usage_note" }],
-          qc_status: "fail",
-          qc_score: 0.4,
-          qc_issues: [{ code: "example_too_literal" }],
-          regen_requested: false,
-          import_eligible: true,
-          decision_reason: "bulk ready",
-          reviewed_by: "user-1",
-          reviewed_at: "2026-03-21T02:00:00Z",
-          compiled_payload: { entry_id: "word:bank", word: "bank" },
-          compiled_payload_sha256: "b".repeat(64),
-          created_at: "2026-03-21T00:00:00Z",
-          updated_at: "2026-03-21T02:00:00Z",
-        },
-        {
-          id: "item-2",
-          batch_id: "batch-1",
-          entry_id: "word:harbor",
-          entry_type: "word",
-          normalized_form: "harbor",
-          display_text: "harbor",
-          entity_category: "general",
-          language: "en",
-          frequency_rank: 120,
-          cefr_level: "B1",
-          review_status: "approved",
-          review_priority: 90,
-          validator_status: "pass",
-          validator_issues: [],
-          qc_status: "pass",
-          qc_score: 0.9,
-          qc_issues: [],
-          regen_requested: false,
-          import_eligible: true,
-          decision_reason: "bulk ready",
-          reviewed_by: "user-1",
-          reviewed_at: "2026-03-21T02:00:00Z",
-          compiled_payload: { entry_id: "word:harbor", word: "harbor" },
-          compiled_payload_sha256: "c".repeat(64),
-          created_at: "2026-03-21T00:00:00Z",
-          updated_at: "2026-03-21T02:00:00Z",
-        },
-      ],
+      result_payload: null,
+      progress_total: 2,
+      progress_completed: 0,
+      progress_current_label: null,
+      error_message: null,
+      created_at: "2026-03-21T02:00:00Z",
+      started_at: null,
+      completed_at: null,
     });
     mockDownloadApproved.mockResolvedValue("{\"entry_id\":\"word:bank\"}\n");
     mockDownloadDecisions.mockResolvedValue("{\"entry_id\":\"word:bank\",\"decision\":\"approved\"}\n");
@@ -370,6 +317,57 @@ describe("LexiconCompiledReviewPage", () => {
       started_at: "2026-03-21T00:00:01Z",
       completed_at: "2026-03-21T00:00:02Z",
     });
+    mockGetLexiconJob.mockResolvedValueOnce({
+      id: "job-bulk-1",
+      created_by: "user-1",
+      job_type: "compiled_review_bulk_update",
+      status: "running",
+      target_key: "compiled_review_bulk_update:batch-1:approved:all_pending",
+      request_payload: {
+        batch_id: "batch-1",
+        review_status: "approved",
+        decision_reason: "bulk ready",
+        scope: "all_pending",
+      },
+      result_payload: null,
+      progress_total: 2,
+      progress_completed: 1,
+      progress_current_label: "bank",
+      error_message: null,
+      created_at: "2026-03-21T02:00:00Z",
+      started_at: "2026-03-21T02:00:01Z",
+      completed_at: null,
+    });
+    mockGetLexiconJob.mockResolvedValueOnce({
+      id: "job-bulk-1",
+      created_by: "user-1",
+      job_type: "compiled_review_bulk_update",
+      status: "completed",
+      target_key: "compiled_review_bulk_update:batch-1:approved:all_pending",
+      request_payload: {
+        batch_id: "batch-1",
+        review_status: "approved",
+        decision_reason: "bulk ready",
+        scope: "all_pending",
+      },
+      result_payload: {
+        batch_id: "batch-1",
+        processed_count: 2,
+        approved_count: 2,
+        rejected_count: 0,
+        pending_count: 0,
+        failed_count: 0,
+        scope: "all_pending",
+        review_status: "approved",
+      },
+      progress_total: 2,
+      progress_completed: 2,
+      progress_current_label: "harbor",
+      error_message: null,
+      created_at: "2026-03-21T02:00:00Z",
+      started_at: "2026-03-21T02:00:01Z",
+      completed_at: "2026-03-21T02:00:03Z",
+    });
     mockDeleteBatch.mockResolvedValue(undefined);
   });
 
@@ -427,20 +425,117 @@ describe("LexiconCompiledReviewPage", () => {
     await user.type(screen.getByTestId("compiled-review-decision-reason"), "bulk ready");
     await user.click(screen.getByTestId("compiled-review-approve-all-button"));
 
-    expect(mockBulkUpdateBatch).not.toHaveBeenCalled();
+    expect(mockCreateBulkJob).not.toHaveBeenCalled();
     await user.click(screen.getByTestId("compiled-review-confirm-bulk-approved-button"));
 
     await waitFor(() =>
-      expect(mockBulkUpdateBatch).toHaveBeenCalledWith("batch-1", {
-        review_status: "approved",
-        decision_reason: "bulk ready",
+      expect(mockCreateBulkJob).toHaveBeenCalledWith({
+        batchId: "batch-1",
+        reviewStatus: "approved",
+        decisionReason: "bulk ready",
+        scope: "all_pending",
       }),
     );
-    await waitFor(() => expect(screen.getByText(/Updated 2 rows to approved\./i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("compiled-review-bulk-job-progress")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Completed bulk approved job for 2 rows\./i)).toBeInTheDocument());
+  });
+
+  it("loads the next server window of compiled review items", async () => {
+    const user = userEvent.setup();
+    mockListItems
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "item-1",
+            batch_id: "batch-1",
+            entry_id: "word:bank",
+            entry_type: "word",
+            normalized_form: "bank",
+            display_text: "bank",
+            entity_category: "general",
+            language: "en",
+            frequency_rank: 100,
+            cefr_level: "B1",
+            review_status: "pending",
+            review_priority: 100,
+            validator_status: "warn",
+            validator_issues: [],
+            qc_status: "pass",
+            qc_score: 0.8,
+            qc_issues: [],
+            regen_requested: false,
+            import_eligible: false,
+            decision_reason: null,
+            reviewed_by: null,
+            reviewed_at: null,
+            compiled_payload: { entry_id: "word:bank", word: "bank" },
+            compiled_payload_sha256: "b".repeat(64),
+            created_at: "2026-03-21T00:00:00Z",
+            updated_at: "2026-03-21T00:00:00Z",
+          },
+        ],
+        total: 60,
+        limit: 50,
+        offset: 0,
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "item-51",
+            batch_id: "batch-1",
+            entry_id: "word:zebra",
+            entry_type: "word",
+            normalized_form: "zebra",
+            display_text: "zebra",
+            entity_category: "general",
+            language: "en",
+            frequency_rank: 600,
+            cefr_level: "B1",
+            review_status: "pending",
+            review_priority: 10,
+            validator_status: "pass",
+            validator_issues: [],
+            qc_status: "pass",
+            qc_score: 0.95,
+            qc_issues: [],
+            regen_requested: false,
+            import_eligible: false,
+            decision_reason: null,
+            reviewed_by: null,
+            reviewed_at: null,
+            compiled_payload: { entry_id: "word:zebra", word: "zebra" },
+            compiled_payload_sha256: "z".repeat(64),
+            created_at: "2026-03-21T00:00:00Z",
+            updated_at: "2026-03-21T00:00:00Z",
+          },
+        ],
+        total: 60,
+        limit: 50,
+        offset: 50,
+        has_more: false,
+      });
+
+    render(<LexiconCompiledReviewPage />);
+
+    await waitFor(() => expect(screen.getByTestId("compiled-review-item-title")).toHaveTextContent("bank"));
+    await user.click(screen.getByRole("button", { name: "Next 50" }));
+
+    await waitFor(() =>
+      expect(mockListItems).toHaveBeenLastCalledWith("batch-1", {
+        limit: 50,
+        offset: 50,
+        reviewStatus: undefined,
+        search: undefined,
+      }),
+    );
+    await waitFor(() => expect(screen.getByTestId("compiled-review-item-title")).toHaveTextContent("zebra"));
+    expect(screen.getByText("Showing 51-51 of 60")).toBeInTheDocument();
   });
 
   it("renders structured phrase details from compiled phrase rows", async () => {
-    mockListItems.mockResolvedValueOnce([
+    mockListItems.mockResolvedValueOnce({
+      items: [
       {
         id: "item-phrase-1",
         batch_id: "batch-1",
@@ -483,7 +578,12 @@ describe("LexiconCompiledReviewPage", () => {
         created_at: "2026-03-21T00:00:00Z",
         updated_at: "2026-03-21T00:00:00Z",
       },
-    ]);
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+      has_more: false,
+    });
     render(<LexiconCompiledReviewPage />);
 
     await waitFor(() => expect(screen.getByTestId("compiled-review-phrase-details")).toBeInTheDocument());
@@ -517,8 +617,8 @@ describe("LexiconCompiledReviewPage", () => {
         completed_at: null,
       })),
     );
-    mockListItems.mockResolvedValueOnce(
-      Array.from({ length: 12 }, (_, index) => ({
+    mockListItems.mockResolvedValueOnce({
+      items: Array.from({ length: 12 }, (_, index) => ({
         id: `item-${index + 1}`,
         batch_id: "batch-1",
         entry_id: `word:item-${index + 1}`,
@@ -546,7 +646,11 @@ describe("LexiconCompiledReviewPage", () => {
         created_at: "2026-03-21T00:00:00Z",
         updated_at: "2026-03-21T00:00:00Z",
       })),
-    );
+      total: 12,
+      limit: 50,
+      offset: 0,
+      has_more: false,
+    });
 
     const user = userEvent.setup();
     window.history.pushState({}, "", "/lexicon/compiled-review");

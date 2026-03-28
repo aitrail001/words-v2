@@ -164,7 +164,9 @@ class TestLexiconCompiledReviewApi:
         batch_result.scalar_one_or_none.return_value = batch
         items_result = MagicMock()
         items_result.scalars.return_value.all.return_value = [item]
-        mock_db.execute.side_effect = [user_result, batch_result, items_result]
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 1
+        mock_db.execute.side_effect = [user_result, batch_result, count_result, items_result]
 
         response = await client.get(
             f"/api/lexicon-compiled-reviews/batches/{batch.id}/items",
@@ -173,11 +175,47 @@ class TestLexiconCompiledReviewApi:
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 1
-        assert data[0]["entry_id"] == "word:bank"
-        assert data[0]["validator_status"] == "warn"
-        assert data[0]["qc_status"] == "fail"
-        assert data[0]["compiled_payload"]["word"] == "bank"
+        assert data["total"] == 1
+        assert data["limit"] == 50
+        assert data["offset"] == 0
+        assert data["has_more"] is False
+        assert len(data["items"]) == 1
+        assert data["items"][0]["entry_id"] == "word:bank"
+        assert data["items"][0]["validator_status"] == "warn"
+        assert data["items"][0]["qc_status"] == "fail"
+        assert data["items"][0]["compiled_payload"]["word"] == "bank"
+
+    @pytest.mark.asyncio
+    async def test_list_items_supports_pagination_filters_and_search(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        batch = make_batch(created_by=user_id, total_items=3, pending_count=1, approved_count=1, rejected_count=1)
+        first = make_item(batch.id, id=uuid.uuid4(), entry_id="word:bank", display_text="bank", normalized_form="bank", review_status="pending")
+        second = make_item(batch.id, id=uuid.uuid4(), entry_id="word:harbor", display_text="harbor", normalized_form="harbor", review_status="approved")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        batch_result = MagicMock()
+        batch_result.scalar_one_or_none.return_value = batch
+        items_result = MagicMock()
+        items_result.scalars.return_value.all.return_value = [first, second]
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 3
+        mock_db.execute.side_effect = [user_result, batch_result, count_result, items_result]
+
+        response = await client.get(
+            f"/api/lexicon-compiled-reviews/batches/{batch.id}/items?limit=2&offset=1&status=approved&search=harbor",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 3
+        assert data["limit"] == 2
+        assert data["offset"] == 1
+        assert data["has_more"] is False
+        assert [item["entry_id"] for item in data["items"]] == ["word:bank", "word:harbor"]
 
     @pytest.mark.asyncio
     async def test_patch_item_updates_decision(self, client, mock_db):
@@ -195,9 +233,21 @@ class TestLexiconCompiledReviewApi:
         batch_result.scalar_one_or_none.return_value = batch
         regen_request_result = MagicMock()
         regen_request_result.scalar_one_or_none.return_value = None
-        all_items_result = MagicMock()
-        all_items_result.scalars.return_value.all.return_value = [item]
-        mock_db.execute.side_effect = [user_result, item_result, batch_result, regen_request_result, all_items_result]
+        total_count_result = MagicMock()
+        total_count_result.scalar_one.return_value = 1
+        approved_count_result = MagicMock()
+        approved_count_result.scalar_one.return_value = 1
+        rejected_count_result = MagicMock()
+        rejected_count_result.scalar_one.return_value = 0
+        mock_db.execute.side_effect = [
+            user_result,
+            item_result,
+            batch_result,
+            regen_request_result,
+            total_count_result,
+            approved_count_result,
+            rejected_count_result,
+        ]
 
         response = await client.patch(
             f"/api/lexicon-compiled-reviews/items/{item.id}",
@@ -502,9 +552,21 @@ class TestLexiconCompiledReviewApi:
         batch_result.scalar_one_or_none.return_value = batch
         regen_request_result = MagicMock()
         regen_request_result.scalar_one_or_none.return_value = None
-        all_items_result = MagicMock()
-        all_items_result.scalars.return_value.all.return_value = [item]
-        mock_db.execute.side_effect = [user_result, item_result, batch_result, regen_request_result, all_items_result]
+        total_count_result = MagicMock()
+        total_count_result.scalar_one.return_value = 1
+        approved_count_result = MagicMock()
+        approved_count_result.scalar_one.return_value = 0
+        rejected_count_result = MagicMock()
+        rejected_count_result.scalar_one.return_value = 1
+        mock_db.execute.side_effect = [
+            user_result,
+            item_result,
+            batch_result,
+            regen_request_result,
+            total_count_result,
+            approved_count_result,
+            rejected_count_result,
+        ]
 
         patch_response = await client.patch(
             f"/api/lexicon-compiled-reviews/items/{item.id}",
@@ -579,15 +641,21 @@ class TestLexiconCompiledReviewApi:
         regen_request_result_one.scalar_one_or_none.return_value = None
         regen_request_result_two = MagicMock()
         regen_request_result_two.scalar_one_or_none.return_value = None
-        refreshed_items_result = MagicMock()
-        refreshed_items_result.scalars.return_value.all.return_value = [item_one, item_two]
+        total_count_result = MagicMock()
+        total_count_result.scalar_one.return_value = 2
+        approved_count_result = MagicMock()
+        approved_count_result.scalar_one.return_value = 2
+        rejected_count_result = MagicMock()
+        rejected_count_result.scalar_one.return_value = 0
         mock_db.execute.side_effect = [
             user_result,
             batch_result,
             items_result,
             regen_request_result_one,
             regen_request_result_two,
-            refreshed_items_result,
+            total_count_result,
+            approved_count_result,
+            rejected_count_result,
         ]
 
         response = await client.post(

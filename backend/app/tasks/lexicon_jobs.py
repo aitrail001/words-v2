@@ -9,8 +9,18 @@ from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.core.config import get_settings
+from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
+from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.lexicon_job import LexiconJob
 from app.services.lexicon_compiled_reviews import materialize_compiled_review_batch
+from app.services.lexicon_compiled_review_decisions import (
+    BULK_REVIEW_CHUNK_SIZE,
+    add_review_item_event,
+    apply_review_decision,
+    recalculate_batch_counts,
+    upsert_regeneration_request_sync,
+    utc_now,
+)
 from app.services.lexicon_jobs import (
     apply_lexicon_job_completed,
     apply_lexicon_job_failed,
@@ -34,6 +44,118 @@ def _load_job(db: Session, job_id: str) -> LexiconJob:
     if job is None:
         raise RuntimeError("Lexicon job not found")
     return job
+
+
+def process_compiled_review_bulk_job(
+    db: Session,
+    *,
+    job: LexiconJob,
+    batch_id: uuid.UUID,
+    review_status: str,
+    decision_reason: str | None,
+    scope: str,
+    chunk_size: int,
+) -> dict[str, Any]:
+    batch = db.execute(
+        select(LexiconArtifactReviewBatch).where(LexiconArtifactReviewBatch.id == batch_id)
+    ).scalar_one_or_none()
+    if batch is None:
+        raise RuntimeError("Compiled review batch not found")
+    if scope != "all_pending":
+        raise RuntimeError("Unsupported compiled review bulk scope")
+
+    items = list(
+        db.execute(
+            select(LexiconArtifactReviewItem)
+            .where(
+                LexiconArtifactReviewItem.batch_id == batch_id,
+                LexiconArtifactReviewItem.review_status == "pending",
+            )
+            .order_by(
+                LexiconArtifactReviewItem.review_priority.asc(),
+                LexiconArtifactReviewItem.display_text.asc(),
+                LexiconArtifactReviewItem.id.asc(),
+            )
+        ).scalars().all()
+    )
+    total = len(items)
+    reviewed_at = utc_now()
+    processed_count = 0
+    initial_total_items = batch.total_items
+    initial_approved_count = batch.approved_count
+    initial_rejected_count = batch.rejected_count
+    initial_pending_count = batch.pending_count
+
+    if total == 0:
+        apply_lexicon_job_progress(job, progress_completed=0, progress_total=0, current_label=None)
+        recalculate_batch_counts(
+            batch,
+            total_items=initial_total_items,
+            approved_count=initial_approved_count,
+            rejected_count=initial_rejected_count,
+            updated_at=reviewed_at,
+        )
+        return {
+            "batch_id": str(batch_id),
+            "processed_count": 0,
+            "approved_count": batch.approved_count,
+            "rejected_count": batch.rejected_count,
+            "pending_count": batch.pending_count,
+            "failed_count": 0,
+            "scope": scope,
+            "review_status": review_status,
+        }
+
+    for start in range(0, total, chunk_size):
+        chunk = items[start:start + chunk_size]
+        for item in chunk:
+            previous_status = apply_review_decision(
+                item,
+                review_status=review_status,
+                decision_reason=decision_reason,
+                actor_user_id=job.created_by,
+                reviewed_at=reviewed_at,
+            )
+            upsert_regeneration_request_sync(db=db, batch=batch, item=item, actor_user_id=job.created_by)
+            db.add(add_review_item_event(
+                item=item,
+                previous_status=previous_status,
+                review_status=review_status,
+                actor_user_id=job.created_by,
+                reason=decision_reason,
+            ))
+        processed_count += len(chunk)
+        approved_count = initial_approved_count + (processed_count if review_status == "approved" else 0)
+        rejected_count = initial_rejected_count + (processed_count if review_status == "rejected" else 0)
+        pending_count = initial_pending_count - (processed_count if review_status in {"approved", "rejected"} else 0)
+        recalculate_batch_counts(
+            batch,
+            total_items=initial_total_items,
+            approved_count=approved_count,
+            rejected_count=rejected_count,
+            updated_at=reviewed_at,
+        )
+        batch.pending_count = pending_count
+        batch.status = "completed" if pending_count == 0 else "pending_review"
+        batch.completed_at = reviewed_at if pending_count == 0 else None
+        apply_lexicon_job_progress(
+            job,
+            progress_completed=processed_count,
+            progress_total=total,
+            current_label=chunk[-1].display_text if chunk else None,
+        )
+        db.commit()
+
+    return {
+        "batch_id": str(batch_id),
+        "processed_count": processed_count,
+        "approved_count": batch.approved_count,
+        "rejected_count": batch.rejected_count,
+        "pending_count": batch.pending_count,
+        "failed_count": 0,
+        "scope": scope,
+        "review_status": review_status,
+    }
 
 
 @celery_app.task(bind=True, name="run_lexicon_import_db")
@@ -112,6 +234,32 @@ def run_lexicon_compiled_materialize(self, job_id: str) -> dict[str, Any]:
                 batch_id=uuid.UUID(request_payload["batch_id"]),
                 output_dir=Path(request_payload["output_dir"]),
                 settings=settings,
+            )
+            apply_lexicon_job_completed(job, result_payload=result_payload)
+            db.commit()
+            return {"status": "completed", "result_payload": result_payload}
+        except Exception as exc:
+            apply_lexicon_job_failed(job, str(exc))
+            db.commit()
+            return {"status": "failed", "error": str(exc)}
+
+
+@celery_app.task(bind=True, name="run_lexicon_compiled_review_bulk_update")
+def run_lexicon_compiled_review_bulk_update(self, job_id: str) -> dict[str, Any]:
+    with Session(sync_engine) as db:
+        job = _load_job(db, job_id)
+        apply_lexicon_job_started(job)
+        db.commit()
+        try:
+            request_payload = dict(job.request_payload or {})
+            result_payload = process_compiled_review_bulk_job(
+                db,
+                job=job,
+                batch_id=uuid.UUID(request_payload["batch_id"]),
+                review_status=str(request_payload["review_status"]),
+                decision_reason=request_payload.get("decision_reason"),
+                scope=str(request_payload.get("scope") or "all_pending"),
+                chunk_size=int(request_payload.get("chunk_size") or BULK_REVIEW_CHUNK_SIZE),
             )
             apply_lexicon_job_completed(job, result_payload=result_payload)
             db.commit()

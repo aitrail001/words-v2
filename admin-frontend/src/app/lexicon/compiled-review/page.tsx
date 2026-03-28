@@ -8,7 +8,6 @@ import { ReviewerSummaryCard } from "@/components/lexicon/reviewer-summary-card"
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
-  bulkUpdateLexiconCompiledReviewBatch,
   LexiconCompiledReviewBatch,
   LexiconCompiledReviewItem,
   type LexiconCompiledReviewMaterializeResult,
@@ -25,12 +24,14 @@ import {
 } from "@/lib/lexicon-compiled-reviews-client";
 import {
   createCompiledMaterializeLexiconJob,
+  createCompiledReviewBulkUpdateLexiconJob,
   getLexiconJob,
   type LexiconJob,
 } from "@/lib/lexicon-jobs-client";
 import { derivePhraseDetails, deriveReviewSummary } from "@/lib/lexicon-review-summary";
 
 type ReviewDecisionStatus = "pending" | "approved" | "rejected";
+const ITEMS_PAGE_SIZE = 50;
 
 function searchParam(name: string): string {
   if (typeof window === "undefined") return "";
@@ -87,22 +88,15 @@ function nextPendingItemId(items: LexiconCompiledReviewItem[], currentItemId: st
   return pendingItems[0]?.id ?? null;
 }
 
-function batchCounts(items: LexiconCompiledReviewItem[]) {
-  const approved = items.filter((item) => item.review_status === "approved").length;
-  const rejected = items.filter((item) => item.review_status === "rejected").length;
-  return {
-    approved,
-    rejected,
-    pending: items.length - approved - rejected,
-  };
-}
-
 export default function LexiconCompiledReviewPage() {
   const [itemSearch, setItemSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [batches, setBatches] = useState<LexiconCompiledReviewBatch[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [items, setItems] = useState<LexiconCompiledReviewItem[]>([]);
+  const [itemsTotal, setItemsTotal] = useState(0);
+  const [itemsHasMore, setItemsHasMore] = useState(false);
+  const [itemsOffset, setItemsOffset] = useState(0);
   const [selectedItemId, setSelectedItemId] = useState("");
   const [loading, setLoading] = useState(true);
   const [itemsLoading, setItemsLoading] = useState(false);
@@ -115,6 +109,7 @@ export default function LexiconCompiledReviewPage() {
   const [materializeOutputDir, setMaterializeOutputDir] = useState("");
   const [materializeResult, setMaterializeResult] = useState<LexiconCompiledReviewMaterializeResult | null>(null);
   const [materializeJob, setMaterializeJob] = useState<LexiconJob | null>(null);
+  const [bulkJob, setBulkJob] = useState<LexiconJob | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
   const [pendingBulkDecision, setPendingBulkDecision] = useState<ReviewDecisionStatus | null>(null);
   const [confirmDeleteBatch, setConfirmDeleteBatch] = useState(false);
@@ -157,16 +152,6 @@ export default function LexiconCompiledReviewPage() {
     () => (selectedItem ? deriveReviewSummary(selectedItem.compiled_payload) : null),
     [selectedItem],
   );
-  const filteredItems = useMemo(() => {
-    const search = itemSearch.trim().toLowerCase();
-    return items.filter((item) => {
-      if (statusFilter !== "all" && item.review_status !== statusFilter) return false;
-      if (!search) return true;
-      return [item.entry_id, item.display_text, item.normalized_form ?? ""].some((value) =>
-        value.toLowerCase().includes(search),
-      );
-    });
-  }, [itemSearch, items, statusFilter]);
   const batchRailSummary = useMemo(
     () => `${batches.length} batch${batches.length === 1 ? "" : "es"}`,
     [batches.length],
@@ -190,19 +175,30 @@ export default function LexiconCompiledReviewPage() {
     }
   };
 
-  const loadItems = async (batchId: string) => {
+  const loadItems = useCallback(async (batchId: string, offset: number) => {
     setItemsLoading(true);
     setError(null);
     try {
-      const nextItems = await listLexiconCompiledReviewItems(batchId);
-      setItems(nextItems);
-      setSelectedItemId(nextItems[0]?.id ?? "");
+      const page = await listLexiconCompiledReviewItems(batchId, {
+        limit: ITEMS_PAGE_SIZE,
+        offset,
+        reviewStatus: statusFilter !== "all" ? statusFilter : undefined,
+        search: itemSearch || undefined,
+      });
+      setItems(page.items);
+      setItemsTotal(page.total);
+      setItemsHasMore(page.has_more);
+      setSelectedItemId(page.items[0]?.id ?? "");
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Failed to load compiled review items.");
     } finally {
       setItemsLoading(false);
     }
-  };
+  }, [itemSearch, statusFilter]);
+
+  useEffect(() => {
+    setItemsOffset(0);
+  }, [itemSearch, selectedBatchId, statusFilter]);
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -247,25 +243,27 @@ export default function LexiconCompiledReviewPage() {
   useEffect(() => {
     if (!selectedBatchId) {
       setItems([]);
+      setItemsTotal(0);
+      setItemsHasMore(false);
       setSelectedItemId("");
       return;
     }
-    void loadItems(selectedBatchId);
-  }, [selectedBatchId]);
+    void loadItems(selectedBatchId, itemsOffset);
+  }, [itemsOffset, loadItems, selectedBatchId]);
 
   useEffect(() => {
     setDecisionReason(selectedItem?.decision_reason ?? "");
   }, [selectedItem?.decision_reason, selectedItem?.id]);
 
   useEffect(() => {
-    if (!filteredItems.length) {
+    if (!items.length) {
       setSelectedItemId("");
       return;
     }
-    if (!filteredItems.some((item) => item.id === selectedItemId)) {
-      setSelectedItemId(filteredItems[0]?.id ?? "");
+    if (!items.some((item) => item.id === selectedItemId)) {
+      setSelectedItemId(items[0]?.id ?? "");
     }
-  }, [filteredItems, selectedItemId]);
+  }, [items, selectedItemId]);
 
   const handleImport = async (event: FormEvent) => {
     event.preventDefault();
@@ -334,15 +332,15 @@ export default function LexiconCompiledReviewPage() {
     setSaveLoading(true);
     setMessage(null);
     try {
-      const result = await bulkUpdateLexiconCompiledReviewBatch(selectedBatch.id, {
-        review_status: reviewStatus,
-        decision_reason: decisionReason || null,
+      const job = await createCompiledReviewBulkUpdateLexiconJob({
+        batchId: selectedBatch.id,
+        reviewStatus,
+        decisionReason: decisionReason || undefined,
+        scope: "all_pending",
       });
-      setBatches((current) => current.map((batch) => (batch.id === result.batch.id ? result.batch : batch)));
-      setItems(result.items);
-      setSelectedItemId(result.items.find((item) => item.review_status === "pending")?.id ?? result.items[0]?.id ?? "");
+      setBulkJob(job);
       setPendingBulkDecision(null);
-      setMessage(`Updated ${result.items.length} rows to ${reviewStatus}.`);
+      setMessage(`Started bulk ${reviewStatus} job.`);
     } catch (nextError) {
       setMessage(nextError instanceof Error ? nextError.message : "Failed to bulk update review items.");
     } finally {
@@ -362,19 +360,19 @@ export default function LexiconCompiledReviewPage() {
         return;
       }
 
-      if (!filteredItems.length || saveLoading || loading || itemsLoading) return;
+      if (!items.length || saveLoading || loading || itemsLoading) return;
 
-      const currentIndex = filteredItems.findIndex((item) => item.id === selectedItem?.id);
+      const currentIndex = items.findIndex((item) => item.id === selectedItem?.id);
       if (event.key === "j") {
         event.preventDefault();
-        const nextIndex = currentIndex >= 0 ? Math.min(currentIndex + 1, filteredItems.length - 1) : 0;
-        setSelectedItemId(filteredItems[nextIndex]?.id ?? "");
+        const nextIndex = currentIndex >= 0 ? Math.min(currentIndex + 1, items.length - 1) : 0;
+        setSelectedItemId(items[nextIndex]?.id ?? "");
         return;
       }
       if (event.key === "k") {
         event.preventDefault();
         const nextIndex = currentIndex >= 0 ? Math.max(currentIndex - 1, 0) : 0;
-        setSelectedItemId(filteredItems[nextIndex]?.id ?? "");
+        setSelectedItemId(items[nextIndex]?.id ?? "");
         return;
       }
       if (!selectedItem) return;
@@ -392,7 +390,7 @@ export default function LexiconCompiledReviewPage() {
 
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [filteredItems, handleDecision, itemsLoading, loading, saveLoading, selectedItem]);
+  }, [handleDecision, items, itemsLoading, loading, saveLoading, selectedItem]);
 
   const handleExport = async (kind: "approved" | "rejected" | "regenerate" | "decisions") => {
     if (!selectedBatch) return;
@@ -449,6 +447,31 @@ export default function LexiconCompiledReviewPage() {
     return () => window.clearInterval(timer);
   }, [materializeJob, materializeResultFromJob]);
 
+  useEffect(() => {
+    if (!bulkJob || bulkJob.status === "completed" || bulkJob.status === "failed") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void getLexiconJob(bulkJob.id)
+        .then(async (nextJob) => {
+          setBulkJob(nextJob);
+          if (nextJob.status === "completed") {
+            if (selectedBatchId) {
+              await loadBatches(selectedBatchId);
+              await loadItems(selectedBatchId, itemsOffset);
+            }
+            setMessage(`Completed bulk ${String(nextJob.result_payload?.review_status ?? "review")} job for ${String(nextJob.result_payload?.processed_count ?? 0)} rows.`);
+          } else if (nextJob.status === "failed") {
+            setMessage(nextJob.error_message || "Bulk review job failed.");
+          }
+        })
+        .catch((nextError) => {
+          setMessage(nextError instanceof Error ? nextError.message : "Failed to refresh bulk review job.");
+        });
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [bulkJob, itemsOffset, loadItems, selectedBatchId]);
+
   const handleDeleteBatch = async () => {
     if (!selectedBatch) return;
     setSaveLoading(true);
@@ -458,6 +481,8 @@ export default function LexiconCompiledReviewPage() {
       setConfirmDeleteBatch(false);
       await loadBatches();
       setItems([]);
+      setItemsTotal(0);
+      setItemsHasMore(false);
       setSelectedItemId("");
       setMessage(`Deleted ${selectedBatch.artifact_filename}.`);
     } catch (nextError) {
@@ -694,25 +719,20 @@ export default function LexiconCompiledReviewPage() {
               <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
                 <div className="space-y-3" data-testid="compiled-review-items-pane">
                   <div className="grid grid-cols-3 gap-2 text-sm">
-                    {(() => {
-                      const counts = batchCounts(items);
-                      return (
-                        <>
-                          <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Pending</p>
-                            <p className="mt-1 text-xl font-semibold text-amber-950">{counts.pending}</p>
-                          </div>
-                          <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Approved</p>
-                            <p className="mt-1 text-xl font-semibold text-emerald-950">{counts.approved}</p>
-                          </div>
-                          <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Rejected</p>
-                            <p className="mt-1 text-xl font-semibold text-rose-950">{counts.rejected}</p>
-                          </div>
-                        </>
-                      );
-                    })()}
+                    <>
+                      <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Pending</p>
+                        <p className="mt-1 text-xl font-semibold text-amber-950">{selectedBatch.pending_count}</p>
+                      </div>
+                      <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Approved</p>
+                        <p className="mt-1 text-xl font-semibold text-emerald-950">{selectedBatch.approved_count}</p>
+                      </div>
+                      <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Rejected</p>
+                        <p className="mt-1 text-xl font-semibold text-rose-950">{selectedBatch.rejected_count}</p>
+                      </div>
+                    </>
                   </div>
                   <div className="grid gap-2">
                     <input
@@ -733,24 +753,56 @@ export default function LexiconCompiledReviewPage() {
                     </select>
                   </div>
                   {itemsLoading ? <p className="text-sm text-gray-500">Loading items...</p> : null}
+                  {bulkJob ? (
+                    <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950" data-testid="compiled-review-bulk-job-progress">
+                      <p className="font-medium">Bulk review job: {bulkJob.status}</p>
+                      <p className="mt-1">{bulkJob.progress_completed} / {bulkJob.progress_total} processed</p>
+                      {bulkJob.progress_current_label ? <p className="mt-1 text-xs text-sky-800">Current: {bulkJob.progress_current_label}</p> : null}
+                    </div>
+                  ) : null}
                   {!itemsLoading ? (
-                    <PagedRecordList
-                      items={filteredItems}
-                      selectedId={selectedItemId || null}
-                      getId={(item) => item.id}
-                      onSelect={setSelectedItemId}
-                      title="Entries"
-                      testId="compiled-review-items-list"
-                      pageSize={5}
-                      emptyState={<p className="text-sm text-gray-500">No items match the current filter.</p>}
-                      renderItem={(item) => (
-                        <div>
-                          <p className="font-medium text-gray-900">{item.display_text}</p>
-                          <p className="text-xs text-gray-500">{item.entry_type} · {item.review_status}</p>
-                          <p className="mt-1 text-xs text-gray-500">validator {item.validator_status ?? "—"} · qc {item.qc_status ?? "—"}</p>
+                    <div className="space-y-3">
+                      <PagedRecordList
+                        items={items}
+                        selectedId={selectedItemId || null}
+                        getId={(item) => item.id}
+                        onSelect={setSelectedItemId}
+                        title={`Entries · ${itemsTotal}${itemsHasMore ? "+" : ""}`}
+                        testId="compiled-review-items-list"
+                        pageSize={5}
+                        emptyState={<p className="text-sm text-gray-500">No items match the current filter.</p>}
+                        renderItem={(item) => (
+                          <div>
+                            <p className="font-medium text-gray-900">{item.display_text}</p>
+                            <p className="text-xs text-gray-500">{item.entry_type} · {item.review_status}</p>
+                            <p className="mt-1 text-xs text-gray-500">validator {item.validator_status ?? "—"} · qc {item.qc_status ?? "—"}</p>
+                          </div>
+                        )}
+                      />
+                      <div className="flex items-center justify-between text-xs text-gray-500" data-testid="compiled-review-server-page-controls">
+                        <p>
+                          Showing {items.length ? itemsOffset + 1 : 0}-{itemsOffset + items.length} of {itemsTotal}
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setItemsOffset((current) => Math.max(0, current - ITEMS_PAGE_SIZE))}
+                            disabled={itemsOffset === 0 || itemsLoading}
+                            className="rounded-md border border-gray-300 px-3 py-1 text-xs text-gray-700 disabled:opacity-50"
+                          >
+                            Previous 50
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setItemsOffset((current) => current + ITEMS_PAGE_SIZE)}
+                            disabled={!itemsHasMore || itemsLoading}
+                            className="rounded-md border border-gray-300 px-3 py-1 text-xs text-gray-700 disabled:opacity-50"
+                          >
+                            Next 50
+                          </button>
                         </div>
-                      )}
-                    />
+                      </div>
+                    </div>
                   ) : null}
                 </div>
 
