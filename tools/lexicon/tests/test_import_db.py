@@ -1716,6 +1716,83 @@ class ImportCompiledRowsTests(unittest.TestCase):
             ["أقلعنا مبكرًا.", "Despegamos temprano.", "私たちは早く離陸した。", "Decolamos cedo.", "我们很早起飞了。"],
         )
 
+    def test_import_compiled_rows_uses_effective_normalized_form_for_new_phrase_cache_keys(self) -> None:
+        session = MagicMock()
+        session.execute.return_value = _ScalarResult(None)
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        summary = import_compiled_rows(
+            session,
+            [
+                {
+                    "entry_type": "phrase",
+                    "word": "Take Off",
+                    "display_form": "Take Off",
+                    "senses": [],
+                },
+                {
+                    "entry_type": "phrase",
+                    "word": "By And Large",
+                    "display_form": "By And Large",
+                    "senses": [],
+                },
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260329",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+        )
+
+        phrases = [item for item in added if isinstance(item, FakePhraseEntry)]
+        self.assertEqual(summary.created_phrases, 2)
+        self.assertEqual(len(phrases), 2)
+        self.assertEqual([phrase.normalized_form for phrase in phrases], ["take off", "by and large"])
+
+    def test_import_compiled_rows_uses_effective_normalized_form_for_new_reference_cache_keys(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [_ScalarResult(None), _ScalarResult(None)]
+        added = []
+        session.add.side_effect = added.append
+        session.flush.side_effect = lambda: None
+
+        summary = import_compiled_rows(
+            session,
+            [
+                {
+                    "entry_type": "reference",
+                    "word": "Australia",
+                    "display_form": "Australia",
+                    "localizations": [],
+                },
+                {
+                    "entry_type": "reference",
+                    "word": "New Zealand",
+                    "display_form": "New Zealand",
+                    "localizations": [],
+                },
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260329",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            reference_model=FakeReferenceEntry,
+            reference_localization_model=FakeReferenceLocalization,
+        )
+
+        references = [item for item in added if isinstance(item, FakeReferenceEntry)]
+        self.assertEqual(summary.created_reference_entries, 2)
+        self.assertEqual(len(references), 2)
+        self.assertEqual([reference.normalized_form for reference in references], ["australia", "new zealand"])
+
     def test_import_compiled_rows_replaces_normalized_phrase_children_on_repeat_import_with_real_sqlalchemy_models(self) -> None:
         models = _load_real_models()
 

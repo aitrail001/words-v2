@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -7,6 +8,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.schema_names import LEXICON_TABLE_ARGS, lexicon_fk
+
+if TYPE_CHECKING:
+    from app.models.meaning_metadata import MeaningMetadata
+    from app.models.translation import Translation
+    from app.models.word import Word
 
 
 class Meaning(Base):

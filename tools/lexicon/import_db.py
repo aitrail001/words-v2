@@ -785,6 +785,10 @@ def _effective_row_source_reference(row: dict[str, Any], default_source_referenc
     return str(row.get("source_reference") or default_source_reference).strip() or default_source_reference
 
 
+def _effective_normalized_form(row: dict[str, Any]) -> str:
+    return str(row.get("normalized_form") or row.get("display_form") or row.get("word") or "").strip().lower()
+
+
 def _supports_cascaded_phrase_import(
     phrase_model: Type[Any] | None,
     phrase_sense_model: Type[Any] | None,
@@ -1016,7 +1020,8 @@ def import_compiled_rows(
                     resolved_phrase_sense_example_localization_model = default_phrase_sense_example_localization_model
             if resolved_phrase_model is None:
                 resolved_phrase_model = _default_phrase_models()[0]
-            phrase_key = (str(row.get("normalized_form") or "").strip(), row_language)
+            phrase_normalized_form = _effective_normalized_form(row)
+            phrase_key = (phrase_normalized_form, row_language)
             existing_phrase = preloaded_phrases.get(phrase_key)
             if existing_phrase is None:
                 existing_phrase = _find_existing_by_normalized_form(
@@ -1030,7 +1035,7 @@ def import_compiled_rows(
             if existing_phrase is None:
                 phrase = resolved_phrase_model(
                     phrase_text=row.get("display_form") or row.get("word"),
-                    normalized_form=row.get("normalized_form") or str(row.get("word") or "").strip().lower(),
+                    normalized_form=phrase_normalized_form,
                     phrase_kind=row.get("phrase_kind") or "multiword_expression",
                     language=row_language,
                     cefr_level=row.get("cefr_level"),
@@ -1051,7 +1056,7 @@ def import_compiled_rows(
                 is_new_phrase = True
             else:
                 existing_phrase.phrase_text = row.get("display_form") or row.get("word")
-                existing_phrase.normalized_form = row.get("normalized_form") or existing_phrase.normalized_form
+                existing_phrase.normalized_form = phrase_normalized_form or existing_phrase.normalized_form
                 existing_phrase.phrase_kind = row.get("phrase_kind") or existing_phrase.phrase_kind
                 existing_phrase.cefr_level = row.get("cefr_level")
                 existing_phrase.register_label = row.get("register") or row.get("register_label")
@@ -1198,7 +1203,8 @@ def import_compiled_rows(
                     resolved_reference_model = default_reference_model
                 if resolved_reference_localization_model is None:
                     resolved_reference_localization_model = default_reference_localization_model
-            reference_key = (str(row.get("normalized_form") or "").strip(), row_language)
+            reference_normalized_form = _effective_normalized_form(row)
+            reference_key = (reference_normalized_form, row_language)
             existing_reference = preloaded_references.get(reference_key)
             if existing_reference is None:
                 existing_reference = _find_existing_by_normalized_form(
@@ -1213,7 +1219,7 @@ def import_compiled_rows(
                 reference_entry = resolved_reference_model(
                     reference_type=row.get("reference_type") or "name",
                     display_form=row.get("display_form") or row.get("word"),
-                    normalized_form=row.get("normalized_form") or str(row.get("word") or "").strip().lower(),
+                    normalized_form=reference_normalized_form,
                     translation_mode=row.get("translation_mode") or "unchanged",
                     brief_description=row.get("brief_description") or "",
                     pronunciation=row.get("pronunciation") or "",
@@ -1232,7 +1238,7 @@ def import_compiled_rows(
                 current_reference = existing_reference
                 current_reference.reference_type = row.get("reference_type") or current_reference.reference_type
                 current_reference.display_form = row.get("display_form") or current_reference.display_form
-                current_reference.normalized_form = row.get("normalized_form") or current_reference.normalized_form
+                current_reference.normalized_form = reference_normalized_form or current_reference.normalized_form
                 current_reference.translation_mode = row.get("translation_mode") or current_reference.translation_mode
                 current_reference.brief_description = row.get("brief_description") or current_reference.brief_description
                 current_reference.pronunciation = row.get("pronunciation") or current_reference.pronunciation
