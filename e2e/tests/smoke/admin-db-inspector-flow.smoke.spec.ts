@@ -76,6 +76,36 @@ test("@smoke admin can browse mixed-family final DB entries", async ({ page, req
     );
     await client.query(
       `
+      INSERT INTO lexicon.lexicon_voice_storage_policies (
+        id,
+        policy_key,
+        source_reference,
+        content_scope,
+        provider,
+        family,
+        locale,
+        primary_storage_kind,
+        primary_storage_base
+      )
+      VALUES (
+        gen_random_uuid(),
+        'word_default',
+        'global',
+        'word',
+        'default',
+        'default',
+        'all',
+        'remote',
+        'https://cdn.example.com/lexicon'
+      )
+      ON CONFLICT (policy_key) DO UPDATE
+      SET
+        primary_storage_kind = EXCLUDED.primary_storage_kind,
+        primary_storage_base = EXCLUDED.primary_storage_base
+      `,
+    );
+    await client.query(
+      `
       INSERT INTO lexicon.lexicon_voice_assets (
         id, word_id, storage_policy_id, content_scope, locale, voice_role, provider, family, voice_id, profile_key,
         audio_format, mime_type, lead_ms, tail_ms, relative_path,
