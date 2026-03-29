@@ -37,6 +37,13 @@ export function AuthNavigation() {
         Lexicon Ops
       </Link>
       <Link
+        href="/lexicon/voice"
+        className="hover:text-gray-900"
+        data-testid="nav-lexicon-voice-link"
+      >
+        Lexicon Voice
+      </Link>
+      <Link
         href="/lexicon/compiled-review"
         className="hover:text-gray-900"
         data-testid="nav-lexicon-compiled-review-link"

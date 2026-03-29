@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,6 +17,8 @@ from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.word_relation import WordRelation
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+from app.models.lexicon_voice_asset import LexiconVoiceAsset
+from app.models.lexicon_voice_storage_policy import LexiconVoiceStoragePolicy
 
 
 @pytest.fixture
@@ -119,6 +122,40 @@ def make_enrichment_run() -> LexiconEnrichmentRun:
         token_input=123,
         token_output=45,
         estimated_cost=0.01,
+    )
+
+
+def make_voice_asset(*, word_id: uuid.UUID | None = None, meaning_id: uuid.UUID | None = None, meaning_example_id: uuid.UUID | None = None) -> LexiconVoiceAsset:
+    storage_policy = LexiconVoiceStoragePolicy(
+        id=uuid.uuid4(),
+        policy_key="fixture:word",
+        source_reference="fixture",
+        content_scope="word" if word_id is not None else ("definition" if meaning_id is not None else "example"),
+        primary_storage_kind="local",
+        primary_storage_base="/tmp/voice",
+        fallback_storage_kind=None,
+        fallback_storage_base=None,
+    )
+    return LexiconVoiceAsset(
+        id=uuid.uuid4(),
+        word_id=word_id,
+        meaning_id=meaning_id,
+        meaning_example_id=meaning_example_id,
+        storage_policy_id=storage_policy.id,
+        storage_policy=storage_policy,
+        content_scope="word" if word_id is not None else ("definition" if meaning_id is not None else "example"),
+        locale="en-US",
+        voice_role="female",
+        provider="google",
+        family="neural2",
+        voice_id="en-US-Neural2-C",
+        profile_key="word" if word_id is not None else ("definition" if meaning_id is not None else "example"),
+        audio_format="mp3",
+        mime_type="audio/mpeg",
+        relative_path="word_bank/word/en_us/female-word-123.mp3",
+        source_text="bank",
+        source_text_hash="abc123",
+        status="generated",
     )
 
 
@@ -309,7 +346,13 @@ class TestWordEnrichmentDetail:
         relations_result.scalars.return_value.all.return_value = [relation]
         runs_result = MagicMock()
         runs_result.scalars.return_value.all.return_value = [run]
-        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result, runs_result]
+        voice_assets_result = MagicMock()
+        voice_assets_result.scalars.return_value.all.return_value = [
+            make_voice_asset(word_id=word.id),
+            make_voice_asset(meaning_id=meaning.id),
+            make_voice_asset(meaning_example_id=example.id),
+        ]
+        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result, runs_result, voice_assets_result]
 
         response = await client.get(
             f"/api/words/{word.id}/enrichment",
@@ -346,6 +389,8 @@ class TestWordEnrichmentDetail:
         assert len(data["enrichment_runs"]) == 1
         assert data["enrichment_runs"][0]["generator_model"] == "gpt-5.1"
         assert data["enrichment_runs"][0]["verdict"] == "imported"
+        assert len(data["voice_assets"]) == 3
+        assert data["voice_assets"][0]["playback_url"].startswith("/api/words/voice-assets/")
 
     @pytest.mark.asyncio
     async def test_get_word_enrichment_prefers_normalized_part_of_speech_rows(self, client, mock_db, auth_token):
@@ -369,7 +414,9 @@ class TestWordEnrichmentDetail:
         examples_result.scalars.return_value.all.return_value = []
         relations_result = MagicMock()
         relations_result.scalars.return_value.all.return_value = []
-        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result]
+        voice_assets_result = MagicMock()
+        voice_assets_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result, voice_assets_result]
 
         response = await client.get(
             f"/api/words/{word.id}/enrichment",
@@ -402,7 +449,9 @@ class TestWordEnrichmentDetail:
         examples_result.scalars.return_value.all.return_value = []
         relations_result = MagicMock()
         relations_result.scalars.return_value.all.return_value = []
-        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result]
+        voice_assets_result = MagicMock()
+        voice_assets_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result, relations_result, voice_assets_result]
 
         response = await client.get(
             f"/api/words/{word.id}/enrichment",
@@ -439,3 +488,55 @@ class TestWordEnrichmentDetail:
     async def test_get_word_enrichment_requires_auth(self, client):
         response = await client.get(f"/api/words/{uuid.uuid4()}/enrichment")
         assert response.status_code == 401
+
+
+class TestVoiceAssetContent:
+    @pytest.mark.asyncio
+    async def test_get_voice_asset_content_serves_local_file(self, client, mock_db, auth_token, tmp_path):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        audio_path = tmp_path / "voice" / "word_bank" / "word" / "en_us" / "female-word-123.mp3"
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
+        audio_path.write_bytes(b"fake-mp3")
+        asset = make_voice_asset(word_id=uuid.uuid4())
+        asset.storage_policy.primary_storage_base = str(tmp_path / "voice")
+        asset.relative_path = str(Path("word_bank") / "word" / "en_us" / "female-word-123.mp3")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        asset_result = MagicMock()
+        asset_result.scalar_one_or_none.return_value = asset
+        mock_db.execute.side_effect = [user_result, asset_result]
+
+        response = await client.get(
+            f"/api/words/voice-assets/{asset.id}/content",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.content == b"fake-mp3"
+        assert response.headers["content-type"].startswith("audio/mpeg")
+
+    @pytest.mark.asyncio
+    async def test_get_voice_asset_content_redirects_remote_storage(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        asset = make_voice_asset(word_id=uuid.uuid4())
+        asset.storage_policy.primary_storage_kind = "http"
+        asset.storage_policy.primary_storage_base = "https://cdn.example.com/lexicon"
+        asset.relative_path = "word_bank/word/en_us/female-word-123.mp3"
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        asset_result = MagicMock()
+        asset_result.scalar_one_or_none.return_value = asset
+        mock_db.execute.side_effect = [user_result, asset_result]
+
+        response = await client.get(
+            f"/api/words/voice-assets/{asset.id}/content",
+            headers={"Authorization": f"Bearer {token}"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code in {302, 307}
+        assert response.headers["location"] == "https://cdn.example.com/lexicon/word_bank/word/en_us/female-word-123.mp3"

@@ -7,6 +7,7 @@ import { readAccessToken } from "@/lib/auth-session";
 import {
   getLexiconOpsSnapshot,
   listLexiconOpsSnapshots,
+  rewriteLexiconVoiceStorage,
 } from "@/lib/lexicon-ops-client";
 
 jest.mock("next/navigation", () => ({
@@ -16,6 +17,7 @@ jest.mock("next/navigation", () => ({
 jest.mock("@/lib/lexicon-ops-client", () => ({
   listLexiconOpsSnapshots: jest.fn(),
   getLexiconOpsSnapshot: jest.fn(),
+  rewriteLexiconVoiceStorage: jest.fn(),
 }));
 
 jest.mock("@/lib/auth-session", () => ({
@@ -32,6 +34,7 @@ jest.mock("@/lib/auth-redirect", () => ({
 describe("LexiconOpsPage", () => {
   const mockListLexiconOpsSnapshots = listLexiconOpsSnapshots as jest.Mock;
   const mockGetLexiconOpsSnapshot = getLexiconOpsSnapshot as jest.Mock;
+  const mockRewriteLexiconVoiceStorage = rewriteLexiconVoiceStorage as jest.Mock;
   const mockReadAccessToken = readAccessToken as jest.Mock;
   const mockRedirectToLogin = redirectToLogin as jest.Mock;
   const mockUseRouter = useRouter as jest.Mock;
@@ -179,6 +182,13 @@ describe("LexiconOpsPage", () => {
     mockReadAccessToken.mockReturnValue("active-token");
     mockListLexiconOpsSnapshots.mockResolvedValue(snapshots);
     mockGetLexiconOpsSnapshot.mockResolvedValue(detail);
+    mockRewriteLexiconVoiceStorage.mockResolvedValue({
+      matched_count: 3,
+      updated_count: 3,
+      dry_run: false,
+      storage_kind: "s3",
+      storage_base: "https://cdn.example.com/voice",
+    });
     mockUseRouter.mockReturnValue({ push });
   });
 
@@ -340,6 +350,17 @@ describe("LexiconOpsPage", () => {
     );
     expect(screen.getByTestId("lexicon-ops-import-dry-run-button")).toBeInTheDocument();
     expect(screen.getByTestId("lexicon-ops-import-run-button")).toBeInTheDocument();
+  });
+
+  it("offers a handoff from ops into the dedicated voice page", async () => {
+    const user = userEvent.setup();
+    render(<LexiconOpsPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-ops-open-voice-admin")).toBeInTheDocument());
+    await user.click(screen.getByTestId("lexicon-ops-open-voice-admin"));
+
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/voice"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("sourceReference=lexicon-20260312-wordnet-wordfreq"));
   });
 
   it("disables review and import actions when the selected snapshot is not ready", async () => {

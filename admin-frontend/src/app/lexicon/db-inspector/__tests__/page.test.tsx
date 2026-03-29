@@ -76,6 +76,28 @@ describe("LexiconDbInspectorPage", () => {
       source_reference: "snapshot-001",
       learner_generated_at: "2026-03-21T00:00:00Z",
       created_at: "2026-03-21T00:00:00Z",
+      voice_assets: [
+        {
+          id: "voice-1",
+          content_scope: "word",
+          meaning_id: null,
+          meaning_example_id: null,
+          locale: "en-US",
+          voice_role: "female",
+          provider: "google",
+          family: "neural2",
+          voice_id: "en-US-Neural2-C",
+          profile_key: "word",
+          audio_format: "mp3",
+          mime_type: "audio/mpeg",
+          playback_url: "/api/words/voice-assets/voice-1/content",
+          playback_route_kind: "backend_content_route",
+          primary_target_kind: "local",
+          primary_target_base: "/tmp/voice",
+          status: "generated",
+          generated_at: "2026-03-21T00:00:00Z",
+        },
+      ],
       meanings: [
         {
           id: "meaning-1",
@@ -147,6 +169,11 @@ describe("LexiconDbInspectorPage", () => {
     expect(screen.getByText("a financial institution")).toBeInTheDocument();
     expect(screen.getByText(/Common everyday sense\./i)).toBeInTheDocument();
     expect(screen.getByText(/banco/i)).toBeInTheDocument();
+    expect(screen.getByText(/Word · en-US · female/i)).toBeInTheDocument();
+    expect(screen.getByText(/playback route: backend_content_route/i)).toBeInTheDocument();
+    expect(screen.getByText(/primary target: local/i)).toBeInTheDocument();
+    expect(screen.getByText("/api/words/voice-assets/voice-1/content")).toBeInTheDocument();
+    expect(screen.getByText("/tmp/voice")).toBeInTheDocument();
   });
 
   it("renders phrase senses with grouped examples and translations", async () => {
@@ -170,6 +197,7 @@ describe("LexiconDbInspectorPage", () => {
       source_reference: "snapshot-001",
       learner_generated_at: "2026-03-21T00:00:00Z",
       created_at: "2026-03-21T00:00:00Z",
+      voice_assets: [],
       meanings: [],
       enrichment_runs: [],
     });

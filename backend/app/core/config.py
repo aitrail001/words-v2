@@ -41,6 +41,7 @@ class Settings(BaseSettings):
 
     # Lexicon artifact root (admin read-only ops API)
     lexicon_snapshot_root: str = "data/lexicon/snapshots"
+    lexicon_voice_root: str = "data/lexicon/voice"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

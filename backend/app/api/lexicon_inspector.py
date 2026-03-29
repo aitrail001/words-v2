@@ -15,6 +15,7 @@ from app.api.request_db_metrics import finalize_request_db_metrics
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+from app.models.lexicon_voice_asset import LexiconVoiceAsset
 from app.models.learner_catalog_entry import LearnerCatalogEntry
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
@@ -31,6 +32,7 @@ from app.services.knowledge_map import (
     normalize_word_forms,
     normalize_word_part_of_speech,
 )
+from app.services.voice_assets import build_voice_asset_playback_url, load_word_voice_assets
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -108,6 +110,27 @@ class LexiconEnrichmentRunResponse(BaseModel):
     created_at: str
 
 
+class InspectorVoiceAssetResponse(BaseModel):
+    id: str
+    content_scope: str
+    meaning_id: str | None
+    meaning_example_id: str | None
+    locale: str
+    voice_role: str
+    provider: str
+    family: str
+    voice_id: str
+    profile_key: str
+    audio_format: str
+    mime_type: str | None
+    playback_url: str
+    playback_route_kind: str
+    status: str
+    generated_at: str | None
+    primary_target_kind: str
+    primary_target_base: str
+
+
 class InspectorMeaningResponse(BaseModel):
     id: str
     definition: str
@@ -148,6 +171,7 @@ class LexiconInspectorWordDetail(BaseModel):
     created_at: str | None
     meanings: list[InspectorMeaningResponse]
     enrichment_runs: list[LexiconEnrichmentRunResponse]
+    voice_assets: list[InspectorVoiceAssetResponse]
 
 
 class LexiconInspectorPhraseDetail(BaseModel):
@@ -215,6 +239,29 @@ def _entry_matches(query: str | None, *values: str | None) -> bool:
         return True
     lowered = query.lower()
     return any((value or "").lower().find(lowered) >= 0 for value in values)
+
+
+def _voice_asset_response(asset: LexiconVoiceAsset) -> InspectorVoiceAssetResponse:
+    return InspectorVoiceAssetResponse(
+        id=str(asset.id),
+        content_scope=asset.content_scope,
+        meaning_id=str(asset.meaning_id) if asset.meaning_id else None,
+        meaning_example_id=str(asset.meaning_example_id) if asset.meaning_example_id else None,
+        locale=asset.locale,
+        voice_role=asset.voice_role,
+        provider=asset.provider,
+        family=asset.family,
+        voice_id=asset.voice_id,
+        profile_key=asset.profile_key,
+        audio_format=asset.audio_format,
+        mime_type=asset.mime_type,
+        playback_url=build_voice_asset_playback_url(asset),
+        playback_route_kind="backend_content_route",
+        status=asset.status,
+        generated_at=_created_iso(asset.generated_at),
+        primary_target_kind=asset.storage_kind,
+        primary_target_base=asset.storage_base,
+    )
 
 
 def _sort_entries(items: list[LexiconInspectorListEntry], sort: InspectorSort) -> list[LexiconInspectorListEntry]:
@@ -645,6 +692,12 @@ async def get_word_inspector_detail(
             .order_by(LexiconEnrichmentRun.created_at.desc())
         )
         enrichment_runs = runs_result.scalars().all()
+    voice_assets = await load_word_voice_assets(
+        db,
+        word_id=word.id,
+        meaning_ids=[meaning.id for meaning in meanings],
+        example_ids=[example.id for examples in examples_by_meaning.values() for example in examples],
+    )
 
     result = LexiconInspectorWordDetail(
         family="word",
@@ -719,6 +772,7 @@ async def get_word_inspector_detail(
             )
             for run in enrichment_runs
         ],
+        voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
     )
     metrics = finalize_request_db_metrics(
         response,

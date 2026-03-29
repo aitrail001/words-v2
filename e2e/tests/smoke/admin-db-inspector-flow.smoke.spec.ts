@@ -37,6 +37,13 @@ test("@smoke admin can browse mixed-family final DB entries", async ({ page, req
       INSERT INTO lexicon.words (id, word, language, cefr_level, frequency_rank, source_reference)
       VALUES (gen_random_uuid(), $1, 'en', 'B1', 100, 'e2e-inspector')
       ON CONFLICT DO NOTHING
+      RETURNING id::text AS id
+      `,
+      [wordText],
+    );
+    const wordResult = await client.query<{ id: string }>(
+      `
+      SELECT id::text AS id FROM lexicon.words WHERE word = $1 AND language = 'en'
       `,
       [wordText],
     );
@@ -67,6 +74,37 @@ test("@smoke admin can browse mixed-family final DB entries", async ({ page, req
       `,
       [referenceResult.rows[0].id, `ロンドン${suffix}`],
     );
+    await client.query(
+      `
+      INSERT INTO lexicon.lexicon_voice_assets (
+        id, word_id, storage_policy_id, content_scope, locale, voice_role, provider, family, voice_id, profile_key,
+        audio_format, mime_type, lead_ms, tail_ms, relative_path,
+        source_text, source_text_hash, status
+      )
+      VALUES (
+        gen_random_uuid(),
+        $1::uuid,
+        (SELECT id FROM lexicon.lexicon_voice_storage_policies WHERE policy_key = 'word_default'),
+        'word',
+        'en-US',
+        'female',
+        'google',
+        'neural2',
+        'en-US-Neural2-C',
+        'word',
+        'mp3',
+        'audio/mpeg',
+        140,
+        220,
+        $2,
+        $3,
+        md5($3),
+        'generated'
+      )
+      ON CONFLICT DO NOTHING
+      `,
+      [wordResult.rows[0].id, `${wordText}/word/en_us/female-word.mp3`, wordText],
+    );
   } finally {
     await client.end();
   }
@@ -76,6 +114,9 @@ test("@smoke admin can browse mixed-family final DB entries", async ({ page, req
   await page.goto(`${adminUrl}/lexicon/db-inspector`);
   await expect(page.getByTestId("lexicon-db-inspector-page")).toBeVisible();
   await expect(page.getByTestId("lexicon-db-inspector-results")).toContainText(wordText);
+  await page.getByRole("button", { name: new RegExp(`^${wordText}`) }).click();
+  await expect(page.getByTestId("lexicon-db-inspector-detail")).toContainText("Voice assets");
+  await expect(page.getByTestId("lexicon-db-inspector-detail")).toContainText("Word · en-US · female");
 
   await page.getByTestId("lexicon-db-inspector-family-filter").selectOption("phrase");
   await expect(page.getByTestId("lexicon-db-inspector-results")).toContainText(phraseText);

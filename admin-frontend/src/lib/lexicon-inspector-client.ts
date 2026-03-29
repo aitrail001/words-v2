@@ -65,6 +65,26 @@ export type LexiconInspectorWordDetail = {
     translations: Array<{ id: string; language: string; translation: string }>;
   }>;
   enrichment_runs: Array<{ id: string; generator_model: string | null; validator_model: string | null; prompt_version: string | null; verdict: string | null; created_at: string }>;
+  voice_assets: Array<{
+    id: string;
+    content_scope: string;
+    meaning_id: string | null;
+    meaning_example_id: string | null;
+    locale: string;
+    voice_role: string;
+    provider: string;
+    family: string;
+    voice_id: string;
+    profile_key: string;
+    audio_format: string;
+    mime_type: string | null;
+    playback_url: string;
+    playback_route_kind: string;
+    status: string;
+    generated_at: string | null;
+    primary_target_kind: string;
+    primary_target_base: string;
+  }>;
 };
 
 export type LexiconInspectorPhraseDetail = {
