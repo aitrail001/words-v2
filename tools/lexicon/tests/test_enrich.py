@@ -3564,6 +3564,63 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             self.assertEqual(called_lemmas, ["run", "play"])
 
+    def test_enrich_snapshot_per_word_resume_does_not_load_failures_without_failure_mode_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            failures_path = snapshot_dir / "enrich.failures.jsonl"
+            checkpoint_path.write_text(
+                json.dumps(
+                    {
+                        "lexeme_id": "lx_alpha",
+                        "lemma": "alpha",
+                        "status": "completed",
+                        "generation_run_id": "completed-alpha",
+                        "completed_at": "2026-03-07T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            failures_path.write_text(
+                json.dumps(
+                    {
+                        "lexeme_id": "lx_run",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "lemma": "run",
+                        "display_form": "run",
+                        "normalized_form": "run",
+                        "phrase_kind": None,
+                        "status": "failed",
+                        "generation_run_id": "failed-run",
+                        "failed_at": "2026-03-07T00:00:00Z",
+                        "error": "gateway timeout",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            called_lemmas: list[str] = []
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                del senses, settings, generated_at, generation_run_id, prompt_version
+                called_lemmas.append(lexeme.lemma)
+                return []
+
+            with patch("tools.lexicon.enrich._load_failed_lexeme_ids", side_effect=AssertionError("should not load failures")):
+                enrich_snapshot(
+                    snapshot_dir,
+                    mode="per_word",
+                    word_provider=word_provider,
+                    checkpoint_path=checkpoint_path,
+                    failures_output=failures_path,
+                    resume=True,
+                )
+
+            self.assertEqual(called_lemmas, ["run", "play"])
+
     def test_enrich_snapshot_per_word_resume_skip_failed_excludes_unresolved_failed_lexemes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)

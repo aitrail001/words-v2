@@ -2377,7 +2377,8 @@ def enrich_snapshot(
     }
     lexeme_id_by_entry_id = {lexeme.entry_id: lexeme.lexeme_id for lexeme in ordered_lexemes}
     completed_lexeme_ids = _load_completed_lexeme_ids(checkpoint_destination) if resume else set()
-    failed_lexeme_ids = _load_failed_lexeme_ids(failures_destination) if resume else set()
+    load_failed_lexeme_ids = resume and (retry_failed_only or skip_failed)
+    failed_lexeme_ids = _load_failed_lexeme_ids(failures_destination) if load_failed_lexeme_ids else set()
     unresolved_failed_lexeme_ids = failed_lexeme_ids - completed_lexeme_ids
     completed_count_before_run = len(completed_lexeme_ids)
     if resume:
