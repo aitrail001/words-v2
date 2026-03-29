@@ -960,6 +960,7 @@ def _import_db_command(args: argparse.Namespace) -> int:
         source_reference=args.source_reference,
         language=args.language,
         import_mode=args.import_mode,
+        on_conflict=args.on_conflict,
         progress_callback=(
             lambda **fields: _emit_item_progress(
                 runtime_logger,
@@ -1206,6 +1207,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_db.add_argument('--source-reference', help='source reference to stamp onto imported rows')
     import_db.add_argument('--language', default='en', help='language code for imported words')
     import_db.add_argument('--import-mode', choices=('orm', 'staging'), default='orm', help='import execution mode')
+    import_db.add_argument('--on-conflict', choices=('fail', 'upsert', 'skip'), default='upsert', help='behavior when an entry already exists in the target DB')
     _add_shared_logging_args(import_db)
     import_db.set_defaults(handler=_import_db_command)
 

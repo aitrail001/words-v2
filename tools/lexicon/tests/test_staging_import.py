@@ -138,3 +138,41 @@ class TestStagingImport:
         mocked_import.assert_called_once()
         assert mocked_import.call_args.args[1] == [staged_rows[1]]
         mocked_rebuild.assert_called_once()
+
+    def test_run_staging_import_file_skip_only_does_not_rebuild_learner_catalog(self) -> None:
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        staged_rows = [{"entry_type": "word", "word": "alpha", "language": "en", "senses": []}]
+
+        with patch("tools.lexicon.staging_import._copy_rows_into_temp_stage", return_value=staged_rows), \
+             patch(
+                 "tools.lexicon.staging_import.merge_staged_word_rows",
+                 return_value=ImportSummary(skipped_words=1),
+                 create=True,
+             ) as mocked_merge, \
+             patch("tools.lexicon.staging_import._rebuild_learner_catalog_projection", create=True) as mocked_rebuild, \
+             patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+             patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+             patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            summary = run_staging_import_file(
+                "/tmp/fake.jsonl",
+                source_type="repo_fixture",
+                source_reference="fake-fixture",
+                on_conflict="skip",
+            )
+
+        assert summary["skipped_words"] == 1
+        mocked_merge.assert_called_once()
+        mocked_rebuild.assert_not_called()

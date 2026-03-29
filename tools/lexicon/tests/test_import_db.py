@@ -77,6 +77,9 @@ def _install_fake_sqlalchemy_module() -> None:
 
 def _load_real_models():
     _ensure_backend_path()
+    from app.core.database import Base
+    from app.models.learner_catalog_entry import LearnerCatalogEntry
+    from app.models.meaning_metadata import MeaningMetadata
     from app.models.meaning import Meaning
     from app.models.meaning_example import MeaningExample
     from app.models.phrase_entry import PhraseEntry
@@ -87,17 +90,28 @@ def _load_real_models():
     from app.models.reference_entry import ReferenceEntry
     from app.models.reference_localization import ReferenceLocalization
     from app.models.translation import Translation
+    from app.models.translation_example import TranslationExample
     from app.models.word import Word
+    from app.models.word_confusable import WordConfusable
+    from app.models.word_form import WordForm
+    from app.models.word_part_of_speech import WordPartOfSpeech
     from app.models.word_relation import WordRelation
     from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 
     return {
+        "Base": Base,
+        "LearnerCatalogEntry": LearnerCatalogEntry,
         "Word": Word,
         "Meaning": Meaning,
+        "MeaningMetadata": MeaningMetadata,
         "MeaningExample": MeaningExample,
         "Translation": Translation,
+        "TranslationExample": TranslationExample,
         "WordRelation": WordRelation,
+        "WordConfusable": WordConfusable,
+        "WordForm": WordForm,
+        "WordPartOfSpeech": WordPartOfSpeech,
         "LexiconEnrichmentJob": LexiconEnrichmentJob,
         "LexiconEnrichmentRun": LexiconEnrichmentRun,
         "PhraseEntry": PhraseEntry,
@@ -227,6 +241,27 @@ def _create_real_lexicon_tables(connection, models) -> None:
         "PhraseSenseExampleLocalization",
     ]:
         models[name].__table__.create(connection, checkfirst=True)
+
+
+def _create_real_word_lexicon_tables(connection, models) -> None:
+    models["Base"].metadata.create_all(
+        connection,
+        tables=[
+            models["Word"].__table__,
+            models["Meaning"].__table__,
+            models["MeaningMetadata"].__table__,
+            models["MeaningExample"].__table__,
+            models["Translation"].__table__,
+            models["TranslationExample"].__table__,
+            models["WordRelation"].__table__,
+            models["WordConfusable"].__table__,
+            models["WordForm"].__table__,
+            models["WordPartOfSpeech"].__table__,
+            models["LexiconEnrichmentJob"].__table__,
+            models["LexiconEnrichmentRun"].__table__,
+        ],
+        checkfirst=True,
+    )
 
 
 class SqlMeaningExample:
@@ -815,6 +850,81 @@ class ImportCompiledRowsTests(unittest.TestCase):
             ],
         )
 
+    def test_import_fail_mode_raises_for_existing_word(self) -> None:
+        session = MagicMock()
+        existing_word = FakeWord(word="run")
+        session.execute.side_effect = [
+            _ScalarResult(existing_word),
+        ]
+
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            import_compiled_rows(
+                session,
+                [
+                    {
+                        "schema_version": "1.0.0",
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "A1",
+                        "frequency_rank": 5,
+                        "forms": {},
+                        "senses": [],
+                        "confusable_words": [{"word": "ran", "note": "Past tense form."}],
+                    }
+                ],
+                source_type="lexicon_snapshot",
+                source_reference="snapshot-20260307",
+                language="en",
+                word_model=FakeWord,
+                meaning_model=FakeMeaning,
+                word_confusable_model=FakeWordConfusable,
+                on_conflict="fail",
+            )
+
+    def test_import_skip_mode_leaves_existing_word_unchanged(self) -> None:
+        session = MagicMock()
+        existing_word = FakeWord(word="run")
+        existing_word.confusable_entries = [
+            FakeWordConfusable(
+                word_id=existing_word.id,
+                confusable_word="old",
+                note="stale",
+                order_index=0,
+            )
+        ]
+        session.execute.side_effect = [
+            _ScalarResult(existing_word),
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            [
+                {
+                    "schema_version": "1.0.0",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
+                    "cefr_level": "A1",
+                    "frequency_rank": 5,
+                    "forms": {},
+                    "senses": [],
+                    "confusable_words": [{"word": "ran", "note": "Past tense form."}],
+                }
+            ],
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260307",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            word_confusable_model=FakeWordConfusable,
+            on_conflict="skip",
+        )
+
+        self.assertEqual(summary.skipped_words, 1)
+        self.assertEqual(
+            [(item.confusable_word, item.note, item.order_index) for item in existing_word.confusable_entries],
+            [("old", "stale", 0)],
+        )
+
     def test_import_replaces_normalized_word_form_rows(self) -> None:
         session = MagicMock()
         existing_word = FakeWord(
@@ -1256,6 +1366,92 @@ class ImportCompiledRowsTests(unittest.TestCase):
                 ("grammar_pattern", "run + adverb", 0),
             ],
         )
+
+    def test_import_upsert_mode_reimports_existing_word_without_duplicate_normalized_children_on_real_sqlalchemy_models(self) -> None:
+        models = _load_real_models()
+        row = {
+            "schema_version": "1.1.0",
+            "entry_type": "word",
+            "word": "aaron",
+            "language": "en",
+            "cefr_level": "A2",
+            "frequency_rank": 4815,
+            "part_of_speech": ["proper noun"],
+            "forms": {"plural_forms": ["Aarons"], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "confusable_words": [{"word": "Erin", "note": "another male given name; different name"}],
+            "phonetics": {"us": {"ipa": "ˈerən", "confidence": 0.88}},
+            "phonetic": "ˈerən",
+            "phonetic_confidence": 0.88,
+            "generated_at": "2026-03-24T02:57:14+00:00",
+            "source_type": "snapshot_reviewed_approved",
+            "source_reference": "words-40000-20260323-main-wordfreq-live-target30k",
+            "senses": [
+                {
+                    "sense_id": "sn_lx_aaron_1",
+                    "definition": "a male first name",
+                    "pos": "proper noun",
+                    "primary_domain": "general",
+                    "secondary_domains": [],
+                    "register": "neutral",
+                    "grammar_patterns": ["Aaron + be + noun", "meet + Aaron", "call + someone + Aaron"],
+                    "usage_note": "Used as a common male given name in English and many other languages.",
+                    "generated_at": "2026-03-24T02:57:14+00:00",
+                    "examples": [
+                        {"sentence": "Aaron is my cousin.", "difficulty": "A2"},
+                        {"sentence": "I met Aaron at school.", "difficulty": "A2"},
+                    ],
+                    "translations": {
+                        "zh-Hans": {
+                            "definition": "男性名字：亚伦，阿伦",
+                            "usage_note": "用作男性人名。",
+                            "examples": ["亚伦是我表弟。", "我在学校见到了亚伦。"],
+                        }
+                    },
+                    "synonyms": [],
+                    "antonyms": [],
+                    "collocations": ["Aaron and I", "Aaron said", "my friend Aaron"],
+                }
+            ],
+        }
+
+        with _temporary_postgres_lexicon_connection() as connection:
+            _create_real_word_lexicon_tables(connection, models)
+            session = Session(bind=connection, expire_on_commit=False)
+            try:
+                import_kwargs = dict(
+                    source_type="snapshot_reviewed_approved",
+                    source_reference="words-40000-20260323-main-wordfreq-live-target30k",
+                    language="en",
+                    word_model=models["Word"],
+                    meaning_model=models["Meaning"],
+                    meaning_metadata_model=models["MeaningMetadata"],
+                    meaning_example_model=models["MeaningExample"],
+                    word_relation_model=models["WordRelation"],
+                    lexicon_enrichment_job_model=models["LexiconEnrichmentJob"],
+                    lexicon_enrichment_run_model=models["LexiconEnrichmentRun"],
+                    translation_model=models["Translation"],
+                    translation_example_model=models["TranslationExample"],
+                    word_confusable_model=models["WordConfusable"],
+                    word_form_model=models["WordForm"],
+                    word_part_of_speech_model=models["WordPartOfSpeech"],
+                    rebuild_learner_catalog=False,
+                    on_conflict="upsert",
+                )
+
+                import_compiled_rows(session, [row], **import_kwargs)
+                session.flush()
+
+                import_compiled_rows(session, [row], **import_kwargs)
+                session.flush()
+
+                self.assertEqual(connection.execute(text("SELECT count(*) FROM lexicon.words")).scalar_one(), 1)
+                self.assertEqual(connection.execute(text("SELECT count(*) FROM lexicon.word_confusables")).scalar_one(), 1)
+                self.assertEqual(connection.execute(text("SELECT count(*) FROM lexicon.meaning_metadata WHERE metadata_kind = 'grammar_pattern'")).scalar_one(), 3)
+                self.assertEqual(connection.execute(text("SELECT count(*) FROM lexicon.meaning_examples")).scalar_one(), 2)
+                self.assertEqual(connection.execute(text("SELECT count(*) FROM lexicon.translation_examples")).scalar_one(), 2)
+                self.assertEqual(connection.execute(text("SELECT count(*) FROM lexicon.word_relations")).scalar_one(), 3)
+            finally:
+                session.close()
 
     def test_import_updates_existing_word_and_meanings_without_duplication(self) -> None:
         existing_word = FakeWord(
@@ -2765,6 +2961,44 @@ class ImportCompiledRowsTests(unittest.TestCase):
         mocked_rebuild_projection.assert_called_once()
         self.assertEqual(fake_session.commit.call_count, 3)
 
+    def test_run_import_file_skip_only_does_not_rebuild_learner_catalog(self) -> None:
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        rows = iter([{"entry_type": "word", "word": "alpha"}])
+
+        with patch("tools.lexicon.import_db.iter_compiled_rows", return_value=rows), \
+             patch("tools.lexicon.import_db.count_compiled_rows", return_value=1), \
+             patch(
+                 "tools.lexicon.import_db.import_compiled_rows",
+                 return_value=ImportSummary(skipped_words=1),
+             ), \
+             patch("tools.lexicon.import_db._rebuild_learner_catalog_projection") as mocked_rebuild_projection, \
+             patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+             patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+             patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            summary = run_import_file(
+                "/tmp/fake.jsonl",
+                source_type="repo_fixture",
+                source_reference="fake-fixture",
+                on_conflict="skip",
+            )
+
+        self.assertEqual(summary["skipped_words"], 1)
+        mocked_rebuild_projection.assert_not_called()
+        self.assertEqual(fake_session.commit.call_count, 1)
+
     def test_run_import_file_staging_mode_delegates_to_staging_import(self) -> None:
         with patch("tools.lexicon.staging_import.run_staging_import_file", return_value={"created_words": 9}) as mocked_staging:
             summary = run_import_file(
@@ -2783,6 +3017,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
             rows=None,
             commit_every_rows=250,
             progress_callback=None,
+            on_conflict="upsert",
         )
 
 
@@ -2916,6 +3151,69 @@ class ImportCompiledRowsTests(unittest.TestCase):
             [("synonym", "jog"), ("antonym", "walk")],
         )
         self.assertEqual([item.difficulty for item in added if isinstance(item, FakeMeaningExample)], ["A1"])
+
+    def test_import_creates_new_enrichment_job_without_counting_it_as_reused(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [_ScalarResult(None)]
+        session.flush.side_effect = lambda: None
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "word": "fresh",
+                "part_of_speech": ["adjective"],
+                "cefr_level": "A1",
+                "frequency_rank": 5,
+                "forms": {
+                    "plural_forms": [],
+                    "verb_forms": {},
+                    "comparative": None,
+                    "superlative": None,
+                    "derivations": [],
+                },
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_fresh_adj_01_abcd1234",
+                        "wn_synset_id": "fresh.a.01",
+                        "pos": "adjective",
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "new or recently made",
+                        "examples": [],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": None,
+                        "enrichment_id": "en_sn_lx_fresh_adj_01_abcd1234_v1",
+                        "generation_run_id": "run-fresh-123",
+                        "model_name": "gpt-5.1",
+                        "prompt_version": "v1",
+                        "confidence": 0.91,
+                        "generated_at": "2026-03-07T00:00:00Z",
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-03-07T00:00:00Z",
+            }
+        ]
+
+        summary = import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260307",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            meaning_example_model=FakeMeaningExample,
+            word_relation_model=FakeWordRelation,
+            lexicon_enrichment_job_model=FakeLexiconEnrichmentJob,
+            lexicon_enrichment_run_model=FakeLexiconEnrichmentRun,
+        )
+
+        self.assertEqual(summary.created_enrichment_jobs, 1)
+        self.assertEqual(summary.reused_enrichment_jobs, 0)
 
 
 if __name__ == "__main__":
