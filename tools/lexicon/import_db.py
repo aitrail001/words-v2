@@ -219,6 +219,7 @@ class ImportSummary:
     skipped_reference_entries: int = 0
     created_reference_localizations: int = 0
     updated_reference_localizations: int = 0
+    failed_rows: int = 0
 
 
 def _increment(summary: ImportSummary, **changes: int) -> ImportSummary:
@@ -274,6 +275,66 @@ def _validate_on_conflict_mode(on_conflict: str) -> str:
     if normalized not in {"fail", "upsert", "skip"}:
         raise ValueError(f"unsupported on_conflict mode: {on_conflict}")
     return normalized
+
+
+def _validate_error_mode(error_mode: str) -> str:
+    normalized = str(error_mode or "fail_fast").strip().lower()
+    if normalized not in {"fail_fast", "continue"}:
+        raise ValueError(f"unsupported error_mode: {error_mode}")
+    return normalized
+
+
+def _resolve_conflict_mode(*, conflict_mode: str | None, on_conflict: str) -> str:
+    if conflict_mode is not None:
+        return _validate_on_conflict_mode(conflict_mode)
+    return _validate_on_conflict_mode(on_conflict)
+
+
+def _compiled_row_identity(row: dict[str, Any], row_index: int) -> str:
+    for key in ("display_form", "display_text", "word", "normalized_form", "entry_id"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return f"row {row_index}"
+
+
+def _is_row_level_import_exception(exc: Exception) -> bool:
+    try:
+        from sqlalchemy.exc import DataError, IntegrityError, OperationalError, ProgrammingError, StatementError
+    except Exception:  # pragma: no cover - defensive fallback
+        return isinstance(exc, (ValueError, RuntimeError))
+
+    if isinstance(exc, (OperationalError, ProgrammingError)):
+        return False
+    return isinstance(exc, (ValueError, RuntimeError, IntegrityError, DataError, StatementError))
+
+
+def _should_preflight_validate_row(row: dict[str, Any]) -> bool:
+    return any(key in row for key in ("schema_version", "entry_id", "source_provenance"))
+
+
+def _is_import_blocking_validation_error(error: str) -> bool:
+    return (
+        "translations." in error
+        or "must include at least one example" in error
+        or error == "senses must be a list"
+    )
+
+
+def _preflight_validate_compiled_rows(rows: Iterable[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    for row_index, row in enumerate(rows, start=1):
+        if not _should_preflight_validate_row(row):
+            continue
+        validation_errors = [
+            error
+            for error in validate_compiled_record(row)
+            if _is_import_blocking_validation_error(error)
+        ]
+        if validation_errors:
+            row_label = _compiled_row_identity(row, row_index)
+            errors.extend(f"{row_label}: {error}" for error in validation_errors)
+    return errors
 
 
 def _raise_existing_entry_conflict(*, entry_type: str, identifier: str, language: str) -> None:
@@ -950,8 +1011,12 @@ def import_compiled_rows(
     rebuild_learner_catalog: bool = True,
     progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
     on_conflict: str = "upsert",
+    conflict_mode: str | None = None,
+    error_mode: str = "fail_fast",
+    dry_run: bool = False,
 ) -> ImportSummary:
-    on_conflict = _validate_on_conflict_mode(on_conflict)
+    on_conflict = _resolve_conflict_mode(conflict_mode=conflict_mode, on_conflict=on_conflict)
+    _validate_error_mode(error_mode)
     if word_model is None or meaning_model is None:
         (
             word_model,
@@ -1000,6 +1065,11 @@ def import_compiled_rows(
 
     summary = ImportSummary()
     row_list = list(rows)
+    if dry_run:
+        preflight_errors = _preflight_validate_compiled_rows(row_list)
+        if preflight_errors:
+            raise RuntimeError("; ".join(preflight_errors))
+        return summary
     total_rows = len(row_list)
     preloaded_words = _preload_existing_words(session, word_model, row_list, language)
     preloaded_phrases = (
@@ -1039,7 +1109,7 @@ def import_compiled_rows(
         row_source_reference = _effective_row_source_reference(row, source_reference)
         if entry_type == "phrase":
             senses = row.get("senses")
-            if isinstance(senses, list) and senses:
+            if _should_preflight_validate_row(row) and isinstance(senses, list) and senses:
                 validation_errors = validate_compiled_record(row)
                 if validation_errors:
                     raise RuntimeError("; ".join(validation_errors))
@@ -1131,6 +1201,11 @@ def import_compiled_rows(
                 current_phrase = existing_phrase
                 is_new_phrase = False
             if isinstance(senses, list) and senses and resolved_phrase_sense_model is not None:
+                if not is_new_phrase:
+                    with _session_no_autoflush(session):
+                        _replace_collection(current_phrase, "phrase_senses", [])
+                    if hasattr(session, "flush"):
+                        session.flush()
                 use_cascaded_phrase_graph = is_new_phrase and _supports_cascaded_phrase_import(
                     resolved_phrase_model,
                     resolved_phrase_sense_model,
@@ -1780,8 +1855,13 @@ def run_import_file(
     commit_every_rows: int | None = 250,
     progress_callback: Optional[Callable[..., None]] = None,
     on_conflict: str = "upsert",
-) -> dict[str, int]:
-    on_conflict = _validate_on_conflict_mode(on_conflict)
+    conflict_mode: str | None = None,
+    error_mode: str = "fail_fast",
+    dry_run: bool = False,
+    error_samples_sink: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    on_conflict = _resolve_conflict_mode(conflict_mode=conflict_mode, on_conflict=on_conflict)
+    error_mode = _validate_error_mode(error_mode)
     if import_mode == "staging":
         from tools.lexicon.staging_import import run_staging_import_file
 
@@ -1807,31 +1887,109 @@ def run_import_file(
     settings = get_settings()
     engine = create_engine(settings.database_url_sync)
     effective_source_reference = source_reference or _default_source_reference(path)
-    resolved_row_total = len(rows) if rows is not None else count_compiled_rows(path)
-    row_source = iter(rows) if rows is not None else iter_compiled_rows(path)
+    resolved_rows = list(rows) if rows is not None else load_compiled_rows(path)
+    if any(_should_preflight_validate_row(row) for row in resolved_rows):
+        preflight_errors = _preflight_validate_compiled_rows(resolved_rows)
+        if preflight_errors:
+            raise RuntimeError("; ".join(preflight_errors))
+    resolved_row_total = len(resolved_rows)
+    if dry_run:
+        counts = summarize_compiled_rows(resolved_rows)
+        sense_count = sum(len(row.get("senses") or []) for row in resolved_rows if str(row.get("entry_type") or "word") == "word")
+        example_count = sum(
+            len(sense.get("examples") or [])
+            for row in resolved_rows
+            if str(row.get("entry_type") or "word") == "word"
+            for sense in (row.get("senses") or [])
+        )
+        relation_count = sum(
+            len(sense.get("synonyms") or []) + len(sense.get("antonyms") or []) + len(sense.get("collocations") or [])
+            for row in resolved_rows
+            if str(row.get("entry_type") or "word") == "word"
+            for sense in (row.get("senses") or [])
+        )
+        return {
+            **counts,
+            "sense_count": sense_count,
+            "example_count": example_count,
+            "relation_count": relation_count,
+            "failed_rows": 0,
+            "dry_run": True,
+        }
+    row_source = iter(resolved_rows)
     batch_size = commit_every_rows if commit_every_rows is not None and commit_every_rows > 0 else resolved_row_total or 1
     aggregate_summary = ImportSummary()
     completed_rows = 0
+    error_samples: list[dict[str, Any]] = []
     with Session(engine) as session:
         for batch in _iter_row_batches(row_source, batch_size):
-            batch_summary = import_compiled_rows(
-                session,
-                batch,
-                source_type=source_type,
-                source_reference=effective_source_reference,
-                language=language,
-                rebuild_learner_catalog=False,
-                progress_callback=(
-                    (lambda row, batch_completed_rows, _batch_total_rows, base_completed_rows=completed_rows: progress_callback(
-                        row=row,
-                        completed_rows=base_completed_rows + batch_completed_rows,
-                        total_rows=resolved_row_total,
-                    ))
-                    if progress_callback is not None
-                    else None
-                ),
-                on_conflict=on_conflict,
-            )
+            try:
+                batch_summary = import_compiled_rows(
+                    session,
+                    batch,
+                    source_type=source_type,
+                    source_reference=effective_source_reference,
+                    language=language,
+                    rebuild_learner_catalog=False,
+                    progress_callback=(
+                        (lambda row, batch_completed_rows, _batch_total_rows, base_completed_rows=completed_rows: progress_callback(
+                            row=row,
+                            completed_rows=base_completed_rows + batch_completed_rows,
+                            total_rows=resolved_row_total,
+                        ))
+                        if progress_callback is not None
+                        else None
+                    ),
+                    on_conflict=on_conflict,
+                    error_mode=error_mode,
+                )
+            except Exception as exc:
+                session.rollback()
+                if error_mode != "continue":
+                    raise
+                if not _is_row_level_import_exception(exc):
+                    raise
+                batch_summary = ImportSummary()
+                for batch_index, row in enumerate(batch):
+                    row_completed_base = completed_rows + batch_index
+                    try:
+                        row_summary = import_compiled_rows(
+                            session,
+                            [row],
+                            source_type=source_type,
+                            source_reference=effective_source_reference,
+                            language=language,
+                            rebuild_learner_catalog=False,
+                            progress_callback=(
+                                (lambda current_row, batch_completed_rows, _batch_total_rows, base_completed_rows=row_completed_base: progress_callback(
+                                    row=current_row,
+                                    completed_rows=base_completed_rows + batch_completed_rows,
+                                    total_rows=resolved_row_total,
+                                ))
+                                if progress_callback is not None
+                                else None
+                            ),
+                            on_conflict=on_conflict,
+                            error_mode=error_mode,
+                        )
+                    except Exception as row_exc:
+                        session.rollback()
+                        if not _is_row_level_import_exception(row_exc):
+                            raise
+                        batch_summary = _increment(batch_summary, failed_rows=1)
+                        if len(error_samples) < 10:
+                            error_samples.append(
+                                {
+                                    "entry": _compiled_row_identity(row, row_completed_base + 1),
+                                    "error": str(row_exc),
+                                }
+                            )
+                        continue
+                    batch_summary = _increment(batch_summary, **row_summary.__dict__)
+                    session.commit()
+                aggregate_summary = _increment(aggregate_summary, **batch_summary.__dict__)
+                completed_rows += len(batch)
+                continue
             aggregate_summary = _increment(aggregate_summary, **batch_summary.__dict__)
             completed_rows += len(batch)
             session.commit()
@@ -1859,7 +2017,7 @@ def run_import_file(
                 phrase_model=phrase_model,
             )
             session.commit()
-    return {
+    result = {
         "created_words": aggregate_summary.created_words,
         "updated_words": aggregate_summary.updated_words,
         "skipped_words": aggregate_summary.skipped_words,
@@ -1883,7 +2041,12 @@ def run_import_file(
         "skipped_reference_entries": aggregate_summary.skipped_reference_entries,
         "created_reference_localizations": aggregate_summary.created_reference_localizations,
         "updated_reference_localizations": aggregate_summary.updated_reference_localizations,
+        "failed_rows": aggregate_summary.failed_rows,
+        "dry_run": False,
     }
+    if error_samples_sink is not None:
+        error_samples_sink.extend(error_samples)
+    return result
 
 
 def summarize_compiled_rows(rows: Iterable[dict[str, Any]]) -> dict[str, int]:

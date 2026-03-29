@@ -53,11 +53,15 @@ class TestLexiconJobsApi:
                 "source_type": "lexicon_snapshot",
                 "source_reference": "demo",
                 "language": "en",
+                "conflict_mode": "upsert",
+                "error_mode": "continue",
             },
         )
 
         assert response.status_code == 202
         assert response.json()["job_type"] == "import_db"
+        assert response.json()["request_payload"]["conflict_mode"] == "upsert"
+        assert response.json()["request_payload"]["error_mode"] == "continue"
         mock_delay.assert_called_once()
 
     @pytest.mark.asyncio
@@ -136,6 +140,35 @@ class TestLexiconJobsApi:
         assert response.status_code == 200
         assert response.json()["status"] == "completed"
         assert response.json()["result_payload"]["created_words"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_failed_import_db_job_exposes_first_row_failure_details(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=user_id,
+            job_type="import_db",
+            status="failed",
+            target_key="import_db:/app/data/lexicon/snapshots/phrases/reviewed/approved.jsonl",
+            request_payload={"input_path": "/app/data/lexicon/snapshots/phrases/reviewed/approved.jsonl"},
+            result_payload=None,
+            progress_total=0,
+            progress_completed=0,
+            progress_current_label=None,
+            error_message="sense 2 translations.zh-Hans.usage_note must be a non-empty string",
+        )
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(job)]
+
+        response = await client.get(
+            f"/api/lexicon-jobs/{job.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+        assert response.json()["progress_current_label"] == "Failed before first row"
+        assert "usage_note" in response.json()["error_message"]
 
     @pytest.mark.asyncio
     @patch("app.api.lexicon_jobs.run_lexicon_compiled_review_bulk_update.delay")

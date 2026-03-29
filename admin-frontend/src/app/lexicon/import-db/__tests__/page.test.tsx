@@ -30,7 +30,8 @@ describe("LexiconImportDbPage", () => {
       artifact_filename: "words.enriched.jsonl",
       input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
       row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
-      import_summary: null,
+      import_summary: { dry_run: 1, failed_rows: 0 },
+      error_samples: [],
     });
     getLexiconJob.mockResolvedValue({
       id: "job-1",
@@ -43,6 +44,8 @@ describe("LexiconImportDbPage", () => {
         source_type: "lexicon_snapshot",
         source_reference: "lexicon-20260321-wordfreq",
         language: "en",
+        conflict_mode: "upsert",
+        error_mode: "continue",
         row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
       },
       result_payload: { created_words: 1 },
@@ -65,6 +68,8 @@ describe("LexiconImportDbPage", () => {
         source_type: "lexicon_snapshot",
         source_reference: "lexicon-20260321-wordfreq",
         language: "en",
+        conflict_mode: "upsert",
+        error_mode: "continue",
         row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
       },
       result_payload: null,
@@ -109,6 +114,8 @@ describe("LexiconImportDbPage", () => {
         sourceType: "lexicon_snapshot",
         sourceReference: "lexicon-20260321-wordfreq",
         language: "en",
+        conflictMode: "upsert",
+        errorMode: "continue",
       }),
     );
     await user.type(screen.getByTestId("lexicon-import-db-input-path"), "data/lexicon/snapshots/demo/words.enriched.jsonl");
@@ -122,9 +129,45 @@ describe("LexiconImportDbPage", () => {
       sourceType: "lexicon_snapshot",
       sourceReference: "lexicon-20260321-wordfreq",
       language: "en",
+      conflictMode: "upsert",
+      errorMode: "continue",
     }));
     expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
     expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("To do1");
+  });
+
+  it("shows failed-before-first-row copy instead of waiting text", async () => {
+    getLexiconJob.mockResolvedValue({
+      id: "job-failed",
+      created_by: "user-1",
+      job_type: "import_db",
+      status: "failed",
+      target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+      request_payload: {
+        input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+        source_type: "lexicon_snapshot",
+        source_reference: "lexicon-20260321-wordfreq",
+        language: "en",
+        conflict_mode: "upsert",
+        error_mode: "continue",
+        row_summary: { row_count: 1, word_count: 0, phrase_count: 1, reference_count: 0 },
+      },
+      result_payload: null,
+      progress_total: 0,
+      progress_completed: 0,
+      progress_current_label: "Failed before first row",
+      error_message: "sense 2 translations.zh-Hans.usage_note must be a non-empty string",
+      created_at: "2026-03-23T00:00:00Z",
+      started_at: "2026-03-23T00:00:01Z",
+      completed_at: "2026-03-23T00:00:02Z",
+    });
+    window.localStorage.setItem("lexicon-import-db-active-job", "job-failed");
+    render(<LexiconImportDbPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: Failed before first row");
+    expect(screen.queryByText("Waiting for first row...")).not.toBeInTheDocument();
+    expect(screen.getByText(/usage_note/)).toBeInTheDocument();
   });
 
   it("reconnects to the active import job from local storage", async () => {

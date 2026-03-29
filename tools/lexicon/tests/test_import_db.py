@@ -10,7 +10,7 @@ from contextlib import contextmanager
 import time
 from dataclasses import dataclass, field
 from types import ModuleType
-from typing import Optional
+from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
@@ -1167,6 +1167,58 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(imported_phrase.source_type, "db_export")
         self.assertEqual(imported_phrase.source_reference, "phrase-fixture")
         self.assertEqual(imported_phrase.language, "en")
+
+    def test_import_preflight_reports_phrase_translation_usage_note_error_before_mutating_counts(self) -> None:
+        session = MagicMock()
+        session.execute.side_effect = [_ScalarResult(None)]
+        session.flush.side_effect = lambda: None
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "phrase",
+                "word": "by and large",
+                "display_form": "by and large",
+                "normalized_form": "by and large",
+                "language": "en",
+                "source_type": "db_export",
+                "source_reference": "phrase-fixture",
+                "senses": [
+                    {
+                        "sense_id": "phrase-1",
+                        "definition": "generally",
+                        "part_of_speech": "adverb",
+                        "examples": [{"sentence": "By and large, the plan worked.", "difficulty": "B2"}],
+                        "translations": {
+                            "zh-Hans": {
+                                "definition": "总的来说",
+                                "usage_note": "",
+                                "examples": ["总的来说，计划成功了。"],
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "usage_note must be a non-empty string"):
+            import_compiled_rows(
+                session,
+                rows,
+                source_type="fallback_source",
+                source_reference="fallback-ref",
+                language="en",
+                word_model=FakeWord,
+                meaning_model=FakeMeaning,
+                phrase_model=FakePhraseEntry,
+                phrase_sense_model=FakePhraseSense,
+                phrase_sense_localization_model=FakePhraseSenseLocalization,
+                phrase_sense_example_model=FakePhraseSenseExample,
+                phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+                on_conflict="upsert",
+                error_mode="continue",
+                dry_run=True,
+            )
 
     def test_import_preserves_localized_usage_notes_and_example_translations(self) -> None:
         session = MagicMock()
@@ -2477,6 +2529,115 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(len(added[0].phrase_senses[0].localizations), 5)
         self.assertEqual(len(added[0].phrase_senses[0].examples[0].localizations), 5)
 
+    def test_import_skip_mode_skips_existing_phrase(self) -> None:
+        existing_phrase = FakePhraseEntry(
+            phrase_text="take off",
+            normalized_form="take off",
+            phrase_kind="phrasal_verb",
+            language="en",
+            source_type="snapshot_reviewed_approved",
+            source_reference="snapshot-20260320",
+        )
+        session = MagicMock()
+        session.execute.side_effect = [_ScalarResult(existing_phrase)]
+
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_id": "ph_take_off",
+                "entry_type": "phrase",
+                "normalized_form": "take off",
+                "source_provenance": [{"source": "phrase_seed"}],
+                "entity_category": "general",
+                "word": "take off",
+                "display_form": "take off",
+                "phrase_kind": "phrasal_verb",
+                "part_of_speech": ["phrasal_verb"],
+                "cefr_level": "B1",
+                "frequency_rank": 0,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "confusable_words": [],
+                "generated_at": "2026-03-20T00:00:00Z",
+                "senses": [],
+            }
+        ]
+
+        import_compiled_rows(
+            session,
+            rows,
+            source_type="lexicon_snapshot",
+            source_reference="snapshot-20260320",
+            language="en",
+            word_model=FakeWord,
+            meaning_model=FakeMeaning,
+            phrase_model=FakePhraseEntry,
+            phrase_sense_model=FakePhraseSense,
+            phrase_sense_localization_model=FakePhraseSenseLocalization,
+            phrase_sense_example_model=FakePhraseSenseExample,
+            phrase_sense_example_localization_model=FakePhraseSenseExampleLocalization,
+            conflict_mode="skip",
+        )
+
+    def test_import_upsert_mode_reimports_existing_phrase_without_duplicate_order_index_on_real_sqlalchemy_models(self) -> None:
+        models = _load_real_models()
+        phrase_row = {
+            "schema_version": "1.1.0",
+            "entry_id": "ph_take_off",
+            "entry_type": "phrase",
+            "normalized_form": "take off",
+            "source_provenance": [{"source": "phrase_seed"}],
+            "entity_category": "general",
+            "word": "take off",
+            "display_form": "take off",
+            "phrase_kind": "phrasal_verb",
+            "part_of_speech": ["phrasal_verb"],
+            "cefr_level": "B1",
+            "frequency_rank": 0,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "confusable_words": [],
+            "generated_at": "2026-03-20T00:00:00Z",
+            "senses": [{
+                "sense_id": "phrase-1",
+                "definition": "leave the ground",
+                "part_of_speech": "verb",
+                "examples": [{"sentence": "The plane took off.", "difficulty": "A1"}],
+                "translations": {
+                    "zh-Hans": {"definition": "起飞", "usage_note": "常见用法", "examples": ["飞机起飞了。"]},
+                    "es": {"definition": "despegar", "usage_note": "uso común", "examples": ["El avión despegó."]},
+                    "ar": {"definition": "يقلع", "usage_note": "استخدام شائع", "examples": ["أقلعت الطائرة."]},
+                    "pt-BR": {"definition": "decolar", "usage_note": "uso comum", "examples": ["O avião decolou."]},
+                    "ja": {"definition": "離陸する", "usage_note": "よくある用法", "examples": ["飛行機が離陸した."]},
+                },
+            }],
+        }
+
+        with _temporary_postgres_lexicon_connection() as connection:
+            _create_real_lexicon_tables(connection, models)
+            session = Session(bind=connection, expire_on_commit=False)
+            try:
+                import_kwargs = dict(
+                    source_type="snapshot_reviewed_approved",
+                    source_reference="snapshot-20260320",
+                    language="en",
+                    phrase_model=models["PhraseEntry"],
+                    phrase_sense_model=models["PhraseSense"],
+                    phrase_sense_localization_model=models["PhraseSenseLocalization"],
+                    phrase_sense_example_model=models["PhraseSenseExample"],
+                    phrase_sense_example_localization_model=models["PhraseSenseExampleLocalization"],
+                    rebuild_learner_catalog=False,
+                    conflict_mode="upsert",
+                )
+
+                import_compiled_rows(session, [phrase_row], **import_kwargs)
+                session.flush()
+
+                import_compiled_rows(session, [phrase_row], **import_kwargs)
+                session.flush()
+                phrase = session.query(models["PhraseEntry"]).one()
+                self.assertEqual(len(phrase.phrase_senses), 1)
+            finally:
+                session.close()
+
     def test_import_compiled_rows_rejects_phrase_rows_missing_translation_examples(self) -> None:
         session = MagicMock()
         session.execute.return_value = _ScalarResult(None)
@@ -2998,6 +3159,91 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(summary["skipped_words"], 1)
         mocked_rebuild_projection.assert_not_called()
         self.assertEqual(fake_session.commit.call_count, 1)
+
+    def test_run_import_file_continue_mode_falls_back_to_row_level_import(self) -> None:
+        from sqlalchemy.exc import IntegrityError
+
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        rows = [
+            {"entry_type": "word", "word": "alpha"},
+            {"entry_type": "word", "word": "beta"},
+            {"entry_type": "word", "word": "gamma"},
+        ]
+
+        def fake_import(_session, batch, **kwargs):
+            if len(batch) > 1:
+                raise IntegrityError("insert", {}, Exception("bad row in batch"))
+            if str(batch[0].get("word")) == "beta":
+                raise ValueError("beta is invalid")
+            return ImportSummary(created_words=1)
+
+        error_samples: list[dict[str, Any]] = []
+        with patch("tools.lexicon.import_db.import_compiled_rows", side_effect=fake_import), \
+             patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+             patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+             patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            summary = run_import_file(
+                "/tmp/fake.jsonl",
+                source_type="repo_fixture",
+                source_reference="fake-fixture",
+                rows=rows,
+                commit_every_rows=3,
+                error_mode="continue",
+                error_samples_sink=error_samples,
+            )
+
+        self.assertEqual(summary["created_words"], 2)
+        self.assertEqual(summary["failed_rows"], 1)
+        self.assertEqual(error_samples, [{"entry": "beta", "error": "beta is invalid"}])
+        self.assertGreaterEqual(fake_session.rollback.call_count, 2)
+
+    def test_run_import_file_continue_mode_reraises_non_row_level_errors(self) -> None:
+        from sqlalchemy.exc import OperationalError
+
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        rows = [{"entry_type": "word", "word": "alpha"}]
+
+        with patch(
+            "tools.lexicon.import_db.import_compiled_rows",
+            side_effect=OperationalError("select 1", {}, Exception("db down")),
+        ), \
+             patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+             patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+             patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            with self.assertRaises(OperationalError):
+                run_import_file(
+                    "/tmp/fake.jsonl",
+                    source_type="repo_fixture",
+                    source_reference="fake-fixture",
+                    rows=rows,
+                    error_mode="continue",
+                )
 
     def test_run_import_file_staging_mode_delegates_to_staging_import(self) -> None:
         with patch("tools.lexicon.staging_import.run_staging_import_file", return_value={"created_words": 9}) as mocked_staging:
