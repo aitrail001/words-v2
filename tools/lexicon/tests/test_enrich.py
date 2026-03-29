@@ -114,6 +114,102 @@ class EnrichSnapshotTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def _write_resume_modes_snapshot(self, snapshot_dir: Path) -> None:
+        (snapshot_dir / "lexemes.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "lexeme_id": "lx_alpha",
+                            "lemma": "alpha",
+                            "language": "en",
+                            "wordfreq_rank": 1,
+                            "is_wordnet_backed": True,
+                            "source_refs": ["wordnet", "wordfreq"],
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "lexeme_id": "lx_run",
+                            "lemma": "run",
+                            "language": "en",
+                            "wordfreq_rank": 2,
+                            "is_wordnet_backed": True,
+                            "source_refs": ["wordnet", "wordfreq"],
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "lexeme_id": "lx_play",
+                            "lemma": "play",
+                            "language": "en",
+                            "wordfreq_rank": 3,
+                            "is_wordnet_backed": True,
+                            "source_refs": ["wordnet", "wordfreq"],
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (snapshot_dir / "senses.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "sense_id": "sn_lx_alpha_1",
+                            "lexeme_id": "lx_alpha",
+                            "wn_synset_id": "alpha.n.01",
+                            "part_of_speech": "noun",
+                            "canonical_gloss": "alpha sense",
+                            "selection_reason": "common learner sense",
+                            "sense_order": 1,
+                            "is_high_polysemy": False,
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "sense_id": "sn_lx_run_1",
+                            "lexeme_id": "lx_run",
+                            "wn_synset_id": "run.v.01",
+                            "part_of_speech": "verb",
+                            "canonical_gloss": "run sense",
+                            "selection_reason": "common learner sense",
+                            "sense_order": 1,
+                            "is_high_polysemy": False,
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "sense_id": "sn_lx_play_1",
+                            "lexeme_id": "lx_play",
+                            "wn_synset_id": "play.v.01",
+                            "part_of_speech": "verb",
+                            "canonical_gloss": "play sense",
+                            "selection_reason": "common learner sense",
+                            "sense_order": 1,
+                            "is_high_polysemy": False,
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     def test_read_snapshot_inputs_loads_linked_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -2380,6 +2476,102 @@ class EnrichPerWordModeTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def _write_resume_modes_snapshot(self, snapshot_dir: Path) -> None:
+        (snapshot_dir / "lexemes.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "lexeme_id": "lx_alpha",
+                            "lemma": "alpha",
+                            "language": "en",
+                            "wordfreq_rank": 1,
+                            "is_wordnet_backed": True,
+                            "source_refs": ["wordnet", "wordfreq"],
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "lexeme_id": "lx_run",
+                            "lemma": "run",
+                            "language": "en",
+                            "wordfreq_rank": 2,
+                            "is_wordnet_backed": True,
+                            "source_refs": ["wordnet", "wordfreq"],
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "lexeme_id": "lx_play",
+                            "lemma": "play",
+                            "language": "en",
+                            "wordfreq_rank": 3,
+                            "is_wordnet_backed": True,
+                            "source_refs": ["wordnet", "wordfreq"],
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (snapshot_dir / "senses.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "sense_id": "sn_lx_alpha_1",
+                            "lexeme_id": "lx_alpha",
+                            "wn_synset_id": "alpha.n.01",
+                            "part_of_speech": "noun",
+                            "canonical_gloss": "alpha sense",
+                            "selection_reason": "common learner sense",
+                            "sense_order": 1,
+                            "is_high_polysemy": False,
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "sense_id": "sn_lx_run_1",
+                            "lexeme_id": "lx_run",
+                            "wn_synset_id": "run.v.01",
+                            "part_of_speech": "verb",
+                            "canonical_gloss": "run sense",
+                            "selection_reason": "common learner sense",
+                            "sense_order": 1,
+                            "is_high_polysemy": False,
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "snapshot_id": "snap-1",
+                            "sense_id": "sn_lx_play_1",
+                            "lexeme_id": "lx_play",
+                            "wn_synset_id": "play.v.01",
+                            "part_of_speech": "verb",
+                            "canonical_gloss": "play sense",
+                            "selection_reason": "common learner sense",
+                            "sense_order": 1,
+                            "is_high_polysemy": False,
+                            "created_at": "2026-03-07T00:00:00Z",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     def _response(self, sense_id: str, definition: str) -> dict:
         return {
             "sense_id": sense_id,
@@ -3296,6 +3488,384 @@ class EnrichPerWordModeTests(unittest.TestCase):
             payload = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(sorted(row["entry_id"] for row in payload), ["lx_play", "lx_run"])
             self.assertEqual(sum(1 for row in payload if row["entry_id"] == "lx_run"), 1)
+
+    def test_enrich_snapshot_per_word_resume_retries_unresolved_failed_lexemes_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            failures_path = snapshot_dir / "enrich.failures.jsonl"
+            checkpoint_path.write_text(
+                json.dumps(
+                    {
+                        "lexeme_id": "lx_alpha",
+                        "lemma": "alpha",
+                        "status": "completed",
+                        "generation_run_id": "completed-alpha",
+                        "completed_at": "2026-03-07T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            failures_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_alpha",
+                                "entry_id": "lx_alpha",
+                                "entry_type": "word",
+                                "lemma": "alpha",
+                                "display_form": "alpha",
+                                "normalized_form": "alpha",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-alpha",
+                                "failed_at": "2026-03-07T00:00:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_run",
+                                "entry_id": "lx_run",
+                                "entry_type": "word",
+                                "lemma": "run",
+                                "display_form": "run",
+                                "normalized_form": "run",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-run",
+                                "failed_at": "2026-03-07T00:00:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            called_lemmas: list[str] = []
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                del senses, settings, generated_at, generation_run_id, prompt_version
+                called_lemmas.append(lexeme.lemma)
+                return []
+
+            enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                checkpoint_path=checkpoint_path,
+                failures_output=failures_path,
+                resume=True,
+            )
+
+            self.assertEqual(called_lemmas, ["run", "play"])
+
+    def test_enrich_snapshot_per_word_resume_skip_failed_excludes_unresolved_failed_lexemes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            failures_path = snapshot_dir / "enrich.failures.jsonl"
+            checkpoint_path.write_text(
+                json.dumps(
+                    {
+                        "lexeme_id": "lx_alpha",
+                        "lemma": "alpha",
+                        "status": "completed",
+                        "generation_run_id": "completed-alpha",
+                        "completed_at": "2026-03-07T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            failures_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_alpha",
+                                "entry_id": "lx_alpha",
+                                "entry_type": "word",
+                                "lemma": "alpha",
+                                "display_form": "alpha",
+                                "normalized_form": "alpha",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-alpha",
+                                "failed_at": "2026-03-07T00:00:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_run",
+                                "entry_id": "lx_run",
+                                "entry_type": "word",
+                                "lemma": "run",
+                                "display_form": "run",
+                                "normalized_form": "run",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-run",
+                                "failed_at": "2026-03-07T00:00:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            called_lemmas: list[str] = []
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                del senses, settings, generated_at, generation_run_id, prompt_version
+                called_lemmas.append(lexeme.lemma)
+                return []
+
+            enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                checkpoint_path=checkpoint_path,
+                failures_output=failures_path,
+                resume=True,
+                skip_failed=True,
+            )
+
+            self.assertEqual(called_lemmas, ["play"])
+
+    def test_enrich_snapshot_per_word_resume_retry_failed_only_schedules_only_unresolved_failed_lexemes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            failures_path = snapshot_dir / "enrich.failures.jsonl"
+            checkpoint_path.write_text(
+                json.dumps(
+                    {
+                        "lexeme_id": "lx_alpha",
+                        "lemma": "alpha",
+                        "status": "completed",
+                        "generation_run_id": "completed-alpha",
+                        "completed_at": "2026-03-07T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            failures_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_alpha",
+                                "entry_id": "lx_alpha",
+                                "entry_type": "word",
+                                "lemma": "alpha",
+                                "display_form": "alpha",
+                                "normalized_form": "alpha",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-alpha",
+                                "failed_at": "2026-03-07T00:00:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_run",
+                                "entry_id": "lx_run",
+                                "entry_type": "word",
+                                "lemma": "run",
+                                "display_form": "run",
+                                "normalized_form": "run",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-run",
+                                "failed_at": "2026-03-07T00:00:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            called_lemmas: list[str] = []
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                del senses, settings, generated_at, generation_run_id, prompt_version
+                called_lemmas.append(lexeme.lemma)
+                return []
+
+            enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                checkpoint_path=checkpoint_path,
+                failures_output=failures_path,
+                resume=True,
+                retry_failed_only=True,
+            )
+
+            self.assertEqual(called_lemmas, ["run"])
+
+    def test_enrich_snapshot_per_word_resume_retry_failed_only_dedupes_failure_history_and_preserves_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            failures_path = snapshot_dir / "enrich.failures.jsonl"
+            checkpoint_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_alpha",
+                                "lemma": "alpha",
+                                "status": "completed",
+                                "generation_run_id": "completed-alpha",
+                                "completed_at": "2026-03-07T00:00:00Z",
+                            }
+                        )
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            failures_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_alpha",
+                                "entry_id": "lx_alpha",
+                                "entry_type": "word",
+                                "lemma": "alpha",
+                                "display_form": "alpha",
+                                "normalized_form": "alpha",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-alpha",
+                                "failed_at": "2026-03-07T00:00:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_run",
+                                "entry_id": "lx_run",
+                                "entry_type": "word",
+                                "lemma": "run",
+                                "display_form": "run",
+                                "normalized_form": "run",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-run-1",
+                                "failed_at": "2026-03-07T00:00:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "lexeme_id": "lx_run",
+                                "entry_id": "lx_run",
+                                "entry_type": "word",
+                                "lemma": "run",
+                                "display_form": "run",
+                                "normalized_form": "run",
+                                "phrase_kind": None,
+                                "status": "failed",
+                                "generation_run_id": "failed-run-2",
+                                "failed_at": "2026-03-07T00:10:00Z",
+                                "error": "gateway timeout",
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            called_lemmas: list[str] = []
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                del senses, settings, generated_at, generation_run_id, prompt_version
+                called_lemmas.append(lexeme.lemma)
+                return []
+
+            enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                checkpoint_path=checkpoint_path,
+                failures_output=failures_path,
+                resume=True,
+                retry_failed_only=True,
+            )
+
+            failures = [json.loads(line) for line in failures_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            checkpoints = [json.loads(line) for line in checkpoint_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+            self.assertEqual(called_lemmas, ["run"])
+            self.assertEqual([row["lexeme_id"] for row in failures], ["lx_alpha", "lx_run", "lx_run"])
+            self.assertEqual([row["generation_run_id"] for row in failures], ["failed-alpha", "failed-run-1", "failed-run-2"])
+            self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_run"])
+
+    def test_enrich_snapshot_rejects_retry_failed_only_without_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+
+            with self.assertRaises(ValueError):
+                enrich_snapshot(
+                    snapshot_dir,
+                    mode="per_word",
+                    word_provider=lambda **kwargs: [],
+                    retry_failed_only=True,
+                )
+
+    def test_run_enrichment_rejects_retry_failed_only_without_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+
+            with self.assertRaises(ValueError):
+                run_enrichment(
+                    snapshot_dir,
+                    mode="per_word",
+                    word_provider=lambda **kwargs: [],
+                    retry_failed_only=True,
+                )
+
+    def test_enrich_snapshot_rejects_skip_failed_without_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+
+            with self.assertRaises(ValueError):
+                enrich_snapshot(
+                    snapshot_dir,
+                    mode="per_word",
+                    word_provider=lambda **kwargs: [],
+                    skip_failed=True,
+                )
+
+    def test_enrich_snapshot_rejects_retry_failed_only_with_skip_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+
+            with self.assertRaises(ValueError):
+                enrich_snapshot(
+                    snapshot_dir,
+                    mode="per_word",
+                    word_provider=lambda **kwargs: [],
+                    resume=True,
+                    retry_failed_only=True,
+                    skip_failed=True,
+                )
 
     def test_enrich_snapshot_per_word_failure_flushes_later_successes_before_raise(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

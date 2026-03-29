@@ -268,6 +268,15 @@ def _build_base_command(args: argparse.Namespace) -> int:
 
 
 def _enrich_command(args: argparse.Namespace) -> int:
+    if args.retry_failed_only and not args.resume:
+        print('--retry-failed-only requires --resume', file=sys.stderr)
+        return 2
+    if args.skip_failed and not args.resume:
+        print('--skip-failed requires --resume', file=sys.stderr)
+        return 2
+    if args.retry_failed_only and args.skip_failed:
+        print('--retry-failed-only and --skip-failed cannot be combined', file=sys.stderr)
+        return 2
     try:
         result = run_enrichment(
             Path(args.snapshot_dir),
@@ -278,6 +287,8 @@ def _enrich_command(args: argparse.Namespace) -> int:
             reasoning_effort=args.reasoning_effort,
             max_concurrency=args.max_concurrency,
             resume=args.resume,
+            retry_failed_only=args.retry_failed_only,
+            skip_failed=args.skip_failed,
             checkpoint_path=Path(args.checkpoint_path) if args.checkpoint_path else None,
             failures_output=Path(args.failures_output) if args.failures_output else None,
             max_failures=args.max_failures,
@@ -1128,6 +1139,8 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for real endpoint runs')
     enrich.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel lexeme jobs for enrichment')
     enrich.add_argument('--resume', action='store_true', help='resume a prior enrichment run using the checkpoint file')
+    enrich.add_argument('--retry-failed-only', action='store_true', help='with --resume, rerun only lexemes previously recorded as failed')
+    enrich.add_argument('--skip-failed', action='store_true', help='with --resume, skip lexemes previously recorded as failed instead of retrying them')
     enrich.add_argument('--checkpoint-path', help='optional override path for the enrichment checkpoint JSONL file')
     enrich.add_argument('--failures-output', help='optional override path for the enrichment failures JSONL file')
     enrich.add_argument('--max-failures', type=int, help='stop submitting new enrichment jobs after this many lexeme failures')
