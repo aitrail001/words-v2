@@ -540,3 +540,27 @@ class TestVoiceAssetContent:
 
         assert response.status_code in {302, 307}
         assert response.headers["location"] == "https://cdn.example.com/lexicon/word_bank/word/en_us/female-word-123.mp3"
+
+    @pytest.mark.asyncio
+    async def test_get_voice_asset_content_redirects_non_http_remote_storage(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        asset = make_voice_asset(word_id=uuid.uuid4())
+        asset.storage_policy.primary_storage_kind = "s3"
+        asset.storage_policy.primary_storage_base = "s3://bucket/lexicon"
+        asset.relative_path = "word_bank/word/en_us/female-word-123.mp3"
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        asset_result = MagicMock()
+        asset_result.scalar_one_or_none.return_value = asset
+        mock_db.execute.side_effect = [user_result, asset_result]
+
+        response = await client.get(
+            f"/api/words/voice-assets/{asset.id}/content",
+            headers={"Authorization": f"Bearer {token}"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code in {302, 307}
+        assert response.headers["location"] == "s3://bucket/lexicon/word_bank/word/en_us/female-word-123.mp3"

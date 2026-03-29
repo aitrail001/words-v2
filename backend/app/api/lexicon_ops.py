@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -667,7 +667,6 @@ async def list_voice_storage_policies(
 ) -> list[VoiceStoragePolicyResponse]:
     query = (
         select(LexiconVoiceStoragePolicy)
-        .options(selectinload(LexiconVoiceStoragePolicy.voice_assets))
         .where(
             LexiconVoiceStoragePolicy.policy_key.in_(["word_default", "definition_default", "example_default"])
         )
@@ -678,6 +677,20 @@ async def list_voice_storage_policies(
     )
     result = await db.execute(query)
     policies = list(result.scalars().all())
+    count_by_policy_id: dict[object, int] = {}
+    if policies:
+        counts_result = await db.execute(
+            select(
+                LexiconVoiceAsset.storage_policy_id,
+                func.count(LexiconVoiceAsset.id),
+            )
+            .where(LexiconVoiceAsset.storage_policy_id.in_([policy.id for policy in policies]))
+            .group_by(LexiconVoiceAsset.storage_policy_id)
+        )
+        count_by_policy_id = {
+            policy_id: int(asset_count)
+            for policy_id, asset_count in counts_result.all()
+        }
     return [
         VoiceStoragePolicyResponse(
             id=str(policy.id),
@@ -687,7 +700,7 @@ async def list_voice_storage_policies(
             primary_storage_base=policy.primary_storage_base,
             fallback_storage_kind=policy.fallback_storage_kind,
             fallback_storage_base=policy.fallback_storage_base,
-            asset_count=len(policy.voice_assets),
+            asset_count=count_by_policy_id.get(policy.id, 0),
         )
         for policy in policies
     ]

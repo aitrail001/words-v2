@@ -525,10 +525,13 @@ class TestLexiconVoiceStorageRewrite:
                 primary_storage_base="/tmp/voice-a",
                 fallback_storage_kind=None,
                 fallback_storage_base=None,
-                voice_assets=[object(), object()],
             ),
         ]
-        mock_db.execute.side_effect = [user_result, policies_result]
+        counts_result = MagicMock()
+        counts_result.all.return_value = [
+            (policies_result.scalars.return_value.all.return_value[0].id, 2),
+        ]
+        mock_db.execute.side_effect = [user_result, policies_result, counts_result]
 
         response = await client.get(
             "/api/lexicon-ops/voice-storage/policies?source_reference=snapshot-001",
