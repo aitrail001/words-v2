@@ -32,8 +32,8 @@ export default function LexiconImportDbPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<LexiconImportResult | null>(null);
   const [job, setJob] = useState<LexiconJob | null>(null);
+  const [lastJob, setLastJob] = useState<LexiconJob | null>(null);
   const [loading, setLoading] = useState(false);
-  const autoStart = searchParam("autostart") === "1";
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -117,23 +117,15 @@ export default function LexiconImportDbPage() {
   }, [canRun, conflictMode, errorMode, inputPath, language, sourceReference]);
 
   useEffect(() => {
-    if (!autoStart || !inputPath.trim() || loading || result) {
-      return;
-    }
-    void execute("dry-run");
-  }, [autoStart, execute, inputPath, loading, result]);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
-    const persistedJobId =
-      window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY) ??
-      window.localStorage.getItem(LAST_JOB_STORAGE_KEY);
+    const persistedJobId = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
     if (!persistedJobId) return;
     void getLexiconJob(persistedJobId)
       .then((nextJob) => {
         setJob(nextJob);
         if (nextJob.status === "completed") {
           setResult(importResultFromJob(nextJob));
+          window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
         }
       })
       .catch(() => {
@@ -141,6 +133,19 @@ export default function LexiconImportDbPage() {
         window.localStorage.removeItem(LAST_JOB_STORAGE_KEY);
       });
   }, [importResultFromJob]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const persistedJobId = window.localStorage.getItem(LAST_JOB_STORAGE_KEY);
+    if (!persistedJobId) return;
+    void getLexiconJob(persistedJobId)
+      .then((nextJob) => {
+        setLastJob(nextJob);
+      })
+      .catch(() => {
+        window.localStorage.removeItem(LAST_JOB_STORAGE_KEY);
+      });
+  }, []);
 
   useEffect(() => {
     if (!job || job.status === "completed" || job.status === "failed") {
@@ -186,10 +191,13 @@ export default function LexiconImportDbPage() {
           <div>
             <h3 className="text-2xl font-semibold text-gray-900">Lexicon Import to Final DB</h3>
             <p className="mt-1 max-w-3xl text-sm text-gray-600">
-              Dry-run or execute the final `import-db` write step using an approved compiled artifact.
+              Run a manual dry run to validate importability, then execute the final `import-db` write step when ready.
             </p>
             <p className="mt-2 max-w-3xl text-sm text-gray-600">
               Use reviewed/approved.jsonl from Compiled Review export or JSONL Review materialize, not the raw words.enriched.jsonl artifact unless you are intentionally bypassing review.
+            </p>
+            <p className="mt-2 max-w-3xl text-sm text-gray-600">
+              Dry run checks import-blocking validation and importability issues before any write path starts. Import runs the same preflight again before SQL writes.
             </p>
             <p className="mt-2 max-w-3xl text-sm text-gray-600">
               Imports run in the backend. If you browse away and come back in the same browser session, this page reconnects to the active import job.
@@ -325,6 +333,41 @@ export default function LexiconImportDbPage() {
               </p>
             </div>
           </div>
+        </section>
+      ) : null}
+
+      {lastJob ? (
+        <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm" data-testid="lexicon-import-db-last-job">
+          <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Last job</h4>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <div className="rounded border border-gray-200 p-3">
+              <p className="text-gray-500">Status</p>
+              <p className="font-medium">{lastJob.status}</p>
+            </div>
+            <div className="rounded border border-gray-200 p-3">
+              <p className="text-gray-500">Done</p>
+              <p className="font-medium">{lastJob.progress_completed}</p>
+            </div>
+            <div className="rounded border border-gray-200 p-3">
+              <p className="text-gray-500">Total</p>
+              <p className="font-medium">{lastJob.progress_total}</p>
+            </div>
+            <div className="rounded border border-gray-200 p-3">
+              <p className="text-gray-500">Input</p>
+              <p className="truncate font-medium" title={String(lastJob.request_payload.input_path ?? "")}>
+                {String(lastJob.request_payload.input_path ?? "").split("/").pop() || "—"}
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2 text-sm text-gray-700 md:grid-cols-2">
+            <p>Source reference: <span className="font-medium">{String(lastJob.request_payload.source_reference ?? "—")}</span></p>
+            <p>Conflict mode: <span className="font-medium">{String(lastJob.request_payload.conflict_mode ?? "—")}</span></p>
+            <p>Error mode: <span className="font-medium">{String(lastJob.request_payload.error_mode ?? "—")}</span></p>
+            <p>Current entry: <span className="font-medium">{lastJob.progress_current_label ?? "—"}</span></p>
+          </div>
+          {lastJob.error_message ? (
+            <p className="mt-4 text-sm text-rose-700">{lastJob.error_message}</p>
+          ) : null}
         </section>
       ) : null}
 

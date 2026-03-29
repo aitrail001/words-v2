@@ -621,7 +621,6 @@ export default function LexiconOpsPage() {
                     onClick={() => openWorkflow("/lexicon/import-db", {
                       inputPath: importArtifactPath || importPath,
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
-                      autostart: "1",
                     })}
                   >
                     Open Import DB
