@@ -38,6 +38,7 @@ Legacy sense-selection and staged-selection review flows are removed from the su
   - reads `lexemes.jsonl` and optional `phrases.jsonl`
   - writes `words.enriched.jsonl`
   - keeps `enrich.checkpoint.jsonl`, `enrich.decisions.jsonl`, `enrich.failures.jsonl`
+  - supports `--resume`, `--skip-failed`, and `--retry-failed-only` for operator reruns
 - `.venv-lexicon/bin/python -m tools.lexicon.cli validate --snapshot-dir ...`
   - validates snapshot inputs and outputs
 - `.venv-lexicon/bin/python -m tools.lexicon.cli validate --compiled-input ...`
@@ -104,6 +105,8 @@ The active pipeline no longer relies on `senses.jsonl`, `concepts.jsonl`, `selec
 .venv-lexicon/bin/python -m tools.lexicon.cli adjudicate-forms --input data/lexicon/snapshots/demo/ambiguous_forms.jsonl --output data/lexicon/snapshots/demo/form_adjudications.jsonl --provider-mode placeholder
 .venv-lexicon/bin/python -m tools.lexicon.cli build-base close light play --adjudications data/lexicon/snapshots/demo/form_adjudications.jsonl --output-dir data/lexicon/snapshots/demo-adjudicated
 .venv-lexicon/bin/python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --max-concurrency 4 --resume
+.venv-lexicon/bin/python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --max-concurrency 4 --resume --skip-failed
+.venv-lexicon/bin/python -m tools.lexicon.cli enrich --snapshot-dir data/lexicon/snapshots/demo --provider-mode auto --max-concurrency 4 --resume --retry-failed-only
 .venv-lexicon/bin/python -m tools.lexicon.cli validate --snapshot-dir data/lexicon/snapshots/demo
 .venv-lexicon/bin/python -m tools.lexicon.cli import-db --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --dry-run
 .venv-lexicon/bin/python -m tools.lexicon.cli voice-generate --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --output-dir data/lexicon/voice/demo --provider google --family neural2 --locales en-US en-GB
@@ -135,6 +138,13 @@ python3 -m tools.lexicon.cli smoke-openai-compatible --output-dir /tmp/lexicon-o
 python3 -m tools.lexicon.cli smoke-openai-compatible --output-dir /tmp/lexicon-openai-smoke --provider-mode openai_compatible --max-words 1 run
 python3 -m tools.lexicon.cli smoke-openai-compatible --output-dir /tmp/lexicon-openai-smoke --provider-mode openai_compatible_node --max-words 1 run
 ```
+
+## Enrich resume options
+
+- `--resume`: skip lexemes already recorded in `enrich.checkpoint.jsonl` and retry unresolved failures by default
+- `--resume --skip-failed`: skip unresolved failed lexemes derived from `enrich.failures.jsonl - enrich.checkpoint.jsonl`
+- `--resume --retry-failed-only`: run only unresolved failed lexemes, deduped by `lexeme_id`
+- `enrich.failures.jsonl` remains append-only history; a later success is recognized from the checkpoint ledger rather than by deleting prior failure rows
 
 ## Voice generation
 

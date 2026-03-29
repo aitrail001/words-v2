@@ -58,6 +58,13 @@ _WORD_SENSE_KINDS = {"standard_meaning", "base_form_reference", "special_meaning
 _DEFAULT_RUNTIME_LOG_FILE = "enrich.log"
 
 
+def _validate_resume_mode_flags(*, resume: bool, retry_failed_only: bool, skip_failed: bool) -> None:
+    if retry_failed_only and skip_failed:
+        raise ValueError('retry_failed_only and skip_failed cannot be used together')
+    if (retry_failed_only or skip_failed) and not resume:
+        raise ValueError('retry_failed_only and skip_failed require resume=True')
+
+
 @dataclass(frozen=True)
 class EnrichmentRunResult:
     output_path: Path
@@ -2117,6 +2124,14 @@ def _load_completed_lexeme_ids(checkpoint_path: Path) -> set[str]:
     return completed
 
 
+def _load_failed_lexeme_ids(failures_path: Path) -> set[str]:
+    return {
+        str(row['lexeme_id'])
+        for row in _read_jsonl_if_exists(failures_path)
+        if str(row.get('status') or '') == 'failed' and row.get('lexeme_id')
+    }
+
+
 def _load_existing_output_rows(output_path: Path) -> list[dict[str, Any]]:
     if not output_path.exists():
         return []
@@ -2293,6 +2308,8 @@ def enrich_snapshot(
     mode: str = 'per_word',
     max_concurrency: int = 1,
     resume: bool = False,
+    retry_failed_only: bool = False,
+    skip_failed: bool = False,
     checkpoint_path: Path | None = None,
     failures_output: Path | None = None,
     max_failures: int | None = None,
@@ -2305,6 +2322,7 @@ def enrich_snapshot(
 ) -> list[EnrichmentRecord]:
     if mode != 'per_word':
         raise ValueError(f'Unsupported enrichment mode: {mode}')
+    _validate_resume_mode_flags(resume=resume, retry_failed_only=retry_failed_only, skip_failed=skip_failed)
     effective_settings = settings or LexiconSettings.from_env()
     effective_generated_at = generated_at or _utc_now()
     effective_generation_run_id = generation_run_id or f'enrich-{effective_generated_at}'
@@ -2359,6 +2377,9 @@ def enrich_snapshot(
     }
     lexeme_id_by_entry_id = {lexeme.entry_id: lexeme.lexeme_id for lexeme in ordered_lexemes}
     completed_lexeme_ids = _load_completed_lexeme_ids(checkpoint_destination) if resume else set()
+    load_failed_lexeme_ids = resume and (retry_failed_only or skip_failed)
+    failed_lexeme_ids = _load_failed_lexeme_ids(failures_destination) if load_failed_lexeme_ids else set()
+    unresolved_failed_lexeme_ids = failed_lexeme_ids - completed_lexeme_ids
     completed_count_before_run = len(completed_lexeme_ids)
     if resume:
         _reconcile_resumable_output(
@@ -2370,7 +2391,16 @@ def enrich_snapshot(
             decisions_destination,
             completed_lexeme_ids=completed_lexeme_ids,
         )
-    pending_lexemes = [lexeme for lexeme in ordered_lexemes if lexeme.lexeme_id not in completed_lexeme_ids]
+    if resume and retry_failed_only:
+        pending_lexemes = [lexeme for lexeme in ordered_lexemes if lexeme.lexeme_id in unresolved_failed_lexeme_ids]
+    elif resume and skip_failed:
+        pending_lexemes = [
+            lexeme
+            for lexeme in ordered_lexemes
+            if lexeme.lexeme_id not in completed_lexeme_ids and lexeme.lexeme_id not in unresolved_failed_lexeme_ids
+        ]
+    else:
+        pending_lexemes = [lexeme for lexeme in ordered_lexemes if lexeme.lexeme_id not in completed_lexeme_ids]
     if not resume:
         write_jsonl(destination, [])
         write_jsonl(checkpoint_destination, [])
@@ -2533,6 +2563,8 @@ def run_enrichment(
     mode: str = 'per_word',
     max_concurrency: int = 1,
     resume: bool = False,
+    retry_failed_only: bool = False,
+    skip_failed: bool = False,
     checkpoint_path: Path | None = None,
     failures_output: Path | None = None,
     max_failures: int | None = None,
@@ -2545,6 +2577,7 @@ def run_enrichment(
 ) -> EnrichmentRunResult:
     if mode != 'per_word':
         raise ValueError(f'Unsupported enrichment mode: {mode}')
+    _validate_resume_mode_flags(resume=resume, retry_failed_only=retry_failed_only, skip_failed=skip_failed)
     destination = output_path or snapshot_dir / 'words.enriched.jsonl'
     lexemes, _ = read_snapshot_inputs(snapshot_dir)
     enrichments = enrich_snapshot(
@@ -2562,6 +2595,8 @@ def run_enrichment(
         mode=mode,
         max_concurrency=max_concurrency,
         resume=resume,
+        retry_failed_only=retry_failed_only,
+        skip_failed=skip_failed,
         checkpoint_path=checkpoint_path,
         failures_output=failures_output,
         max_failures=max_failures,

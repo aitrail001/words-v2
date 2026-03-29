@@ -374,6 +374,47 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["enrichment_count"], 1)
             mocked_enrich.assert_called_once()
 
+    def test_enrich_command_rejects_retry_failed_only_without_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            code, _, stderr = self.run_cli([
+                "enrich",
+                "--snapshot-dir",
+                str(snapshot_dir),
+                "--retry-failed-only",
+            ])
+
+        self.assertEqual(code, 2)
+        self.assertIn("--retry-failed-only requires --resume", stderr)
+
+    def test_enrich_command_rejects_skip_failed_without_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            code, _, stderr = self.run_cli([
+                "enrich",
+                "--snapshot-dir",
+                str(snapshot_dir),
+                "--skip-failed",
+            ])
+
+        self.assertEqual(code, 2)
+        self.assertIn("--skip-failed requires --resume", stderr)
+
+    def test_enrich_command_rejects_retry_failed_only_with_skip_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            code, _, stderr = self.run_cli([
+                "enrich",
+                "--snapshot-dir",
+                str(snapshot_dir),
+                "--resume",
+                "--retry-failed-only",
+                "--skip-failed",
+            ])
+
+        self.assertEqual(code, 2)
+        self.assertIn("--retry-failed-only and --skip-failed cannot be combined", stderr)
+
     def test_enrich_command_passes_provider_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -472,6 +513,40 @@ class CliTests(unittest.TestCase):
             self.assertEqual(mocked_enrich.call_args.kwargs["max_failures"], 3)
             self.assertEqual(mocked_enrich.call_args.kwargs["request_delay_seconds"], 1.5)
             self.assertEqual(mocked_enrich.call_args.kwargs["max_new_completed_lexemes"], 250)
+
+    def test_enrich_command_forwards_retry_failed_only_when_resuming(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")) as mocked_enrich:
+                code, stdout, _ = self.run_cli([
+                    "enrich",
+                    "--snapshot-dir",
+                    str(snapshot_dir),
+                    "--resume",
+                    "--retry-failed-only",
+                ])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["command"], "enrich")
+        self.assertTrue(mocked_enrich.call_args.kwargs["retry_failed_only"])
+
+    def test_enrich_command_forwards_skip_failed_when_resuming(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            with patch("tools.lexicon.cli.run_enrichment", return_value=EnrichmentRunResult(output_path=snapshot_dir / "words.enriched.jsonl", enrichments=[object()], mode="per_word")) as mocked_enrich:
+                code, stdout, _ = self.run_cli([
+                    "enrich",
+                    "--snapshot-dir",
+                    str(snapshot_dir),
+                    "--resume",
+                    "--skip-failed",
+                ])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["command"], "enrich")
+        self.assertTrue(mocked_enrich.call_args.kwargs["skip_failed"])
 
     def test_enrich_command_rejects_removed_mode_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
