@@ -14,6 +14,7 @@ from tools.lexicon.import_db import (
     _increment,
     _iter_row_batches,
     _rebuild_learner_catalog_projection,
+    _summary_has_material_changes,
     import_compiled_rows,
     iter_compiled_rows,
 )
@@ -156,7 +157,7 @@ def run_staging_import_file(
                 completed_other_rows += len(batch)
                 session.commit()
 
-        if aggregate_summary != ImportSummary():
+        if _summary_has_material_changes(aggregate_summary):
             (
                 word_model,
                 _meaning_model,

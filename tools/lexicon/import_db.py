@@ -228,6 +228,14 @@ def _increment(summary: ImportSummary, **changes: int) -> ImportSummary:
     return replace(summary, **values)
 
 
+def _summary_has_material_changes(summary: ImportSummary) -> bool:
+    return any(
+        value
+        for key, value in summary.__dict__.items()
+        if not key.startswith("skipped_")
+    )
+
+
 def _replace_collection(parent: Any, attribute: str, items: list[Any]) -> None:
     collection = getattr(parent, attribute, None)
     if isinstance(collection, list):
@@ -1415,9 +1423,9 @@ def import_compiled_rows(
                 else:
                     if hasattr(enrichment_job, "status"):
                         enrichment_job.status = "completed"
+                    summary = _increment(summary, reused_enrichment_jobs=1)
                 if hasattr(enrichment_job, "completed_at"):
                     enrichment_job.completed_at = _parse_timestamp(row.get("generated_at"))
-                summary = _increment(summary, reused_enrichment_jobs=1)
 
             if enrichment_job is not None and lexicon_enrichment_run_model is not None:
                 for sense in row.get("senses") or []:
@@ -1827,7 +1835,7 @@ def run_import_file(
             aggregate_summary = _increment(aggregate_summary, **batch_summary.__dict__)
             completed_rows += len(batch)
             session.commit()
-        if aggregate_summary != ImportSummary():
+        if _summary_has_material_changes(aggregate_summary):
             (
                 word_model,
                 _meaning_model,
