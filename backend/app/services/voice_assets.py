@@ -36,6 +36,32 @@ async def load_word_voice_assets(
     return list(result.scalars().all())
 
 
+async def load_phrase_voice_assets(
+    db: AsyncSession,
+    *,
+    phrase_entry_id: uuid.UUID,
+    phrase_sense_ids: list[uuid.UUID],
+    phrase_example_ids: list[uuid.UUID],
+) -> list[LexiconVoiceAsset]:
+    clauses = [LexiconVoiceAsset.phrase_entry_id == phrase_entry_id]
+    if phrase_sense_ids:
+        clauses.append(LexiconVoiceAsset.phrase_sense_id.in_(phrase_sense_ids))
+    if phrase_example_ids:
+        clauses.append(LexiconVoiceAsset.phrase_sense_example_id.in_(phrase_example_ids))
+    result = await db.execute(
+        select(LexiconVoiceAsset)
+        .options(selectinload(LexiconVoiceAsset.storage_policy))
+        .where(or_(*clauses))
+        .order_by(
+            LexiconVoiceAsset.content_scope.asc(),
+            LexiconVoiceAsset.locale.asc(),
+            LexiconVoiceAsset.voice_role.asc(),
+            LexiconVoiceAsset.profile_key.asc(),
+        )
+    )
+    return list(result.scalars().all())
+
+
 def build_voice_asset_playback_url(asset: LexiconVoiceAsset) -> str:
     return f"/api/words/voice-assets/{asset.id}/content"
 

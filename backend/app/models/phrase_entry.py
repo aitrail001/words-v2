@@ -9,6 +9,7 @@ from app.core.database import Base
 from app.models.schema_names import lexicon_table_args
 
 if TYPE_CHECKING:
+    from app.models.lexicon_voice_asset import LexiconVoiceAsset
     from app.models.phrase_sense import PhraseSense
 
 
@@ -39,6 +40,13 @@ class PhraseEntry(Base):
         back_populates="phrase_entry",
         cascade="all, delete-orphan",
         order_by="PhraseSense.order_index",
+    )
+    voice_assets: Mapped[list["LexiconVoiceAsset"]] = relationship(
+        "LexiconVoiceAsset",
+        back_populates="phrase_entry",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="LexiconVoiceAsset.created_at.asc()",
     )
 
     __table_args__ = lexicon_table_args(

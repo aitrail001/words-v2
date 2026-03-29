@@ -179,6 +179,7 @@ Current defaults:
 - provider: `google`
 - family: `neural2`
 - locales: `en-US`, `en-GB`
+- supports reviewed `entry_type: word` and `entry_type: phrase` rows
 - both `female` and `male` variants generated for each `word`, `definition`, and `example`
 - default Google voices:
   - `en-US`: female `en-US-Neural2-C`, male `en-US-Neural2-D`
@@ -210,6 +211,7 @@ Outputs:
 - `voice_manifest.jsonl` = successful generated assets and metadata
 - `voice_errors.jsonl` = failed work units and error details
 - audio files under the selected `--output-dir`, organized by provider/family/locale
+- structured console progress, including startup config, planning counts, periodic progress snapshots, concise failure lines, and completion totals
 
 Notes:
 
@@ -231,10 +233,10 @@ After `import-db` has loaded the reviewed learner rows, import the generated voi
 Behavior:
 
 - loads normalized voice metadata into `lexicon_voice_assets`
-- links rows to imported words, meanings, and examples
+- links rows to imported words, meanings, examples, phrases, phrase senses, and phrase examples
 - preserves `relative_path` on each asset and assigns each asset to a shared DB storage policy so playback can resolve through primary and optional fallback storage directly from the policy
 - backend playback resolves through `/api/words/voice-assets/{asset_id}/content`
-- admin DB Inspector shows imported voice assets per word detail, including the runtime playback route and the primary resolved storage target
+- admin DB Inspector shows imported voice assets on both word and phrase detail, including the runtime playback route and the primary resolved storage target
 - admin Lexicon Voice includes the voice-storage rewrite panel with both Dry Run and Apply actions for repointing imported assets after a cloud copy
 - the Lexicon Voice page shows the latest rewrite result summary, including matched count, updated count, primary storage, and fallback storage
 - the Lexicon Voice page shows the current persisted storage policies from the DB directly

@@ -4,8 +4,10 @@ import uuid
 import app.models as model_registry
 from app.core.database import Base
 from app.models.user import User
+from app.models.lexicon_voice_asset import LexiconVoiceAsset
 from app.models.phrase_entry import PhraseEntry
 from app.models.phrase_sense import PhraseSense
+from app.models.phrase_sense_example import PhraseSenseExample
 from app.models.word import Word
 from app.models.meaning import Meaning
 from app.models.lexicon_job import LexiconJob
@@ -108,6 +110,19 @@ class TestPhraseEntryModel:
         assert "lexicon.phrase_sense_examples" in Base.metadata.tables
         assert "lexicon.phrase_sense_example_localizations" in Base.metadata.tables
 
+    def test_phrase_models_register_voice_asset_relationships(self):
+        entry = PhraseEntry(
+            phrase_text="take off",
+            normalized_form="take off",
+            phrase_kind="phrasal_verb",
+        )
+        sense = PhraseSense(phrase_entry_id=uuid.uuid4(), definition="to depart")
+        example = PhraseSenseExample(phrase_sense_id=uuid.uuid4(), sentence="The plane will take off.")
+
+        assert entry.voice_assets == []
+        assert sense.voice_assets == []
+        assert example.voice_assets == []
+
 
 class TestPhraseSenseModel:
     def test_phrase_sense_exposes_normalized_metadata_fields(self):
@@ -133,6 +148,70 @@ class TestPhraseSenseModel:
         assert sense.synonyms == ["depart"]
         assert sense.antonyms == ["land"]
         assert sense.collocations == ["take off quickly"]
+
+
+class TestLexiconVoiceAssetModel:
+    def test_voice_asset_supports_phrase_ownership_fields(self):
+        policy_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        sense_id = uuid.uuid4()
+        example_id = uuid.uuid4()
+
+        entry_asset = LexiconVoiceAsset(
+            phrase_entry_id=entry_id,
+            storage_policy_id=policy_id,
+            content_scope="word",
+            locale="en-US",
+            voice_role="female",
+            provider="google",
+            family="neural2",
+            voice_id="en-US-Neural2-C",
+            profile_key="word",
+            audio_format="mp3",
+            relative_path="phrase_take_off/word/en_us/example.mp3",
+            source_text="take off",
+            source_text_hash="hash-1",
+        )
+        sense_asset = LexiconVoiceAsset(
+            phrase_sense_id=sense_id,
+            storage_policy_id=policy_id,
+            content_scope="definition",
+            locale="en-US",
+            voice_role="female",
+            provider="google",
+            family="neural2",
+            voice_id="en-US-Neural2-C",
+            profile_key="definition",
+            audio_format="mp3",
+            relative_path="phrase_take_off/meaning/take_off.v.01/definition/en_us/example.mp3",
+            source_text="to depart",
+            source_text_hash="hash-2",
+        )
+        example_asset = LexiconVoiceAsset(
+            phrase_sense_example_id=example_id,
+            storage_policy_id=policy_id,
+            content_scope="example",
+            locale="en-US",
+            voice_role="female",
+            provider="google",
+            family="neural2",
+            voice_id="en-US-Neural2-C",
+            profile_key="example",
+            audio_format="mp3",
+            relative_path="phrase_take_off/meaning/take_off.v.01/example-0/en_us/example.mp3",
+            source_text="The plane will take off.",
+            source_text_hash="hash-3",
+        )
+
+        assert entry_asset.phrase_entry_id == entry_id
+        assert sense_asset.phrase_sense_id == sense_id
+        assert example_asset.phrase_sense_example_id == example_id
+
+    def test_voice_asset_table_registers_phrase_ownership_columns(self):
+        columns = LexiconVoiceAsset.__table__.columns.keys()
+        assert "phrase_entry_id" in columns
+        assert "phrase_sense_id" in columns
+        assert "phrase_sense_example_id" in columns
 
 
 class TestMeaningModel:

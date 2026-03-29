@@ -20,6 +20,8 @@ from app.models.learner_catalog_entry import LearnerCatalogEntry
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.phrase_entry import PhraseEntry
+from app.models.phrase_sense import PhraseSense
+from app.models.phrase_sense_example import PhraseSenseExample
 from app.models.reference_entry import ReferenceEntry
 from app.models.reference_localization import ReferenceLocalization
 from app.models.translation import Translation
@@ -32,7 +34,7 @@ from app.services.knowledge_map import (
     normalize_word_forms,
     normalize_word_part_of_speech,
 )
-from app.services.voice_assets import build_voice_asset_playback_url, load_word_voice_assets
+from app.services.voice_assets import build_voice_asset_playback_url, load_phrase_voice_assets, load_word_voice_assets
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -191,6 +193,7 @@ class LexiconInspectorPhraseDetail(BaseModel):
     seed_metadata: dict | None
     compiled_payload: dict | None
     senses: list[InspectorPhraseSenseResponse]
+    voice_assets: list[InspectorVoiceAssetResponse]
     created_at: str | None
 
 
@@ -798,6 +801,25 @@ async def get_phrase_inspector_detail(
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lexicon inspector entry not found")
 
+    phrase_senses_result = await db.execute(
+        select(PhraseSense.id).where(PhraseSense.phrase_entry_id == entry_id).order_by(PhraseSense.order_index.asc())
+    )
+    phrase_sense_ids = list(phrase_senses_result.scalars().all())
+    phrase_example_ids: list[uuid.UUID] = []
+    if phrase_sense_ids:
+        phrase_examples_result = await db.execute(
+            select(PhraseSenseExample.id)
+            .where(PhraseSenseExample.phrase_sense_id.in_(phrase_sense_ids))
+            .order_by(PhraseSenseExample.phrase_sense_id.asc(), PhraseSenseExample.order_index.asc())
+        )
+        phrase_example_ids = list(phrase_examples_result.scalars().all())
+    voice_assets = await load_phrase_voice_assets(
+        db,
+        phrase_entry_id=entry.id,
+        phrase_sense_ids=phrase_sense_ids,
+        phrase_example_ids=phrase_example_ids,
+    )
+
     payload = _as_object(entry.compiled_payload)
     senses: list[InspectorPhraseSenseResponse] = []
     for sense_index, raw_sense in enumerate(_as_list(payload.get("senses")), start=1):
@@ -851,6 +873,7 @@ async def get_phrase_inspector_detail(
         seed_metadata=entry.seed_metadata,
         compiled_payload=entry.compiled_payload,
         senses=senses,
+        voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
         created_at=_created_iso(entry.created_at),
     )
     metrics = finalize_request_db_metrics(

@@ -12,6 +12,8 @@ from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.meaning_metadata import MeaningMetadata
 from app.models.phrase_entry import PhraseEntry
+from app.models.phrase_sense import PhraseSense
+from app.models.phrase_sense_example import PhraseSenseExample
 from app.models.reference_entry import ReferenceEntry
 from app.models.reference_localization import ReferenceLocalization
 from app.models.translation import Translation
@@ -156,7 +158,106 @@ class TestLexiconInspectorApi:
         )
         phrase_result = MagicMock()
         phrase_result.scalar_one_or_none.return_value = phrase
-        mock_db.execute.side_effect = [user_result, phrase_result]
+        phrase_sense = PhraseSense(
+            id=uuid.uuid4(),
+            phrase_entry_id=phrase.id,
+            definition="good luck",
+            part_of_speech="phrase",
+            order_index=0,
+        )
+        phrase_example = PhraseSenseExample(
+            id=uuid.uuid4(),
+            phrase_sense_id=phrase_sense.id,
+            sentence="Break a leg tonight.",
+            order_index=0,
+        )
+        storage_policy = LexiconVoiceStoragePolicy(
+            id=uuid.uuid4(),
+            policy_key="word_default",
+            source_reference="global",
+            content_scope="word",
+            provider="default",
+            family="default",
+            locale="all",
+            primary_storage_kind="local",
+            primary_storage_base="/tmp/voice",
+            fallback_storage_kind=None,
+            fallback_storage_base=None,
+        )
+        phrase_voice_asset = LexiconVoiceAsset(
+            id=uuid.uuid4(),
+            phrase_entry_id=phrase.id,
+            storage_policy_id=storage_policy.id,
+            storage_policy=storage_policy,
+            content_scope="word",
+            locale="en-GB",
+            voice_role="female",
+            provider="google",
+            family="neural2",
+            voice_id="en-GB-Neural2-F",
+            profile_key="word",
+            audio_format="mp3",
+            mime_type="audio/mpeg",
+            relative_path="phrase_break_a_leg/word/en_gb/female-word-123.mp3",
+            source_text="break a leg",
+            source_text_hash="voice-hash",
+            status="generated",
+        )
+        phrase_definition_asset = LexiconVoiceAsset(
+            id=uuid.uuid4(),
+            phrase_sense_id=phrase_sense.id,
+            storage_policy_id=storage_policy.id,
+            storage_policy=storage_policy,
+            content_scope="definition",
+            locale="en-GB",
+            voice_role="male",
+            provider="google",
+            family="neural2",
+            voice_id="en-GB-Neural2-B",
+            profile_key="definition",
+            audio_format="mp3",
+            mime_type="audio/mpeg",
+            relative_path="phrase_break_a_leg/definition/en_gb/male-definition-123.mp3",
+            source_text="good luck",
+            source_text_hash="voice-hash-2",
+            status="generated",
+        )
+        phrase_example_asset = LexiconVoiceAsset(
+            id=uuid.uuid4(),
+            phrase_sense_example_id=phrase_example.id,
+            storage_policy_id=storage_policy.id,
+            storage_policy=storage_policy,
+            content_scope="example",
+            locale="en-US",
+            voice_role="female",
+            provider="google",
+            family="neural2",
+            voice_id="en-US-Neural2-C",
+            profile_key="example",
+            audio_format="mp3",
+            mime_type="audio/mpeg",
+            relative_path="phrase_break_a_leg/example/en_us/female-example-123.mp3",
+            source_text="Break a leg tonight.",
+            source_text_hash="voice-hash-3",
+            status="generated",
+        )
+        phrase_senses_result = MagicMock()
+        phrase_senses_result.scalars.return_value.all.return_value = [phrase_sense.id]
+        phrase_examples_result = MagicMock()
+        phrase_examples_result.scalars.return_value.all.return_value = [phrase_example.id]
+        voice_assets_result = MagicMock()
+        voice_assets_result.scalars.return_value.all.return_value = [
+            phrase_definition_asset,
+            phrase_example_asset,
+            phrase_voice_asset,
+        ]
+        mock_db.execute.side_effect = [
+            user_result,
+            phrase_result,
+            phrase_senses_result,
+            phrase_examples_result,
+            voice_assets_result,
+        ]
 
         response = await client.get(
           f"/api/lexicon-inspector/entries/phrase/{phrase.id}",
@@ -175,6 +276,8 @@ class TestLexiconInspectorApi:
         assert data["senses"][0]["examples"][0]["sentence"] == "Break a leg tonight."
         assert data["senses"][0]["translations"][0]["locale"] == "es"
         assert data["senses"][0]["translations"][0]["definition"] == "buena suerte"
+        assert len(data["voice_assets"]) == 3
+        assert data["voice_assets"][0]["playback_url"].startswith("/api/words/voice-assets/")
 
     @pytest.mark.asyncio
     async def test_word_detail_returns_rich_top_level_and_meaning_payload(self, client, mock_db):

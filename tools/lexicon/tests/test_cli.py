@@ -74,6 +74,61 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("cannot be combined", stderr)
 
+    def test_voice_generate_emits_runtime_progress_events(self) -> None:
+        def fake_run_voice_generation(**kwargs):
+            progress_callback = kwargs["progress_callback"]
+            progress_callback(
+                "voice-generate-start",
+                message="Voice generation started",
+                input="approved.jsonl",
+                output_dir="voice-out",
+            )
+            progress_callback(
+                "voice-generate-plan",
+                message="Voice generation planned",
+                planned_count=6,
+                eligible_word_count=1,
+                eligible_phrase_count=0,
+            )
+            progress_callback(
+                "voice-generate-complete",
+                message="Voice generation complete",
+                planned_count=6,
+                generated_count=6,
+                failed_count=0,
+            )
+            return {
+                "planned_count": 6,
+                "scheduled_count": 6,
+                "generated_count": 6,
+                "existing_count": 0,
+                "failed_count": 0,
+                "skipped_completed_count": 0,
+                "skipped_failed_count": 0,
+                "retried_failed_count": 0,
+                "manifest_path": "voice-out/voice_manifest.jsonl",
+                "errors_path": "voice-out/voice_errors.jsonl",
+                "plan_path": "voice-out/voice_plan.jsonl",
+            }
+
+        with patch("tools.lexicon.cli.run_voice_generation", side_effect=fake_run_voice_generation):
+            code, stdout, stderr = self.run_cli([
+                "voice-generate",
+                "--input",
+                "approved.jsonl",
+                "--output-dir",
+                "voice-out",
+                "--locales",
+                "en-US",
+            ])
+
+        self.assertEqual(code, 0)
+        self.assertIn("voice-generate-start", stderr)
+        self.assertIn("voice-generate-plan", stderr)
+        self.assertIn("voice-generate-complete", stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["planned_count"], 6)
+
     def test_voice_sync_storage_dry_run_emits_summary(self) -> None:
         with patch("tools.lexicon.cli.run_voice_storage_sync", return_value={
             "matched_count": 6,

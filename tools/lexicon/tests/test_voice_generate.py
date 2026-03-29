@@ -51,6 +51,89 @@ class VoiceGenerateTests(unittest.TestCase):
         self.assertEqual(uk_male_definition.voice_id, "en-GB-Neural2-B")
         self.assertIn("word_bank/word/en_us", us_female_word.relative_path)
 
+    def test_plan_voice_work_units_supports_phrase_rows(self) -> None:
+        rows = [
+            {
+                "entry_id": "phrase_take_off",
+                "entry_type": "phrase",
+                "word": "take off",
+                "language": "en",
+                "source_reference": "phrases-001",
+                "senses": [
+                    {
+                        "sense_id": "take_off.v.01",
+                        "definition": "to leave the ground in an aircraft",
+                        "examples": [{"sentence": "The plane will take off at noon."}],
+                    }
+                ],
+            }
+        ]
+
+        units = plan_voice_work_units(
+            rows,
+            provider="google",
+            family="neural2",
+            locales=["en-US"],
+            audio_format="mp3",
+            storage_kind="local",
+            storage_base="/tmp/voice",
+        )
+
+        self.assertEqual(len(units), 6)
+        phrase_word = next(unit for unit in units if unit.content_scope == "word" and unit.voice_role == "female")
+        phrase_definition = next(unit for unit in units if unit.content_scope == "definition" and unit.voice_role == "female")
+        phrase_example = next(unit for unit in units if unit.content_scope == "example" and unit.voice_role == "female")
+        self.assertEqual(phrase_word.source_text, "take off")
+        self.assertEqual(phrase_definition.source_text, "to leave the ground in an aircraft")
+        self.assertEqual(phrase_example.source_text, "The plane will take off at noon.")
+        self.assertIn("phrase_take_off/word/en_us", phrase_word.relative_path)
+
+    def test_plan_voice_work_units_supports_mixed_word_and_phrase_rows(self) -> None:
+        rows = [
+            {
+                "entry_id": "word_bank",
+                "entry_type": "word",
+                "word": "bank",
+                "language": "en",
+                "source_reference": "snapshot-001",
+                "senses": [
+                    {
+                        "sense_id": "bank.n.01",
+                        "definition": "a financial institution",
+                        "examples": [{"sentence": "She went to the bank."}],
+                    }
+                ],
+            },
+            {
+                "entry_id": "phrase_take_off",
+                "entry_type": "phrase",
+                "word": "take off",
+                "language": "en",
+                "source_reference": "phrases-001",
+                "senses": [
+                    {
+                        "sense_id": "take_off.v.01",
+                        "definition": "to leave the ground in an aircraft",
+                        "examples": [{"sentence": "The plane will take off at noon."}],
+                    }
+                ],
+            },
+        ]
+
+        units = plan_voice_work_units(
+            rows,
+            provider="google",
+            family="neural2",
+            locales=["en-US"],
+            audio_format="mp3",
+            storage_kind="local",
+            storage_base="/tmp/voice",
+        )
+
+        self.assertEqual(len(units), 12)
+        entry_ids = {unit.entry_id for unit in units}
+        self.assertEqual(entry_ids, {"word_bank", "phrase_take_off"})
+
     def test_run_voice_generation_writes_manifest_and_errors_without_stopping(self) -> None:
         approved_jsonl = """{"entry_id":"word_bank","entry_type":"word","word":"bank","language":"en","source_reference":"snapshot-001","senses":[{"sense_id":"bank.n.01","definition":"a financial institution","examples":[{"sentence":"She went to the bank."}]}]}\n"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -229,3 +312,76 @@ class VoiceGenerateTests(unittest.TestCase):
             self.assertEqual(resumed_summary["generated_count"], 0)
             self.assertEqual(resumed_summary["skipped_completed_count"], 5)
             self.assertEqual(resumed_summary["skipped_failed_count"], 1)
+
+    def test_run_voice_generation_emits_progress_events_for_phrases(self) -> None:
+        approved_jsonl = """{"entry_id":"phrase_take_off","entry_type":"phrase","word":"take off","language":"en","source_reference":"phrases-001","senses":[{"sense_id":"take_off.v.01","definition":"to leave the ground in an aircraft","examples":[{"sentence":"The plane will take off at noon."}]}]}\n"""
+        events: list[tuple[str, dict[str, object]]] = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "approved.jsonl"
+            output_dir = Path(tmpdir) / "voice"
+            input_path.write_text(approved_jsonl, encoding="utf-8")
+
+            summary = run_voice_generation(
+                input_path=input_path,
+                output_dir=output_dir,
+                locales=["en-US"],
+                max_concurrency=1,
+                synth_provider=FakeSynthProvider(),
+                progress_callback=lambda event, **fields: events.append((event, fields)),
+            )
+
+        self.assertEqual(summary["planned_count"], 6)
+        event_names = [event for event, _ in events]
+        self.assertIn("voice-generate-start", event_names)
+        self.assertIn("voice-generate-plan", event_names)
+        self.assertIn("voice-generate-progress", event_names)
+        self.assertIn("voice-generate-complete", event_names)
+        plan_event = next(fields for event, fields in events if event == "voice-generate-plan")
+        self.assertEqual(plan_event["eligible_phrase_count"], 1)
+        self.assertEqual(plan_event["planned_count"], 6)
+        self.assertEqual(plan_event["planned_scope_counts"], {"word": 2, "definition": 2, "example": 2})
+
+    def test_run_voice_generation_emits_failure_progress_events(self) -> None:
+        approved_jsonl = """{"entry_id":"word_bank","entry_type":"word","word":"bank","language":"en","source_reference":"snapshot-001","senses":[{"sense_id":"bank.n.01","definition":"a financial institution","examples":[{"sentence":"She went to the bank."}]}]}\n"""
+        events: list[tuple[str, dict[str, object]]] = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = Path(tmpdir) / "approved.jsonl"
+            output_dir = Path(tmpdir) / "voice"
+            input_path.write_text(approved_jsonl, encoding="utf-8")
+            planned_units = plan_voice_work_units(
+                [
+                    {
+                        "entry_id": "word_bank",
+                        "entry_type": "word",
+                        "word": "bank",
+                        "language": "en",
+                        "source_reference": "snapshot-001",
+                        "senses": [{"sense_id": "bank.n.01", "definition": "a financial institution", "examples": [{"sentence": "She went to the bank."}]}],
+                    }
+                ],
+                provider="google",
+                family="neural2",
+                locales=["en-US"],
+                audio_format="mp3",
+                storage_kind="local",
+                storage_base=str(output_dir),
+            )
+
+            summary = run_voice_generation(
+                input_path=input_path,
+                output_dir=output_dir,
+                locales=["en-US"],
+                max_concurrency=1,
+                synth_provider=FakeSynthProvider(failing_unit_id=planned_units[0].unit_id),
+                progress_callback=lambda event, **fields: events.append((event, fields)),
+            )
+
+        self.assertEqual(summary["failed_count"], 1)
+        failure_event = next(fields for event, fields in events if event == "voice-generate-unit-failed")
+        self.assertEqual(failure_event["unit_id"], planned_units[0].unit_id)
+        self.assertEqual(failure_event["word"], "bank")
+        self.assertEqual(failure_event["locale"], "en-US")
+        self.assertEqual(failure_event["voice_role"], planned_units[0].voice_role)
+        self.assertEqual(failure_event["error"], "boom")
