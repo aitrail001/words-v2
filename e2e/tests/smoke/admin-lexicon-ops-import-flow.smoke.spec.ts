@@ -99,6 +99,8 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   await expect(page.getByTestId("lexicon-import-db-input-path")).toHaveValue(new RegExp(`${snapshotName}/reviewed/approved\\.jsonl$`));
   await expect(page.getByTestId("lexicon-import-db-conflict-mode")).toHaveValue("upsert");
   await expect(page.getByTestId("lexicon-import-db-error-mode")).toHaveValue("continue");
+  await expect(page.getByText("Import dry-run complete.")).not.toBeVisible();
+  await expect(page.getByTestId("lexicon-import-db-summary-rows")).toHaveCount(0);
 
   await page.getByTestId("lexicon-import-db-dry-run-button").click();
   await expect(page.getByText("Import dry-run complete.")).toBeVisible();

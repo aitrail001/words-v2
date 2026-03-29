@@ -88,7 +88,7 @@ describe("LexiconImportDbPage", () => {
     window.history.pushState(
       {},
       "",
-      "/lexicon/import-db?inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fdemo%2Freviewed%2Fapproved.jsonl&sourceReference=lexicon-20260321-wordfreq&language=en&autostart=1",
+      "/lexicon/import-db?inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fdemo%2Freviewed%2Fapproved.jsonl&sourceReference=lexicon-20260321-wordfreq&language=en",
     );
     render(<LexiconImportDbPage />);
 
@@ -108,16 +108,7 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByText("Approved import input")).toBeInTheDocument();
     expect(screen.getAllByText("Decision ledger").length).toBeGreaterThan(0);
     expect(screen.getByPlaceholderText("data/lexicon/snapshots/.../reviewed/approved.jsonl")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(dryRunLexiconImport).toHaveBeenCalledWith({
-        inputPath: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-        sourceType: "lexicon_snapshot",
-        sourceReference: "lexicon-20260321-wordfreq",
-        language: "en",
-        conflictMode: "upsert",
-        errorMode: "continue",
-      }),
-    );
+    expect(dryRunLexiconImport).not.toHaveBeenCalled();
     await user.type(screen.getByTestId("lexicon-import-db-input-path"), "data/lexicon/snapshots/demo/words.enriched.jsonl");
     await user.click(screen.getByTestId("lexicon-import-db-dry-run-button"));
 
@@ -179,13 +170,14 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
   });
 
-  it("restores the last completed import job when the active key is gone", async () => {
+  it("shows the last completed import job in a separate section when there is no active key", async () => {
     window.localStorage.setItem("lexicon-import-db-last-job", "job-1");
     render(<LexiconImportDbPage />);
 
     await waitFor(() => expect(getLexiconJob).toHaveBeenCalledWith("job-1"));
-    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Done1"));
-    expect(screen.getByTestId("lexicon-import-db-summary-rows")).toHaveTextContent("Rows");
-    expect(screen.getByTestId("lexicon-import-db-summary-rows")).toHaveTextContent("1");
+    expect(screen.queryByTestId("lexicon-import-db-progress")).not.toBeInTheDocument();
+    expect(screen.getByTestId("lexicon-import-db-last-job")).toHaveTextContent("Last job");
+    expect(screen.getByTestId("lexicon-import-db-last-job")).toHaveTextContent("completed");
+    expect(screen.getByTestId("lexicon-import-db-last-job")).toHaveTextContent("approved.jsonl");
   });
 });

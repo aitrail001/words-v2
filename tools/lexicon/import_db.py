@@ -1844,6 +1844,61 @@ def _default_source_reference(path: str | Path) -> str:
     return source_path.stem or "compiled-lexicon"
 
 
+def _summarize_import_preflight_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = summarize_compiled_rows(rows)
+    sense_count = sum(len(row.get("senses") or []) for row in rows if str(row.get("entry_type") or "word") == "word")
+    example_count = sum(
+        len(sense.get("examples") or [])
+        for row in rows
+        if str(row.get("entry_type") or "word") == "word"
+        for sense in (row.get("senses") or [])
+    )
+    relation_count = sum(
+        len(sense.get("synonyms") or []) + len(sense.get("antonyms") or []) + len(sense.get("collocations") or [])
+        for row in rows
+        if str(row.get("entry_type") or "word") == "word"
+        for sense in (row.get("senses") or [])
+    )
+    return {
+        **counts,
+        "sense_count": sense_count,
+        "example_count": example_count,
+        "relation_count": relation_count,
+        "failed_rows": 0,
+        "dry_run": True,
+    }
+
+
+def _record_preflight_errors(errors: list[str], *, error_samples_sink: list[dict[str, Any]] | None = None) -> None:
+    if error_samples_sink is None:
+        return
+    for error in errors[:10]:
+        entry, separator, detail = error.partition(": ")
+        error_samples_sink.append(
+            {
+                "entry": entry if separator else "preflight",
+                "error": detail if separator else error,
+            }
+        )
+
+
+def run_import_preflight(
+    path: str | Path,
+    *,
+    source_reference: str | None = None,
+    rows: list[dict[str, Any]] | None = None,
+    error_samples_sink: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    resolved_rows = list(rows) if rows is not None else load_compiled_rows(path)
+    summary = _summarize_import_preflight_rows(resolved_rows)
+    preflight_errors: list[str] = []
+    if any(_should_preflight_validate_row(row) for row in resolved_rows):
+        preflight_errors = _preflight_validate_compiled_rows(resolved_rows)
+    _record_preflight_errors(preflight_errors, error_samples_sink=error_samples_sink)
+    summary["failed_rows"] = len(preflight_errors)
+    return summary
+
+
 def run_import_file(
     path: str | Path,
     *,
@@ -1876,6 +1931,16 @@ def run_import_file(
             on_conflict=on_conflict,
         )
 
+    resolved_rows = list(rows) if rows is not None else load_compiled_rows(path)
+    preflight_summary = run_import_preflight(
+        path,
+        source_reference=source_reference,
+        rows=resolved_rows,
+        error_samples_sink=error_samples_sink,
+    )
+    if dry_run:
+        return preflight_summary
+
     _ensure_backend_path()
     try:
         from sqlalchemy import create_engine
@@ -1887,35 +1952,11 @@ def run_import_file(
     settings = get_settings()
     engine = create_engine(settings.database_url_sync)
     effective_source_reference = source_reference or _default_source_reference(path)
-    resolved_rows = list(rows) if rows is not None else load_compiled_rows(path)
     if any(_should_preflight_validate_row(row) for row in resolved_rows):
         preflight_errors = _preflight_validate_compiled_rows(resolved_rows)
         if preflight_errors:
             raise RuntimeError("; ".join(preflight_errors))
     resolved_row_total = len(resolved_rows)
-    if dry_run:
-        counts = summarize_compiled_rows(resolved_rows)
-        sense_count = sum(len(row.get("senses") or []) for row in resolved_rows if str(row.get("entry_type") or "word") == "word")
-        example_count = sum(
-            len(sense.get("examples") or [])
-            for row in resolved_rows
-            if str(row.get("entry_type") or "word") == "word"
-            for sense in (row.get("senses") or [])
-        )
-        relation_count = sum(
-            len(sense.get("synonyms") or []) + len(sense.get("antonyms") or []) + len(sense.get("collocations") or [])
-            for row in resolved_rows
-            if str(row.get("entry_type") or "word") == "word"
-            for sense in (row.get("senses") or [])
-        )
-        return {
-            **counts,
-            "sense_count": sense_count,
-            "example_count": example_count,
-            "relation_count": relation_count,
-            "failed_rows": 0,
-            "dry_run": True,
-        }
     row_source = iter(resolved_rows)
     batch_size = commit_every_rows if commit_every_rows is not None and commit_every_rows > 0 else resolved_row_total or 1
     aggregate_summary = ImportSummary()
