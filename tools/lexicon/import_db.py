@@ -9,6 +9,7 @@ import json
 import sys
 import uuid
 from collections import Counter
+from contextlib import nullcontext
 
 from tools.lexicon.validate import validate_compiled_record
 
@@ -197,6 +198,7 @@ def _default_reference_models() -> tuple[type, type]:
 class ImportSummary:
     created_words: int = 0
     updated_words: int = 0
+    skipped_words: int = 0
     created_meanings: int = 0
     updated_meanings: int = 0
     created_examples: int = 0
@@ -211,8 +213,10 @@ class ImportSummary:
     reused_enrichment_runs: int = 0
     created_phrases: int = 0
     updated_phrases: int = 0
+    skipped_phrases: int = 0
     created_reference_entries: int = 0
     updated_reference_entries: int = 0
+    skipped_reference_entries: int = 0
     created_reference_localizations: int = 0
     updated_reference_localizations: int = 0
 
@@ -231,6 +235,41 @@ def _replace_collection(parent: Any, attribute: str, items: list[Any]) -> None:
         collection.extend(items)
     else:
         setattr(parent, attribute, list(items))
+
+
+def _replace_normalized_child_collection(session: Any, parent: Any, attribute: str, items: list[Any]) -> None:
+    collection = getattr(parent, attribute, None)
+    if not isinstance(collection, list):
+        setattr(parent, attribute, list(items))
+        return
+
+    existing_items = list(collection)
+    if existing_items:
+        for existing_item in existing_items:
+            if hasattr(session, "delete"):
+                session.delete(existing_item)
+        collection.clear()
+        if hasattr(session, "flush"):
+            session.flush()
+    collection.extend(items)
+
+
+def _session_no_autoflush(session: Any) -> Any:
+    context = getattr(session, "no_autoflush", None)
+    if context is None:
+        return nullcontext()
+    return context
+
+
+def _validate_on_conflict_mode(on_conflict: str) -> str:
+    normalized = str(on_conflict or "fail").strip().lower()
+    if normalized not in {"fail", "upsert", "skip"}:
+        raise ValueError(f"unsupported on_conflict mode: {on_conflict}")
+    return normalized
+
+
+def _raise_existing_entry_conflict(*, entry_type: str, identifier: str, language: str) -> None:
+    raise ValueError(f"{entry_type} '{identifier}' for language '{language}' already exists")
 
 
 def _phrase_example_translation_score(translations: dict[str, Any], example_index: int) -> tuple[int, int]:
@@ -594,7 +633,7 @@ def _sync_word_level_enrichment_fields(
         word.phonetic_confidence = _normalize_confidence(phonetic_confidence)
 
 
-def _sync_word_confusable_rows(word: Any, row: dict[str, Any], word_confusable_model: Type[Any] | None) -> None:
+def _sync_word_confusable_rows(session: Any, word: Any, row: dict[str, Any], word_confusable_model: Type[Any] | None) -> None:
     if word_confusable_model is None or not hasattr(word, "confusable_entries"):
         return
 
@@ -614,10 +653,10 @@ def _sync_word_confusable_rows(word: Any, row: dict[str, Any], word_confusable_m
                 order_index=index,
             )
         )
-    _replace_collection(word, "confusable_entries", confusable_rows)
+    _replace_normalized_child_collection(session, word, "confusable_entries", confusable_rows)
 
 
-def _sync_word_form_rows(word: Any, row: dict[str, Any], word_form_model: Type[Any] | None) -> None:
+def _sync_word_form_rows(session: Any, word: Any, row: dict[str, Any], word_form_model: Type[Any] | None) -> None:
     if word_form_model is None or not hasattr(word, "form_entries"):
         return
 
@@ -685,10 +724,10 @@ def _sync_word_form_rows(word: Any, row: dict[str, Any], word_form_model: Type[A
             )
         )
 
-    _replace_collection(word, "form_entries", normalized_rows)
+    _replace_normalized_child_collection(session, word, "form_entries", normalized_rows)
 
 
-def _sync_word_part_of_speech_rows(word: Any, row: dict[str, Any], word_part_of_speech_model: Type[Any] | None) -> None:
+def _sync_word_part_of_speech_rows(session: Any, word: Any, row: dict[str, Any], word_part_of_speech_model: Type[Any] | None) -> None:
     if word_part_of_speech_model is None or not hasattr(word, "part_of_speech_entries"):
         return
 
@@ -704,7 +743,7 @@ def _sync_word_part_of_speech_rows(word: Any, row: dict[str, Any], word_part_of_
                 order_index=index,
             )
         )
-    _replace_collection(word, "part_of_speech_entries", normalized_rows)
+    _replace_normalized_child_collection(session, word, "part_of_speech_entries", normalized_rows)
 
 
 def _sync_translation_example_rows(
@@ -729,7 +768,7 @@ def _sync_translation_example_rows(
     _replace_collection(translation, "example_entries", example_rows)
 
 
-def _sync_meaning_metadata_rows(meaning: Any, sense: dict[str, Any], meaning_metadata_model: Type[Any] | None) -> None:
+def _sync_meaning_metadata_rows(session: Any, meaning: Any, sense: dict[str, Any], meaning_metadata_model: Type[Any] | None) -> None:
     if meaning_metadata_model is None or not hasattr(meaning, "metadata_entries"):
         return
 
@@ -752,7 +791,7 @@ def _sync_meaning_metadata_rows(meaning: Any, sense: dict[str, Any], meaning_met
                 order_index=index,
             )
         )
-    _replace_collection(meaning, "metadata_entries", metadata_rows)
+    _replace_normalized_child_collection(session, meaning, "metadata_entries", metadata_rows)
 
 
 def _sync_meaning_level_learner_fields(meaning: Any, sense: dict[str, Any], row: dict[str, Any]) -> None:
@@ -902,7 +941,9 @@ def import_compiled_rows(
     learner_catalog_entry_model: Optional[Type[Any]] = None,
     rebuild_learner_catalog: bool = True,
     progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
+    on_conflict: str = "upsert",
 ) -> ImportSummary:
+    on_conflict = _validate_on_conflict_mode(on_conflict)
     if word_model is None or meaning_model is None:
         (
             word_model,
@@ -1030,8 +1071,8 @@ def import_compiled_rows(
                     phrase_key[0],
                     row_language,
                 )
-                if existing_phrase is not None:
-                    preloaded_phrases[phrase_key] = existing_phrase
+            if existing_phrase is not None:
+                preloaded_phrases[phrase_key] = existing_phrase
             if existing_phrase is None:
                 phrase = resolved_phrase_model(
                     phrase_text=row.get("display_form") or row.get("word"),
@@ -1055,6 +1096,11 @@ def import_compiled_rows(
                 current_phrase = phrase
                 is_new_phrase = True
             else:
+                if on_conflict == "fail":
+                    _raise_existing_entry_conflict(entry_type="phrase", identifier=phrase_key[0], language=row_language)
+                if on_conflict == "skip":
+                    summary = _increment(summary, skipped_phrases=1)
+                    continue
                 existing_phrase.phrase_text = row.get("display_form") or row.get("word")
                 existing_phrase.normalized_form = phrase_normalized_form or existing_phrase.normalized_form
                 existing_phrase.phrase_kind = row.get("phrase_kind") or existing_phrase.phrase_kind
@@ -1235,6 +1281,11 @@ def import_compiled_rows(
                 summary = _increment(summary, created_reference_entries=1)
                 is_new_reference = True
             else:
+                if on_conflict == "fail":
+                    _raise_existing_entry_conflict(entry_type="reference", identifier=reference_key[0], language=row_language)
+                if on_conflict == "skip":
+                    summary = _increment(summary, skipped_reference_entries=1)
+                    continue
                 current_reference = existing_reference
                 current_reference.reference_type = row.get("reference_type") or current_reference.reference_type
                 current_reference.display_form = row.get("display_form") or current_reference.display_form
@@ -1299,6 +1350,11 @@ def import_compiled_rows(
             summary = _increment(summary, created_words=1)
             is_new_word = True
         else:
+            if on_conflict == "fail":
+                _raise_existing_entry_conflict(entry_type="word", identifier=row["word"], language=row_language)
+            if on_conflict == "skip":
+                summary = _increment(summary, skipped_words=1)
+                continue
             word.frequency_rank = row.get("frequency_rank")
             if hasattr(word, "source_type"):
                 word.source_type = row_source_type
@@ -1315,101 +1371,103 @@ def import_compiled_rows(
             lexicon_enrichment_run_model,
         )
 
-        _sync_word_level_enrichment_fields(
-            word,
-            row,
-            None,
-            row_source_type,
-        )
-        _sync_word_confusable_rows(word, row, word_confusable_model)
-        _sync_word_form_rows(word, row, word_form_model)
-        _sync_word_part_of_speech_rows(word, row, word_part_of_speech_model)
-
-        existing_meanings = [] if is_new_word else _load_existing_meanings(session, meaning_model, word.id)
-        matched_meaning_ids: set[Any] = set()
-        enrichment_job = None
-        phonetic_enrichment_run = None
-
-        enrichment_run_by_group: dict[tuple[str | None, str | None, str | None], Any] = {}
-
-        if lexicon_enrichment_job_model is not None and lexicon_enrichment_run_model is not None:
-            is_new_enrichment_job = False
-            enrichment_job = None if is_new_word else _find_existing_enrichment_job(
-                session,
-                lexicon_enrichment_job_model,
-                word.id,
-                "phase1",
+        with _session_no_autoflush(session):
+            _sync_word_level_enrichment_fields(
+                word,
+                row,
+                None,
+                row_source_type,
             )
-            if enrichment_job is None:
-                enrichment_job = lexicon_enrichment_job_model(
-                    word_id=word.id,
-                    phase="phase1",
-                    status="completed",
-                    started_at=_parse_timestamp(row.get("generated_at")),
-                    completed_at=_parse_timestamp(row.get("generated_at")),
+            _sync_word_confusable_rows(session, word, row, word_confusable_model)
+            _sync_word_form_rows(session, word, row, word_form_model)
+            _sync_word_part_of_speech_rows(session, word, row, word_part_of_speech_model)
+
+            existing_meanings = [] if is_new_word else _load_existing_meanings(session, meaning_model, word.id)
+            matched_meaning_ids: set[Any] = set()
+            enrichment_job = None
+            phonetic_enrichment_run = None
+            is_new_enrichment_job = False
+
+            enrichment_run_by_group: dict[tuple[str | None, str | None, str | None], Any] = {}
+
+            if lexicon_enrichment_job_model is not None and lexicon_enrichment_run_model is not None:
+                enrichment_job = None if is_new_word else _find_existing_enrichment_job(
+                    session,
+                    lexicon_enrichment_job_model,
+                    word.id,
+                    "phase1",
                 )
-                _ensure_object_id(enrichment_job)
-                if use_cascaded_word_graph or _is_real_mapped_model(lexicon_enrichment_job_model):
-                    _attach_child(word, "enrichment_jobs", enrichment_job, "word")
-                if not use_cascaded_word_graph:
-                    session.add(enrichment_job)
-                summary = _increment(summary, created_enrichment_jobs=1)
-                is_new_enrichment_job = True
-            else:
-                if hasattr(enrichment_job, "status"):
-                    enrichment_job.status = "completed"
+                if enrichment_job is None:
+                    enrichment_job = lexicon_enrichment_job_model(
+                        word_id=word.id,
+                        phase="phase1",
+                        status="completed",
+                        started_at=_parse_timestamp(row.get("generated_at")),
+                        completed_at=_parse_timestamp(row.get("generated_at")),
+                    )
+                    _ensure_object_id(enrichment_job)
+                    if use_cascaded_word_graph or _is_real_mapped_model(lexicon_enrichment_job_model):
+                        _attach_child(word, "enrichment_jobs", enrichment_job, "word")
+                    if not use_cascaded_word_graph:
+                        session.add(enrichment_job)
+                    summary = _increment(summary, created_enrichment_jobs=1)
+                    is_new_enrichment_job = True
+                else:
+                    if hasattr(enrichment_job, "status"):
+                        enrichment_job.status = "completed"
                 if hasattr(enrichment_job, "completed_at"):
                     enrichment_job.completed_at = _parse_timestamp(row.get("generated_at"))
                 summary = _increment(summary, reused_enrichment_jobs=1)
 
-            for sense in row.get("senses") or []:
-                group_key = _sense_run_group_key(sense)
-                if group_key in enrichment_run_by_group:
-                    continue
-                generation_run_id, model_name, prompt_version = group_key
-                prompt_hash = _make_word_prompt_hash(
-                    row_source_type,
-                    row_source_reference,
-                    row["word"],
-                    generation_run_id,
-                    model_name,
-                    prompt_version,
-                )
-                enrichment_run = None if is_new_enrichment_job else _find_existing_enrichment_run(
-                    session,
-                    lexicon_enrichment_run_model,
-                    enrichment_job.id,
-                    prompt_version,
-                    prompt_hash,
-                )
-                if enrichment_run is None:
-                    enrichment_run = lexicon_enrichment_run_model(
-                        enrichment_job_id=enrichment_job.id,
-                        generator_provider=row_source_type,
-                        generator_model=model_name,
-                        prompt_version=prompt_version,
-                        prompt_hash=prompt_hash,
-                        verdict="imported",
-                        confidence=_normalize_confidence(sense.get("confidence")),
-                        created_at=_parse_timestamp(sense.get("generated_at") or row.get("generated_at")),
+            if enrichment_job is not None and lexicon_enrichment_run_model is not None:
+                for sense in row.get("senses") or []:
+                    group_key = _sense_run_group_key(sense)
+                    if group_key in enrichment_run_by_group:
+                        continue
+                    generation_run_id, model_name, prompt_version = group_key
+                    prompt_hash = _make_word_prompt_hash(
+                        row_source_type,
+                        row_source_reference,
+                        row["word"],
+                        generation_run_id,
+                        model_name,
+                        prompt_version,
                     )
-                    _ensure_object_id(enrichment_run)
-                    if use_cascaded_word_graph or _is_real_mapped_model(lexicon_enrichment_run_model):
-                        _attach_child(enrichment_job, "runs", enrichment_run, "enrichment_job")
-                    if not use_cascaded_word_graph:
-                        session.add(enrichment_run)
-                    summary = _increment(summary, created_enrichment_runs=1)
-                else:
-                    if hasattr(enrichment_run, "generator_provider"):
-                        enrichment_run.generator_provider = row_source_type
-                    if hasattr(enrichment_run, "generator_model"):
-                        enrichment_run.generator_model = model_name
-                    if hasattr(enrichment_run, "verdict"):
-                        enrichment_run.verdict = "imported"
-                    if hasattr(enrichment_run, "confidence"):
-                        enrichment_run.confidence = _normalize_confidence(sense.get("confidence"))
-                    summary = _increment(summary, reused_enrichment_runs=1)
-                enrichment_run_by_group[group_key] = enrichment_run
+                    enrichment_run = None if is_new_enrichment_job else _find_existing_enrichment_run(
+                        session,
+                        lexicon_enrichment_run_model,
+                        enrichment_job.id,
+                        prompt_version,
+                        prompt_hash,
+                    )
+                    if enrichment_run is None:
+                        enrichment_run = lexicon_enrichment_run_model(
+                            enrichment_job_id=enrichment_job.id,
+                            generator_provider=row_source_type,
+                            generator_model=model_name,
+                            prompt_version=prompt_version,
+                            prompt_hash=prompt_hash,
+                            verdict="imported",
+                            confidence=_normalize_confidence(sense.get("confidence")),
+                            created_at=_parse_timestamp(sense.get("generated_at") or row.get("generated_at")),
+                        )
+                        _ensure_object_id(enrichment_run)
+                        if use_cascaded_word_graph or _is_real_mapped_model(lexicon_enrichment_run_model):
+                            _attach_child(enrichment_job, "runs", enrichment_run, "enrichment_job")
+                        if not use_cascaded_word_graph:
+                            session.add(enrichment_run)
+                        summary = _increment(summary, created_enrichment_runs=1)
+                    else:
+                        if hasattr(enrichment_run, "generator_provider"):
+                            enrichment_run.generator_provider = row_source_type
+                        if hasattr(enrichment_run, "generator_model"):
+                            enrichment_run.generator_model = model_name
+                        if hasattr(enrichment_run, "verdict"):
+                            enrichment_run.verdict = "imported"
+                        if hasattr(enrichment_run, "confidence"):
+                            enrichment_run.confidence = _normalize_confidence(sense.get("confidence"))
+                        summary = _increment(summary, reused_enrichment_runs=1)
+                    enrichment_run_by_group[group_key] = enrichment_run
 
         for index, sense in enumerate(row.get("senses") or []):
             sense_source_reference = f"{row_source_reference}:{sense['sense_id']}"
@@ -1453,7 +1511,7 @@ def import_compiled_rows(
                 summary = _increment(summary, updated_meanings=1)
                 is_new_meaning = False
             _sync_meaning_level_learner_fields(meaning, sense, row)
-            _sync_meaning_metadata_rows(meaning, sense, meaning_metadata_model)
+            _sync_meaning_metadata_rows(session, meaning, sense, meaning_metadata_model)
             matched_meaning_ids.add(meaning.id)
 
             enrichment_run = None
@@ -1713,7 +1771,9 @@ def run_import_file(
     import_mode: str = "orm",
     commit_every_rows: int | None = 250,
     progress_callback: Optional[Callable[..., None]] = None,
+    on_conflict: str = "upsert",
 ) -> dict[str, int]:
+    on_conflict = _validate_on_conflict_mode(on_conflict)
     if import_mode == "staging":
         from tools.lexicon.staging_import import run_staging_import_file
 
@@ -1725,6 +1785,7 @@ def run_import_file(
             rows=rows,
             commit_every_rows=commit_every_rows,
             progress_callback=progress_callback,
+            on_conflict=on_conflict,
         )
 
     _ensure_backend_path()
@@ -1761,6 +1822,7 @@ def run_import_file(
                     if progress_callback is not None
                     else None
                 ),
+                on_conflict=on_conflict,
             )
             aggregate_summary = _increment(aggregate_summary, **batch_summary.__dict__)
             completed_rows += len(batch)
@@ -1792,6 +1854,7 @@ def run_import_file(
     return {
         "created_words": aggregate_summary.created_words,
         "updated_words": aggregate_summary.updated_words,
+        "skipped_words": aggregate_summary.skipped_words,
         "created_meanings": aggregate_summary.created_meanings,
         "updated_meanings": aggregate_summary.updated_meanings,
         "created_examples": aggregate_summary.created_examples,
@@ -1806,8 +1869,10 @@ def run_import_file(
         "reused_enrichment_runs": aggregate_summary.reused_enrichment_runs,
         "created_phrases": aggregate_summary.created_phrases,
         "updated_phrases": aggregate_summary.updated_phrases,
+        "skipped_phrases": aggregate_summary.skipped_phrases,
         "created_reference_entries": aggregate_summary.created_reference_entries,
         "updated_reference_entries": aggregate_summary.updated_reference_entries,
+        "skipped_reference_entries": aggregate_summary.skipped_reference_entries,
         "created_reference_localizations": aggregate_summary.created_reference_localizations,
         "updated_reference_localizations": aggregate_summary.updated_reference_localizations,
     }

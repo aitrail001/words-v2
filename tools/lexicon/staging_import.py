@@ -68,6 +68,7 @@ def merge_staged_word_rows(
     source_reference: str,
     language: str,
     progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
+    on_conflict: str = "upsert",
 ) -> ImportSummary:
     return import_compiled_rows(
         session,
@@ -77,6 +78,7 @@ def merge_staged_word_rows(
         language=language,
         rebuild_learner_catalog=False,
         progress_callback=progress_callback,
+        on_conflict=on_conflict,
     )
 
 
@@ -89,6 +91,7 @@ def run_staging_import_file(
     rows: list[dict[str, Any]] | None = None,
     commit_every_rows: int | None = 250,
     progress_callback: Optional[Callable[..., None]] = None,
+    on_conflict: str = "upsert",
 ) -> dict[str, int]:
     from sqlalchemy.engine.create import create_engine
     from sqlalchemy.orm.session import Session
@@ -122,6 +125,7 @@ def run_staging_import_file(
                     if progress_callback is not None
                     else None
                 ),
+                on_conflict=on_conflict,
             )
             aggregate_summary = _increment(aggregate_summary, **word_summary.__dict__)
             session.commit()
@@ -146,6 +150,7 @@ def run_staging_import_file(
                         if progress_callback is not None
                         else None
                     ),
+                    on_conflict=on_conflict,
                 )
                 aggregate_summary = _increment(aggregate_summary, **batch_summary.__dict__)
                 completed_other_rows += len(batch)
