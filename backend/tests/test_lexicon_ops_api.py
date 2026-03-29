@@ -1,14 +1,17 @@
 import json
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.dialects import postgresql
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.redis import get_redis
 from app.core.security import create_access_token
+from app.api.lexicon_ops import _voice_storage_rewrite_query
 from app.main import app
 from app.models.user import User
 
@@ -61,6 +64,16 @@ def snapshot_root_env(tmp_path, monkeypatch: pytest.MonkeyPatch):
     root = tmp_path / "snapshots"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("LEXICON_SNAPSHOT_ROOT", str(root))
+    get_settings.cache_clear()
+    yield root
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def voice_root_env(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    root = tmp_path / "voice"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("LEXICON_VOICE_ROOT", str(root))
     get_settings.cache_clear()
     yield root
     get_settings.cache_clear()
@@ -307,3 +320,319 @@ class TestLexiconOpsSnapshotDetail:
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Snapshot not found"
+
+
+class TestLexiconVoiceStorageRewrite:
+    def test_voice_storage_rewrite_query_applies_optional_filters(self):
+        statement = _voice_storage_rewrite_query(
+            source_reference="snapshot-001",
+            provider="google",
+            family="neural2",
+            locale="en-US",
+        )
+
+        compiled = str(
+            statement.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+
+        assert "google" in compiled
+        assert "neural2" in compiled
+        assert "en-US" in compiled
+        assert "snapshot-001" in compiled
+
+    @pytest.mark.asyncio
+    async def test_rewrite_voice_storage_updates_matching_assets(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = _make_user(user_id)
+
+        matched_result = MagicMock()
+        matched_result.scalars.return_value.all.return_value = [
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                storage_policy_id=uuid.uuid4(),
+                created_at="2026-03-29T00:00:00Z",
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                storage_policy_id=uuid.uuid4(),
+                created_at="2026-03-29T00:00:01Z",
+            ),
+        ]
+        target_root_result = MagicMock()
+        target_root_result.scalar_one_or_none.return_value = None
+        policy_result = MagicMock()
+        policy_result.scalars.return_value.all.return_value = [
+            SimpleNamespace(id=matched_result.scalars.return_value.all.return_value[0].storage_policy_id),
+            SimpleNamespace(id=matched_result.scalars.return_value.all.return_value[1].storage_policy_id),
+        ]
+        mock_db.execute.side_effect = [user_result, matched_result, target_root_result, policy_result]
+
+        response = await client.post(
+            "/api/lexicon-ops/voice-storage/rewrite",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "source_reference": "snapshot-001",
+                "storage_kind": "s3",
+                "storage_base": "https://cdn.example.com/voice",
+                "dry_run": False,
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["matched_count"] == 2
+        assert payload["updated_count"] == 2
+        assert payload["dry_run"] is False
+        assert payload["storage_kind"] == "s3"
+        assert payload["storage_base"] == "https://cdn.example.com/voice"
+        assert mock_db.commit.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_rewrite_voice_storage_updates_selected_policies(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = _make_user(user_id)
+
+        policy_a = SimpleNamespace(id=uuid.uuid4(), primary_storage_kind="local", primary_storage_base="/tmp/a", fallback_storage_kind=None, fallback_storage_base=None)
+        policy_b = SimpleNamespace(id=uuid.uuid4(), primary_storage_kind="local", primary_storage_base="/tmp/b", fallback_storage_kind=None, fallback_storage_base=None)
+        policy_result = MagicMock()
+        policy_result.scalars.return_value.all.return_value = [policy_a, policy_b]
+        mock_db.execute.side_effect = [user_result, policy_result]
+
+        response = await client.post(
+            "/api/lexicon-ops/voice-storage/rewrite",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "policy_ids": [str(policy_a.id), str(policy_b.id)],
+                "storage_kind": "http",
+                "storage_base": "https://cdn.example.com/voice",
+                "dry_run": False,
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["matched_count"] == 2
+        assert payload["updated_count"] == 2
+        assert policy_a.primary_storage_kind == "http"
+        assert policy_a.primary_storage_base == "https://cdn.example.com/voice"
+        assert policy_b.primary_storage_kind == "http"
+        assert policy_b.primary_storage_base == "https://cdn.example.com/voice"
+        assert mock_db.commit.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_rewrite_voice_storage_dry_run_does_not_commit(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = _make_user(user_id)
+
+        matched_result = MagicMock()
+        matched_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [user_result, matched_result]
+
+        response = await client.post(
+            "/api/lexicon-ops/voice-storage/rewrite",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "source_reference": "snapshot-001",
+                "storage_kind": "s3",
+                "storage_base": "https://cdn.example.com/voice",
+                "dry_run": True,
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["matched_count"] == 0
+        assert payload["updated_count"] == 0
+        assert payload["dry_run"] is True
+        assert mock_db.commit.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_rewrite_voice_storage_requires_scope(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        response = await client.post(
+            "/api/lexicon-ops/voice-storage/rewrite",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "storage_kind": "s3",
+                "storage_base": "https://cdn.example.com/voice",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "policy_ids or source_reference is required"
+
+    @pytest.mark.asyncio
+    async def test_voice_storage_summary_returns_grouped_current_config(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = _make_user(user_id)
+
+        matched_result = MagicMock()
+        matched_result.scalars.return_value.all.return_value = [
+            SimpleNamespace(storage_policy=SimpleNamespace(primary_storage_kind="local", primary_storage_base="/tmp/voice-a")),
+            SimpleNamespace(storage_policy=SimpleNamespace(primary_storage_kind="local", primary_storage_base="/tmp/voice-a")),
+            SimpleNamespace(storage_policy=SimpleNamespace(primary_storage_kind="s3", primary_storage_base="https://cdn.example.com/voice")),
+        ]
+        mock_db.execute.side_effect = [user_result, matched_result]
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-storage/summary?source_reference=snapshot-001",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_reference"] == "snapshot-001"
+        assert payload["asset_count"] == 3
+        assert payload["groups"] == [
+            {"storage_kind": "local", "storage_base": "/tmp/voice-a", "asset_count": 2},
+            {"storage_kind": "s3", "storage_base": "https://cdn.example.com/voice", "asset_count": 1},
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    async def test_voice_storage_policies_returns_policy_config(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = _make_user(user_id)
+
+        policies_result = MagicMock()
+        policies_result.scalars.return_value.all.return_value = [
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                policy_key="word_default",
+                content_scope="word",
+                primary_storage_kind="local",
+                primary_storage_base="/tmp/voice-a",
+                fallback_storage_kind=None,
+                fallback_storage_base=None,
+            ),
+        ]
+        counts_result = MagicMock()
+        counts_result.all.return_value = [
+            (policies_result.scalars.return_value.all.return_value[0].id, 2),
+        ]
+        mock_db.execute.side_effect = [user_result, policies_result, counts_result]
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-storage/policies?source_reference=snapshot-001",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload == [
+            {
+                "id": payload[0]["id"],
+                "policy_key": "word_default",
+                "content_scope": "word",
+                "primary_storage_kind": "local",
+                "primary_storage_base": "/tmp/voice-a",
+                "fallback_storage_kind": None,
+                "fallback_storage_base": None,
+                "asset_count": 2,
+            }
+        ]
+
+
+class TestLexiconVoiceRuns:
+    @pytest.mark.asyncio
+    async def test_list_voice_runs_returns_ledger_summary(self, client, mock_db, voice_root_env):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        run_dir = voice_root_env / "voice-roundtrip"
+        run_dir.mkdir()
+        _write_jsonl(run_dir / "voice_plan.jsonl", [{"unit_id": "1"}, {"unit_id": "2"}, {"unit_id": "3"}])
+        _write_jsonl(run_dir / "voice_manifest.jsonl", [{"status": "generated"}, {"status": "existing"}])
+        _write_jsonl(run_dir / "voice_errors.jsonl", [{"status": "failed"}])
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-runs",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert len(payload) == 1
+        assert payload[0]["run_name"] == "voice-roundtrip"
+        assert payload[0]["planned_count"] == 3
+        assert payload[0]["generated_count"] == 1
+        assert payload[0]["existing_count"] == 1
+        assert payload[0]["failed_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_voice_run_detail_returns_latest_rows(self, client, mock_db, voice_root_env):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        run_dir = voice_root_env / "voice-roundtrip"
+        run_dir.mkdir()
+        _write_jsonl(run_dir / "voice_plan.jsonl", [{"unit_id": "1"}, {"unit_id": "2"}])
+        _write_jsonl(
+            run_dir / "voice_manifest.jsonl",
+            [
+                {"status": "generated", "locale": "en-US", "voice_role": "female", "content_scope": "word", "source_reference": "voice-roundtrip"},
+                {"status": "existing", "locale": "en-GB", "voice_role": "male", "content_scope": "definition", "source_reference": "voice-roundtrip"},
+            ],
+        )
+        _write_jsonl(run_dir / "voice_errors.jsonl", [{"status": "failed", "generation_error": "boom", "locale": "en-US", "voice_role": "female", "content_scope": "example", "source_reference": "voice-roundtrip"}])
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-runs/voice-roundtrip",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["run_name"] == "voice-roundtrip"
+        assert payload["planned_count"] == 2
+        assert payload["generated_count"] == 1
+        assert payload["existing_count"] == 1
+        assert payload["failed_count"] == 1
+        assert payload["locale_counts"] == {"en-US": 2, "en-GB": 1}
+        assert payload["voice_role_counts"] == {"female": 2, "male": 1}
+        assert payload["content_scope_counts"] == {"word": 1, "definition": 1, "example": 1}
+        assert payload["source_references"] == ["voice-roundtrip"]
+        assert payload["artifacts"]["voice_plan_url"].endswith("/api/lexicon-ops/voice-runs/voice-roundtrip/artifacts/voice_plan.jsonl")
+        assert len(payload["latest_manifest_rows"]) == 2
+        assert len(payload["latest_error_rows"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_voice_run_artifact_serves_jsonl_file(self, client, mock_db, voice_root_env):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        run_dir = voice_root_env / "voice-roundtrip"
+        run_dir.mkdir()
+        _write_jsonl(run_dir / "voice_manifest.jsonl", [{"status": "generated"}])
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-runs/voice-roundtrip/artifacts/voice_manifest.jsonl",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert '"status": "generated"' in response.text

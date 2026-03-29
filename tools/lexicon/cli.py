@@ -38,6 +38,8 @@ from tools.lexicon.qc import run_batch_qc, run_review_apply
 from tools.lexicon.review_materialize import materialize_review_outputs
 from tools.lexicon.runtime_logging import RuntimeLogConfig, RuntimeLogger
 from tools.lexicon.validate import validate_compiled_record, validate_snapshot_files
+from tools.lexicon.voice_generate import run_voice_generation
+from tools.lexicon.voice_import_db import load_voice_manifest_rows, run_voice_import_file, run_voice_storage_sync, summarize_voice_manifest_rows
 from tools.lexicon.policy_data import excluded_canonical_forms
 from tools.lexicon.wordfreq_provider import build_wordfreq_rank_provider
 from tools.lexicon.wordfreq_utils import build_wordfreq_inventory_provider
@@ -992,6 +994,100 @@ def _export_db_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _voice_generate_command(args: argparse.Namespace) -> int:
+    if args.retry_failed_only and args.skip_failed:
+        print("--retry-failed-only and --skip-failed cannot be combined", file=sys.stderr)
+        return 2
+    try:
+        payload = run_voice_generation(
+            input_path=Path(args.input),
+            output_dir=Path(args.output_dir),
+            provider=args.provider,
+            family=args.family,
+            locales=[value.strip() for value in str(args.locales).split(",") if value.strip()],
+            audio_format=args.audio_format,
+            max_concurrency=args.max_concurrency,
+            storage_kind=args.storage_kind,
+            storage_base=args.storage_base,
+            voice_map_path=args.voice_map_file,
+            profile_config_path=args.profile_config_file,
+            overwrite_existing=args.overwrite_existing,
+            resume=args.resume,
+            retry_failed_only=args.retry_failed_only,
+            skip_failed=args.skip_failed,
+            dry_run=args.dry_run,
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    result = {
+        'command': 'voice-generate',
+        'input': str(Path(args.input)),
+        'output_dir': str(Path(args.output_dir)),
+        'provider': args.provider,
+        'family': args.family,
+        'locales': [value.strip() for value in str(args.locales).split(",") if value.strip()],
+        'audio_format': args.audio_format,
+        'resume': bool(args.resume),
+        'retry_failed_only': bool(args.retry_failed_only),
+        'skip_failed': bool(args.skip_failed),
+        'dry_run': bool(args.dry_run),
+        **payload,
+    }
+    print(json.dumps(result))
+    return 0
+
+
+def _voice_import_db_command(args: argparse.Namespace) -> int:
+    rows = load_voice_manifest_rows(Path(args.input))
+    if args.dry_run:
+        print(json.dumps({
+            'command': 'voice-import-db',
+            'dry_run': True,
+            **summarize_voice_manifest_rows(rows),
+        }))
+        return 0
+
+    summary = run_voice_import_file(Path(args.input), default_language=args.language)
+    print(json.dumps({
+        'command': 'voice-import-db',
+        'dry_run': False,
+        'summary': summary,
+    }))
+    return 0
+
+
+def _voice_sync_storage_command(args: argparse.Namespace) -> int:
+    try:
+        payload = run_voice_storage_sync(
+            source_reference=args.source_reference,
+            storage_kind=args.storage_kind,
+            storage_base=args.storage_base,
+            fallback_storage_kind=args.fallback_storage_kind,
+            fallback_storage_base=args.fallback_storage_base,
+            provider=args.provider,
+            family=args.family,
+            locale=args.locale,
+            dry_run=args.dry_run,
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    print(json.dumps({
+        'command': 'voice-sync-storage',
+        'source_reference': args.source_reference,
+        'provider': args.provider,
+        'family': args.family,
+        'locale': args.locale,
+        'fallback_storage_kind': args.fallback_storage_kind,
+        'fallback_storage_base': args.fallback_storage_base,
+        **payload,
+    }))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='python -m tools.lexicon.cli', allow_abbrev=False)
     subparsers = parser.add_subparsers(
@@ -1200,6 +1296,26 @@ def build_parser() -> argparse.ArgumentParser:
     _add_shared_logging_args(validate)
     validate.set_defaults(handler=_validate_command)
 
+    voice_generate = subparsers.add_parser('voice-generate', help='generate lexicon voice artifacts from approved compiled JSONL')
+    voice_generate.add_argument('--input', required=True, help='approved compiled JSONL input, usually reviewed/approved.jsonl')
+    voice_generate.add_argument('--output-dir', required=True, help='directory to write voice artifacts and JSONL ledgers')
+    voice_generate.add_argument('--provider', default='google', choices=['google'], help='voice synthesis provider')
+    voice_generate.add_argument('--family', default='neural2', help='provider voice family')
+    voice_generate.add_argument('--locales', default='en-US,en-GB', help='comma-separated locale list')
+    voice_generate.add_argument('--audio-format', default='mp3', choices=['mp3', 'ogg_opus'], help='output audio format')
+    voice_generate.add_argument('--max-concurrency', type=int, default=4, help='maximum concurrent synthesis requests')
+    voice_generate.add_argument('--storage-kind', default='local', help='storage backend label recorded in manifests')
+    voice_generate.add_argument('--storage-base', help='storage base recorded in manifests; defaults to output dir')
+    voice_generate.add_argument('--voice-map-file', help='optional JSON file overriding provider/family/locale/role voice ids')
+    voice_generate.add_argument('--profile-config-file', help='optional JSON file overriding provider profile settings')
+    voice_generate.add_argument('--overwrite-existing', action='store_true', help='overwrite existing audio files instead of marking them existing')
+    voice_generate.add_argument('--resume', action='store_true', help='skip units already completed in prior voice ledgers for this output dir')
+    voice_generate.add_argument('--retry-failed-only', action='store_true', help='with prior ledgers present, rerun only units previously recorded as failed')
+    voice_generate.add_argument('--skip-failed', action='store_true', help='with --resume, skip units previously recorded as failed instead of retrying them')
+    voice_generate.add_argument('--dry-run', action='store_true', help='plan units and write voice_plan.jsonl without synthesis')
+    _add_shared_logging_args(voice_generate)
+    voice_generate.set_defaults(handler=_voice_generate_command)
+
     import_db = subparsers.add_parser('import-db', help='load compiled learner JSONL for local DB import workflows')
     import_db.add_argument('--input', required=True, help='compiled learner JSONL input path')
     import_db.add_argument('--dry-run', action='store_true', help='show import summary without opening a DB session')
@@ -1217,6 +1333,26 @@ def build_parser() -> argparse.ArgumentParser:
     export_db.add_argument('--max-phrases', type=int, help='optional deterministic cap on exported phrase rows')
     _add_shared_logging_args(export_db)
     export_db.set_defaults(handler=_export_db_command)
+
+    voice_import_db = subparsers.add_parser('voice-import-db', help='import generated voice manifest rows into the lexicon DB')
+    voice_import_db.add_argument('--input', required=True, help='voice_manifest.jsonl file produced by voice-generate')
+    voice_import_db.add_argument('--language', default='en', help='default language fallback for word resolution')
+    voice_import_db.add_argument('--dry-run', action='store_true', help='summarize manifest rows without writing the DB')
+    _add_shared_logging_args(voice_import_db)
+    voice_import_db.set_defaults(handler=_voice_import_db_command)
+
+    voice_sync_storage = subparsers.add_parser('voice-sync-storage', help='rewrite DB voice asset storage fields after syncing files elsewhere')
+    voice_sync_storage.add_argument('--source-reference', required=True, help='word source_reference scope to rewrite')
+    voice_sync_storage.add_argument('--provider', help='optional provider filter')
+    voice_sync_storage.add_argument('--family', help='optional family filter')
+    voice_sync_storage.add_argument('--locale', help='optional locale filter')
+    voice_sync_storage.add_argument('--storage-kind', required=True, help='new storage kind')
+    voice_sync_storage.add_argument('--storage-base', required=True, help='new storage base')
+    voice_sync_storage.add_argument('--fallback-storage-kind', help='optional fallback storage kind')
+    voice_sync_storage.add_argument('--fallback-storage-base', help='optional fallback storage base')
+    voice_sync_storage.add_argument('--dry-run', action='store_true', help='summarize matching assets without writing DB updates')
+    _add_shared_logging_args(voice_sync_storage)
+    voice_sync_storage.set_defaults(handler=_voice_sync_storage_command)
 
     return parser
 

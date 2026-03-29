@@ -636,6 +636,16 @@ export default function LexiconOpsPage() {
                   >
                     Open DB Inspector
                   </button>
+                  <button
+                    type="button"
+                    data-testid="lexicon-ops-open-voice-admin"
+                    className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
+                    onClick={() => openWorkflow("/lexicon/voice", {
+                      sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
+                    })}
+                  >
+                    Open Voice Admin
+                  </button>
                 </div>
                 <div className="space-y-1 text-xs text-gray-500" data-testid="lexicon-ops-action-reasons">
                   {!jsonlReviewAction.enabled ? <p>JSONL Review: {jsonlReviewAction.reason}</p> : null}
@@ -771,6 +781,16 @@ export default function LexiconOpsPage() {
                       <div className="rounded border border-gray-200 p-3"><p className="text-gray-500">References</p><p className="font-medium">{importResult.row_summary.reference_count}</p></div>
                     </div>
                   ) : null}
+                </section>
+
+                <section className="rounded border border-gray-200 bg-emerald-50 p-4" data-testid="lexicon-ops-voice-admin-panel">
+                  <h5 className="text-base font-semibold text-emerald-950">Voice admin</h5>
+                  <p className="mt-1 text-sm text-emerald-900">
+                    Voice storage rewrites and future voice-run controls live on the dedicated Lexicon Voice page.
+                  </p>
+                  <p className="mt-2 text-xs text-emerald-800">
+                    Use the selected snapshot source reference to jump there with the form prefilled.
+                  </p>
                 </section>
               </div>
             ) : (

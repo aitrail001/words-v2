@@ -1,6 +1,6 @@
 # Lexicon Operator Guide
 
-This runbook covers the active lexicon workflow only: word snapshot generation, curated phrase inventory build, shared enrichment, review, and DB import.
+This runbook covers the active lexicon workflow only: word snapshot generation, curated phrase inventory build, shared enrichment, review, DB import, and optional derived voice generation/import.
 
 ## 1. Setup
 
@@ -34,6 +34,8 @@ Important:
 4. `validate`
 5. review `words.enriched.jsonl`
 6. `import-db` from `reviewed/approved.jsonl`
+7. optional `voice-generate` from `reviewed/approved.jsonl`
+8. optional `voice-import-db` from `voice_manifest.jsonl`
 
 Realtime writes final accepted word and phrase rows directly to `words.enriched.jsonl`.
 Batch materializes accepted word and phrase rows into that same file later via `batch-ingest`.
@@ -137,6 +139,7 @@ Current admin tools:
 - `/lexicon/jsonl-review`
 - `/lexicon/import-db`
 - `/lexicon/db-inspector`
+- `/lexicon/voice`
 
 Recommended order:
 
@@ -167,7 +170,109 @@ The admin portal no longer supports the old staged-selection review flow.
 
 `import-db` is the only final write path into lexicon DB tables, including approved phrase rows.
 
-## 11. Troubleshooting
+## 11. Generate voice artifacts
+
+Voice generation is a separate derived-media step. It reads reviewed `approved.jsonl`, writes audio files plus JSONL ledgers, and does not mutate the reviewed learner rows.
+
+Current defaults:
+
+- provider: `google`
+- family: `neural2`
+- locales: `en-US`, `en-GB`
+- both `female` and `male` variants generated for each `word`, `definition`, and `example`
+- default Google voices:
+  - `en-US`: female `en-US-Neural2-C`, male `en-US-Neural2-D`
+  - `en-GB`: female `en-GB-Neural2-F`, male `en-GB-Neural2-B`
+
+Live Google prerequisite:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+```
+
+Generate voice artifacts:
+
+```bash
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-generate --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --output-dir data/lexicon/voice/demo --provider google --family neural2 --locales en-US,en-GB
+```
+
+Resume options:
+
+```bash
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-generate --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --output-dir data/lexicon/voice/demo --provider google --family neural2 --locales en-US,en-GB --resume
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-generate --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --output-dir data/lexicon/voice/demo --provider google --family neural2 --locales en-US,en-GB --resume --retry-failed-only
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-generate --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --output-dir data/lexicon/voice/demo --provider google --family neural2 --locales en-US,en-GB --resume --skip-failed
+```
+
+Outputs:
+
+- `voice_plan.jsonl` = planned work units
+- `voice_manifest.jsonl` = successful generated assets and metadata
+- `voice_errors.jsonl` = failed work units and error details
+- audio files under the selected `--output-dir`, organized by provider/family/locale
+
+Notes:
+
+- voice IDs are defaults, not hardcoded behavior; override them through command arguments/config when needed
+- the tool flushes results as units complete, so one failed or slow word does not block unrelated outputs
+- reruns are safe because paths are deterministic and manifest rows are keyed by content scope, locale, voice role, provider/family, and source text hash
+- `--resume` uses prior `voice_manifest.jsonl` and `voice_errors.jsonl` ledgers to decide what is already complete
+- `--retry-failed-only` restricts the rerun to units previously recorded as failed and is intended to be used with `--resume`
+- `--skip-failed` keeps `--resume` from retrying prior failed units when the operator wants to leave known-bad rows alone for the current pass
+
+## 12. Import voice metadata to DB
+
+After `import-db` has loaded the reviewed learner rows, import the generated voice manifest:
+
+```bash
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-import-db --input data/lexicon/voice/demo/voice_manifest.jsonl
+```
+
+Behavior:
+
+- loads normalized voice metadata into `lexicon_voice_assets`
+- links rows to imported words, meanings, and examples
+- preserves `relative_path` on each asset and assigns each asset to a shared DB storage policy so playback can resolve through primary and optional fallback storage directly from the policy
+- backend playback resolves through `/api/words/voice-assets/{asset_id}/content`
+- admin DB Inspector shows imported voice assets per word detail, including the runtime playback route and the primary resolved storage target
+- admin Lexicon Voice includes the voice-storage rewrite panel with both Dry Run and Apply actions for repointing imported assets after a cloud copy
+- the Lexicon Voice page shows the latest rewrite result summary, including matched count, updated count, primary storage, and fallback storage
+- the Lexicon Voice page shows the current persisted storage policies from the DB directly
+- the current simplified storage model uses exactly 3 DB policies: `word_default`, `definition_default`, and `example_default`
+- policy cards include direct `Edit policy` actions and storage-state badges
+- policy rewrites in the admin UI apply to the explicitly selected policy rows; `sourceReference` is only a filter on the DB policy list, not the direct rewrite target
+- the Lexicon Voice page now also shows recent voice runs from the configured voice artifact root, including planned/generated/existing/failed counts per run directory
+- recent runs are shown in a paged horizontal strip with 2 runs per page so many runs do not prolong the page
+- clicking a run in Lexicon Voice now shows the latest manifest rows and latest error rows for that run
+- run detail also shows locale / voice-role / content-scope breakdowns plus artifact download links from the CLI-ledger directory
+- artifact downloads on `/lexicon/voice` now use authenticated admin fetches; opening the raw `/api/lexicon-ops/voice-runs/.../artifacts/...` URL directly without admin auth will return `Not authenticated`
+- voice runs are separate operational history; they do not scope or define storage policies
+
+Live demo references currently loaded in local dev:
+
+- `/lexicon/voice`
+  - shows the 3 current DB policies directly
+  - recent runs currently include `voice-admin-demo-a-run` and `voice-admin-demo-b-run`
+
+## 13. Rewrite voice storage from CLI
+
+Use this after copying generated voice files from local output to cloud/object storage and you want the DB to point the matching storage policies at a new primary and optional fallback storage target.
+
+```bash
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-sync-storage --source-reference demo --storage-kind s3 --storage-base https://cdn.example.com/voice --dry-run
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-sync-storage --source-reference demo --storage-kind s3 --storage-base https://cdn.example.com/voice
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-sync-storage --source-reference demo --storage-kind s3 --storage-base https://cdn.example.com/voice --fallback-storage-kind http --fallback-storage-base https://backup.example.com/voice
+```
+
+Behavior:
+
+- updates the selected storage policy or matching CLI-scoped policies to use the requested primary `storage_kind` and `storage_base`
+- optionally sets or clears fallback storage via `--fallback-storage-kind` / `--fallback-storage-base`
+- keeps `relative_path` unchanged
+- supports optional `--provider`, `--family`, and `--locale` filters
+- mirrors the admin Lexicon Voice rewrite operation for terminal workflows
+
+## 14. Troubleshooting
 
 - Ops page shows `Failed to fetch`
   - ensure admin/frontend browser API base is `/api`
@@ -178,17 +283,30 @@ The admin portal no longer supports the old staged-selection review flow.
   - inspect `enrich.failures.jsonl` or `words.regenerate.jsonl`
 - Import does not see reviewed rows
   - confirm `reviewed/approved.jsonl` exists under the selected snapshot
+- `voice-generate` fails immediately
+  - confirm `google-cloud-texttospeech` is installed in `.venv-lexicon`
+  - confirm `GOOGLE_APPLICATION_CREDENTIALS` points to a readable service-account file
+- `voice-import-db` reports missing words/meanings/examples
+  - run `import-db` on the same reviewed `approved.jsonl` first
+  - confirm the voice manifest was generated from the same reviewed content set
 - Local code checkout is behind remote after a merge
   - `git fetch origin && git pull --ff-only`
   - remember that restarting a long-running lexicon command is required before it can pick up newly pulled code
 
-## 11. Helper scripts
+## 15. Helper scripts
 
 Monitor realtime enrichment sidecars:
 
 ```bash
 zsh tools/lexicon/scripts/monitor-enrich.zsh data/lexicon/snapshots/demo
 zsh tools/lexicon/scripts/monitor-enrich.zsh --no-tail data/lexicon/snapshots/demo
+```
+
+Monitor voice generation ledgers:
+
+```bash
+zsh tools/lexicon/scripts/monitor-voice.zsh data/lexicon/voice/demo
+zsh tools/lexicon/scripts/monitor-voice.zsh --no-tail data/lexicon/voice/demo
 ```
 
 Show discarded realtime decisions and why:

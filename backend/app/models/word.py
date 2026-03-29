@@ -12,6 +12,7 @@ from app.models.schema_names import lexicon_fk, lexicon_table_args
 if TYPE_CHECKING:
     from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+    from app.models.lexicon_voice_asset import LexiconVoiceAsset
     from app.models.meaning import Meaning
     from app.models.word_confusable import WordConfusable
     from app.models.word_form import WordForm
@@ -85,6 +86,13 @@ class Word(Base):
         "LexiconEnrichmentRun",
         back_populates="phonetic_words",
         foreign_keys=[phonetic_enrichment_run_id],
+    )
+    voice_assets: Mapped[list["LexiconVoiceAsset"]] = relationship(
+        "LexiconVoiceAsset",
+        back_populates="word",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="LexiconVoiceAsset.created_at.asc()",
     )
 
     __table_args__ = lexicon_table_args(

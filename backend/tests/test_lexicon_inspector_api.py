@@ -6,6 +6,8 @@ import pytest
 
 from app.core.security import create_access_token
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+from app.models.lexicon_voice_asset import LexiconVoiceAsset
+from app.models.lexicon_voice_storage_policy import LexiconVoiceStoragePolicy
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.meaning_metadata import MeaningMetadata
@@ -272,6 +274,41 @@ class TestLexiconInspectorApi:
         )
         translations_result = MagicMock()
         translations_result.scalars.return_value.all.return_value = [translation]
+        storage_policy = LexiconVoiceStoragePolicy(
+            id=uuid.uuid4(),
+            policy_key="word_default",
+            source_reference="global",
+            content_scope="word",
+            provider="default",
+            family="default",
+            locale="all",
+            primary_storage_kind="local",
+            primary_storage_base="/tmp/voice",
+            fallback_storage_kind=None,
+            fallback_storage_base=None,
+        )
+        voice_asset = LexiconVoiceAsset(
+            id=uuid.uuid4(),
+            word_id=word.id,
+            storage_policy_id=storage_policy.id,
+            storage_policy=storage_policy,
+            content_scope="word",
+            locale="en-US",
+            voice_role="female",
+            provider="google",
+            family="neural2",
+            voice_id="en-US-Neural2-C",
+            profile_key="word",
+            audio_format="mp3",
+            mime_type="audio/mpeg",
+            relative_path="word_bank/word/en_us/female-word-123.mp3",
+            source_text="bank",
+            source_text_hash="hash",
+            status="generated",
+            created_at=datetime.now(timezone.utc),
+        )
+        voice_assets_result = MagicMock()
+        voice_assets_result.scalars.return_value.all.return_value = [voice_asset]
 
         mock_db.execute.side_effect = [
             user_result,
@@ -281,6 +318,7 @@ class TestLexiconInspectorApi:
             translations_result,
             relations_result,
             runs_result,
+            voice_assets_result,
         ]
 
         response = await client.get(
@@ -304,6 +342,10 @@ class TestLexiconInspectorApi:
         assert data["meanings"][0]["usage_note"] == "Common everyday sense."
         assert data["meanings"][0]["translations"] == [{"id": str(translation.id), "language": "es", "translation": "banco"}]
         assert len(data["enrichment_runs"]) == 1
+        assert len(data["voice_assets"]) == 1
+        assert data["voice_assets"][0]["playback_url"].startswith("/api/words/voice-assets/")
+        assert data["voice_assets"][0]["playback_route_kind"] == "backend_content_route"
+        assert data["voice_assets"][0]["primary_target_kind"] == "local"
 
     @pytest.mark.asyncio
     async def test_reference_detail_returns_localizations(self, client, mock_db):

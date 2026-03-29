@@ -45,6 +45,33 @@ export type LexiconEnrichmentRun = {
   created_at: string;
 };
 
+export type VoiceAsset = {
+  id: string;
+  content_scope: string;
+  meaning_id: string | null;
+  meaning_example_id: string | null;
+  locale: string;
+  voice_role: string;
+  provider: string;
+  family: string;
+  voice_id: string;
+  profile_key: string;
+  audio_format: string;
+  mime_type: string | null;
+  speaking_rate: number | null;
+  pitch_semitones: number | null;
+  lead_ms: number;
+  tail_ms: number;
+  effects_profile_id: string | null;
+  playback_url: string;
+  storage_kind: string;
+  storage_base: string;
+  relative_path: string;
+  status: string;
+  generation_error: string | null;
+  generated_at: string | null;
+};
+
 export type EnrichedMeaning = {
   id: string;
   definition: string;
@@ -77,6 +104,7 @@ export type WordEnrichmentDetail = {
   learner_generated_at: string | null;
   meanings: EnrichedMeaning[];
   enrichment_runs: LexiconEnrichmentRun[];
+  voice_assets: VoiceAsset[];
 };
 
 export const searchWords = (query: string): Promise<WordSearchResult[]> =>
