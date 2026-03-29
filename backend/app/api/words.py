@@ -14,7 +14,6 @@ from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 from app.models.lexicon_voice_asset import LexiconVoiceAsset
-from app.models.lexicon_voice_storage_policy import LexiconVoiceStoragePolicy
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.user import User

@@ -37,6 +37,8 @@ export type RewriteLexiconVoiceStorageRequest = {
   locale?: string;
   storage_kind: string;
   storage_base: string;
+  fallback_storage_kind?: string;
+  fallback_storage_base?: string;
   dry_run?: boolean;
 };
 
