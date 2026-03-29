@@ -14,6 +14,7 @@ export type LexiconImportResult = {
   input_path: string;
   row_summary: LexiconImportRowSummary;
   import_summary: LexiconImportSummary | null;
+  error_samples?: Array<{ entry: string; error: string }>;
 };
 
 export type LexiconImportJob = {
@@ -23,6 +24,8 @@ export type LexiconImportJob = {
   source_type: string;
   source_reference: string | null;
   language: string;
+  conflict_mode: "fail" | "skip" | "upsert";
+  error_mode: "fail_fast" | "continue";
   status: "queued" | "running" | "completed" | "failed";
   row_summary: LexiconImportRowSummary;
   import_summary: LexiconImportSummary | null;
@@ -41,6 +44,8 @@ export type LexiconImportRequest = {
   sourceType: string;
   sourceReference?: string;
   language?: string;
+  conflictMode?: "fail" | "skip" | "upsert";
+  errorMode?: "fail_fast" | "continue";
 };
 
 export const dryRunLexiconImport = (input: LexiconImportRequest): Promise<LexiconImportResult> =>
@@ -49,6 +54,8 @@ export const dryRunLexiconImport = (input: LexiconImportRequest): Promise<Lexico
     source_type: input.sourceType,
     source_reference: input.sourceReference,
     language: input.language ?? "en",
+    conflict_mode: input.conflictMode ?? "upsert",
+    error_mode: input.errorMode ?? "fail_fast",
   });
 
 export const runLexiconImport = (input: LexiconImportRequest): Promise<LexiconImportJob> =>
@@ -57,6 +64,8 @@ export const runLexiconImport = (input: LexiconImportRequest): Promise<LexiconIm
     source_type: input.sourceType,
     source_reference: input.sourceReference,
     language: input.language ?? "en",
+    conflict_mode: input.conflictMode ?? "upsert",
+    error_mode: input.errorMode ?? "fail_fast",
   });
 
 export const getLexiconImportJob = (jobId: string): Promise<LexiconImportJob> =>

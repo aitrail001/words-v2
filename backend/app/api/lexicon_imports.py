@@ -24,6 +24,8 @@ class LexiconImportRequest(BaseModel):
     source_type: str
     source_reference: str | None = None
     language: str = "en"
+    conflict_mode: str = "upsert"
+    error_mode: str = "fail_fast"
 
 
 class LexiconImportResponse(BaseModel):
@@ -31,6 +33,7 @@ class LexiconImportResponse(BaseModel):
     input_path: str
     row_summary: dict[str, int]
     import_summary: dict[str, int] | None
+    error_samples: list[dict[str, str]] | None = None
 
 
 class LexiconImportJobResponse(BaseModel):
@@ -40,6 +43,8 @@ class LexiconImportJobResponse(BaseModel):
     source_type: str
     source_reference: str | None
     language: str
+    conflict_mode: str
+    error_mode: str
     status: str
     row_summary: dict[str, int]
     import_summary: dict[str, int] | None
@@ -78,11 +83,33 @@ async def dry_run_lexicon_import(
     input_path = _resolve_import_input_path(request.input_path, settings=settings)
     import_db = _import_db_module()
     rows = import_db.load_compiled_rows(input_path)
+    import_summary = import_db.run_import_file(
+        input_path,
+        source_type=request.source_type,
+        source_reference=request.source_reference,
+        language=request.language,
+        rows=rows,
+        conflict_mode=request.conflict_mode,
+        error_mode=request.error_mode,
+        dry_run=True,
+    )
     return LexiconImportResponse(
         artifact_filename=input_path.name,
         input_path=str(input_path),
         row_summary=import_db.summarize_compiled_rows(rows),
-        import_summary=None,
+        import_summary={
+            key: int(value)
+            for key, value in import_summary.items()
+            if isinstance(value, bool) or isinstance(value, int)
+        },
+        error_samples=(
+            [
+                {"entry": str(item.get("entry", "")), "error": str(item.get("error", ""))}
+                for item in (import_summary.get("error_samples") or [])
+                if isinstance(item, dict)
+            ]
+            or None
+        ),
     )
 
 
@@ -100,6 +127,8 @@ async def run_lexicon_import(
         source_type=request.source_type,
         source_reference=request.source_reference,
         language=request.language,
+        conflict_mode=request.conflict_mode,
+        error_mode=request.error_mode,
         rows=rows,
         import_runner=import_db.run_import_file,
         row_summary=import_db.summarize_compiled_rows(rows),

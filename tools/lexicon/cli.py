@@ -942,27 +942,20 @@ def _import_db_command(args: argparse.Namespace) -> int:
     runtime_logger = getattr(args, 'runtime_logger', None)
     rows = load_compiled_rows(Path(args.input))
     if args.dry_run:
-        counts = summarize_compiled_rows(rows)
-        sense_count = sum(len(row.get('senses') or []) for row in rows if str(row.get('entry_type') or 'word') == 'word')
-        example_count = sum(
-            len(sense.get('examples') or [])
-            for row in rows
-            if str(row.get('entry_type') or 'word') == 'word'
-            for sense in (row.get('senses') or [])
-        )
-        relation_count = sum(
-            len(sense.get('synonyms') or []) + len(sense.get('antonyms') or []) + len(sense.get('collocations') or [])
-            for row in rows
-            if str(row.get('entry_type') or 'word') == 'word'
-            for sense in (row.get('senses') or [])
-        )
         payload = {
             'command': 'import-db',
-            'dry_run': True,
-            **counts,
-            'sense_count': sense_count,
-            'example_count': example_count,
-            'relation_count': relation_count,
+            **run_import_file(
+                Path(args.input),
+                source_type=args.source_type,
+                source_reference=args.source_reference,
+                language=args.language,
+                rows=rows,
+                import_mode=args.import_mode,
+                on_conflict=args.on_conflict,
+                conflict_mode=args.conflict_mode,
+                error_mode=args.error_mode,
+                dry_run=True,
+            ),
         }
         print(json.dumps(payload))
         return 0
@@ -974,6 +967,8 @@ def _import_db_command(args: argparse.Namespace) -> int:
         language=args.language,
         import_mode=args.import_mode,
         on_conflict=args.on_conflict,
+        conflict_mode=args.conflict_mode,
+        error_mode=args.error_mode,
         progress_callback=(
             lambda **fields: _emit_item_progress(
                 runtime_logger,
@@ -1347,6 +1342,8 @@ def build_parser() -> argparse.ArgumentParser:
     import_db.add_argument('--language', default='en', help='language code for imported words')
     import_db.add_argument('--import-mode', choices=('orm', 'staging'), default='orm', help='import execution mode')
     import_db.add_argument('--on-conflict', choices=('fail', 'upsert', 'skip'), default='upsert', help='behavior when an entry already exists in the target DB')
+    import_db.add_argument('--conflict-mode', choices=('fail', 'upsert', 'skip'), help='alias for --on-conflict; preferred operator wording')
+    import_db.add_argument('--error-mode', choices=('fail_fast', 'continue'), default='fail_fast', help='behavior when a row-level import error occurs after preflight validation')
     _add_shared_logging_args(import_db)
     import_db.set_defaults(handler=_import_db_command)
 

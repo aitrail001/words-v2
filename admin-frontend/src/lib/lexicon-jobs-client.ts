@@ -24,6 +24,8 @@ export type CreateImportDbLexiconJobInput = {
   sourceType: string;
   sourceReference?: string;
   language?: string;
+  conflictMode?: "fail" | "skip" | "upsert";
+  errorMode?: "fail_fast" | "continue";
 };
 
 export type CreateJsonlMaterializeLexiconJobInput = {
@@ -52,6 +54,8 @@ export const createImportDbLexiconJob = (
     source_type: input.sourceType,
     source_reference: input.sourceReference,
     language: input.language ?? "en",
+    conflict_mode: input.conflictMode ?? "upsert",
+    error_mode: input.errorMode ?? "fail_fast",
   });
 
 export const createJsonlMaterializeLexiconJob = (

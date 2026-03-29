@@ -16,6 +16,8 @@ class LexiconImportJobState:
     source_type: str
     source_reference: str | None
     language: str
+    conflict_mode: str
+    error_mode: str
     status: str
     row_summary: dict[str, int]
     import_summary: dict[str, int] | None
@@ -56,6 +58,8 @@ def create_lexicon_import_job(
     source_type: str,
     source_reference: str | None,
     language: str,
+    conflict_mode: str,
+    error_mode: str,
     rows: list[dict[str, Any]],
     import_runner: Callable[..., dict[str, int]],
     row_summary: dict[str, int],
@@ -68,6 +72,8 @@ def create_lexicon_import_job(
         source_type=source_type,
         source_reference=source_reference,
         language=language,
+        conflict_mode=conflict_mode,
+        error_mode=error_mode,
         status="queued",
         row_summary=dict(row_summary),
         import_summary=None,
@@ -106,6 +112,8 @@ def create_lexicon_import_job(
                 source_type=source_type,
                 source_reference=source_reference,
                 language=language,
+                conflict_mode=conflict_mode,
+                error_mode=error_mode,
                 rows=rows,
                 progress_callback=progress_callback,
             )
@@ -121,6 +129,8 @@ def create_lexicon_import_job(
                 current = _jobs[job_id]
                 current.status = "failed"
                 current.error_message = str(exc)
+                if current.completed_rows == 0 and not current.current_entry:
+                    current.current_entry = "Failed before first row"
                 current.completed_at = _now_iso()
 
     _start_job_thread(run_job, name=f"lexicon-import-{job_id}")

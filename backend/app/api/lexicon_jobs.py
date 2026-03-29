@@ -58,6 +58,8 @@ class LexiconJobImportDbRequest(BaseModel):
     source_type: str
     source_reference: str | None = None
     language: str = "en"
+    conflict_mode: str = "upsert"
+    error_mode: str = "fail_fast"
 
 
 class LexiconJobJsonlMaterializeRequest(BaseModel):
@@ -83,6 +85,13 @@ def _import_db_module():
 
 
 def _serialize_job(job: LexiconJob) -> LexiconJobResponse:
+    progress_current_label = job.progress_current_label
+    if (
+        progress_current_label is None
+        and job.status == "failed"
+        and job.progress_completed == 0
+    ):
+        progress_current_label = "Failed before first row"
     return LexiconJobResponse(
         id=str(job.id),
         created_by=str(job.created_by) if job.created_by else None,
@@ -93,7 +102,7 @@ def _serialize_job(job: LexiconJob) -> LexiconJobResponse:
         result_payload=dict(job.result_payload or {}) if job.result_payload is not None else None,
         progress_total=job.progress_total,
         progress_completed=job.progress_completed,
-        progress_current_label=job.progress_current_label,
+        progress_current_label=progress_current_label,
         error_message=job.error_message,
         created_at=job.created_at,
         started_at=job.started_at,
@@ -154,6 +163,8 @@ async def create_import_db_job(
             "source_type": request.source_type,
             "source_reference": request.source_reference,
             "language": request.language,
+            "conflict_mode": request.conflict_mode,
+            "error_mode": request.error_mode,
             "row_summary": row_summary,
         },
     )

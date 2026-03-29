@@ -27,6 +27,8 @@ export default function LexiconImportDbPage() {
   const [inputPath, setInputPath] = useState("");
   const [sourceReference, setSourceReference] = useState("");
   const [language, setLanguage] = useState("en");
+  const [conflictMode, setConflictMode] = useState<"fail" | "skip" | "upsert">("upsert");
+  const [errorMode, setErrorMode] = useState<"fail_fast" | "continue">("continue");
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<LexiconImportResult | null>(null);
   const [job, setJob] = useState<LexiconJob | null>(null);
@@ -88,6 +90,8 @@ export default function LexiconImportDbPage() {
         sourceType: "lexicon_snapshot",
         sourceReference: sourceReference || undefined,
         language,
+        conflictMode,
+        errorMode,
       };
       const nextResult = mode === "dry-run"
         ? await dryRunLexiconImport(payload)
@@ -110,7 +114,7 @@ export default function LexiconImportDbPage() {
     } finally {
       setLoading(false);
     }
-  }, [canRun, inputPath, language, sourceReference]);
+  }, [canRun, conflictMode, errorMode, inputPath, language, sourceReference]);
 
   useEffect(() => {
     if (!autoStart || !inputPath.trim() || loading || result) {
@@ -226,6 +230,31 @@ export default function LexiconImportDbPage() {
               className="rounded-md border border-gray-300 px-3 py-2 text-sm"
             />
           </label>
+          <label className="grid gap-1 text-sm text-gray-700">
+            <span className="font-medium">Conflict handling</span>
+            <select
+              value={conflictMode}
+              onChange={(event) => setConflictMode(event.target.value as "fail" | "skip" | "upsert")}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              data-testid="lexicon-import-db-conflict-mode"
+            >
+              <option value="fail">Fail if exists</option>
+              <option value="skip">Skip existing</option>
+              <option value="upsert">Upsert existing</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm text-gray-700">
+            <span className="font-medium">Error handling</span>
+            <select
+              value={errorMode}
+              onChange={(event) => setErrorMode(event.target.value as "fail_fast" | "continue")}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              data-testid="lexicon-import-db-error-mode"
+            >
+              <option value="continue">Continue and report failures</option>
+              <option value="fail_fast">Stop on first error</option>
+            </select>
+          </label>
           <div className="flex flex-wrap items-end gap-3">
             <button
               type="button"
@@ -262,6 +291,9 @@ export default function LexiconImportDbPage() {
               <p className="mt-1 text-sm text-gray-700">
                 Current entry: <span className="font-medium">{job.progress_current_label ?? "Waiting for first row..."}</span>
               </p>
+              {job.error_message ? (
+                <p className="mt-1 text-sm text-rose-700">{job.error_message}</p>
+              ) : null}
             </div>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
               {progressPercent}%
@@ -325,6 +357,18 @@ export default function LexiconImportDbPage() {
                   <p className="font-medium">{value}</p>
                 </div>
               ))}
+            </div>
+          ) : null}
+          {result.error_samples?.length ? (
+            <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <p className="font-medium">Detected issues</p>
+              <ul className="mt-2 space-y-1">
+                {result.error_samples.map((sample, index) => (
+                  <li key={`${sample.entry}-${index}`}>
+                    <span className="font-medium">{sample.entry}:</span> {sample.error}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
         </section>

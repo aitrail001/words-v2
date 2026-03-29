@@ -62,7 +62,12 @@ class TestLexiconImportsApi:
         response = await client.post(
             "/api/lexicon-imports/dry-run",
             headers={"Authorization": f"Bearer {token}"},
-            json={"input_path": str(compiled_path), "source_type": "lexicon_snapshot"},
+            json={
+                "input_path": str(compiled_path),
+                "source_type": "lexicon_snapshot",
+                "conflict_mode": "skip",
+                "error_mode": "continue",
+            },
         )
 
         assert response.status_code == 200
@@ -70,6 +75,7 @@ class TestLexiconImportsApi:
         assert data["artifact_filename"] == "words.enriched.jsonl"
         assert data["row_summary"]["row_count"] == 1
         assert data["row_summary"]["word_count"] == 1
+        assert data["import_summary"]["dry_run"] == 1
 
     @pytest.mark.asyncio
     async def test_run_import_executes_import_file_as_background_job(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -99,7 +105,12 @@ class TestLexiconImportsApi:
         response = await client.post(
             "/api/lexicon-imports/run",
             headers={"Authorization": f"Bearer {token}"},
-            json={"input_path": str(compiled_path), "source_type": "lexicon_snapshot"},
+            json={
+                "input_path": str(compiled_path),
+                "source_type": "lexicon_snapshot",
+                "conflict_mode": "upsert",
+                "error_mode": "continue",
+            },
         )
 
         assert response.status_code == 202
@@ -109,6 +120,8 @@ class TestLexiconImportsApi:
         assert data["completed_rows"] == 1
         assert data["remaining_rows"] == 0
         assert data["import_summary"]["created_words"] == 1
+        assert data["conflict_mode"] == "upsert"
+        assert data["error_mode"] == "continue"
 
         status_response = await client.get(
             f"/api/lexicon-imports/jobs/{data['id']}",

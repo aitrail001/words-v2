@@ -5,6 +5,7 @@ import path from "node:path";
 import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
+const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? path.join(process.cwd(), "..", "data");
 
 const buildCompiledWordRow = (runId: string, word: string) => ({
   schema_version: "1.1.0",
@@ -53,7 +54,7 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
   const normalized = `opsimport${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const snapshotName = `ops-import-${normalized}`;
-  const hostSnapshotDir = path.join(process.cwd(), "..", "data", "lexicon", "snapshots", snapshotName);
+  const hostSnapshotDir = path.join(dataRoot, "lexicon", "snapshots", snapshotName);
   const reviewedHostDir = path.join(hostSnapshotDir, "reviewed");
   const compiledHostPath = path.join(hostSnapshotDir, "words.enriched.jsonl");
   const approvedHostPath = path.join(reviewedHostDir, "approved.jsonl");
@@ -96,6 +97,8 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
 
   await expect(page).toHaveURL(/\/lexicon\/import-db/);
   await expect(page.getByTestId("lexicon-import-db-input-path")).toHaveValue(new RegExp(`${snapshotName}/reviewed/approved\\.jsonl$`));
+  await expect(page.getByTestId("lexicon-import-db-conflict-mode")).toHaveValue("upsert");
+  await expect(page.getByTestId("lexicon-import-db-error-mode")).toHaveValue("continue");
 
   await page.getByTestId("lexicon-import-db-dry-run-button").click();
   await expect(page.getByText("Import dry-run complete.")).toBeVisible();

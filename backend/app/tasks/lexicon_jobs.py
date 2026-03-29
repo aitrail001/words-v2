@@ -180,6 +180,8 @@ def run_lexicon_import_db(self, job_id: str) -> dict[str, Any]:
                 source_type=request_payload["source_type"],
                 source_reference=request_payload.get("source_reference"),
                 language=request_payload.get("language", "en"),
+                conflict_mode=request_payload.get("conflict_mode"),
+                error_mode=request_payload.get("error_mode", "fail_fast"),
                 progress_callback=lambda row, completed_rows, total_rows: (
                     apply_lexicon_job_progress(
                         job,
