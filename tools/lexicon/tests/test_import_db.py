@@ -3323,6 +3323,50 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(error_samples[0]["entry"], "fuss over")
         self.assertIn("usage_note must be a non-empty string", error_samples[0]["error"])
 
+    def test_run_import_file_dry_run_counts_failed_rows_once_per_row(self) -> None:
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "phrase",
+                "word": "fuss over",
+                "display_form": "fuss over",
+                "normalized_form": "fuss over",
+                "language": "en",
+                "source_type": "db_export",
+                "source_reference": "phrase-fixture",
+                "source_provenance": [{"source": "snapshot"}],
+                "senses": [
+                    {
+                        "sense_id": "phrase-1",
+                        "definition": "care too much",
+                        "part_of_speech": "verb",
+                        "examples": [],
+                        "translations": {
+                            "zh-Hans": {
+                                "definition": "为...过分操心",
+                                "usage_note": "",
+                                "examples": [],
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+
+        with patch("tools.lexicon.import_db.import_compiled_rows", side_effect=AssertionError("write path should not run")), \
+             patch("sqlalchemy.engine.create.create_engine", return_value=MagicMock()), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            summary = run_import_file(
+                "/tmp/fake.jsonl",
+                source_type="repo_fixture",
+                source_reference="fake-fixture",
+                rows=rows,
+                dry_run=True,
+            )
+
+        self.assertEqual(summary["row_count"], 1)
+        self.assertEqual(summary["failed_rows"], 1)
+
     def test_run_import_file_raises_preflight_error_before_write_path(self) -> None:
         rows = [
             {
@@ -3363,6 +3407,50 @@ class ImportCompiledRowsTests(unittest.TestCase):
                     source_reference="fake-fixture",
                     rows=rows,
                 )
+
+    def test_run_import_file_reuses_single_preflight_scan_before_write_path(self) -> None:
+        rows = [
+            {
+                "schema_version": "1.1.0",
+                "entry_type": "phrase",
+                "word": "fuss over",
+                "display_form": "fuss over",
+                "normalized_form": "fuss over",
+                "language": "en",
+                "source_type": "db_export",
+                "source_reference": "phrase-fixture",
+                "source_provenance": [{"source": "snapshot"}],
+                "senses": [
+                    {
+                        "sense_id": "phrase-1",
+                        "definition": "care too much",
+                        "part_of_speech": "verb",
+                        "examples": [{"sentence": "Do not fuss over small things.", "difficulty": "B2"}],
+                        "translations": {
+                            "zh-Hans": {
+                                "definition": "为...过分操心",
+                                "usage_note": "",
+                                "examples": ["不要为小事过分操心。"],
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+
+        with patch("tools.lexicon.import_db._preflight_validate_compiled_rows", wraps=sys.modules["tools.lexicon.import_db"]._preflight_validate_compiled_rows) as preflight_validate, \
+             patch("tools.lexicon.import_db.import_compiled_rows", side_effect=AssertionError("write path should not run")), \
+             patch("sqlalchemy.engine.create.create_engine", return_value=MagicMock()), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            with self.assertRaisesRegex(RuntimeError, "usage_note must be a non-empty string"):
+                run_import_file(
+                    "/tmp/fake.jsonl",
+                    source_type="repo_fixture",
+                    source_reference="fake-fixture",
+                    rows=rows,
+                )
+
+        self.assertEqual(preflight_validate.call_count, 1)
 
     def test_run_import_file_staging_mode_delegates_to_staging_import(self) -> None:
         with patch("tools.lexicon.staging_import.run_staging_import_file", return_value={"created_words": 9}) as mocked_staging:
