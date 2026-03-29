@@ -93,6 +93,72 @@ def _find_meaning(session: Any, meaning_model: type, *, word_id: Any, source_ref
     ).scalar_one_or_none()
 
 
+def _find_phrase_entry(session: Any, phrase_entry_model: type, *, phrase_text: str, language: str) -> Any | None:
+    from sqlalchemy import select
+
+    return session.execute(
+        select(phrase_entry_model).where(phrase_entry_model.phrase_text == phrase_text, phrase_entry_model.language == language)
+    ).scalar_one_or_none()
+
+
+def _find_phrase_sense(
+    session: Any,
+    phrase_sense_model: type,
+    *,
+    phrase_entry_id: Any,
+    definition: str,
+    order_index: int | None,
+) -> Any | None:
+    from sqlalchemy import select
+
+    if definition:
+        result = session.execute(
+            select(phrase_sense_model).where(
+                phrase_sense_model.phrase_entry_id == phrase_entry_id,
+                phrase_sense_model.definition == definition,
+            )
+        ).scalar_one_or_none()
+        if result is not None:
+            return result
+    if order_index is None:
+        return None
+    return session.execute(
+        select(phrase_sense_model).where(
+            phrase_sense_model.phrase_entry_id == phrase_entry_id,
+            phrase_sense_model.order_index == int(order_index),
+        )
+    ).scalar_one_or_none()
+
+
+def _find_phrase_example(
+    session: Any,
+    phrase_example_model: type,
+    *,
+    phrase_sense_id: Any,
+    sentence: str,
+    order_index: int | None,
+) -> Any | None:
+    from sqlalchemy import select
+
+    if sentence:
+        result = session.execute(
+            select(phrase_example_model).where(
+                phrase_example_model.phrase_sense_id == phrase_sense_id,
+                phrase_example_model.sentence == sentence,
+            )
+        ).scalar_one_or_none()
+        if result is not None:
+            return result
+    if order_index is None:
+        return None
+    return session.execute(
+        select(phrase_example_model).where(
+            phrase_example_model.phrase_sense_id == phrase_sense_id,
+            phrase_example_model.order_index == int(order_index),
+        )
+    ).scalar_one_or_none()
+
+
 def _find_example(session: Any, example_model: type, *, meaning_id: Any, sentence: str, order_index: int | None) -> Any | None:
     from sqlalchemy import select
 
@@ -117,6 +183,9 @@ def _find_voice_asset(
     word_id: Any | None,
     meaning_id: Any | None,
     meaning_example_id: Any | None,
+    phrase_entry_id: Any | None,
+    phrase_sense_id: Any | None,
+    phrase_sense_example_id: Any | None,
     locale: str,
     voice_role: str,
     provider: str,
@@ -143,6 +212,21 @@ def _find_voice_asset(
         voice_asset_model.meaning_example_id.is_(None)
         if meaning_example_id is None
         else voice_asset_model.meaning_example_id == meaning_example_id
+    )
+    clauses.append(
+        voice_asset_model.phrase_entry_id.is_(None)
+        if phrase_entry_id is None
+        else voice_asset_model.phrase_entry_id == phrase_entry_id
+    )
+    clauses.append(
+        voice_asset_model.phrase_sense_id.is_(None)
+        if phrase_sense_id is None
+        else voice_asset_model.phrase_sense_id == phrase_sense_id
+    )
+    clauses.append(
+        voice_asset_model.phrase_sense_example_id.is_(None)
+        if phrase_sense_example_id is None
+        else voice_asset_model.phrase_sense_example_id == phrase_sense_example_id
     )
     return session.execute(select(voice_asset_model).where(*clauses)).scalar_one_or_none()
 
@@ -210,6 +294,9 @@ def import_voice_manifest_rows(
     from app.models.lexicon_voice_storage_policy import LexiconVoiceStoragePolicy
     from app.models.meaning import Meaning
     from app.models.meaning_example import MeaningExample
+    from app.models.phrase_entry import PhraseEntry
+    from app.models.phrase_sense import PhraseSense
+    from app.models.phrase_sense_example import PhraseSenseExample
     from app.models.word import Word
 
     summary = VoiceImportSummary()
@@ -227,46 +314,83 @@ def import_voice_manifest_rows(
         meaning_index = row.get("meaning_index")
         example_index = row.get("example_index")
         source_text = str(row.get("source_text") or "").strip()
+        entry_type = str(row.get("entry_type") or "word").strip().lower() or "word"
 
-        word = _find_word(session, Word, word=word_value, language=language)
-        if word is None:
-            summary = _increment(summary, missing_words=1)
-            continue
-
+        word = None
         meaning = None
-        if content_scope in {"definition", "example"}:
-            meaning_source_reference = f"{source_reference}:{sense_id}" if source_reference and sense_id else ""
-            meaning = _find_meaning(
-                session,
-                Meaning,
-                word_id=word.id,
-                source_reference=meaning_source_reference,
-                order_index=int(meaning_index) if meaning_index is not None else None,
-            )
-            if meaning is None:
-                summary = _increment(summary, missing_meanings=1)
+        example = None
+        phrase_entry = None
+        phrase_sense = None
+        phrase_example = None
+
+        if entry_type == "phrase":
+            phrase_entry = _find_phrase_entry(session, PhraseEntry, phrase_text=word_value, language=language)
+            if phrase_entry is None:
+                summary = _increment(summary, missing_words=1)
+                continue
+            if content_scope in {"definition", "example"}:
+                phrase_sense = _find_phrase_sense(
+                    session,
+                    PhraseSense,
+                    phrase_entry_id=phrase_entry.id,
+                    definition=source_text if content_scope == "definition" else "",
+                    order_index=int(meaning_index) if meaning_index is not None else None,
+                )
+                if phrase_sense is None:
+                    summary = _increment(summary, missing_meanings=1)
+                    continue
+            if content_scope == "example":
+                phrase_example = _find_phrase_example(
+                    session,
+                    PhraseSenseExample,
+                    phrase_sense_id=phrase_sense.id,
+                    sentence=source_text,
+                    order_index=int(example_index) if example_index is not None else None,
+                )
+                if phrase_example is None:
+                    summary = _increment(summary, missing_examples=1)
+                    continue
+        else:
+            word = _find_word(session, Word, word=word_value, language=language)
+            if word is None:
+                summary = _increment(summary, missing_words=1)
                 continue
 
-        example = None
-        if content_scope == "example":
-            example = _find_example(
-                session,
-                MeaningExample,
-                meaning_id=meaning.id,
-                sentence=source_text,
-                order_index=int(example_index) if example_index is not None else None,
-            )
-            if example is None:
-                summary = _increment(summary, missing_examples=1)
-                continue
+            if content_scope in {"definition", "example"}:
+                meaning_source_reference = f"{source_reference}:{sense_id}" if source_reference and sense_id else ""
+                meaning = _find_meaning(
+                    session,
+                    Meaning,
+                    word_id=word.id,
+                    source_reference=meaning_source_reference,
+                    order_index=int(meaning_index) if meaning_index is not None else None,
+                )
+                if meaning is None:
+                    summary = _increment(summary, missing_meanings=1)
+                    continue
+
+            if content_scope == "example":
+                example = _find_example(
+                    session,
+                    MeaningExample,
+                    meaning_id=meaning.id,
+                    sentence=source_text,
+                    order_index=int(example_index) if example_index is not None else None,
+                )
+                if example is None:
+                    summary = _increment(summary, missing_examples=1)
+                    continue
 
         existing = _find_voice_asset(
             session,
             LexiconVoiceAsset,
             content_scope=content_scope,
-            word_id=word.id if content_scope == "word" else None,
-            meaning_id=meaning.id if content_scope == "definition" else None,
-            meaning_example_id=example.id if content_scope == "example" else None,
+            word_id=word.id if content_scope == "word" and word is not None else None,
+            meaning_id=meaning.id if content_scope == "definition" and meaning is not None else None,
+            meaning_example_id=example.id if content_scope == "example" and example is not None else None,
+            phrase_entry_id=phrase_entry.id if content_scope == "word" and phrase_entry is not None else None,
+            phrase_sense_id=phrase_sense.id if content_scope == "definition" and phrase_sense is not None else None,
+            phrase_sense_example_id=phrase_example.id if content_scope == "example" and phrase_example is not None else None,
             locale=str(row.get("locale") or "").strip(),
             voice_role=str(row.get("voice_role") or "").strip(),
             provider=str(row.get("provider") or "").strip(),
@@ -288,9 +412,12 @@ def import_voice_manifest_rows(
                 primary_storage_base=str(row.get("storage_base") or "").strip(),
             )
             existing = LexiconVoiceAsset(
-                word_id=word.id if content_scope == "word" else None,
-                meaning_id=meaning.id if content_scope == "definition" else None,
-                meaning_example_id=example.id if content_scope == "example" else None,
+                word_id=word.id if content_scope == "word" and word is not None else None,
+                meaning_id=meaning.id if content_scope == "definition" and meaning is not None else None,
+                meaning_example_id=example.id if content_scope == "example" and example is not None else None,
+                phrase_entry_id=phrase_entry.id if content_scope == "word" and phrase_entry is not None else None,
+                phrase_sense_id=phrase_sense.id if content_scope == "definition" and phrase_sense is not None else None,
+                phrase_sense_example_id=phrase_example.id if content_scope == "example" and phrase_example is not None else None,
                 storage_policy_id=storage_policy.id,
                 content_scope=content_scope,
                 locale=str(row.get("locale") or "").strip(),

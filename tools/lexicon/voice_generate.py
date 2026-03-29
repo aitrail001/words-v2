@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 import hashlib
 import json
 
@@ -113,10 +113,23 @@ def _load_prior_unit_sets(manifest_path: Path, errors_path: Path) -> tuple[set[s
     return completed, failed
 
 
+def _emit_progress(
+    progress_callback: Callable[..., None] | None,
+    event: str,
+    *,
+    message: str,
+    **fields: Any,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(event, message=message, **fields)
+
+
 @dataclass(frozen=True)
 class VoiceWorkUnit:
     unit_id: str
     entry_id: str
+    entry_type: str
     word: str
     source_reference: str
     language: str
@@ -310,6 +323,7 @@ def plan_voice_work_units(
                     VoiceWorkUnit(
                         unit_id=_hash_text(unit_key),
                         entry_id=str(row.get("entry_id") or row.get("word") or ""),
+                        entry_type=entry_type,
                         word=str(row.get("word") or "").strip(),
                         source_reference=str(row.get("source_reference") or "").strip(),
                         language=str(row.get("language") or "en").strip() or "en",
@@ -354,7 +368,7 @@ def plan_voice_work_units(
 
     for row in rows:
         entry_type = str(row.get("entry_type") or "word").strip().lower() or "word"
-        if entry_type != "word":
+        if entry_type not in {"word", "phrase"}:
             continue
         append_units(
             row=row,
@@ -418,6 +432,7 @@ def run_voice_generation(
     skip_failed: bool = False,
     dry_run: bool = False,
     synth_provider: VoiceSynthProvider | None = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> dict[str, Any]:
     if audio_format not in FORMAT_TO_MIME:
         raise RuntimeError(f"Unsupported audio format: {audio_format}")
@@ -433,6 +448,31 @@ def run_voice_generation(
     effective_voice_map = _deep_merge(DEFAULT_VOICE_MAP, _load_optional_json(voice_map_path))
     effective_profile_map = _deep_merge(DEFAULT_PROFILE_MAP, _load_optional_json(profile_config_path))
     effective_storage_base = storage_base or str(resolved_output_dir.resolve())
+    rows_scanned = len(rows)
+    eligible_word_count = sum(
+        1 for row in rows if str(row.get("entry_type") or "word").strip().lower() == "word"
+    )
+    eligible_phrase_count = sum(
+        1 for row in rows if str(row.get("entry_type") or "word").strip().lower() == "phrase"
+    )
+
+    _emit_progress(
+        progress_callback,
+        "voice-generate-start",
+        message="Voice generation started",
+        input=str(Path(input_path)),
+        output_dir=str(resolved_output_dir),
+        provider=provider,
+        family=family,
+        locales=effective_locales,
+        audio_format=audio_format,
+        max_concurrency=max_concurrency,
+        storage_kind=storage_kind,
+        storage_base=effective_storage_base,
+        resume=resume,
+        retry_failed_only=retry_failed_only,
+        skip_failed=skip_failed,
+    )
 
     units = plan_voice_work_units(
         rows,
@@ -444,6 +484,26 @@ def run_voice_generation(
         storage_base=effective_storage_base,
         voice_map=effective_voice_map,
         profile_map=effective_profile_map,
+    )
+    planned_scope_counts: dict[str, int] = {}
+    planned_locale_counts: dict[str, int] = {}
+    planned_voice_role_counts: dict[str, int] = {}
+    for unit in units:
+        planned_scope_counts[unit.content_scope] = planned_scope_counts.get(unit.content_scope, 0) + 1
+        planned_locale_counts[unit.locale] = planned_locale_counts.get(unit.locale, 0) + 1
+        planned_voice_role_counts[unit.voice_role] = planned_voice_role_counts.get(unit.voice_role, 0) + 1
+
+    _emit_progress(
+        progress_callback,
+        "voice-generate-plan",
+        message="Voice generation planned",
+        rows_scanned=rows_scanned,
+        eligible_word_count=eligible_word_count,
+        eligible_phrase_count=eligible_phrase_count,
+        planned_count=len(units),
+        planned_scope_counts=planned_scope_counts,
+        planned_locale_counts=planned_locale_counts,
+        planned_voice_role_counts=planned_voice_role_counts,
     )
     write_jsonl_rows(plan_path, [unit.to_plan_row() for unit in units])
 
@@ -468,6 +528,22 @@ def run_voice_generation(
     retried_failed_count = len(units_to_run) if retry_failed_only else 0
 
     if dry_run:
+        _emit_progress(
+            progress_callback,
+            "voice-generate-complete",
+            message="Voice generation dry run complete",
+            planned_count=len(units),
+            scheduled_count=len(units_to_run),
+            generated_count=0,
+            existing_count=0,
+            failed_count=0,
+            skipped_completed_count=skipped_completed_count,
+            skipped_failed_count=skipped_failed_count,
+            retried_failed_count=retried_failed_count,
+            manifest_path=str(manifest_path),
+            errors_path=str(errors_path),
+            plan_path=str(plan_path),
+        )
         return {
             "planned_count": len(units),
             "scheduled_count": len(units_to_run),
@@ -486,6 +562,7 @@ def run_voice_generation(
     generated_count = 0
     existing_count = 0
     failed_count = 0
+    progress_count = 0
 
     def run_unit(unit: VoiceWorkUnit) -> dict[str, Any]:
         destination = resolved_output_dir / unit.relative_path
@@ -507,13 +584,67 @@ def run_voice_generation(
                     errors_path,
                     [unit.to_manifest_row(status="failed", generated_at=_utc_now(), generation_error=str(exc))],
                 )
+                progress_count += 1
+                _emit_progress(
+                    progress_callback,
+                    "voice-generate-unit-failed",
+                    message="Voice generation unit failed",
+                    unit_id=unit.unit_id,
+                    entry_id=unit.entry_id,
+                    word=unit.word,
+                    content_scope=unit.content_scope,
+                    locale=unit.locale,
+                    voice_role=unit.voice_role,
+                    error=str(exc),
+                )
+                _emit_progress(
+                    progress_callback,
+                    "voice-generate-progress",
+                    message="Voice generation progress",
+                    planned_count=len(units),
+                    scheduled_count=len(units_to_run),
+                    completed_count=progress_count,
+                    generated_count=generated_count,
+                    existing_count=existing_count,
+                    failed_count=failed_count,
+                    in_flight_count=max(len(units_to_run) - progress_count, 0),
+                )
                 continue
             if row["status"] == "existing":
                 existing_count += 1
             else:
                 generated_count += 1
             append_jsonl_rows(manifest_path, [row])
+            progress_count += 1
+            _emit_progress(
+                progress_callback,
+                "voice-generate-progress",
+                message="Voice generation progress",
+                planned_count=len(units),
+                scheduled_count=len(units_to_run),
+                completed_count=progress_count,
+                generated_count=generated_count,
+                existing_count=existing_count,
+                failed_count=failed_count,
+                in_flight_count=max(len(units_to_run) - progress_count, 0),
+            )
 
+    _emit_progress(
+        progress_callback,
+        "voice-generate-complete",
+        message="Voice generation complete",
+        planned_count=len(units),
+        scheduled_count=len(units_to_run),
+        generated_count=generated_count,
+        existing_count=existing_count,
+        failed_count=failed_count,
+        skipped_completed_count=skipped_completed_count,
+        skipped_failed_count=skipped_failed_count,
+        retried_failed_count=retried_failed_count,
+        manifest_path=str(manifest_path),
+        errors_path=str(errors_path),
+        plan_path=str(plan_path),
+    )
     return {
         "planned_count": len(units),
         "scheduled_count": len(units_to_run),

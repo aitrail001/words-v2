@@ -13,6 +13,9 @@ from app.models.schema_names import lexicon_fk, lexicon_table_args
 if TYPE_CHECKING:
     from app.models.meaning import Meaning
     from app.models.meaning_example import MeaningExample
+    from app.models.phrase_entry import PhraseEntry
+    from app.models.phrase_sense import PhraseSense
+    from app.models.phrase_sense_example import PhraseSenseExample
     from app.models.word import Word
 
 
@@ -35,6 +38,24 @@ class LexiconVoiceAsset(Base):
     meaning_example_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(lexicon_fk("meaning_examples"), ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    phrase_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(lexicon_fk("phrase_entries"), ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    phrase_sense_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(lexicon_fk("phrase_senses"), ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    phrase_sense_example_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(lexicon_fk("phrase_sense_examples"), ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
@@ -69,6 +90,9 @@ class LexiconVoiceAsset(Base):
     word: Mapped["Word | None"] = relationship("Word", back_populates="voice_assets")
     meaning: Mapped["Meaning | None"] = relationship("Meaning", back_populates="voice_assets")
     meaning_example: Mapped["MeaningExample | None"] = relationship("MeaningExample", back_populates="voice_assets")
+    phrase_entry: Mapped["PhraseEntry | None"] = relationship("PhraseEntry", back_populates="voice_assets")
+    phrase_sense: Mapped["PhraseSense | None"] = relationship("PhraseSense", back_populates="voice_assets")
+    phrase_sense_example: Mapped["PhraseSenseExample | None"] = relationship("PhraseSenseExample", back_populates="voice_assets")
     storage_policy: Mapped["LexiconVoiceStoragePolicy"] = relationship("LexiconVoiceStoragePolicy", back_populates="voice_assets")
 
     @property
@@ -92,7 +116,8 @@ class LexiconVoiceAsset(Base):
         CheckConstraint("content_scope IN ('word', 'definition', 'example')", name="ck_lexicon_voice_assets_content_scope"),
         CheckConstraint("voice_role IN ('female', 'male')", name="ck_lexicon_voice_assets_voice_role"),
         CheckConstraint(
-            "((word_id IS NOT NULL)::int + (meaning_id IS NOT NULL)::int + (meaning_example_id IS NOT NULL)::int) = 1",
+            "((word_id IS NOT NULL)::int + (meaning_id IS NOT NULL)::int + (meaning_example_id IS NOT NULL)::int + "
+            "(phrase_entry_id IS NOT NULL)::int + (phrase_sense_id IS NOT NULL)::int + (phrase_sense_example_id IS NOT NULL)::int) = 1",
             name="ck_lexicon_voice_assets_single_parent",
         ),
     )

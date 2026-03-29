@@ -125,12 +125,24 @@ def make_enrichment_run() -> LexiconEnrichmentRun:
     )
 
 
-def make_voice_asset(*, word_id: uuid.UUID | None = None, meaning_id: uuid.UUID | None = None, meaning_example_id: uuid.UUID | None = None) -> LexiconVoiceAsset:
+def make_voice_asset(
+    *,
+    word_id: uuid.UUID | None = None,
+    meaning_id: uuid.UUID | None = None,
+    meaning_example_id: uuid.UUID | None = None,
+    phrase_entry_id: uuid.UUID | None = None,
+    phrase_sense_id: uuid.UUID | None = None,
+    phrase_sense_example_id: uuid.UUID | None = None,
+) -> LexiconVoiceAsset:
     storage_policy = LexiconVoiceStoragePolicy(
         id=uuid.uuid4(),
         policy_key="fixture:word",
         source_reference="fixture",
-        content_scope="word" if word_id is not None else ("definition" if meaning_id is not None else "example"),
+        content_scope=(
+            "word"
+            if word_id is not None or phrase_entry_id is not None
+            else ("definition" if meaning_id is not None or phrase_sense_id is not None else "example")
+        ),
         primary_storage_kind="local",
         primary_storage_base="/tmp/voice",
         fallback_storage_kind=None,
@@ -141,15 +153,26 @@ def make_voice_asset(*, word_id: uuid.UUID | None = None, meaning_id: uuid.UUID 
         word_id=word_id,
         meaning_id=meaning_id,
         meaning_example_id=meaning_example_id,
+        phrase_entry_id=phrase_entry_id,
+        phrase_sense_id=phrase_sense_id,
+        phrase_sense_example_id=phrase_sense_example_id,
         storage_policy_id=storage_policy.id,
         storage_policy=storage_policy,
-        content_scope="word" if word_id is not None else ("definition" if meaning_id is not None else "example"),
+        content_scope=(
+            "word"
+            if word_id is not None or phrase_entry_id is not None
+            else ("definition" if meaning_id is not None or phrase_sense_id is not None else "example")
+        ),
         locale="en-US",
         voice_role="female",
         provider="google",
         family="neural2",
         voice_id="en-US-Neural2-C",
-        profile_key="word" if word_id is not None else ("definition" if meaning_id is not None else "example"),
+        profile_key=(
+            "word"
+            if word_id is not None or phrase_entry_id is not None
+            else ("definition" if meaning_id is not None or phrase_sense_id is not None else "example")
+        ),
         audio_format="mp3",
         mime_type="audio/mpeg",
         relative_path="word_bank/word/en_us/female-word-123.mp3",
@@ -515,6 +538,32 @@ class TestVoiceAssetContent:
 
         assert response.status_code == 200
         assert response.content == b"fake-mp3"
+        assert response.headers["content-type"].startswith("audio/mpeg")
+
+    @pytest.mark.asyncio
+    async def test_get_voice_asset_content_serves_local_file_for_phrase_asset(self, client, mock_db, auth_token, tmp_path):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        audio_path = tmp_path / "voice" / "phrase_take_off" / "word" / "en_us" / "female-word-123.mp3"
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
+        audio_path.write_bytes(b"fake-phrase-mp3")
+        asset = make_voice_asset(phrase_entry_id=uuid.uuid4())
+        asset.storage_policy.primary_storage_base = str(tmp_path / "voice")
+        asset.relative_path = str(Path("phrase_take_off") / "word" / "en_us" / "female-word-123.mp3")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        asset_result = MagicMock()
+        asset_result.scalar_one_or_none.return_value = asset
+        mock_db.execute.side_effect = [user_result, asset_result]
+
+        response = await client.get(
+            f"/api/words/voice-assets/{asset.id}/content",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.content == b"fake-phrase-mp3"
         assert response.headers["content-type"].startswith("audio/mpeg")
 
     @pytest.mark.asyncio

@@ -998,6 +998,7 @@ def _voice_generate_command(args: argparse.Namespace) -> int:
     if args.retry_failed_only and args.skip_failed:
         print("--retry-failed-only and --skip-failed cannot be combined", file=sys.stderr)
         return 2
+    runtime_logger = getattr(args, 'runtime_logger', None)
     try:
         payload = run_voice_generation(
             input_path=Path(args.input),
@@ -1016,6 +1017,15 @@ def _voice_generate_command(args: argparse.Namespace) -> int:
             retry_failed_only=args.retry_failed_only,
             skip_failed=args.skip_failed,
             dry_run=args.dry_run,
+            progress_callback=(
+                lambda event, message="", **fields: _emit_command_event(
+                    runtime_logger,
+                    event,
+                    message,
+                    command='voice-generate',
+                    **fields,
+                )
+            ),
         )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)

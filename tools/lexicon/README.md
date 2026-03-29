@@ -52,7 +52,9 @@ Legacy sense-selection and staged-selection review flows are removed from the su
   - dry-runs or imports reviewed learner-facing rows into the DB
 - `.venv-lexicon/bin/python -m tools.lexicon.cli voice-generate --input ... --output-dir ...`
   - generates deterministic voice artifacts and JSONL ledgers from reviewed `approved.jsonl`
+  - supports reviewed word rows and reviewed phrase rows in the same input
   - writes `voice_plan.jsonl`, `voice_manifest.jsonl`, and `voice_errors.jsonl`
+  - prints startup, planning, progress, failure, and completion summaries during long runs
   - `--locales` currently expects a comma-separated value such as `en-US,en-GB`
 - `.venv-lexicon/bin/python -m tools.lexicon.cli voice-import-db --input ...`
   - imports generated voice manifest rows into normalized DB voice-asset tables
@@ -143,6 +145,7 @@ Current defaults:
 - provider: `google`
 - family: `neural2`
 - locales: `en-US`, `en-GB`
+- supports reviewed `entry_type: word` and `entry_type: phrase` rows
 - generates both `female` and `male` variants for each `word`, `definition`, and `example`
 - voice IDs are configurable per run; the current defaults are:
   - `en-US`: female `en-US-Neural2-C`, male `en-US-Neural2-D`
@@ -156,7 +159,7 @@ Prerequisite for live Google runs:
 Minimal flow:
 
 ```bash
-.venv-lexicon/bin/python -m tools.lexicon.cli voice-generate --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --output-dir data/lexicon/voice/demo --provider google --family neural2 --locales en-US en-GB
+.venv-lexicon/bin/python -m tools.lexicon.cli voice-generate --input data/lexicon/snapshots/demo/reviewed/approved.jsonl --output-dir data/lexicon/voice/demo --provider google --family neural2 --locales en-US,en-GB
 .venv-lexicon/bin/python -m tools.lexicon.cli voice-import-db --input data/lexicon/voice/demo/voice_manifest.jsonl
 ```
 
@@ -167,7 +170,7 @@ Resume options:
 - `--skip-failed`: with `--resume`, skip units previously recorded in `voice_errors.jsonl`
 - file existence alone is not the resume source of truth anymore; prior ledgers drive the filter
 
-The backend then resolves playback through `/api/words/voice-assets/{asset_id}/content`, while admin DB Inspector shows imported voice assets per word.
+The backend then resolves playback through `/api/words/voice-assets/{asset_id}/content`, while admin DB Inspector shows imported voice assets for both words and phrases.
 Voice assets now keep `relative_path` plus a shared DB storage-policy reference internally. The storage policy itself owns the primary and optional fallback storage configuration. API responses still expose `storage_kind` and `storage_base` for compatibility.
 
 Admin Voice page:
