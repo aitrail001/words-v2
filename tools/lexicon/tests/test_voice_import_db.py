@@ -1,7 +1,11 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import uuid
 
+from tools.lexicon.tests.test_voice_generate import FakeSynthProvider
+from tools.lexicon.voice_generate import run_voice_generation
 from tools.lexicon.voice_import_db import import_voice_manifest_rows
 
 
@@ -83,3 +87,24 @@ def test_import_voice_manifest_rows_creates_phrase_sense_and_example_assets():
     assert created_definition_asset.meaning_id is None
     assert created_example_asset.phrase_sense_example_id == phrase_example.id
     assert created_example_asset.meaning_example_id is None
+
+
+def test_run_voice_generation_manifest_preserves_phrase_entry_type():
+    approved_jsonl = """{"entry_id":"phrase_take_off","entry_type":"phrase","word":"take off","language":"en","source_reference":"phrases-001","senses":[{"sense_id":"take_off.v.01","definition":"to depart","examples":[{"sentence":"The plane will take off."}]}]}\n"""
+    with TemporaryDirectory() as tmpdir:
+        input_path = Path(tmpdir) / "approved.jsonl"
+        output_dir = Path(tmpdir) / "voice"
+        input_path.write_text(approved_jsonl, encoding="utf-8")
+
+        summary = run_voice_generation(
+            input_path=input_path,
+            output_dir=output_dir,
+            locales=["en-US"],
+            max_concurrency=1,
+            synth_provider=FakeSynthProvider(),
+        )
+
+        assert summary["generated_count"] == 6
+        manifest_lines = (output_dir / "voice_manifest.jsonl").read_text(encoding="utf-8").strip().splitlines()
+        assert manifest_lines
+        assert all('"entry_type": "phrase"' in line for line in manifest_lines)

@@ -129,6 +129,7 @@ def _emit_progress(
 class VoiceWorkUnit:
     unit_id: str
     entry_id: str
+    entry_type: str
     word: str
     source_reference: str
     language: str
@@ -322,6 +323,7 @@ def plan_voice_work_units(
                     VoiceWorkUnit(
                         unit_id=_hash_text(unit_key),
                         entry_id=str(row.get("entry_id") or row.get("word") or ""),
+                        entry_type=entry_type,
                         word=str(row.get("word") or "").strip(),
                         source_reference=str(row.get("source_reference") or "").strip(),
                         language=str(row.get("language") or "en").strip() or "en",
