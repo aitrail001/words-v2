@@ -1,3 +1,4 @@
 nltk>=3.9,<4
 wordfreq>=3.1,<4
 openai>=1.109.0,<2
+google-cloud-texttospeech>=2.33.0,<3

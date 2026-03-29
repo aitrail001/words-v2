@@ -11,6 +11,7 @@ from app.models.schema_names import lexicon_fk, lexicon_table_args
 
 if TYPE_CHECKING:
     from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+    from app.models.lexicon_voice_asset import LexiconVoiceAsset
     from app.models.meaning import Meaning
 
 
@@ -44,6 +45,13 @@ class MeaningExample(Base):
     enrichment_run: Mapped["LexiconEnrichmentRun | None"] = relationship(
         "LexiconEnrichmentRun",
         back_populates="meaning_examples",
+    )
+    voice_assets: Mapped[list["LexiconVoiceAsset"]] = relationship(
+        "LexiconVoiceAsset",
+        back_populates="meaning_example",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="LexiconVoiceAsset.created_at.asc()",
     )
 
     __table_args__ = lexicon_table_args(

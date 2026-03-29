@@ -10,6 +10,7 @@ from app.core.database import Base
 from app.models.schema_names import LEXICON_TABLE_ARGS, lexicon_fk
 
 if TYPE_CHECKING:
+    from app.models.lexicon_voice_asset import LexiconVoiceAsset
     from app.models.meaning_metadata import MeaningMetadata
     from app.models.translation import Translation
     from app.models.word import Word
@@ -51,6 +52,13 @@ class Meaning(Base):
         back_populates="meaning",
         cascade="all, delete-orphan",
         order_by="MeaningMetadata.order_index",
+    )
+    voice_assets: Mapped[list["LexiconVoiceAsset"]] = relationship(
+        "LexiconVoiceAsset",
+        back_populates="meaning",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="LexiconVoiceAsset.created_at.asc()",
     )
 
     def __init__(self, **kwargs):

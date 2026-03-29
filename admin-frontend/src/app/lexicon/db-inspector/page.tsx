@@ -65,6 +65,13 @@ function phoneticEntries(phonetics: Record<string, unknown> | null | undefined):
     .filter((value): value is { label: string; ipa: string; confidence: string | null } => value !== null);
 }
 
+function voiceScopeLabel(value: string): string {
+  if (value === "word") return "Word";
+  if (value === "definition") return "Definition";
+  if (value === "example") return "Example";
+  return value;
+}
+
 export default function LexiconDbInspectorPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [familyFilter, setFamilyFilter] = useState<LexiconInspectorFamilyFilter>("all");
@@ -285,6 +292,10 @@ export default function LexiconDbInspectorPage() {
                   <p className="text-gray-500">Phonetic</p>
                   <p className="font-medium">{detail.phonetic ?? "—"}</p>
                 </div>
+                <div className="rounded border border-gray-200 p-3">
+                  <p className="text-gray-500">Voice assets</p>
+                  <p className="font-medium">{detail.voice_assets.length}</p>
+                </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded border border-gray-200 p-3">
@@ -312,6 +323,29 @@ export default function LexiconDbInspectorPage() {
                 </div>
               </div>
               <div className="space-y-3">
+                <section className="rounded-lg border border-gray-200 p-4">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Voice assets</p>
+                  <div className="mt-3 space-y-2 text-sm text-gray-900">
+                    {detail.voice_assets.length ? detail.voice_assets.map((asset) => (
+                      <div key={asset.id} className="rounded border border-gray-100 bg-gray-50 p-3">
+                        <p className="font-medium">
+                          {voiceScopeLabel(asset.content_scope)} · {asset.locale} · {asset.voice_role}
+                        </p>
+                        <p className="text-gray-600">
+                          {asset.provider}/{asset.family} · {asset.voice_id} · {asset.profile_key} · {asset.audio_format} · {asset.status}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          playback route: {asset.playback_route_kind}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          primary target: {asset.primary_target_kind}
+                        </p>
+                        <p className="break-all text-xs text-gray-500">{asset.playback_url}</p>
+                        <p className="break-all text-xs text-gray-500">{asset.primary_target_base}</p>
+                      </div>
+                    )) : <p>—</p>}
+                  </div>
+                </section>
                 {detail.meanings.map((meaning) => (
                   <article key={meaning.id} className="rounded-lg border border-gray-200 p-4">
                     <p className="font-medium text-gray-900">{meaning.definition}</p>

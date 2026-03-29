@@ -1,7 +1,9 @@
 import uuid
 from collections import defaultdict
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,7 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+from app.models.lexicon_voice_asset import LexiconVoiceAsset
 from app.models.meaning import Meaning
 from app.models.meaning_example import MeaningExample
 from app.models.user import User
@@ -19,6 +22,14 @@ from app.models.word_relation import WordRelation
 from app.services.knowledge_map import normalize_confusable_words
 from app.services.knowledge_map import normalize_meaning_metadata
 from app.services.knowledge_map import normalize_word_part_of_speech
+from app.services.voice_assets import (
+    build_fallback_local_storage_path,
+    build_fallback_storage_target_url,
+    build_local_storage_path,
+    build_storage_target_url,
+    build_voice_asset_playback_url,
+    load_word_voice_assets,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -94,6 +105,33 @@ class LexiconEnrichmentRunResponse(BaseModel):
     created_at: str
 
 
+class VoiceAssetResponse(BaseModel):
+    id: str
+    content_scope: str
+    meaning_id: str | None
+    meaning_example_id: str | None
+    locale: str
+    voice_role: str
+    provider: str
+    family: str
+    voice_id: str
+    profile_key: str
+    audio_format: str
+    mime_type: str | None
+    speaking_rate: float | None
+    pitch_semitones: float | None
+    lead_ms: int
+    tail_ms: int
+    effects_profile_id: str | None
+    playback_url: str
+    storage_kind: str
+    storage_base: str
+    relative_path: str
+    status: str
+    generation_error: str | None
+    generated_at: str | None
+
+
 class EnrichedMeaningResponse(MeaningResponse):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -118,6 +156,7 @@ class WordEnrichmentDetailResponse(WordResponse):
     learner_generated_at: str | None
     meanings: list[EnrichedMeaningResponse]
     enrichment_runs: list[LexiconEnrichmentRunResponse]
+    voice_assets: list[VoiceAssetResponse]
 
 
 class LookupRequest(BaseModel):
@@ -153,6 +192,35 @@ def _meaning_response(meaning: Meaning) -> MeaningResponse:
     )
 
 
+def _voice_asset_response(asset: LexiconVoiceAsset) -> VoiceAssetResponse:
+    return VoiceAssetResponse(
+        id=str(asset.id),
+        content_scope=asset.content_scope,
+        meaning_id=str(asset.meaning_id) if asset.meaning_id else None,
+        meaning_example_id=str(asset.meaning_example_id) if asset.meaning_example_id else None,
+        locale=asset.locale,
+        voice_role=asset.voice_role,
+        provider=asset.provider,
+        family=asset.family,
+        voice_id=asset.voice_id,
+        profile_key=asset.profile_key,
+        audio_format=asset.audio_format,
+        mime_type=asset.mime_type,
+        speaking_rate=asset.speaking_rate,
+        pitch_semitones=asset.pitch_semitones,
+        lead_ms=int(asset.lead_ms or 0),
+        tail_ms=int(asset.tail_ms or 0),
+        effects_profile_id=asset.effects_profile_id,
+        playback_url=build_voice_asset_playback_url(asset),
+        storage_kind=asset.storage_kind,
+        storage_base=asset.storage_base,
+        relative_path=asset.relative_path,
+        status=asset.status,
+        generation_error=asset.generation_error,
+        generated_at=asset.generated_at.isoformat() if asset.generated_at else None,
+    )
+
+
 @router.get("/search", response_model=list[WordResponse])
 async def search_words(
     q: str = Query(..., min_length=1),
@@ -169,6 +237,49 @@ async def search_words(
     words = result.scalars().all()
 
     return [_word_response(w) for w in words]
+
+
+@router.get("/voice-assets/{asset_id}/content")
+async def get_voice_asset_content(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(LexiconVoiceAsset)
+        .options(selectinload(LexiconVoiceAsset.storage_policy))
+        .where(LexiconVoiceAsset.id == asset_id)
+    )
+    asset = result.scalar_one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset not found")
+
+    remote_url = build_storage_target_url(asset)
+    if remote_url:
+        return RedirectResponse(remote_url)
+
+    try:
+        local_path = build_local_storage_path(asset)
+    except FileNotFoundError as exc:
+        fallback_remote_url = build_fallback_storage_target_url(asset)
+        if fallback_remote_url:
+            return RedirectResponse(fallback_remote_url)
+        try:
+            local_path = build_fallback_local_storage_path(asset)
+        except FileNotFoundError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if not local_path.exists() or not local_path.is_file():
+        fallback_remote_url = build_fallback_storage_target_url(asset)
+        if fallback_remote_url:
+            return RedirectResponse(fallback_remote_url)
+        try:
+            fallback_path = build_fallback_local_storage_path(asset)
+        except FileNotFoundError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
+        if not fallback_path.exists() or not fallback_path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
+        local_path = fallback_path
+    return FileResponse(local_path, media_type=asset.mime_type or "audio/mpeg", filename=Path(asset.relative_path).name)
 
 
 @router.get("/{word_id}/enrichment", response_model=WordEnrichmentDetailResponse)
@@ -238,6 +349,12 @@ async def get_word_enrichment(
         enrichment_runs = runs_result.scalars().all()
 
     meaning_metadata = {meaning.id: normalize_meaning_metadata(meaning) for meaning in meanings}
+    voice_assets = await load_word_voice_assets(
+        db,
+        word_id=word.id,
+        meaning_ids=meaning_ids,
+        example_ids=[example.id for example in examples],
+    )
 
     return WordEnrichmentDetailResponse(
         id=str(word.id),
@@ -309,6 +426,7 @@ async def get_word_enrichment(
             )
             for run in enrichment_runs
         ],
+        voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
     )
 
 

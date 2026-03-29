@@ -56,6 +56,56 @@ class CliTests(unittest.TestCase):
         self.assertIn("review-materialize", stdout)
         self.assertIn("validate", stdout)
         self.assertIn("import-db", stdout)
+        self.assertIn("voice-generate", stdout)
+        self.assertIn("voice-import-db", stdout)
+
+    def test_voice_generate_rejects_retry_failed_only_with_skip_failed(self) -> None:
+        code, _, stderr = self.run_cli([
+            "voice-generate",
+            "--input",
+            "approved.jsonl",
+            "--output-dir",
+            "voice-out",
+            "--resume",
+            "--retry-failed-only",
+            "--skip-failed",
+        ])
+
+        self.assertEqual(code, 2)
+        self.assertIn("cannot be combined", stderr)
+
+    def test_voice_sync_storage_dry_run_emits_summary(self) -> None:
+        with patch("tools.lexicon.cli.run_voice_storage_sync", return_value={
+            "matched_count": 6,
+            "updated_count": 0,
+            "dry_run": True,
+            "storage_kind": "s3",
+            "storage_base": "https://cdn.example.com/voice",
+            "fallback_storage_kind": "http",
+            "fallback_storage_base": "https://backup.example.com/voice",
+        }):
+            code, stdout, _ = self.run_cli([
+                "voice-sync-storage",
+                "--source-reference",
+                "voice-roundtrip",
+                "--storage-kind",
+                "s3",
+                "--storage-base",
+                "https://cdn.example.com/voice",
+                "--fallback-storage-kind",
+                "http",
+                "--fallback-storage-base",
+                "https://backup.example.com/voice",
+                "--dry-run",
+            ])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["command"], "voice-sync-storage")
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["matched_count"], 6)
+        self.assertEqual(payload["fallback_storage_kind"], "http")
+        self.assertEqual(payload["fallback_storage_base"], "https://backup.example.com/voice")
 
     def test_build_base_command_emits_json_summary(self) -> None:
         with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: {"run": 5, "set": 10}[word], lambda word: [{"wn_synset_id": f"{word}.n.01", "part_of_speech": "noun", "canonical_gloss": f"gloss for {word}", "canonical_label": word}])):

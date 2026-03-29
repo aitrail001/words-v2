@@ -31,6 +31,7 @@ describe("Admin RootLayout auth navigation", () => {
 
     expect(screen.getByTestId("nav-login-link")).toBeInTheDocument();
     expect(screen.getByTestId("nav-lexicon-ops-link")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-lexicon-voice-link")).toBeInTheDocument();
     expect(screen.getByTestId("nav-lexicon-import-db-link")).toBeInTheDocument();
     expect(screen.getByTestId("nav-lexicon-db-inspector-link")).toBeInTheDocument();
     expect(
