@@ -83,6 +83,7 @@ async def dry_run_lexicon_import(
     input_path = _resolve_import_input_path(request.input_path, settings=settings)
     import_db = _import_db_module()
     rows = import_db.load_compiled_rows(input_path)
+    error_samples: list[dict[str, str]] = []
     import_summary = import_db.run_import_file(
         input_path,
         source_type=request.source_type,
@@ -92,6 +93,7 @@ async def dry_run_lexicon_import(
         conflict_mode=request.conflict_mode,
         error_mode=request.error_mode,
         dry_run=True,
+        error_samples_sink=error_samples,
     )
     return LexiconImportResponse(
         artifact_filename=input_path.name,
@@ -105,7 +107,7 @@ async def dry_run_lexicon_import(
         error_samples=(
             [
                 {"entry": str(item.get("entry", "")), "error": str(item.get("error", ""))}
-                for item in (import_summary.get("error_samples") or [])
+                for item in error_samples
                 if isinstance(item, dict)
             ]
             or None

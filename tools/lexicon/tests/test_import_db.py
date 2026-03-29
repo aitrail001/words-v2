@@ -10,7 +10,7 @@ from contextlib import contextmanager
 import time
 from dataclasses import dataclass, field
 from types import ModuleType
-from typing import Optional
+from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
@@ -3159,6 +3159,91 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual(summary["skipped_words"], 1)
         mocked_rebuild_projection.assert_not_called()
         self.assertEqual(fake_session.commit.call_count, 1)
+
+    def test_run_import_file_continue_mode_falls_back_to_row_level_import(self) -> None:
+        from sqlalchemy.exc import IntegrityError
+
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        rows = [
+            {"entry_type": "word", "word": "alpha"},
+            {"entry_type": "word", "word": "beta"},
+            {"entry_type": "word", "word": "gamma"},
+        ]
+
+        def fake_import(_session, batch, **kwargs):
+            if len(batch) > 1:
+                raise IntegrityError("insert", {}, Exception("bad row in batch"))
+            if str(batch[0].get("word")) == "beta":
+                raise ValueError("beta is invalid")
+            return ImportSummary(created_words=1)
+
+        error_samples: list[dict[str, Any]] = []
+        with patch("tools.lexicon.import_db.import_compiled_rows", side_effect=fake_import), \
+             patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+             patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+             patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            summary = run_import_file(
+                "/tmp/fake.jsonl",
+                source_type="repo_fixture",
+                source_reference="fake-fixture",
+                rows=rows,
+                commit_every_rows=3,
+                error_mode="continue",
+                error_samples_sink=error_samples,
+            )
+
+        self.assertEqual(summary["created_words"], 2)
+        self.assertEqual(summary["failed_rows"], 1)
+        self.assertEqual(error_samples, [{"entry": "beta", "error": "beta is invalid"}])
+        self.assertGreaterEqual(fake_session.rollback.call_count, 2)
+
+    def test_run_import_file_continue_mode_reraises_non_row_level_errors(self) -> None:
+        from sqlalchemy.exc import OperationalError
+
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        rows = [{"entry_type": "word", "word": "alpha"}]
+
+        with patch(
+            "tools.lexicon.import_db.import_compiled_rows",
+            side_effect=OperationalError("select 1", {}, Exception("db down")),
+        ), \
+             patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+             patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+             patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+            with self.assertRaises(OperationalError):
+                run_import_file(
+                    "/tmp/fake.jsonl",
+                    source_type="repo_fixture",
+                    source_reference="fake-fixture",
+                    rows=rows,
+                    error_mode="continue",
+                )
 
     def test_run_import_file_staging_mode_delegates_to_staging_import(self) -> None:
         with patch("tools.lexicon.staging_import.run_staging_import_file", return_value={"created_words": 9}) as mocked_staging:

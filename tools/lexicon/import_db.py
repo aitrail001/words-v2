@@ -298,6 +298,17 @@ def _compiled_row_identity(row: dict[str, Any], row_index: int) -> str:
     return f"row {row_index}"
 
 
+def _is_row_level_import_exception(exc: Exception) -> bool:
+    try:
+        from sqlalchemy.exc import DataError, IntegrityError, OperationalError, ProgrammingError, StatementError
+    except Exception:  # pragma: no cover - defensive fallback
+        return isinstance(exc, (ValueError, RuntimeError))
+
+    if isinstance(exc, (OperationalError, ProgrammingError)):
+        return False
+    return isinstance(exc, (ValueError, RuntimeError, IntegrityError, DataError, StatementError))
+
+
 def _should_preflight_validate_row(row: dict[str, Any]) -> bool:
     return any(key in row for key in ("schema_version", "entry_id", "source_provenance"))
 
@@ -1847,6 +1858,7 @@ def run_import_file(
     conflict_mode: str | None = None,
     error_mode: str = "fail_fast",
     dry_run: bool = False,
+    error_samples_sink: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     on_conflict = _resolve_conflict_mode(conflict_mode=conflict_mode, on_conflict=on_conflict)
     error_mode = _validate_error_mode(error_mode)
@@ -1902,7 +1914,6 @@ def run_import_file(
             "example_count": example_count,
             "relation_count": relation_count,
             "failed_rows": 0,
-            "error_samples": [],
             "dry_run": True,
         }
     row_source = iter(resolved_rows)
@@ -1936,16 +1947,47 @@ def run_import_file(
                 session.rollback()
                 if error_mode != "continue":
                     raise
-                aggregate_summary = _increment(aggregate_summary, failed_rows=len(batch))
-                for row in batch:
-                    if len(error_samples) >= 10:
-                        break
-                    error_samples.append(
-                        {
-                            "entry": _compiled_row_identity(row, completed_rows + 1),
-                            "error": str(exc),
-                        }
-                    )
+                if not _is_row_level_import_exception(exc):
+                    raise
+                batch_summary = ImportSummary()
+                for batch_index, row in enumerate(batch):
+                    row_completed_base = completed_rows + batch_index
+                    try:
+                        row_summary = import_compiled_rows(
+                            session,
+                            [row],
+                            source_type=source_type,
+                            source_reference=effective_source_reference,
+                            language=language,
+                            rebuild_learner_catalog=False,
+                            progress_callback=(
+                                (lambda current_row, batch_completed_rows, _batch_total_rows, base_completed_rows=row_completed_base: progress_callback(
+                                    row=current_row,
+                                    completed_rows=base_completed_rows + batch_completed_rows,
+                                    total_rows=resolved_row_total,
+                                ))
+                                if progress_callback is not None
+                                else None
+                            ),
+                            on_conflict=on_conflict,
+                            error_mode=error_mode,
+                        )
+                    except Exception as row_exc:
+                        session.rollback()
+                        if not _is_row_level_import_exception(row_exc):
+                            raise
+                        batch_summary = _increment(batch_summary, failed_rows=1)
+                        if len(error_samples) < 10:
+                            error_samples.append(
+                                {
+                                    "entry": _compiled_row_identity(row, row_completed_base + 1),
+                                    "error": str(row_exc),
+                                }
+                            )
+                        continue
+                    batch_summary = _increment(batch_summary, **row_summary.__dict__)
+                    session.commit()
+                aggregate_summary = _increment(aggregate_summary, **batch_summary.__dict__)
                 completed_rows += len(batch)
                 continue
             aggregate_summary = _increment(aggregate_summary, **batch_summary.__dict__)
@@ -1975,7 +2017,7 @@ def run_import_file(
                 phrase_model=phrase_model,
             )
             session.commit()
-    return {
+    result = {
         "created_words": aggregate_summary.created_words,
         "updated_words": aggregate_summary.updated_words,
         "skipped_words": aggregate_summary.skipped_words,
@@ -2000,9 +2042,11 @@ def run_import_file(
         "created_reference_localizations": aggregate_summary.created_reference_localizations,
         "updated_reference_localizations": aggregate_summary.updated_reference_localizations,
         "failed_rows": aggregate_summary.failed_rows,
-        "error_samples": error_samples,
         "dry_run": False,
     }
+    if error_samples_sink is not None:
+        error_samples_sink.extend(error_samples)
+    return result
 
 
 def summarize_compiled_rows(rows: Iterable[dict[str, Any]]) -> dict[str, int]:
