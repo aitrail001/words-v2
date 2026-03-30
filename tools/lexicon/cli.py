@@ -1058,6 +1058,40 @@ def _voice_generate_command(args: argparse.Namespace) -> int:
 def _voice_import_db_command(args: argparse.Namespace) -> int:
     runtime_logger = getattr(args, 'runtime_logger', None)
     rows = load_voice_manifest_rows(Path(args.input))
+    last_progress_key: tuple[str, str] | None = None
+
+    def _emit_voice_import_progress(*, row: dict[str, object], completed_rows: int, total_rows: int) -> None:
+        nonlocal last_progress_key
+        explicit_label = str(row.get("_progress_label") or "").strip()
+        if explicit_label.startswith("Skipping existing"):
+            action = "skip"
+        elif explicit_label.startswith("Failed"):
+            action = "fail"
+        elif explicit_label.startswith("Validating"):
+            action = "validate"
+        else:
+            action = "import"
+        entry_label = str(row.get("word") or row.get("source_text") or row.get("entry_id") or "").strip() or "unknown"
+        progress_key = (action, str(row.get("entry_id") or entry_label))
+        if progress_key == last_progress_key:
+            return
+        last_progress_key = progress_key
+        _emit_item_progress(
+            runtime_logger,
+            command='voice-import-db',
+            item_type='voice-manifest-group',
+            action=action,
+            entry_id=str(row.get("entry_id") or "").strip() or None,
+            entry_type=str(row.get("entry_type") or "").strip() or None,
+            entry_label=entry_label,
+            content_scope=str(row.get("content_scope") or "").strip() or None,
+            locale=str(row.get("locale") or "").strip() or None,
+            voice_role=str(row.get("voice_role") or "").strip() or None,
+            completed_rows=completed_rows,
+            total_rows=total_rows,
+            progress_label=explicit_label or None,
+        )
+
     summary = run_voice_import_file(
         Path(args.input),
         language=args.language,
@@ -1065,14 +1099,7 @@ def _voice_import_db_command(args: argparse.Namespace) -> int:
         error_mode=args.error_mode,
         dry_run=bool(args.dry_run),
         rows=rows,
-        progress_callback=(
-            lambda **fields: _emit_item_progress(
-                runtime_logger,
-                command='voice-import-db',
-                item_type='voice-manifest-row',
-                **fields,
-            )
-        ),
+        progress_callback=_emit_voice_import_progress,
     )
 
     print(json.dumps({
