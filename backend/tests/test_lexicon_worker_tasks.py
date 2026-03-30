@@ -10,6 +10,7 @@ from app.tasks.lexicon_jobs import (
     run_lexicon_compiled_materialize,
     run_lexicon_import_db,
     run_lexicon_jsonl_materialize,
+    run_lexicon_voice_import_db,
 )
 
 
@@ -103,6 +104,16 @@ class TestLexiconWorkerTasks:
         assert job.progress_total == 2
         assert job.progress_current_label == "Importing 2/2: harbor"
         assert mock_db.commit.call_count >= 3
+        assert job.request_payload["progress_summary"] == {
+            "phase": "completed",
+            "total": 2,
+            "validated": 2,
+            "imported": 1,
+            "skipped": 1,
+            "failed": 0,
+            "to_validate": 0,
+            "to_import": 0,
+        }
 
     @patch("app.tasks.lexicon_jobs._import_db_module")
     @patch("app.tasks.lexicon_jobs.Session")
@@ -136,6 +147,107 @@ class TestLexiconWorkerTasks:
         assert job.progress_completed == 2
         assert job.progress_total == 3
         assert job.progress_current_label == "Validating 2/3: fuss over"
+        assert job.request_payload["progress_summary"] == {
+            "phase": "failed",
+            "total": 3,
+            "validated": 2,
+            "imported": 0,
+            "skipped": 0,
+            "failed": 0,
+            "to_validate": 1,
+            "to_import": 3,
+        }
+
+    @patch("app.tasks.lexicon_jobs._voice_import_db_module")
+    @patch("app.tasks.lexicon_jobs.Session")
+    def test_voice_import_db_task_updates_progress_and_completes(self, mock_session_cls, mock_voice_import_module):
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=uuid.uuid4(),
+            job_type="voice_import_db",
+            target_key="voice_import_db:/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+            request_payload={
+                "input_path": "/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+                "source_type": "voice_manifest",
+                "language": "en",
+                "row_summary": {"row_count": 2},
+            },
+        )
+        mock_db = self._mock_session(mock_session_cls, self._job_result(job))
+
+        def fake_run_voice_import_file(path, *, preflight_progress_callback=None, progress_callback=None, **kwargs):
+            assert preflight_progress_callback is not None
+            assert progress_callback is not None
+            preflight_progress_callback({"word": "bank", "_progress_label": "Validating 1/2"}, 1, 2)
+            progress_callback({"word": "bank", "_progress_label": "Skipping existing word: bank"}, 1, 2)
+            progress_callback({"word": "harbor"}, 2, 2)
+            return {"created_assets": 1, "updated_assets": 0, "skipped_rows": 1, "failed_rows": 0}
+
+        mock_voice_import_module.return_value.run_voice_import_file = fake_run_voice_import_file
+
+        result = run_lexicon_voice_import_db(str(job.id))
+
+        assert result["status"] == "completed"
+        assert result["result_payload"]["created_assets"] == 1
+        assert job.status == "completed"
+        assert job.progress_completed == 2
+        assert job.progress_total == 2
+        assert job.progress_current_label == "Importing 2/2: harbor"
+        assert mock_db.commit.call_count >= 3
+        assert job.request_payload["progress_summary"] == {
+            "phase": "completed",
+            "total": 2,
+            "validated": 2,
+            "imported": 1,
+            "skipped": 1,
+            "failed": 0,
+            "to_validate": 0,
+            "to_import": 0,
+        }
+
+    @patch("app.tasks.lexicon_jobs._voice_import_db_module")
+    @patch("app.tasks.lexicon_jobs.Session")
+    def test_voice_import_db_task_completed_summary_uses_actual_imported_assets(self, mock_session_cls, mock_voice_import_module):
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=uuid.uuid4(),
+            job_type="voice_import_db",
+            target_key="voice_import_db:/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+            request_payload={
+                "input_path": "/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+                "source_type": "voice_manifest",
+                "language": "en",
+                "row_summary": {"row_count": 1},
+            },
+        )
+        self._mock_session(mock_session_cls, self._job_result(job))
+
+        def fake_run_voice_import_file(path, *, preflight_progress_callback=None, **kwargs):
+            assert preflight_progress_callback is not None
+            preflight_progress_callback({"word": "ghost"}, 1, 1)
+            return {
+                "created_assets": 0,
+                "updated_assets": 0,
+                "skipped_rows": 0,
+                "failed_rows": 0,
+                "missing_words": 1,
+            }
+
+        mock_voice_import_module.return_value.run_voice_import_file = fake_run_voice_import_file
+
+        result = run_lexicon_voice_import_db(str(job.id))
+
+        assert result["status"] == "completed"
+        assert job.request_payload["progress_summary"] == {
+            "phase": "completed",
+            "total": 1,
+            "validated": 1,
+            "imported": 0,
+            "skipped": 0,
+            "failed": 1,
+            "to_validate": 0,
+            "to_import": 0,
+        }
 
     @patch("app.tasks.lexicon_jobs.materialize_jsonl_review_outputs")
     @patch("app.tasks.lexicon_jobs.Session")

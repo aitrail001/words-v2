@@ -1056,19 +1056,33 @@ def _voice_generate_command(args: argparse.Namespace) -> int:
 
 
 def _voice_import_db_command(args: argparse.Namespace) -> int:
+    runtime_logger = getattr(args, 'runtime_logger', None)
     rows = load_voice_manifest_rows(Path(args.input))
-    if args.dry_run:
-        print(json.dumps({
-            'command': 'voice-import-db',
-            'dry_run': True,
-            **summarize_voice_manifest_rows(rows),
-        }))
-        return 0
+    summary = run_voice_import_file(
+        Path(args.input),
+        language=args.language,
+        conflict_mode=args.conflict_mode,
+        error_mode=args.error_mode,
+        dry_run=bool(args.dry_run),
+        rows=rows,
+        progress_callback=(
+            lambda **fields: _emit_item_progress(
+                runtime_logger,
+                command='voice-import-db',
+                item_type='voice-manifest-row',
+                **fields,
+            )
+        ),
+    )
 
-    summary = run_voice_import_file(Path(args.input), default_language=args.language)
     print(json.dumps({
         'command': 'voice-import-db',
-        'dry_run': False,
+        'input': str(Path(args.input)),
+        'language': args.language,
+        'conflict_mode': args.conflict_mode,
+        'error_mode': args.error_mode,
+        'dry_run': bool(args.dry_run),
+        'row_summary': summarize_voice_manifest_rows(rows),
         'summary': summary,
     }))
     return 0
@@ -1357,7 +1371,9 @@ def build_parser() -> argparse.ArgumentParser:
     voice_import_db = subparsers.add_parser('voice-import-db', help='import generated voice manifest rows into the lexicon DB')
     voice_import_db.add_argument('--input', required=True, help='voice_manifest.jsonl file produced by voice-generate')
     voice_import_db.add_argument('--language', default='en', help='default language fallback for word resolution')
-    voice_import_db.add_argument('--dry-run', action='store_true', help='summarize manifest rows without writing the DB')
+    voice_import_db.add_argument('--dry-run', action='store_true', help='validate the manifest and report importability without writing the DB')
+    voice_import_db.add_argument('--conflict-mode', choices=('fail', 'upsert', 'skip'), default='upsert', help='behavior when a voice asset already exists in the target DB')
+    voice_import_db.add_argument('--error-mode', choices=('fail_fast', 'continue'), default='fail_fast', help='behavior when a row-level voice import error occurs')
     _add_shared_logging_args(voice_import_db)
     voice_import_db.set_defaults(handler=_voice_import_db_command)
 

@@ -98,6 +98,15 @@ describe("LexiconDbInspectorPage", () => {
           generated_at: "2026-03-21T00:00:00Z",
         },
       ],
+      voice_paths: {
+        word: {
+          playback_url: "/api/words/voice-assets/voice-1/content",
+          resolved_target_kind: "local",
+          resolved_target_base: "/tmp/voice",
+        },
+        definition: null,
+        example: null,
+      },
       meanings: [
         {
           id: "meaning-1",
@@ -172,8 +181,10 @@ describe("LexiconDbInspectorPage", () => {
     expect(screen.getByText(/Word · en-US · female/i)).toBeInTheDocument();
     expect(screen.getByText(/playback route: backend_content_route/i)).toBeInTheDocument();
     expect(screen.getByText(/primary target: local/i)).toBeInTheDocument();
-    expect(screen.getByText("/api/words/voice-assets/voice-1/content")).toBeInTheDocument();
-    expect(screen.getByText("/tmp/voice")).toBeInTheDocument();
+    expect(screen.getAllByText("/api/words/voice-assets/voice-1/content").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("/tmp/voice").length).toBeGreaterThan(0);
+    expect(screen.getByText("Voice paths by scope")).toBeInTheDocument();
+    expect(screen.getByText(/Word path/i)).toBeInTheDocument();
   });
 
   it("renders phrase senses with grouped examples and translations", async () => {
@@ -198,6 +209,11 @@ describe("LexiconDbInspectorPage", () => {
       learner_generated_at: "2026-03-21T00:00:00Z",
       created_at: "2026-03-21T00:00:00Z",
       voice_assets: [],
+      voice_paths: {
+        word: null,
+        definition: null,
+        example: null,
+      },
       meanings: [],
       enrichment_runs: [],
     });
@@ -217,6 +233,16 @@ describe("LexiconDbInspectorPage", () => {
       generated_at: "2026-03-20T00:00:00Z",
       seed_metadata: { raw_reviewed_as: "idiom" },
       compiled_payload: { entry_id: "ph_break_a_leg" },
+      voice_assets: [],
+      voice_paths: {
+        word: null,
+        definition: {
+          playback_url: "/api/words/voice-assets/voice-2/content",
+          resolved_target_kind: "local",
+          resolved_target_base: "/tmp/voice",
+        },
+        example: null,
+      },
       senses: [
         {
           sense_id: "phrase-1",
@@ -240,5 +266,7 @@ describe("LexiconDbInspectorPage", () => {
     expect(screen.getByText("Break a leg tonight.")).toBeInTheDocument();
     expect(screen.getByText(/es: buena suerte/i)).toBeInTheDocument();
     expect(screen.getByText(/Used before a performance\./i)).toBeInTheDocument();
+    expect(screen.getByText("Voice paths by scope")).toBeInTheDocument();
+    expect(screen.getByText(/Definition path/i)).toBeInTheDocument();
   });
 });

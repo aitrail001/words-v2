@@ -278,6 +278,9 @@ class TestLexiconInspectorApi:
         assert data["senses"][0]["translations"][0]["definition"] == "buena suerte"
         assert len(data["voice_assets"]) == 3
         assert data["voice_assets"][0]["playback_url"].startswith("/api/words/voice-assets/")
+        assert data["voice_paths"]["word"]["resolved_target_base"] == "/tmp/voice"
+        assert data["voice_paths"]["definition"]["resolved_target_base"] == "/tmp/voice"
+        assert data["voice_paths"]["example"]["resolved_target_base"] == "/tmp/voice"
 
     @pytest.mark.asyncio
     async def test_word_detail_returns_rich_top_level_and_meaning_payload(self, client, mock_db):
@@ -449,6 +452,7 @@ class TestLexiconInspectorApi:
         assert data["voice_assets"][0]["playback_url"].startswith("/api/words/voice-assets/")
         assert data["voice_assets"][0]["playback_route_kind"] == "backend_content_route"
         assert data["voice_assets"][0]["primary_target_kind"] == "local"
+        assert data["voice_paths"]["word"]["resolved_target_base"] == "/tmp/voice"
 
     @pytest.mark.asyncio
     async def test_reference_detail_returns_localizations(self, client, mock_db):

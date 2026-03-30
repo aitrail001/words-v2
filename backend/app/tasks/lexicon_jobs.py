@@ -38,12 +38,45 @@ def _import_db_module() -> Any:
     return import_lexicon_tool_module("tools.lexicon.import_db")
 
 
+def _voice_import_db_module() -> Any:
+    return import_lexicon_tool_module("tools.lexicon.voice_import_db")
+
+
 def _load_job(db: Session, job_id: str) -> LexiconJob:
     result = db.execute(select(LexiconJob).where(LexiconJob.id == uuid.UUID(job_id)))
     job = result.scalar_one_or_none()
     if job is None:
         raise RuntimeError("Lexicon job not found")
     return job
+
+
+def _set_job_progress_summary(
+    job: LexiconJob,
+    *,
+    phase: str,
+    total: int,
+    validated: int,
+    imported: int,
+    skipped: int,
+    failed: int,
+) -> None:
+    total_value = max(total, 0)
+    validated_value = max(min(validated, total_value), 0)
+    imported_value = max(imported, 0)
+    skipped_value = max(skipped, 0)
+    failed_value = max(failed, 0)
+    payload = dict(job.request_payload or {})
+    payload["progress_summary"] = {
+        "phase": phase,
+        "total": total_value,
+        "validated": validated_value,
+        "imported": imported_value,
+        "skipped": skipped_value,
+        "failed": failed_value,
+        "to_validate": max(total_value - validated_value, 0),
+        "to_import": max(total_value - imported_value - skipped_value - failed_value, 0),
+    }
+    job.request_payload = payload
 
 
 def process_compiled_review_bulk_job(
@@ -177,6 +210,7 @@ def run_lexicon_import_db(self, job_id: str) -> dict[str, Any]:
             import_db = _import_db_module()
             row_summary = dict(request_payload.get("row_summary") or {})
             total_rows = int(row_summary.get("row_count") or 0)
+            skipped_rows = 0
 
             def _row_label(row: dict[str, Any], *, default_prefix: str, completed_rows: int, total_rows: int) -> str | None:
                 explicit_label = str(row.get("_progress_label") or "").strip()
@@ -195,12 +229,72 @@ def run_lexicon_import_db(self, job_id: str) -> dict[str, Any]:
                     or row.get("display_text")
                     or row.get("word")
                     or row.get("normalized_form")
-                    or row.get("entry_id")
-                    or ""
-                ).strip()
+                        or row.get("entry_id")
+                        or ""
+                    ).strip()
                 if not entry_label:
                     return default_prefix
                 return f"{default_prefix} {completed_rows}/{total_rows}: {entry_label}" if total_rows > 0 else f"{default_prefix}: {entry_label}"
+
+            _set_job_progress_summary(
+                job,
+                phase="validating",
+                total=total_rows,
+                validated=0,
+                imported=0,
+                skipped=0,
+                failed=0,
+            )
+            db.commit()
+
+            def _preflight_progress(row: dict[str, Any], completed_rows: int, total_rows: int) -> None:
+                _set_job_progress_summary(
+                    job,
+                    phase="validating",
+                    total=total_rows,
+                    validated=completed_rows,
+                    imported=0,
+                    skipped=0,
+                    failed=0,
+                )
+                apply_lexicon_job_progress(
+                    job,
+                    progress_completed=completed_rows,
+                    progress_total=total_rows,
+                    current_label=_row_label(
+                        row,
+                        default_prefix="Validating",
+                        completed_rows=completed_rows,
+                        total_rows=total_rows,
+                    ),
+                )
+                db.commit()
+
+            def _import_progress(row: dict[str, Any], completed_rows: int, total_rows: int) -> None:
+                nonlocal skipped_rows
+                if str(row.get("_progress_label") or "").startswith("Skipping existing"):
+                    skipped_rows += 1
+                _set_job_progress_summary(
+                    job,
+                    phase="importing",
+                    total=total_rows,
+                    validated=total_rows,
+                    imported=max(completed_rows - skipped_rows, 0),
+                    skipped=skipped_rows,
+                    failed=0,
+                )
+                apply_lexicon_job_progress(
+                    job,
+                    progress_completed=completed_rows,
+                    progress_total=total_rows,
+                    current_label=_row_label(
+                        row,
+                        default_prefix="Importing",
+                        completed_rows=completed_rows,
+                        total_rows=total_rows,
+                    ),
+                )
+                db.commit()
 
             result_payload = import_db.run_import_file(
                 request_payload["input_path"],
@@ -209,39 +303,166 @@ def run_lexicon_import_db(self, job_id: str) -> dict[str, Any]:
                 language=request_payload.get("language", "en"),
                 conflict_mode=request_payload.get("conflict_mode"),
                 error_mode=request_payload.get("error_mode", "fail_fast"),
-                preflight_progress_callback=lambda row, completed_rows, callback_total_rows: (
-                    apply_lexicon_job_progress(
-                        job,
-                        progress_completed=completed_rows,
-                        progress_total=callback_total_rows or total_rows,
-                        current_label=_row_label(
-                            row,
-                            default_prefix="Validating",
-                            completed_rows=completed_rows,
-                            total_rows=callback_total_rows or total_rows,
-                        ),
-                    ),
-                    db.commit(),
-                ),
-                progress_callback=lambda row, completed_rows, total_rows: (
-                    apply_lexicon_job_progress(
-                        job,
-                        progress_completed=completed_rows,
-                        progress_total=total_rows,
-                        current_label=_row_label(
-                            row,
-                            default_prefix="Importing",
-                            completed_rows=completed_rows,
-                            total_rows=total_rows,
-                        ),
-                    ),
-                    db.commit(),
-                ),
+                preflight_progress_callback=_preflight_progress,
+                progress_callback=_import_progress,
+            )
+            skipped_rows = int(result_payload.get("skipped_words", 0)) + int(result_payload.get("skipped_phrases", 0)) + int(result_payload.get("skipped_reference_entries", 0))
+            failed_rows = int(result_payload.get("failed_rows", 0))
+            imported_rows = max(total_rows - skipped_rows - failed_rows, 0)
+            _set_job_progress_summary(
+                job,
+                phase="completed",
+                total=total_rows,
+                validated=total_rows,
+                imported=imported_rows,
+                skipped=skipped_rows,
+                failed=failed_rows,
             )
             apply_lexicon_job_completed(job, result_payload=result_payload)
             db.commit()
             return {"status": "completed", "result_payload": result_payload}
         except Exception as exc:
+            progress_summary = dict((job.request_payload or {}).get("progress_summary") or {})
+            _set_job_progress_summary(
+                job,
+                phase="failed",
+                total=int(progress_summary.get("total") or job.progress_total or 0),
+                validated=int(progress_summary.get("validated") or job.progress_completed or 0),
+                imported=int(progress_summary.get("imported") or 0),
+                skipped=int(progress_summary.get("skipped") or 0),
+                failed=int(progress_summary.get("failed") or 0),
+            )
+            apply_lexicon_job_failed(job, str(exc))
+            db.commit()
+            return {"status": "failed", "error": str(exc)}
+
+
+@celery_app.task(bind=True, name="run_lexicon_voice_import_db")
+def run_lexicon_voice_import_db(self, job_id: str) -> dict[str, Any]:
+    with Session(sync_engine) as db:
+        job = _load_job(db, job_id)
+        apply_lexicon_job_started(job)
+        db.commit()
+        try:
+            request_payload = dict(job.request_payload or {})
+            voice_import_db = _voice_import_db_module()
+            row_summary = dict(request_payload.get("row_summary") or {})
+            total_rows = int(row_summary.get("row_count") or 0)
+            skipped_rows = 0
+            failed_rows = 0
+
+            def _row_label(row: dict[str, Any], *, default_prefix: str, completed_rows: int, total_rows: int) -> str | None:
+                explicit_label = str(row.get("_progress_label") or "").strip()
+                if explicit_label:
+                    entry_label = str(row.get("word") or row.get("source_text") or row.get("entry_id") or "").strip()
+                    return f"{explicit_label}: {entry_label}" if entry_label and entry_label not in explicit_label else explicit_label
+                entry_label = str(row.get("word") or row.get("source_text") or row.get("entry_id") or "").strip()
+                if not entry_label:
+                    return default_prefix
+                return f"{default_prefix} {completed_rows}/{total_rows}: {entry_label}" if total_rows > 0 else f"{default_prefix}: {entry_label}"
+
+            _set_job_progress_summary(
+                job,
+                phase="validating",
+                total=total_rows,
+                validated=0,
+                imported=0,
+                skipped=0,
+                failed=0,
+            )
+            db.commit()
+
+            def _preflight_progress(row: dict[str, Any], completed_rows: int, total_rows: int) -> None:
+                _set_job_progress_summary(
+                    job,
+                    phase="validating",
+                    total=total_rows,
+                    validated=completed_rows,
+                    imported=0,
+                    skipped=0,
+                    failed=0,
+                )
+                apply_lexicon_job_progress(
+                    job,
+                    progress_completed=completed_rows,
+                    progress_total=total_rows,
+                    current_label=_row_label(
+                        row,
+                        default_prefix="Validating",
+                        completed_rows=completed_rows,
+                        total_rows=total_rows,
+                    ),
+                )
+                db.commit()
+
+            def _import_progress(row: dict[str, Any], completed_rows: int, total_rows: int) -> None:
+                nonlocal skipped_rows, failed_rows
+                progress_label = str(row.get("_progress_label") or "")
+                if progress_label.startswith("Skipping existing"):
+                    skipped_rows += 1
+                elif progress_label.startswith("Failed "):
+                    failed_rows += 1
+                _set_job_progress_summary(
+                    job,
+                    phase="importing",
+                    total=total_rows,
+                    validated=total_rows,
+                    imported=max(completed_rows - skipped_rows - failed_rows, 0),
+                    skipped=skipped_rows,
+                    failed=failed_rows,
+                )
+                apply_lexicon_job_progress(
+                    job,
+                    progress_completed=completed_rows,
+                    progress_total=total_rows,
+                    current_label=_row_label(
+                        row,
+                        default_prefix="Importing",
+                        completed_rows=completed_rows,
+                        total_rows=total_rows,
+                    ),
+                )
+                db.commit()
+
+            result_payload = voice_import_db.run_voice_import_file(
+                request_payload["input_path"],
+                language=request_payload.get("language", "en"),
+                conflict_mode=request_payload.get("conflict_mode"),
+                error_mode=request_payload.get("error_mode", "fail_fast"),
+                preflight_progress_callback=_preflight_progress,
+                progress_callback=_import_progress,
+            )
+            skipped_rows = int(result_payload.get("skipped_rows", 0))
+            unresolved_rows = (
+                int(result_payload.get("missing_words", 0))
+                + int(result_payload.get("missing_meanings", 0))
+                + int(result_payload.get("missing_examples", 0))
+            )
+            failed_rows = int(result_payload.get("failed_rows", 0)) + unresolved_rows
+            imported_rows = int(result_payload.get("created_assets", 0)) + int(result_payload.get("updated_assets", 0))
+            _set_job_progress_summary(
+                job,
+                phase="completed",
+                total=total_rows,
+                validated=total_rows,
+                imported=imported_rows,
+                skipped=skipped_rows,
+                failed=failed_rows,
+            )
+            apply_lexicon_job_completed(job, result_payload=result_payload)
+            db.commit()
+            return {"status": "completed", "result_payload": result_payload}
+        except Exception as exc:
+            progress_summary = dict((job.request_payload or {}).get("progress_summary") or {})
+            _set_job_progress_summary(
+                job,
+                phase="failed",
+                total=int(progress_summary.get("total") or job.progress_total or 0),
+                validated=int(progress_summary.get("validated") or job.progress_completed or 0),
+                imported=int(progress_summary.get("imported") or 0),
+                skipped=int(progress_summary.get("skipped") or 0),
+                failed=int(progress_summary.get("failed") or 0),
+            )
             apply_lexicon_job_failed(job, str(exc))
             db.commit()
             return {"status": "failed", "error": str(exc)}

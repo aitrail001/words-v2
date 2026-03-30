@@ -48,6 +48,21 @@ export type LexiconImportRequest = {
   errorMode?: "fail_fast" | "continue";
 };
 
+export type LexiconVoiceImportRowSummary = {
+  row_count: number;
+  generated_count: number;
+  existing_count: number;
+  failed_count: number;
+};
+
+export type LexiconVoiceImportResult = {
+  artifact_filename: string;
+  input_path: string;
+  row_summary: LexiconVoiceImportRowSummary;
+  import_summary: LexiconImportSummary | null;
+  error_samples?: Array<{ entry: string; error: string }>;
+};
+
 export const dryRunLexiconImport = (input: LexiconImportRequest): Promise<LexiconImportResult> =>
   apiClient.post<LexiconImportResult>("/lexicon-imports/dry-run", {
     input_path: input.inputPath,
@@ -70,3 +85,13 @@ export const runLexiconImport = (input: LexiconImportRequest): Promise<LexiconIm
 
 export const getLexiconImportJob = (jobId: string): Promise<LexiconImportJob> =>
   apiClient.get<LexiconImportJob>(`/lexicon-imports/jobs/${jobId}`);
+
+export const dryRunVoiceImport = (input: LexiconImportRequest): Promise<LexiconVoiceImportResult> =>
+  apiClient.post<LexiconVoiceImportResult>("/lexicon-imports/voice-dry-run", {
+    input_path: input.inputPath,
+    source_type: input.sourceType,
+    source_reference: input.sourceReference,
+    language: input.language ?? "en",
+    conflict_mode: input.conflictMode ?? "upsert",
+    error_mode: input.errorMode ?? "fail_fast",
+  });

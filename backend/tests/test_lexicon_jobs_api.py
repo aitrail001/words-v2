@@ -65,6 +65,68 @@ class TestLexiconJobsApi:
         mock_delay.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch("app.api.lexicon_jobs.run_lexicon_voice_import_db.delay")
+    async def test_create_voice_import_db_job(self, mock_delay, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(None)]
+        mock_db.flush = pytest.importorskip("unittest.mock").AsyncMock()
+
+        async def fake_refresh(job):
+            job.id = uuid.uuid4()
+
+        mock_db.refresh = pytest.importorskip("unittest.mock").AsyncMock(side_effect=fake_refresh)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        manifest_path = tmp_path / "voice_manifest.jsonl"
+        manifest_path.write_text('{"status":"generated","entry_type":"word","entry_id":"word:bank","word":"bank"}\n', encoding="utf-8")
+        monkeypatch.setattr("app.api.lexicon_jobs._voice_import_db_module", lambda: SimpleNamespace(
+            load_voice_manifest_rows=lambda path: [{"status": "generated", "entry_type": "word", "entry_id": "word:bank", "word": "bank"}],
+            summarize_voice_manifest_rows=lambda rows: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
+        ))
+
+        response = await client.post(
+            "/api/lexicon-jobs/voice-import-db",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "input_path": str(manifest_path),
+                "source_type": "voice_manifest",
+                "language": "en",
+                "conflict_mode": "skip",
+                "error_mode": "continue",
+            },
+        )
+
+        assert response.status_code == 202
+        assert response.json()["job_type"] == "voice_import_db"
+        assert response.json()["request_payload"]["conflict_mode"] == "skip"
+        assert response.json()["request_payload"]["row_summary"]["generated_count"] == 1
+        mock_delay.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_voice_import_db_job_rejects_directory_input(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.side_effect = [_result_with(make_user(user_id))]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        manifest_dir = tmp_path / "voice-run-dir"
+        manifest_dir.mkdir()
+
+        response = await client.post(
+            "/api/lexicon-jobs/voice-import-db",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "input_path": str(manifest_dir),
+                "source_type": "voice_manifest",
+                "language": "en",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Voice import input must be a .jsonl file, not a directory"
+
+    @pytest.mark.asyncio
     @patch("app.api.lexicon_jobs.run_lexicon_jsonl_materialize.delay")
     async def test_create_jsonl_materialize_reuses_active_job(self, mock_delay, client, mock_db, tmp_path: Path):
         user_id = uuid.uuid4()
@@ -140,6 +202,54 @@ class TestLexiconJobsApi:
         assert response.status_code == 200
         assert response.json()["status"] == "completed"
         assert response.json()["result_payload"]["created_words"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_lexicon_job_status_exposes_phase_aware_progress_summary(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=user_id,
+            job_type="import_db",
+            status="running",
+            target_key="import_db:/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+            request_payload={
+                "input_path": "/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+                "row_summary": {"row_count": 10},
+                "progress_summary": {
+                    "phase": "importing",
+                    "total": 10,
+                    "validated": 10,
+                    "imported": 3,
+                    "skipped": 2,
+                    "failed": 1,
+                    "to_validate": 0,
+                    "to_import": 4,
+                },
+            },
+            result_payload=None,
+            progress_total=10,
+            progress_completed=6,
+            progress_current_label="Importing 6/10: harbor",
+        )
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(job)]
+
+        response = await client.get(
+            f"/api/lexicon-jobs/{job.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["progress_summary"] == {
+            "phase": "importing",
+            "total": 10,
+            "validated": 10,
+            "imported": 3,
+            "skipped": 2,
+            "failed": 1,
+            "to_validate": 0,
+            "to_import": 4,
+        }
 
     @pytest.mark.asyncio
     async def test_list_lexicon_jobs_filters_and_limits(self, client, mock_db):

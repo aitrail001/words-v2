@@ -130,15 +130,14 @@ describe("LexiconVoicePage", () => {
     const user = userEvent.setup();
     render(<LexiconVoicePage />);
 
+    expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("Loading storage policies");
     await waitFor(() => expect(mockGetLexiconVoiceStoragePolicies).toHaveBeenCalledWith(undefined));
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("These are the live DB storage policies used by voice assets");
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("word_default");
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("local");
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("fallback-enabled");
-    expect(screen.getByTestId("lexicon-voice-panel")).toHaveTextContent("Policy Editor");
-    expect(screen.getByTestId("lexicon-voice-panel")).toHaveTextContent("Editing policy word_default · Scope: word");
-    await user.click(screen.getByTestId("lexicon-voice-policy-policy-1"));
-    expect(screen.getByTestId("lexicon-voice-panel")).toHaveTextContent("word_default");
+    expect(screen.queryByTestId("lexicon-voice-panel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /word_default/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Edit policy" }));
     expect(screen.getByTestId("lexicon-voice-panel")).toHaveTextContent("word_default");
   });
@@ -147,12 +146,14 @@ describe("LexiconVoicePage", () => {
     const user = userEvent.setup();
     render(<LexiconVoicePage />);
 
+    expect(screen.getByTestId("lexicon-voice-runs")).toHaveTextContent("Loading voice runs");
     await waitFor(() => expect(mockGetLexiconVoiceStoragePolicies).toHaveBeenCalledWith(undefined));
     await waitFor(() => expect(mockGetLexiconVoiceRuns).toHaveBeenCalled());
     expect(screen.getByTestId("lexicon-voice-runs")).toHaveTextContent("voice-roundtrip");
     expect(screen.getByTestId("lexicon-voice-runs")).toHaveTextContent("planned: 6");
     await user.click(screen.getByTestId("lexicon-voice-run-voice-roundtrip"));
     await waitFor(() => expect(mockGetLexiconVoiceRunDetail).toHaveBeenCalledWith("voice-roundtrip"));
+    await user.click(screen.getByRole("button", { name: "Edit policy" }));
     expect(screen.getByTestId("lexicon-voice-run-detail")).toHaveTextContent("Latest manifest rows");
     expect(screen.getByTestId("lexicon-voice-run-detail")).toHaveTextContent("Locale counts");
     expect(screen.getByTestId("lexicon-voice-run-detail")).toHaveTextContent("en-US");
@@ -220,5 +221,19 @@ describe("LexiconVoicePage", () => {
     expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-c");
     expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-d");
     expect(screen.getByTestId("lexicon-voice-run-page")).not.toHaveTextContent("voice-run-b");
+  });
+
+  it("opens voice import from recent runs and run detail", async () => {
+    const user = userEvent.setup();
+    render(<LexiconVoicePage />);
+
+    await waitFor(() => expect(mockGetLexiconVoiceRuns).toHaveBeenCalled());
+    await user.click(screen.getByTestId("lexicon-voice-run-import-voice-roundtrip"));
+    expect(push).toHaveBeenCalledWith("/lexicon/voice-import?inputPath=%2Fdata%2Flexicon%2Fvoice%2Fvoice-roundtrip%2Fvoice_manifest.jsonl&language=en");
+
+    await user.click(screen.getByTestId("lexicon-voice-run-voice-roundtrip"));
+    await waitFor(() => expect(mockGetLexiconVoiceRunDetail).toHaveBeenCalledWith("voice-roundtrip"));
+    await user.click(screen.getByTestId("lexicon-voice-run-detail-import"));
+    expect(push).toHaveBeenLastCalledWith("/lexicon/voice-import?inputPath=%2Fdata%2Flexicon%2Fvoice%2Fvoice-roundtrip%2Fvoice_manifest.jsonl&language=en");
   });
 });

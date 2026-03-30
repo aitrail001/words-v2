@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import { VoiceStoragePanel } from "@/app/lexicon/voice/voice-storage-panel";
@@ -28,17 +29,49 @@ function policyKindBadgeLabel(policy: LexiconVoiceStoragePolicy): string {
 }
 
 export default function LexiconVoicePage() {
+  const router = useRouter();
   const RUNS_PER_PAGE = 2;
-  const [selectedPolicyId, setSelectedPolicyId] = useState("");
+  const [editingPolicyId, setEditingPolicyId] = useState("");
   const [runs, setRuns] = useState<LexiconVoiceRunSummary[]>([]);
   const [runPage, setRunPage] = useState(0);
   const [selectedRunName, setSelectedRunName] = useState("");
   const [selectedRunDetail, setSelectedRunDetail] = useState<LexiconVoiceRunDetail | null>(null);
   const [storagePolicies, setStoragePolicies] = useState<LexiconVoiceStoragePolicy[]>([]);
+  const [storagePoliciesLoading, setStoragePoliciesLoading] = useState(false);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runDetailLoading, setRunDetailLoading] = useState(false);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [runDetailError, setRunDetailError] = useState<string | null>(null);
   const [storagePoliciesError, setStoragePoliciesError] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
+
+  const loadRuns = useCallback(async (activeRunName: string) => {
+    setRunsLoading(true);
+    try {
+      const result = await getLexiconVoiceRuns();
+      setRuns(result);
+      setRunPage((current) => {
+        const maxPage = Math.max(0, Math.ceil(result.length / RUNS_PER_PAGE) - 1);
+        return Math.min(current, maxPage);
+      });
+      setRunsError(null);
+      if (!result.length) {
+        setSelectedRunName("");
+        setSelectedRunDetail(null);
+        return;
+      }
+      if (activeRunName && result.some((run) => run.run_name === activeRunName)) {
+        setSelectedRunName(activeRunName);
+        return;
+      }
+      setSelectedRunName(result[0].run_name);
+    } catch (error) {
+      setRuns([]);
+      setRunsError(error instanceof Error ? error.message : "Failed to load voice runs.");
+    } finally {
+      setRunsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -49,17 +82,20 @@ export default function LexiconVoicePage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      setStoragePoliciesLoading(true);
       try {
         const result = await getLexiconVoiceStoragePolicies(undefined);
         if (cancelled) return;
         setStoragePolicies(result);
-        setSelectedPolicyId((current) => (result.some((policy) => policy.id === current) ? current : (result[0]?.id ?? "")));
+        setEditingPolicyId((current) => (result.some((policy) => policy.id === current) ? current : ""));
         setStoragePoliciesError(null);
       } catch (error) {
         if (cancelled) return;
         setStoragePolicies([]);
-        setSelectedPolicyId("");
+        setEditingPolicyId("");
         setStoragePoliciesError(error instanceof Error ? error.message : "Failed to load storage policies.");
+      } finally {
+        if (!cancelled) setStoragePoliciesLoading(false);
       }
     })();
     return () => {
@@ -71,6 +107,7 @@ export default function LexiconVoicePage() {
     let cancelled = false;
     void (async () => {
       try {
+        setRunsLoading(true);
         const result = await getLexiconVoiceRuns();
         if (cancelled) return;
         setRuns(result);
@@ -86,6 +123,8 @@ export default function LexiconVoicePage() {
         if (cancelled) return;
         setRuns([]);
         setRunsError(error instanceof Error ? error.message : "Failed to load voice runs.");
+      } finally {
+        if (!cancelled) setRunsLoading(false);
       }
     })();
     return () => {
@@ -101,6 +140,7 @@ export default function LexiconVoicePage() {
     }
     let cancelled = false;
     void (async () => {
+      setRunDetailLoading(true);
       try {
         const result = await getLexiconVoiceRunDetail(selectedRunName);
         if (cancelled) return;
@@ -110,6 +150,8 @@ export default function LexiconVoicePage() {
         if (cancelled) return;
         setSelectedRunDetail(null);
         setRunDetailError(error instanceof Error ? error.message : "Failed to load voice run detail.");
+      } finally {
+        if (!cancelled) setRunDetailLoading(false);
       }
     })();
     return () => {
@@ -149,7 +191,7 @@ export default function LexiconVoicePage() {
   }
 
   function editPolicy(policyId: string): void {
-    setSelectedPolicyId(policyId);
+    setEditingPolicyId(policyId);
     if (typeof document !== "undefined") {
       const panel = document.getElementById("lexicon-voice-panel");
       if (panel && typeof panel.scrollIntoView === "function") {
@@ -158,7 +200,15 @@ export default function LexiconVoicePage() {
     }
   }
 
-  const selectedPolicy = storagePolicies.find((policy) => policy.id === selectedPolicyId) ?? null;
+  function openVoiceImport(runPath: string): void {
+    const params = new URLSearchParams({
+      inputPath: `${runPath.replace(/\/$/, "")}/voice_manifest.jsonl`,
+      language: "en",
+    });
+    router.push(`/lexicon/voice-import?${params.toString()}`);
+  }
+
+  const selectedPolicy = storagePolicies.find((policy) => policy.id === editingPolicyId) ?? null;
   const totalRunPages = Math.max(1, Math.ceil(runs.length / RUNS_PER_PAGE));
   const visibleRuns = runs.slice(runPage * RUNS_PER_PAGE, (runPage + 1) * RUNS_PER_PAGE);
 
@@ -176,25 +226,17 @@ export default function LexiconVoicePage() {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Current DB storage policies</p>
         {storagePoliciesError ? <p className="mt-3 text-sm text-red-600">{storagePoliciesError}</p> : null}
         <p className="mt-1 text-sm text-slate-600">These are the live DB storage policies used by voice assets. Voice runs are shown separately below.</p>
+        {storagePoliciesLoading ? <p className="mt-3 text-sm text-slate-500">Loading storage policies...</p> : null}
         {storagePolicies.length ? (
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             {storagePolicies.map((policy) => (
               <div key={policy.id} className="rounded border border-slate-200 bg-slate-50 p-3 text-sm">
                 <div data-testid={`lexicon-voice-policy-${policy.id}`}>
                   <div className="flex items-start justify-between gap-3">
-                    <label className="flex items-start gap-3">
-                      <input
-                        type="radio"
-                        name="voice-storage-policy"
-                        checked={selectedPolicyId === policy.id}
-                        onChange={() => setSelectedPolicyId(policy.id)}
-                        className="mt-1 h-4 w-4 rounded border-slate-300"
-                      />
-                      <div>
-                        <p className="font-medium text-slate-900">{policy.policy_key}</p>
-                        <p className="mt-1 text-slate-700">scope: {policy.content_scope}</p>
-                      </div>
-                    </label>
+                    <div>
+                      <p className="font-medium text-slate-900">{policy.policy_key}</p>
+                      <p className="mt-1 text-slate-700">scope: {policy.content_scope}</p>
+                    </div>
                     <button
                       type="button"
                       onClick={() => editPolicy(policy.id)}
@@ -230,10 +272,12 @@ export default function LexiconVoicePage() {
         ) : null}
       </section>
 
-      <VoiceStoragePanel
-        testIdPrefix="lexicon-voice"
-        selectedPolicy={selectedPolicy}
-      />
+      {selectedPolicy ? (
+        <VoiceStoragePanel
+          testIdPrefix="lexicon-voice"
+          selectedPolicy={selectedPolicy}
+        />
+      ) : null}
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" data-testid="lexicon-voice-runs">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -242,6 +286,15 @@ export default function LexiconVoicePage() {
             <p className="mt-1 text-sm text-slate-600">Paged horizontal cards keep run history compact while preserving quick access to details.</p>
           </div>
           <div className="flex min-w-[18rem] items-center justify-end gap-2" data-testid="lexicon-voice-run-pagination">
+            <button
+              type="button"
+              data-testid="lexicon-voice-runs-refresh"
+              onClick={() => void loadRuns(selectedRunName)}
+              disabled={runsLoading}
+              className="min-w-[5.5rem] rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
+            >
+              {runsLoading ? "Refreshing..." : "Refresh"}
+            </button>
             <button
               type="button"
               onClick={() => setRunPage((current) => Math.max(0, current - 1))}
@@ -264,14 +317,12 @@ export default function LexiconVoicePage() {
           </div>
         </div>
         {runsError ? <p className="mt-3 text-sm text-red-600">{runsError}</p> : null}
+        {runsLoading ? <p className="mt-3 text-sm text-slate-500">Loading voice runs...</p> : null}
         {runs.length ? (
           <div className="mt-4 grid gap-4 xl:grid-cols-2" data-testid="lexicon-voice-run-page">
             {visibleRuns.map((run) => (
-              <button
-                type="button"
+              <div
                 key={run.run_name}
-                data-testid={`lexicon-voice-run-${run.run_name}`}
-                onClick={() => setSelectedRunName(run.run_name)}
                 className={`w-full rounded border p-3 text-left text-sm ${selectedRunName === run.run_name ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -287,7 +338,25 @@ export default function LexiconVoicePage() {
                   <div className="rounded border border-slate-200 bg-white p-2">existing: {run.existing_count}</div>
                   <div className="rounded border border-slate-200 bg-white p-2">failed: {run.failed_count}</div>
                 </div>
-              </button>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    data-testid={`lexicon-voice-run-${run.run_name}`}
+                    onClick={() => setSelectedRunName(run.run_name)}
+                    className="rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                  >
+                    View details
+                  </button>
+                  <button
+                    type="button"
+                    data-testid={`lexicon-voice-run-import-${run.run_name}`}
+                    onClick={() => openVoiceImport(run.run_path)}
+                    className="rounded border border-slate-900 bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800"
+                  >
+                    Import voice assets
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         ) : (
@@ -299,6 +368,7 @@ export default function LexiconVoicePage() {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Run detail</p>
         {runDetailError ? <p className="mt-3 text-sm text-red-600">{runDetailError}</p> : null}
         {artifactError ? <p className="mt-3 text-sm text-red-600">{artifactError}</p> : null}
+        {runDetailLoading ? <p className="mt-3 text-sm text-slate-500">Loading run detail...</p> : null}
         {selectedRunDetail ? (
           <div className="mt-4 space-y-4">
             <div>
@@ -355,6 +425,14 @@ export default function LexiconVoicePage() {
                   <p className="font-medium text-slate-900">Run artifacts</p>
                   <p className="mt-1 text-sm text-slate-500">Download the plan, manifest, or error ledgers from this CLI run.</p>
                 </div>
+                <button
+                  type="button"
+                  data-testid="lexicon-voice-run-detail-import"
+                  onClick={() => openVoiceImport(selectedRunDetail.run_path)}
+                  className="rounded border border-slate-900 bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800"
+                >
+                  Import voice assets
+                </button>
               </div>
               {selectedRunDetail.source_references.length ? (
                 <p className="mt-2 text-sm text-slate-600">

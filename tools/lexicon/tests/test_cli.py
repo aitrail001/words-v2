@@ -162,6 +162,28 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["fallback_storage_kind"], "http")
         self.assertEqual(payload["fallback_storage_base"], "https://backup.example.com/voice")
 
+    def test_voice_import_db_emits_runtime_progress_events(self) -> None:
+        def fake_run_voice_import_file(*args, progress_callback=None, **kwargs):
+            assert progress_callback is not None
+            progress_callback(row={"entry_id": "word:bank", "_progress_label": "Validating 1/2"}, completed_rows=1, total_rows=2)
+            progress_callback(row={"entry_id": "word:bank", "_progress_label": "Skipping existing word: bank"}, completed_rows=1, total_rows=2)
+            progress_callback(row={"entry_id": "word:harbor"}, completed_rows=2, total_rows=2)
+            return {"created_assets": 1, "updated_assets": 0, "skipped_rows": 1, "failed_rows": 0}
+
+        with patch("tools.lexicon.cli.load_voice_manifest_rows", return_value=[{"entry_id": "word:bank"}, {"entry_id": "word:harbor"}]), \
+             patch("tools.lexicon.cli.run_voice_import_file", side_effect=fake_run_voice_import_file):
+            code, stdout, stderr = self.run_cli([
+                "voice-import-db",
+                "--input",
+                "voice_manifest.jsonl",
+            ])
+
+        self.assertEqual(code, 0)
+        self.assertIn("item-progress", stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["command"], "voice-import-db")
+        self.assertFalse(payload["dry_run"])
+
     def test_build_base_command_emits_json_summary(self) -> None:
         with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: {"run": 5, "set": 10}[word], lambda word: [{"wn_synset_id": f"{word}.n.01", "part_of_speech": "noun", "canonical_gloss": f"gloss for {word}", "canonical_label": word}])):
             code, stdout, _ = self.run_cli(["build-base", "--rerun-existing", "Run", "SET", "run"])

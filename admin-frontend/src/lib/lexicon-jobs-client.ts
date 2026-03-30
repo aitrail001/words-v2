@@ -5,7 +5,7 @@ export type LexiconJobStatus = "queued" | "running" | "completed" | "failed";
 export type LexiconJob = {
   id: string;
   created_by: string | null;
-  job_type: "import_db" | "jsonl_materialize" | "compiled_materialize" | "compiled_review_bulk_update";
+  job_type: "import_db" | "voice_import_db" | "jsonl_materialize" | "compiled_materialize" | "compiled_review_bulk_update";
   status: LexiconJobStatus;
   target_key: string;
   request_payload: Record<string, unknown>;
@@ -13,6 +13,16 @@ export type LexiconJob = {
   progress_total: number;
   progress_completed: number;
   progress_current_label: string | null;
+  progress_summary: {
+    phase: string;
+    total: number;
+    validated: number;
+    imported: number;
+    skipped: number;
+    failed: number;
+    to_validate: number;
+    to_import: number;
+  } | null;
   error_message: string | null;
   created_at: string;
   started_at: string | null;
@@ -50,6 +60,18 @@ export const createImportDbLexiconJob = (
   input: CreateImportDbLexiconJobInput,
 ): Promise<LexiconJob> =>
   apiClient.post<LexiconJob>("/lexicon-jobs/import-db", {
+    input_path: input.inputPath,
+    source_type: input.sourceType,
+    source_reference: input.sourceReference,
+    language: input.language ?? "en",
+    conflict_mode: input.conflictMode ?? "upsert",
+    error_mode: input.errorMode ?? "fail_fast",
+  });
+
+export const createVoiceImportDbLexiconJob = (
+  input: CreateImportDbLexiconJobInput,
+): Promise<LexiconJob> =>
+  apiClient.post<LexiconJob>("/lexicon-jobs/voice-import-db", {
     input_path: input.inputPath,
     source_type: input.sourceType,
     source_reference: input.sourceReference,

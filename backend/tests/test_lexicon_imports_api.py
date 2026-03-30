@@ -278,3 +278,82 @@ class TestLexiconImportsApi:
 
         assert response.status_code == 400
         assert response.json()["detail"] == "Path must stay within the allowed roots"
+
+    @pytest.mark.asyncio
+    async def test_voice_dry_run_summarizes_manifest_rows(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        manifest_path = tmp_path / "voice_manifest.jsonl"
+        manifest_path.write_text('{"status":"generated","entry_type":"word","entry_id":"word:bank","word":"bank"}\n', encoding="utf-8")
+
+        monkeypatch.setattr("app.api.lexicon_imports._voice_import_db_module", lambda: SimpleNamespace(
+            load_voice_manifest_rows=lambda path: [{"status": "generated", "entry_type": "word", "entry_id": "word:bank", "word": "bank"}],
+            summarize_voice_manifest_rows=lambda rows: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
+            run_voice_import_file=lambda *args, **kwargs: {"row_count": 1, "failed_rows": 0, "dry_run": True},
+        ))
+
+        response = await client.post(
+            "/api/lexicon-imports/voice-dry-run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"input_path": str(manifest_path), "source_type": "voice_manifest", "conflict_mode": "skip", "error_mode": "continue"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["artifact_filename"] == "voice_manifest.jsonl"
+        assert data["row_summary"]["row_count"] == 1
+        assert data["import_summary"]["dry_run"] == 1
+
+    @pytest.mark.asyncio
+    async def test_voice_dry_run_rejects_directory_input(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        manifest_dir = tmp_path / "voice-run-dir"
+        manifest_dir.mkdir()
+
+        response = await client.post(
+            "/api/lexicon-imports/voice-dry-run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"input_path": str(manifest_dir), "source_type": "voice_manifest"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Voice import input must be a .jsonl file, not a directory"
+
+    @pytest.mark.asyncio
+    async def test_run_voice_import_executes_as_background_job(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        manifest_path = tmp_path / "voice_manifest.jsonl"
+        manifest_path.write_text('{"status":"generated","entry_type":"word","entry_id":"word:bank","word":"bank"}\n', encoding="utf-8")
+
+        def run_inline(target, *, name):
+            target()
+
+        monkeypatch.setattr(lexicon_import_jobs, "_start_job_thread", run_inline)
+        monkeypatch.setattr("app.api.lexicon_imports._voice_import_db_module", lambda: SimpleNamespace(
+            load_voice_manifest_rows=lambda path: [{"status": "generated", "entry_type": "word", "entry_id": "word:bank", "word": "bank"}],
+            summarize_voice_manifest_rows=lambda rows: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
+            run_voice_import_file=lambda *args, **kwargs: {"created_assets": 1, "updated_assets": 0, "skipped_rows": 0, "failed_rows": 0},
+        ))
+
+        response = await client.post(
+            "/api/lexicon-imports/voice-run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"input_path": str(manifest_path), "source_type": "voice_manifest", "conflict_mode": "upsert", "error_mode": "continue"},
+        )
+
+        assert response.status_code == 202
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["artifact_filename"] == "voice_manifest.jsonl"
+        assert data["import_summary"]["created_assets"] == 1
