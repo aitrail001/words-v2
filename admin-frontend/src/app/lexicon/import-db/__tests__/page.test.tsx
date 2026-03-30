@@ -163,6 +163,39 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByText(/usage_note/)).toBeInTheDocument();
   });
 
+  it("preserves backend failure labels for zero-row failures", async () => {
+    getLexiconJob.mockResolvedValue({
+      id: "job-preflight-failed",
+      created_by: "user-1",
+      job_type: "import_db",
+      status: "failed",
+      target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+      request_payload: {
+        input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+        source_type: "lexicon_snapshot",
+        source_reference: "lexicon-20260321-wordfreq",
+        language: "en",
+        conflict_mode: "upsert",
+        error_mode: "continue",
+        row_summary: { row_count: 3, word_count: 0, phrase_count: 3, reference_count: 0 },
+      },
+      result_payload: null,
+      progress_total: 3,
+      progress_completed: 0,
+      progress_current_label: "Validating 2/3: fuss over",
+      error_message: "sense 2 translations.zh-Hans.usage_note must be a non-empty string",
+      created_at: "2026-03-23T00:00:00Z",
+      started_at: "2026-03-23T00:00:01Z",
+      completed_at: "2026-03-23T00:00:02Z",
+    });
+    window.localStorage.setItem("lexicon-import-db-active-job", "job-preflight-failed");
+    render(<LexiconImportDbPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: Validating 2/3: fuss over");
+    expect(screen.queryByText("Current entry: Failed before first row")).not.toBeInTheDocument();
+  });
+
   it("reconnects to the active import job from local storage", async () => {
     window.localStorage.setItem("lexicon-import-db-active-job", "job-1");
     render(<LexiconImportDbPage />);
@@ -222,7 +255,7 @@ describe("LexiconImportDbPage", () => {
         result_payload: { skipped_words: 1, failed_rows: 1 },
         progress_total: 10,
         progress_completed: 4,
-        progress_current_label: "Failed before first row",
+        progress_current_label: null,
         error_message: "usage_note must be a non-empty string",
         created_at: "2026-03-23T00:00:00Z",
         started_at: "2026-03-23T00:00:01Z",

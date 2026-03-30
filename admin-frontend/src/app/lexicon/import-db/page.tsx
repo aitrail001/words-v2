@@ -253,6 +253,9 @@ export default function LexiconImportDbPage() {
       return "Completed";
     }
     if (targetJob.status === "failed") {
+      if (targetJob.progress_current_label) {
+        return targetJob.progress_current_label;
+      }
       if (targetJob.progress_completed === 0) {
         return "Failed before first row";
       }

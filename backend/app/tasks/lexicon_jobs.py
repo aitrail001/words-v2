@@ -212,7 +212,7 @@ def run_lexicon_import_db(self, job_id: str) -> dict[str, Any]:
                 preflight_progress_callback=lambda row, completed_rows, callback_total_rows: (
                     apply_lexicon_job_progress(
                         job,
-                        progress_completed=0,
+                        progress_completed=completed_rows,
                         progress_total=callback_total_rows or total_rows,
                         current_label=_row_label(
                             row,
