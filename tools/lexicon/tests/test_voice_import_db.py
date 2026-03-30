@@ -8,6 +8,7 @@ import json
 from tools.lexicon.tests.test_voice_generate import FakeSynthProvider
 from tools.lexicon.voice_generate import run_voice_generation
 from tools.lexicon.voice_import_db import (
+    _find_or_create_storage_policy,
     group_voice_manifest_rows,
     import_voice_manifest_rows,
     run_voice_import_file,
@@ -211,6 +212,42 @@ def test_group_voice_manifest_rows_orders_word_then_definition_then_example() ->
         "She went to the bank.",
         "The river overflowed the bank.",
     ]
+
+
+def test_group_voice_manifest_rows_preserves_first_seen_group_order() -> None:
+    rows = [
+        _word_manifest_row(
+            word="zebra",
+            entry_id="word_zebra",
+            source_reference="words-001",
+            content_scope="word",
+            source_text="zebra",
+            relative_path="zebra/word/en_us/example.mp3",
+            source_text_hash="hash-zebra-word",
+        ),
+        _word_manifest_row(
+            word="apple",
+            entry_id="word_apple",
+            source_reference="words-002",
+            content_scope="word",
+            source_text="apple",
+            relative_path="apple/word/en_us/example.mp3",
+            source_text_hash="hash-apple-word",
+        ),
+        _word_manifest_row(
+            word="zebra",
+            entry_id="word_zebra",
+            source_reference="words-001",
+            content_scope="definition",
+            source_text="a striped animal",
+            relative_path="zebra/definition/en_us/example.mp3",
+            source_text_hash="hash-zebra-definition",
+        ),
+    ]
+
+    groups = group_voice_manifest_rows(rows)
+
+    assert [(group.lexical_text, group.language) for group in groups] == [("zebra", "en"), ("apple", "en")]
 
 
 def test_run_voice_import_file_groups_manifest_rows_by_lexical_scope_before_importing(tmp_path: Path):
@@ -429,6 +466,86 @@ def test_run_voice_import_file_fail_fast_rolls_back_only_current_group(tmp_path:
     bank_session.rollback.assert_not_called()
     harbor_session.rollback.assert_called_once()
     harbor_session.commit.assert_not_called()
+
+
+def test_run_voice_import_file_fail_fast_stops_on_first_manifest_group(tmp_path: Path):
+    manifest_rows = [
+        _word_manifest_row(
+            word="zebra",
+            entry_id="word_zebra",
+            source_reference="words-001",
+            content_scope="word",
+            source_text="zebra",
+            relative_path="zebra/word/en_us/example.mp3",
+            source_text_hash="hash-zebra-word",
+        ),
+        _word_manifest_row(
+            word="apple",
+            entry_id="word_apple",
+            source_reference="words-002",
+            content_scope="word",
+            source_text="apple",
+            relative_path="apple/word/en_us/example.mp3",
+            source_text_hash="hash-apple-word",
+        ),
+    ]
+    zebra_session = MagicMock()
+    zebra_cm = MagicMock()
+    zebra_cm.__enter__.return_value = zebra_session
+    zebra_cm.__exit__.return_value = None
+    imported_groups: list[str] = []
+
+    def fake_import_group(_session, rows, **kwargs):
+        imported_groups.append(str(rows[0]["word"]))
+        raise RuntimeError("duplicate voice asset")
+
+    with patch("tools.lexicon.voice_import_db._ensure_backend_path"), \
+         patch("tools.lexicon.voice_import_db.create_engine"), \
+         patch("tools.lexicon.voice_import_db.Session", side_effect=[zebra_cm]), \
+         patch("tools.lexicon.voice_import_db.get_settings", return_value=SimpleNamespace(database_url_sync="postgresql://test")), \
+         patch("tools.lexicon.voice_import_db.import_voice_manifest_group", side_effect=fake_import_group):
+        try:
+            run_voice_import_file(tmp_path / "voice_manifest.jsonl", rows=manifest_rows, error_mode="fail_fast")
+        except RuntimeError as exc:
+            assert str(exc) == "duplicate voice asset"
+        else:
+            raise AssertionError("run_voice_import_file should raise in fail_fast mode")
+
+    assert imported_groups == ["zebra"]
+    zebra_session.rollback.assert_called_once()
+
+
+def test_find_or_create_storage_policy_creates_missing_default_policy():
+    _ = _find_or_create_storage_policy
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = None
+
+    from tools.lexicon.import_db import _ensure_backend_path
+
+    _ensure_backend_path()
+    from app.models.lexicon_voice_storage_policy import LexiconVoiceStoragePolicy
+
+    policy = _find_or_create_storage_policy(
+        session,
+        LexiconVoiceStoragePolicy,
+        source_reference="words-001",
+        content_scope="definition",
+        provider="google",
+        family="neural2",
+        locale="en-US",
+        primary_storage_kind="local",
+        primary_storage_base="/tmp/voice",
+    )
+
+    assert policy.policy_key == "definition_default"
+    assert policy.source_reference == "global"
+    assert policy.provider == "default"
+    assert policy.family == "default"
+    assert policy.locale == "all"
+    assert policy.primary_storage_kind == "local"
+    assert policy.primary_storage_base == "/tmp/voice"
+    session.add.assert_called_once_with(policy)
+    session.flush.assert_called_once()
 
 
 def test_import_voice_manifest_rows_updates_relative_path_without_touching_storage_policy_rows():

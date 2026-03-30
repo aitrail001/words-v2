@@ -86,18 +86,58 @@ function resolveVoiceAssetTarget(asset: LexiconInspectorVoiceAsset): string {
 
 function VoiceAssetPlaybackButton({ asset }: { asset: LexiconInspectorVoiceAsset }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const playLabel = `Play ${voiceScopeLabel(asset.content_scope)} voice asset ${asset.locale} ${asset.voice_role}`;
 
+  useEffect(() => () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  }, []);
+
   return (
     <div className="flex items-center justify-start gap-2 md:justify-end">
-      <audio ref={audioRef} preload="none" src={asset.playback_url} className="hidden" />
+      <audio ref={audioRef} preload="none" className="hidden" />
       <button
         type="button"
         aria-label={playLabel}
-        onClick={() => {
+        disabled={loading}
+        onClick={async () => {
           const player = audioRef.current;
           if (!player) return;
+          if (!player.src) {
+            const token = readAccessToken();
+            if (!token) {
+              redirectToLogin("/lexicon/db-inspector");
+              return;
+            }
+            setLoading(true);
+            try {
+              const response = await fetch(asset.playback_url, {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              });
+              if (response.status === 401) {
+                redirectToLogin("/lexicon/db-inspector");
+                return;
+              }
+              if (!response.ok) {
+                return;
+              }
+              const audioBlob = await response.blob();
+              if (objectUrlRef.current) {
+                URL.revokeObjectURL(objectUrlRef.current);
+              }
+              objectUrlRef.current = URL.createObjectURL(audioBlob);
+              player.src = objectUrlRef.current;
+            } finally {
+              setLoading(false);
+            }
+          }
           player.currentTime = 0;
           const playback = player.play();
           if (playback && typeof playback.catch === "function") {
@@ -106,7 +146,7 @@ function VoiceAssetPlaybackButton({ asset }: { asset: LexiconInspectorVoiceAsset
         }}
         className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
       >
-        Play
+        {loading ? "Loading…" : "Play"}
       </button>
     </div>
   );

@@ -20,9 +20,24 @@ jest.mock("@/lib/auth-redirect", () => ({
 describe("LexiconDbInspectorPage", () => {
   const mockBrowse = browseLexiconInspectorEntries as jest.Mock;
   const mockDetail = getLexiconInspectorDetail as jest.Mock;
+  const originalFetch = global.fetch;
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const playMock = jest.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    Object.defineProperty(global.HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: playMock,
+    });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob(["fake-mp3"], { type: "audio/mpeg" }),
+    } as Response);
+    URL.createObjectURL = jest.fn(() => "blob:voice-1");
+    URL.revokeObjectURL = jest.fn();
     mockBrowse.mockResolvedValue({
       items: [
         {
@@ -131,6 +146,12 @@ describe("LexiconDbInspectorPage", () => {
       ],
       enrichment_runs: [],
     });
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
   });
 
   it("renders browse filters and loads detail for the selected entry", async () => {
@@ -267,5 +288,24 @@ describe("LexiconDbInspectorPage", () => {
     expect(screen.getByText(/Used before a performance\./i)).toBeInTheDocument();
     expect(screen.getByText("Voice assets")).toBeInTheDocument();
     expect(screen.queryByText("Voice paths by scope")).not.toBeInTheDocument();
+  });
+
+  it("loads voice playback through an authenticated fetch before playing", async () => {
+    const user = userEvent.setup();
+
+    render(<LexiconDbInspectorPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /play word voice asset en-us female/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /play word voice asset en-us female/i }));
+
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith("/api/words/voice-assets/voice-1/content", {
+        headers: {
+          Authorization: "Bearer active-token",
+        },
+      }),
+    );
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(playMock).toHaveBeenCalled();
   });
 });

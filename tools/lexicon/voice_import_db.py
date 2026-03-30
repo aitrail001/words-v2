@@ -95,7 +95,7 @@ def group_voice_manifest_rows(rows: list[dict[str, Any]]) -> list[VoiceManifestG
                 rows=ordered_rows,
             )
         )
-    return sorted(groups, key=lambda group: (group.entry_type, group.lexical_text, group.language))
+    return groups
 
 
 def summarize_voice_manifest_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -403,7 +403,21 @@ def _find_or_create_storage_policy(
     ).scalar_one_or_none()
     if existing is not None:
         return existing
-    raise RuntimeError(f"missing default voice storage policy for content_scope={content_scope}")
+    created = storage_policy_model(
+        policy_key=policy_key,
+        source_reference="global",
+        content_scope=content_scope,
+        provider="default",
+        family="default",
+        locale="all",
+        primary_storage_kind=primary_storage_kind,
+        primary_storage_base=primary_storage_base,
+        fallback_storage_kind=fallback_storage_kind,
+        fallback_storage_base=fallback_storage_base,
+    )
+    session.add(created)
+    session.flush()
+    return created
 
 
 def import_voice_manifest_group(
