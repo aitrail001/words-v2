@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import AdminHomePage from "@/app/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
+import { AuthNavigation } from "@/lib/auth-nav";
 
 jest.mock("next/link", () => {
   const MockLink = ({ children, href, ...props }: any) => (
@@ -14,6 +15,7 @@ jest.mock("next/link", () => {
 
 jest.mock("@/lib/auth-session", () => ({
   readAccessToken: jest.fn(() => "active-token"),
+  readRefreshToken: jest.fn(() => null),
 }));
 
 jest.mock("@/lib/auth-redirect", () => ({
@@ -30,6 +32,23 @@ describe("AdminHomePage", () => {
       "href",
       "/lexicon/ops",
     );
+  });
+});
+
+describe("AuthNavigation", () => {
+  it("renders the compact top-level lexicon menu", () => {
+    render(<AuthNavigation />);
+
+    expect(screen.getByTestId("nav-home-link")).toHaveTextContent("Home");
+    expect(screen.getByTestId("nav-lexicon-ops-link")).toHaveTextContent("Lexicon Ops");
+    expect(screen.getByTestId("nav-lexicon-voice-link")).toHaveTextContent("Voice");
+    expect(screen.getByTestId("nav-lexicon-voice-link")).toHaveAttribute("href", "/lexicon/voice-runs");
+    expect(screen.getByTestId("nav-lexicon-compiled-review-link")).toHaveTextContent("Enrichment Review");
+    expect(screen.getByTestId("nav-lexicon-db-link")).toHaveTextContent("DB");
+    expect(screen.getByTestId("nav-logout-button")).toHaveTextContent("Logout");
+    expect(screen.queryByTestId("nav-lexicon-jsonl-review-link")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nav-lexicon-import-db-link")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nav-lexicon-db-inspector-link")).not.toBeInTheDocument();
   });
 });
 

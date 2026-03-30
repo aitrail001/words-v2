@@ -6,9 +6,10 @@ import { rewriteLexiconVoiceStorage, type LexiconVoiceStoragePolicy, type Rewrit
 type VoiceStoragePanelProps = {
   testIdPrefix: string;
   selectedPolicy: LexiconVoiceStoragePolicy | null;
+  onPolicyApplied?: () => void | Promise<void>;
 };
 
-export function VoiceStoragePanel({ testIdPrefix, selectedPolicy }: VoiceStoragePanelProps) {
+export function VoiceStoragePanel({ testIdPrefix, selectedPolicy, onPolicyApplied }: VoiceStoragePanelProps) {
   const [voiceStorageKind, setVoiceStorageKind] = useState("local");
   const [voiceStorageBase, setVoiceStorageBase] = useState("");
   const [fallbackVoiceStorageKind, setFallbackVoiceStorageKind] = useState("");
@@ -46,6 +47,9 @@ export function VoiceStoragePanel({ testIdPrefix, selectedPolicy }: VoiceStorage
           ? `would update ${result.matched_count}`
           : `updated ${result.updated_count} of ${result.matched_count}`,
       );
+      if (!result.dry_run) {
+        await onPolicyApplied?.();
+      }
     } catch (error) {
       setVoiceStorageResult(null);
       setVoiceStorageMessage(error instanceof Error ? error.message : "Voice storage rewrite failed.");

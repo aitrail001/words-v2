@@ -5,6 +5,7 @@ import { HorizontalRecordRail } from "@/components/lexicon/horizontal-record-rai
 import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
 import { PagedRecordList } from "@/components/lexicon/paged-record-list";
 import { ReviewerSummaryCard } from "@/components/lexicon/reviewer-summary-card";
+import { LexiconSectionNav } from "@/components/lexicon/section-nav";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
@@ -535,6 +536,15 @@ export default function LexiconCompiledReviewPage() {
               Materialize Reviewed Outputs
             </button>
           </div>
+        </div>
+        <div className="mt-4">
+          <LexiconSectionNav
+            testId="lexicon-enrichment-review-section-nav"
+            items={[
+              { label: "Compiled Review", href: "/lexicon/compiled-review", active: true },
+              { label: "JSONL Review", href: "/lexicon/jsonl-review" },
+            ]}
+          />
         </div>
 
         <div className="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">

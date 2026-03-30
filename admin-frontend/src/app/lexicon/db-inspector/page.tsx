@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { LexiconSectionNav } from "@/components/lexicon/section-nav";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
@@ -286,6 +287,15 @@ export default function LexiconDbInspectorPage() {
           <p className="mt-1 text-sm text-gray-600">
             Browse and inspect final DB entries across words, phrases, and references.
           </p>
+        </div>
+        <div className="mt-4">
+          <LexiconSectionNav
+            testId="lexicon-db-section-nav"
+            items={[
+              { label: "Enrichment Import", href: "/lexicon/import-db" },
+              { label: "DB Inspector", href: "/lexicon/db-inspector", active: true },
+            ]}
+          />
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem_12rem]">

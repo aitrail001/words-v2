@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
 import { PagedRecordList } from "@/components/lexicon/paged-record-list";
 import { ReviewerSummaryCard } from "@/components/lexicon/reviewer-summary-card";
+import { LexiconSectionNav } from "@/components/lexicon/section-nav";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
@@ -449,6 +450,15 @@ export default function LexiconJsonlReviewPage() {
               Materialize Reviewed Outputs
             </button>
           </div>
+        </div>
+        <div className="mt-4">
+          <LexiconSectionNav
+            testId="lexicon-enrichment-review-section-nav"
+            items={[
+              { label: "Compiled Review", href: "/lexicon/compiled-review" },
+              { label: "JSONL Review", href: "/lexicon/jsonl-review", active: true },
+            ]}
+          />
         </div>
         <div className="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">

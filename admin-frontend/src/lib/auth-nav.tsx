@@ -37,39 +37,25 @@ export function AuthNavigation() {
         Lexicon Ops
       </Link>
       <Link
-        href="/lexicon/voice"
+        href="/lexicon/voice-runs"
         className="hover:text-gray-900"
         data-testid="nav-lexicon-voice-link"
       >
-        Lexicon Voice
+        Voice
       </Link>
       <Link
         href="/lexicon/compiled-review"
         className="hover:text-gray-900"
         data-testid="nav-lexicon-compiled-review-link"
       >
-        Compiled Review
-      </Link>
-      <Link
-        href="/lexicon/jsonl-review"
-        className="hover:text-gray-900"
-        data-testid="nav-lexicon-jsonl-review-link"
-      >
-        JSONL Review
+        Enrichment Review
       </Link>
       <Link
         href="/lexicon/import-db"
         className="hover:text-gray-900"
-        data-testid="nav-lexicon-import-db-link"
+        data-testid="nav-lexicon-db-link"
       >
-        Import DB
-      </Link>
-      <Link
-        href="/lexicon/db-inspector"
-        className="hover:text-gray-900"
-        data-testid="nav-lexicon-db-inspector-link"
-      >
-        DB Inspector
+        DB
       </Link>
       {isAuthenticated ? (
         <button

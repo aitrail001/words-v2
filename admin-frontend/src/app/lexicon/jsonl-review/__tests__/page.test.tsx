@@ -296,6 +296,14 @@ describe("LexiconJsonlReviewPage", () => {
     });
   });
 
+  it("renders the enrichment review submenu", async () => {
+    render(<LexiconJsonlReviewPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-jsonl-review-page")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-enrichment-review-section-nav")).toHaveTextContent("Compiled Review");
+    expect(screen.getByTestId("lexicon-enrichment-review-section-nav")).toHaveTextContent("JSONL Review");
+  });
+
   it("loads rows, applies immediate decisions, advances to the next pending item, and materializes outputs", async () => {
     const user = userEvent.setup();
     window.history.pushState(
