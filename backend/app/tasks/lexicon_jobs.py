@@ -175,6 +175,33 @@ def run_lexicon_import_db(self, job_id: str) -> dict[str, Any]:
         try:
             request_payload = dict(job.request_payload or {})
             import_db = _import_db_module()
+            row_summary = dict(request_payload.get("row_summary") or {})
+            total_rows = int(row_summary.get("row_count") or 0)
+
+            def _row_label(row: dict[str, Any], *, default_prefix: str, completed_rows: int, total_rows: int) -> str | None:
+                explicit_label = str(row.get("_progress_label") or "").strip()
+                if explicit_label:
+                    entry_label = str(
+                        row.get("display_form")
+                        or row.get("display_text")
+                        or row.get("word")
+                        or row.get("normalized_form")
+                        or row.get("entry_id")
+                        or ""
+                    ).strip()
+                    return f"{explicit_label}: {entry_label}" if entry_label and entry_label not in explicit_label else explicit_label
+                entry_label = str(
+                    row.get("display_form")
+                    or row.get("display_text")
+                    or row.get("word")
+                    or row.get("normalized_form")
+                    or row.get("entry_id")
+                    or ""
+                ).strip()
+                if not entry_label:
+                    return default_prefix
+                return f"{default_prefix} {completed_rows}/{total_rows}: {entry_label}" if total_rows > 0 else f"{default_prefix}: {entry_label}"
+
             result_payload = import_db.run_import_file(
                 request_payload["input_path"],
                 source_type=request_payload["source_type"],
@@ -182,20 +209,31 @@ def run_lexicon_import_db(self, job_id: str) -> dict[str, Any]:
                 language=request_payload.get("language", "en"),
                 conflict_mode=request_payload.get("conflict_mode"),
                 error_mode=request_payload.get("error_mode", "fail_fast"),
+                preflight_progress_callback=lambda row, completed_rows, callback_total_rows: (
+                    apply_lexicon_job_progress(
+                        job,
+                        progress_completed=completed_rows,
+                        progress_total=callback_total_rows or total_rows,
+                        current_label=_row_label(
+                            row,
+                            default_prefix="Validating",
+                            completed_rows=completed_rows,
+                            total_rows=callback_total_rows or total_rows,
+                        ),
+                    ),
+                    db.commit(),
+                ),
                 progress_callback=lambda row, completed_rows, total_rows: (
                     apply_lexicon_job_progress(
                         job,
                         progress_completed=completed_rows,
                         progress_total=total_rows,
-                        current_label=str(
-                            row.get("display_form")
-                            or row.get("display_text")
-                            or row.get("word")
-                            or row.get("normalized_form")
-                            or row.get("entry_id")
-                            or ""
-                        ).strip()
-                        or None,
+                        current_label=_row_label(
+                            row,
+                            default_prefix="Importing",
+                            completed_rows=completed_rows,
+                            total_rows=total_rows,
+                        ),
                     ),
                     db.commit(),
                 ),

@@ -298,6 +298,12 @@ def _compiled_row_identity(row: dict[str, Any], row_index: int) -> str:
     return f"row {row_index}"
 
 
+def _progress_row(row: dict[str, Any], *, label: str) -> dict[str, Any]:
+    next_row = dict(row)
+    next_row["_progress_label"] = label
+    return next_row
+
+
 def _is_row_level_import_exception(exc: Exception) -> bool:
     try:
         from sqlalchemy.exc import DataError, IntegrityError, OperationalError, ProgrammingError, StatementError
@@ -1178,6 +1184,8 @@ def import_compiled_rows(
                     _raise_existing_entry_conflict(entry_type="phrase", identifier=phrase_key[0], language=row_language)
                 if on_conflict == "skip":
                     summary = _increment(summary, skipped_phrases=1)
+                    if progress_callback is not None:
+                        progress_callback(_progress_row(row, label=f"Skipping existing phrase: {phrase_key[0]}"), row_index, total_rows)
                     continue
                 existing_phrase.phrase_text = row.get("display_form") or row.get("word")
                 existing_phrase.normalized_form = phrase_normalized_form or existing_phrase.normalized_form
@@ -1368,6 +1376,8 @@ def import_compiled_rows(
                     _raise_existing_entry_conflict(entry_type="reference", identifier=reference_key[0], language=row_language)
                 if on_conflict == "skip":
                     summary = _increment(summary, skipped_reference_entries=1)
+                    if progress_callback is not None:
+                        progress_callback(_progress_row(row, label=f"Skipping existing reference: {reference_key[0]}"), row_index, total_rows)
                     continue
                 current_reference = existing_reference
                 current_reference.reference_type = row.get("reference_type") or current_reference.reference_type
@@ -1437,6 +1447,8 @@ def import_compiled_rows(
                 _raise_existing_entry_conflict(entry_type="word", identifier=row["word"], language=row_language)
             if on_conflict == "skip":
                 summary = _increment(summary, skipped_words=1)
+                if progress_callback is not None:
+                    progress_callback(_progress_row(row, label=f"Skipping existing word: {row['word']}"), row_index, total_rows)
                 continue
             word.frequency_rank = row.get("frequency_rank")
             if hasattr(word, "source_type"):
@@ -1897,12 +1909,20 @@ def run_import_preflight(
     rows: list[dict[str, Any]] | None = None,
     error_samples_sink: list[dict[str, Any]] | None = None,
     preflight_errors_sink: list[str] | None = None,
+    progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
 ) -> dict[str, Any]:
     resolved_rows = list(rows) if rows is not None else load_compiled_rows(path)
     summary = _summarize_import_preflight_rows(resolved_rows)
     preflight_errors: list[str] = []
-    if any(_should_preflight_validate_row(row) for row in resolved_rows):
-        preflight_errors = _preflight_validate_compiled_rows(resolved_rows)
+    validation_rows: list[dict[str, Any]] = []
+    total_rows = len(resolved_rows)
+    for row_index, row in enumerate(resolved_rows, start=1):
+        if progress_callback is not None:
+            progress_callback(_progress_row(row, label=f"Validating {row_index}/{total_rows}"), row_index, total_rows)
+        if _should_preflight_validate_row(row):
+            validation_rows.append(row)
+    if validation_rows:
+        preflight_errors = _preflight_validate_compiled_rows(validation_rows)
     if preflight_errors_sink is not None:
         preflight_errors_sink.extend(preflight_errors)
     _record_preflight_errors(preflight_errors, error_samples_sink=error_samples_sink)
@@ -1925,6 +1945,7 @@ def run_import_file(
     error_mode: str = "fail_fast",
     dry_run: bool = False,
     error_samples_sink: list[dict[str, Any]] | None = None,
+    preflight_progress_callback: Optional[Callable[[dict[str, Any], int, int], None]] = None,
 ) -> dict[str, Any]:
     on_conflict = _resolve_conflict_mode(conflict_mode=conflict_mode, on_conflict=on_conflict)
     error_mode = _validate_error_mode(error_mode)
@@ -1950,6 +1971,7 @@ def run_import_file(
         rows=resolved_rows,
         error_samples_sink=error_samples_sink,
         preflight_errors_sink=preflight_errors,
+        progress_callback=preflight_progress_callback,
     )
     if dry_run:
         return preflight_summary

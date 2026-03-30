@@ -12,6 +12,7 @@ import {
 import {
   createImportDbLexiconJob,
   getLexiconJob,
+  listLexiconJobs,
   type LexiconJob,
 } from "@/lib/lexicon-jobs-client";
 
@@ -32,8 +33,16 @@ export default function LexiconImportDbPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<LexiconImportResult | null>(null);
   const [job, setJob] = useState<LexiconJob | null>(null);
-  const [lastJob, setLastJob] = useState<LexiconJob | null>(null);
+  const [recentJobs, setRecentJobs] = useState<LexiconJob[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const loadRecentJobs = useCallback(async () => {
+    try {
+      setRecentJobs(await listLexiconJobs({ jobType: "import_db", limit: 6 }));
+    } catch {
+      // keep the page usable even if the recent-jobs list fails
+    }
+  }, []);
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -71,6 +80,26 @@ export default function LexiconImportDbPage() {
     () => Object.entries(result?.import_summary ?? {}),
     [result?.import_summary],
   );
+  const skippedCount = useMemo(() => {
+    const payload = job?.result_payload ?? result?.import_summary ?? {};
+    return Number((payload as Record<string, unknown>).skipped_words ?? 0)
+      + Number((payload as Record<string, unknown>).skipped_phrases ?? 0)
+      + Number((payload as Record<string, unknown>).skipped_reference_entries ?? 0);
+  }, [job?.result_payload, result?.import_summary]);
+  const failedCount = useMemo(() => {
+    const payload = job?.result_payload ?? result?.import_summary ?? {};
+    return Number((payload as Record<string, unknown>).failed_rows ?? 0);
+  }, [job?.result_payload, result?.import_summary]);
+  const skippedForJob = (targetJob: LexiconJob | null): number => {
+    const payload = (targetJob?.result_payload ?? {}) as Record<string, unknown>;
+    return Number(payload.skipped_words ?? 0)
+      + Number(payload.skipped_phrases ?? 0)
+      + Number(payload.skipped_reference_entries ?? 0);
+  };
+  const failedForJob = (targetJob: LexiconJob | null): number => {
+    const payload = (targetJob?.result_payload ?? {}) as Record<string, unknown>;
+    return Number(payload.failed_rows ?? 0);
+  };
   const progressPercent = job && job.progress_total > 0
     ? Math.round((job.progress_completed / job.progress_total) * 100)
     : 0;
@@ -79,6 +108,51 @@ export default function LexiconImportDbPage() {
     inputPath.trim().length > 0 ||
     sourceReference.trim().length > 0 ||
     language.trim() !== "en";
+  const currentResultSection = result ? (
+    <div className="mt-4 border-t border-gray-200 pt-4">
+      <h5 className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Current result</h5>
+      <div className="mt-3 flex flex-wrap gap-2 text-sm">
+        <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1" data-testid="lexicon-import-db-summary-rows">
+          <span className="text-gray-500">Rows </span>
+          <span className="font-medium">{result.row_summary.row_count}</span>
+        </div>
+        <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1" data-testid="lexicon-import-db-summary-words">
+          <span className="text-gray-500">Words </span>
+          <span className="font-medium">{result.row_summary.word_count}</span>
+        </div>
+        <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1" data-testid="lexicon-import-db-summary-phrases">
+          <span className="text-gray-500">Phrases </span>
+          <span className="font-medium">{result.row_summary.phrase_count}</span>
+        </div>
+        <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1" data-testid="lexicon-import-db-summary-references">
+          <span className="text-gray-500">References </span>
+          <span className="font-medium">{result.row_summary.reference_count}</span>
+        </div>
+      </div>
+      {importSummaryEntries.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {importSummaryEntries.map(([key, value]) => (
+            <div key={key} className="rounded-full border border-gray-200 px-3 py-1 text-sm">
+              <span className="text-gray-500">{key} </span>
+              <span className="font-medium">{value}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {result.error_samples?.length ? (
+        <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-medium">Detected issues</p>
+          <ul className="mt-2 space-y-1">
+            {result.error_samples.map((sample, index) => (
+              <li key={`${sample.entry}-${index}`}>
+                <span className="font-medium">{sample.entry}:</span> {sample.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  ) : null;
 
   const execute = useCallback(async (mode: "dry-run" | "run") => {
     if (!canRun) return;
@@ -107,6 +181,7 @@ export default function LexiconImportDbPage() {
           window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, nextJob.id);
           window.localStorage.setItem(LAST_JOB_STORAGE_KEY, nextJob.id);
         }
+        void loadRecentJobs();
         setMessage("Import started. The queued job keeps running if you browse away from this page.");
       }
     } catch (error) {
@@ -114,7 +189,7 @@ export default function LexiconImportDbPage() {
     } finally {
       setLoading(false);
     }
-  }, [canRun, conflictMode, errorMode, inputPath, language, sourceReference]);
+  }, [canRun, conflictMode, errorMode, inputPath, language, loadRecentJobs, sourceReference]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -135,17 +210,8 @@ export default function LexiconImportDbPage() {
   }, [importResultFromJob]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const persistedJobId = window.localStorage.getItem(LAST_JOB_STORAGE_KEY);
-    if (!persistedJobId) return;
-    void getLexiconJob(persistedJobId)
-      .then((nextJob) => {
-        setLastJob(nextJob);
-      })
-      .catch(() => {
-        window.localStorage.removeItem(LAST_JOB_STORAGE_KEY);
-      });
-  }, []);
+    void loadRecentJobs();
+  }, [loadRecentJobs]);
 
   useEffect(() => {
     if (!job || job.status === "completed" || job.status === "failed") {
@@ -160,10 +226,12 @@ export default function LexiconImportDbPage() {
             setMessage("Import completed.");
             window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
             window.localStorage.setItem(LAST_JOB_STORAGE_KEY, nextJob.id);
+            void loadRecentJobs();
           } else if (nextJob.status === "failed") {
             setMessage(nextJob.error_message || "Import failed.");
             window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
             window.localStorage.setItem(LAST_JOB_STORAGE_KEY, nextJob.id);
+            void loadRecentJobs();
           }
         })
         .catch((error) => {
@@ -171,7 +239,32 @@ export default function LexiconImportDbPage() {
         });
     }, 500);
     return () => window.clearInterval(timer);
-  }, [importResultFromJob, job]);
+  }, [importResultFromJob, job, loadRecentJobs]);
+
+  const statusBadgeClass = (status: LexiconJob["status"]): string => {
+    if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-700";
+    if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    if (status === "running") return "border-sky-200 bg-sky-50 text-sky-700";
+    return "border-slate-200 bg-slate-50 text-slate-600";
+  };
+
+  const currentEntryLabel = (targetJob: LexiconJob): string => {
+    if (targetJob.status === "completed") {
+      return "Completed";
+    }
+    if (targetJob.status === "failed") {
+      if (targetJob.progress_current_label) {
+        return targetJob.progress_current_label;
+      }
+      if (targetJob.progress_completed === 0) {
+        return "Failed before first row";
+      }
+      return targetJob.progress_total > 0
+        ? `Failed after ${targetJob.progress_completed}/${targetJob.progress_total}`
+        : "Failed";
+    }
+    return targetJob.progress_current_label ?? "Waiting for first row...";
+  };
 
   return (
     <div className="space-y-6" data-testid="lexicon-import-db-page">
@@ -289,15 +382,18 @@ export default function LexiconImportDbPage() {
       </section>
 
       {job ? (
-        <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm" data-testid="lexicon-import-db-progress">
+        <section className={`rounded-lg border bg-white p-6 shadow-sm ${job.status === "failed" ? "border-rose-200" : job.status === "completed" ? "border-emerald-200" : "border-gray-200"}`} data-testid="lexicon-import-db-progress">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Import progress</h4>
               <p className="mt-1 text-sm text-gray-700">
-                Status: <span className="font-medium">{job.status}</span>
+                Status: <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${statusBadgeClass(job.status)}`}>{job.status}</span>
               </p>
               <p className="mt-1 text-sm text-gray-700">
-                Current entry: <span className="font-medium">{job.progress_current_label ?? "Waiting for first row..."}</span>
+                Current entry: <span className="font-medium">{currentEntryLabel(job)}</span>
+              </p>
+              <p className="mt-1 text-sm text-gray-700">
+                Input: <span className="font-medium">{String(job.request_payload.input_path ?? "") || "—"}</span>
               </p>
               {job.error_message ? (
                 <p className="mt-1 text-sm text-rose-700">{job.error_message}</p>
@@ -313,7 +409,7 @@ export default function LexiconImportDbPage() {
               style={{ width: `${progressPercent}%` }}
             />
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <div className="mt-4 grid gap-3 md:grid-cols-5">
             <div className="rounded border border-gray-200 p-3">
               <p className="text-gray-500">Done</p>
               <p className="font-medium">{job.progress_completed}</p>
@@ -327,93 +423,66 @@ export default function LexiconImportDbPage() {
               <p className="font-medium">{job.progress_total}</p>
             </div>
             <div className="rounded border border-gray-200 p-3">
-              <p className="text-gray-500">Input</p>
-              <p className="truncate font-medium" title={String(job.request_payload.input_path ?? "")}>
-                {String(job.request_payload.input_path ?? "").split("/").pop() || "—"}
-              </p>
+              <p className="text-gray-500">Skipped</p>
+              <p className="font-medium">{skippedCount}</p>
+            </div>
+            <div className="rounded border border-gray-200 p-3">
+              <p className="text-gray-500">Failed</p>
+              <p className="font-medium">{failedCount}</p>
             </div>
           </div>
+
+          {currentResultSection}
         </section>
       ) : null}
 
-      {lastJob ? (
-        <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm" data-testid="lexicon-import-db-last-job">
-          <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Last job</h4>
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
-            <div className="rounded border border-gray-200 p-3">
-              <p className="text-gray-500">Status</p>
-              <p className="font-medium">{lastJob.status}</p>
-            </div>
-            <div className="rounded border border-gray-200 p-3">
-              <p className="text-gray-500">Done</p>
-              <p className="font-medium">{lastJob.progress_completed}</p>
-            </div>
-            <div className="rounded border border-gray-200 p-3">
-              <p className="text-gray-500">Total</p>
-              <p className="font-medium">{lastJob.progress_total}</p>
-            </div>
-            <div className="rounded border border-gray-200 p-3">
-              <p className="text-gray-500">Input</p>
-              <p className="truncate font-medium" title={String(lastJob.request_payload.input_path ?? "")}>
-                {String(lastJob.request_payload.input_path ?? "").split("/").pop() || "—"}
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 grid gap-2 text-sm text-gray-700 md:grid-cols-2">
-            <p>Source reference: <span className="font-medium">{String(lastJob.request_payload.source_reference ?? "—")}</span></p>
-            <p>Conflict mode: <span className="font-medium">{String(lastJob.request_payload.conflict_mode ?? "—")}</span></p>
-            <p>Error mode: <span className="font-medium">{String(lastJob.request_payload.error_mode ?? "—")}</span></p>
-            <p>Current entry: <span className="font-medium">{lastJob.progress_current_label ?? "—"}</span></p>
-          </div>
-          {lastJob.error_message ? (
-            <p className="mt-4 text-sm text-rose-700">{lastJob.error_message}</p>
-          ) : null}
-        </section>
-      ) : null}
-
-      {result ? (
+      {!job && currentResultSection ? (
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-          <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Result</h4>
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
-            <div className="rounded border border-gray-200 p-3" data-testid="lexicon-import-db-summary-rows">
-              <p className="text-gray-500">Rows</p>
-              <p className="font-medium">{result.row_summary.row_count}</p>
-            </div>
-            <div className="rounded border border-gray-200 p-3" data-testid="lexicon-import-db-summary-words">
-              <p className="text-gray-500">Words</p>
-              <p className="font-medium">{result.row_summary.word_count}</p>
-            </div>
-            <div className="rounded border border-gray-200 p-3" data-testid="lexicon-import-db-summary-phrases">
-              <p className="text-gray-500">Phrases</p>
-              <p className="font-medium">{result.row_summary.phrase_count}</p>
-            </div>
-            <div className="rounded border border-gray-200 p-3" data-testid="lexicon-import-db-summary-references">
-              <p className="text-gray-500">References</p>
-              <p className="font-medium">{result.row_summary.reference_count}</p>
-            </div>
-          </div>
-          {importSummaryEntries.length > 0 ? (
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {importSummaryEntries.map(([key, value]) => (
-                <div key={key} className="rounded border border-gray-200 p-3 text-sm">
-                  <p className="text-gray-500">{key}</p>
-                  <p className="font-medium">{value}</p>
+          {currentResultSection}
+        </section>
+      ) : null}
+
+      {recentJobs.length > 0 ? (
+        <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm" data-testid="lexicon-import-db-recent-jobs">
+          <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Recent jobs</h4>
+          <div className="mt-4 grid gap-3">
+            {recentJobs.map((recentJob) => (
+              <div
+                key={recentJob.id}
+                className={`rounded border p-3 text-sm ${recentJob.status === "failed" ? "border-rose-200 bg-rose-50" : recentJob.status === "completed" ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-white"}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium" title={String(recentJob.request_payload.input_path ?? "")}>
+                      {String(recentJob.request_payload.input_path ?? "") || "—"}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Current entry: {currentEntryLabel(recentJob)}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {new Date(recentJob.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <span className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${statusBadgeClass(recentJob.status)}`}>
+                    {recentJob.status}
+                  </span>
                 </div>
-              ))}
-            </div>
-          ) : null}
-          {result.error_samples?.length ? (
-            <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <p className="font-medium">Detected issues</p>
-              <ul className="mt-2 space-y-1">
-                {result.error_samples.map((sample, index) => (
-                  <li key={`${sample.entry}-${index}`}>
-                    <span className="font-medium">{sample.entry}:</span> {sample.error}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+                <div className="mt-2 grid gap-2 text-xs text-gray-700 md:grid-cols-4">
+                  <p>Done: <span className="font-medium">{recentJob.progress_completed}</span></p>
+                  <p>Total: <span className="font-medium">{recentJob.progress_total}</span></p>
+                  <p>Skipped: <span className="font-medium">{skippedForJob(recentJob)}</span></p>
+                  <p>Failed: <span className="font-medium">{failedForJob(recentJob)}</span></p>
+                </div>
+                <div className="mt-2 grid gap-2 text-xs text-gray-700 md:grid-cols-2">
+                  <p>Conflict: <span className="font-medium">{String(recentJob.request_payload.conflict_mode ?? "—")}</span></p>
+                  <p>Error mode: <span className="font-medium">{String(recentJob.request_payload.error_mode ?? "—")}</span></p>
+                </div>
+                {recentJob.error_message ? (
+                  <p className="mt-2 text-xs text-rose-700">{recentJob.error_message}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
         </section>
       ) : null}
     </div>

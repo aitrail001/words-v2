@@ -62,8 +62,80 @@ class TestLexiconWorkerTasks:
         assert job.status == "completed"
         assert job.progress_completed == 2
         assert job.progress_total == 2
-        assert job.progress_current_label == "harbor"
+        assert job.progress_current_label == "Importing 2/2: harbor"
         assert mock_db.commit.call_count >= 2
+
+    @patch("app.tasks.lexicon_jobs._import_db_module")
+    @patch("app.tasks.lexicon_jobs.Session")
+    def test_import_db_task_exposes_preflight_and_skip_progress_labels(self, mock_session_cls, mock_import_module):
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=uuid.uuid4(),
+            job_type="import_db",
+            target_key="import_db:/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+            request_payload={
+                "input_path": "/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+                "source_type": "lexicon_snapshot",
+                "source_reference": "demo",
+                "language": "en",
+                "row_summary": {"row_count": 2},
+            },
+        )
+        mock_db = self._mock_session(mock_session_cls, self._job_result(job))
+
+        def fake_run_import_file(path, *, preflight_progress_callback=None, progress_callback=None, **kwargs):
+            assert preflight_progress_callback is not None
+            assert progress_callback is not None
+            preflight_progress_callback({"word": "fuss over", "_progress_label": "Validating 1/2"}, 1, 2)
+            progress_callback({"word": "bank", "_progress_label": "Skipping existing word: bank"}, 1, 2)
+            progress_callback({"word": "harbor"}, 2, 2)
+            return {"skipped_words": 1, "created_words": 1, "failed_rows": 0}
+
+        mock_import_module.return_value.run_import_file = fake_run_import_file
+
+        result = run_lexicon_import_db(str(job.id))
+
+        assert result["status"] == "completed"
+        assert result["result_payload"]["skipped_words"] == 1
+        assert result["result_payload"]["created_words"] == 1
+        assert job.status == "completed"
+        assert job.progress_completed == 2
+        assert job.progress_total == 2
+        assert job.progress_current_label == "Importing 2/2: harbor"
+        assert mock_db.commit.call_count >= 3
+
+    @patch("app.tasks.lexicon_jobs._import_db_module")
+    @patch("app.tasks.lexicon_jobs.Session")
+    def test_import_db_task_advances_preflight_completed_rows(self, mock_session_cls, mock_import_module):
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=uuid.uuid4(),
+            job_type="import_db",
+            target_key="import_db:/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+            request_payload={
+                "input_path": "/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+                "source_type": "lexicon_snapshot",
+                "source_reference": "demo",
+                "language": "en",
+                "row_summary": {"row_count": 3},
+            },
+        )
+        self._mock_session(mock_session_cls, self._job_result(job))
+
+        def fake_run_import_file(path, *, preflight_progress_callback=None, **kwargs):
+            assert preflight_progress_callback is not None
+            preflight_progress_callback({"word": "fuss over"}, 2, 3)
+            raise RuntimeError("preflight failed")
+
+        mock_import_module.return_value.run_import_file = fake_run_import_file
+
+        result = run_lexicon_import_db(str(job.id))
+
+        assert result["status"] == "failed"
+        assert job.status == "failed"
+        assert job.progress_completed == 2
+        assert job.progress_total == 3
+        assert job.progress_current_label == "Validating 2/3: fuss over"
 
     @patch("app.tasks.lexicon_jobs.materialize_jsonl_review_outputs")
     @patch("app.tasks.lexicon_jobs.Session")

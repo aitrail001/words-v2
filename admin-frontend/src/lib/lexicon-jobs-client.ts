@@ -87,3 +87,14 @@ export const createCompiledReviewBulkUpdateLexiconJob = (
 
 export const getLexiconJob = (jobId: string): Promise<LexiconJob> =>
   apiClient.get<LexiconJob>(`/lexicon-jobs/${jobId}`);
+
+export const listLexiconJobs = (input?: {
+  jobType?: LexiconJob["job_type"];
+  limit?: number;
+}): Promise<LexiconJob[]> => {
+  const params = new URLSearchParams();
+  if (input?.jobType) params.set("job_type", input.jobType);
+  if (input?.limit) params.set("limit", String(input.limit));
+  const query = params.toString();
+  return apiClient.get<LexiconJob[]>(`/lexicon-jobs${query ? `?${query}` : ""}`);
+};

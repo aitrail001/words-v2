@@ -142,6 +142,35 @@ class TestLexiconJobsApi:
         assert response.json()["result_payload"]["created_words"] == 1
 
     @pytest.mark.asyncio
+    async def test_list_lexicon_jobs_filters_and_limits(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        recent_job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=user_id,
+            job_type="import_db",
+            status="failed",
+            target_key="import_db:/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+            request_payload={"input_path": "/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl"},
+            result_payload={"failed_rows": 1},
+            error_message="usage_note must be a non-empty string",
+        )
+        jobs_result = MagicMock()
+        jobs_result.scalars.return_value.all.return_value = [recent_job]
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), jobs_result]
+
+        response = await client.get(
+            "/api/lexicon-jobs?job_type=import_db&limit=6",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["status"] == "failed"
+        assert "usage_note" in data[0]["error_message"]
+
+    @pytest.mark.asyncio
     async def test_get_failed_import_db_job_exposes_first_row_failure_details(self, client, mock_db):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
