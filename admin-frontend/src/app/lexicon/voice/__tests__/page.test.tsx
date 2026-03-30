@@ -133,6 +133,7 @@ describe("LexiconVoicePage", () => {
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("Loading storage policies");
     await waitFor(() => expect(mockGetLexiconVoiceStoragePolicies).toHaveBeenCalledWith(undefined));
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("These are the live DB storage policies used by voice assets");
+    expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("Voice import updates asset relative paths and voice metadata only");
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("word_default");
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("local");
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("fallback-enabled");
@@ -163,6 +164,7 @@ describe("LexiconVoicePage", () => {
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("primary: local | /tmp/voice-a");
     expect(screen.getByTestId("lexicon-voice-current-policies")).toHaveTextContent("fallback: http | https://backup.example.com/voice");
     expect(screen.getByTestId("lexicon-voice-panel")).toHaveTextContent("Editing policy word_default · Scope: word");
+    expect(screen.getByTestId("lexicon-voice-panel")).toHaveTextContent("Voice import updates asset relative paths; policy roots set how those paths resolve at runtime.");
     expect(screen.getByTestId("lexicon-voice-storage-base")).toHaveValue("/tmp/voice-a");
     await user.selectOptions(screen.getByTestId("lexicon-voice-storage-kind"), "s3");
     await user.clear(screen.getByTestId("lexicon-voice-storage-base"));

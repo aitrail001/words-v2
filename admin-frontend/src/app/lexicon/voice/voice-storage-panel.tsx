@@ -58,7 +58,7 @@ export function VoiceStoragePanel({ testIdPrefix, selectedPolicy }: VoiceStorage
     <section id={`${testIdPrefix}-panel`} className="rounded border border-gray-200 bg-white p-4" data-testid={`${testIdPrefix}-panel`}>
       <div>
         <h5 className="text-base font-semibold text-gray-900">Policy Editor</h5>
-        <p className="text-sm text-gray-500">Edit the selected DB storage policy after copying files to cloud storage.</p>
+        <p className="text-sm text-gray-500">Edit the selected DB storage policy separately from voice import. Voice import updates asset relative paths; policy roots set how those paths resolve at runtime.</p>
       </div>
       <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
         <p className="text-slate-700">

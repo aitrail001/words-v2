@@ -137,6 +137,41 @@ describe("LexiconVoiceImportPage", () => {
     expect(screen.getByTestId("lexicon-voice-import-recent-jobs")).toHaveTextContent("voice asset already exists");
   });
 
+  it("renders a browse-all recent jobs path when job history exceeds the inline list", async () => {
+    mockListLexiconJobs.mockResolvedValue(
+      Array.from({ length: 8 }, (_, index) => ({
+        id: `job-${index + 1}`,
+        created_by: null,
+        job_type: "voice_import_db",
+        status: index % 2 === 0 ? "completed" : "failed",
+        target_key: `voice_import_db:/data/lexicon/voice/run-${index + 1}/voice_manifest.jsonl`,
+        request_payload: { input_path: `/data/lexicon/voice/run-${index + 1}/voice_manifest.jsonl` },
+        result_payload: { failed_rows: index % 2, skipped_rows: 0 },
+        progress_total: 2,
+        progress_completed: 2,
+        progress_current_label: index % 2 === 0 ? "Completed" : "Failed after 1/2",
+        progress_summary: {
+          phase: index % 2 === 0 ? "completed" : "failed",
+          total: 2,
+          validated: 2,
+          imported: index % 2 === 0 ? 2 : 1,
+          skipped: 0,
+          failed: index % 2,
+          to_validate: 0,
+          to_import: 0,
+        },
+        error_message: index % 2 === 0 ? null : "example row failed",
+        created_at: `2026-03-30T0${index}:00:00Z`,
+        started_at: `2026-03-30T0${index}:00:01Z`,
+        completed_at: `2026-03-30T0${index}:00:02Z`,
+      })),
+    );
+
+    render(<LexiconVoiceImportPage />);
+
+    expect(await screen.findByRole("button", { name: /show more jobs/i })).toBeInTheDocument();
+  });
+
   it("starts a background job and renders import progress", async () => {
     const user = userEvent.setup();
     render(<LexiconVoiceImportPage />);

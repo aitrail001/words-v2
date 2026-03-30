@@ -225,7 +225,9 @@ export default function LexiconVoicePage() {
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" data-testid="lexicon-voice-current-policies">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Current DB storage policies</p>
         {storagePoliciesError ? <p className="mt-3 text-sm text-red-600">{storagePoliciesError}</p> : null}
-        <p className="mt-1 text-sm text-slate-600">These are the live DB storage policies used by voice assets. Voice runs are shown separately below.</p>
+        <p className="mt-1 text-sm text-slate-600">
+          These are the live DB storage policies used by voice assets. Voice import updates asset relative paths and voice metadata only; playback and resolved targets are derived from the current DB policy shown here.
+        </p>
         {storagePoliciesLoading ? <p className="mt-3 text-sm text-slate-500">Loading storage policies...</p> : null}
         {storagePolicies.length ? (
           <div className="mt-4 grid gap-3 md:grid-cols-3">

@@ -278,6 +278,8 @@ class TestLexiconInspectorApi:
         assert data["senses"][0]["translations"][0]["definition"] == "buena suerte"
         assert len(data["voice_assets"]) == 3
         assert data["voice_assets"][0]["playback_url"].startswith("/api/words/voice-assets/")
+        assert data["voice_assets"][0]["relative_path"] == "phrase_break_a_leg/definition/en_gb/male-definition-123.mp3"
+        assert data["voice_assets"][0]["resolved_target_url"] is None
         assert data["voice_paths"]["word"]["resolved_target_base"] == "/tmp/voice"
         assert data["voice_paths"]["definition"]["resolved_target_base"] == "/tmp/voice"
         assert data["voice_paths"]["example"]["resolved_target_base"] == "/tmp/voice"
@@ -452,6 +454,8 @@ class TestLexiconInspectorApi:
         assert data["voice_assets"][0]["playback_url"].startswith("/api/words/voice-assets/")
         assert data["voice_assets"][0]["playback_route_kind"] == "backend_content_route"
         assert data["voice_assets"][0]["primary_target_kind"] == "local"
+        assert data["voice_assets"][0]["relative_path"] == "word_bank/word/en_us/female-word-123.mp3"
+        assert data["voice_assets"][0]["resolved_target_url"] is None
         assert data["voice_paths"]["word"]["resolved_target_base"] == "/tmp/voice"
 
     @pytest.mark.asyncio

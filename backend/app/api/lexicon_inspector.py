@@ -35,6 +35,7 @@ from app.services.knowledge_map import (
     normalize_word_part_of_speech,
 )
 from app.services.voice_assets import build_voice_asset_playback_url, load_phrase_voice_assets, load_word_voice_assets
+from app.services.voice_assets import build_storage_target_url
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -117,6 +118,7 @@ class InspectorVoiceAssetResponse(BaseModel):
     content_scope: str
     meaning_id: str | None
     meaning_example_id: str | None
+    relative_path: str | None
     locale: str
     voice_role: str
     provider: str
@@ -131,6 +133,7 @@ class InspectorVoiceAssetResponse(BaseModel):
     generated_at: str | None
     primary_target_kind: str
     primary_target_base: str
+    resolved_target_url: str | None
 
 
 class InspectorVoicePathResponse(BaseModel):
@@ -258,6 +261,7 @@ def _voice_asset_response(asset: LexiconVoiceAsset) -> InspectorVoiceAssetRespon
         content_scope=asset.content_scope,
         meaning_id=str(asset.meaning_id) if asset.meaning_id else None,
         meaning_example_id=str(asset.meaning_example_id) if asset.meaning_example_id else None,
+        relative_path=asset.relative_path,
         locale=asset.locale,
         voice_role=asset.voice_role,
         provider=asset.provider,
@@ -272,6 +276,7 @@ def _voice_asset_response(asset: LexiconVoiceAsset) -> InspectorVoiceAssetRespon
         generated_at=_created_iso(asset.generated_at),
         primary_target_kind=asset.storage_kind,
         primary_target_base=asset.storage_base,
+        resolved_target_url=build_storage_target_url(asset),
     )
 
 

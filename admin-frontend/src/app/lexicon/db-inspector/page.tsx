@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
@@ -12,6 +12,7 @@ import {
   LexiconInspectorFamilyFilter,
   LexiconInspectorListEntry,
   LexiconInspectorSort,
+  LexiconInspectorVoiceAsset,
 } from "@/lib/lexicon-inspector-client";
 
 function formatDateTime(value: string | null | undefined): string {
@@ -72,11 +73,119 @@ function voiceScopeLabel(value: string): string {
   return value;
 }
 
-function voicePathTitle(scope: string): string {
-  if (scope === "word") return "Word path";
-  if (scope === "definition") return "Definition path";
-  if (scope === "example") return "Example path";
-  return `${scope} path`;
+function joinResolvedTarget(base: string | null | undefined, relativePath: string | null | undefined): string | null {
+  const normalizedBase = String(base ?? "").trim();
+  const normalizedRelativePath = String(relativePath ?? "").trim().replace(/^\/+/, "");
+  if (!normalizedBase || !normalizedRelativePath) return null;
+  return `${normalizedBase.replace(/\/+$/, "")}/${normalizedRelativePath}`;
+}
+
+function resolveVoiceAssetTarget(asset: LexiconInspectorVoiceAsset): string {
+  return asset.resolved_target_url ?? joinResolvedTarget(asset.primary_target_base, asset.relative_path) ?? asset.playback_url;
+}
+
+function VoiceAssetPlaybackButton({ asset }: { asset: LexiconInspectorVoiceAsset }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const playLabel = `Play ${voiceScopeLabel(asset.content_scope)} voice asset ${asset.locale} ${asset.voice_role}`;
+
+  useEffect(() => () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  }, []);
+
+  return (
+    <div className="flex items-center justify-start gap-2 md:justify-end">
+      <audio ref={audioRef} preload="none" className="hidden" />
+      <button
+        type="button"
+        aria-label={playLabel}
+        disabled={loading}
+        onClick={async () => {
+          const player = audioRef.current;
+          if (!player) return;
+          if (!player.src) {
+            const token = readAccessToken();
+            if (!token) {
+              redirectToLogin("/lexicon/db-inspector");
+              return;
+            }
+            setLoading(true);
+            try {
+              const response = await fetch(asset.playback_url, {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              });
+              if (response.status === 401) {
+                redirectToLogin("/lexicon/db-inspector");
+                return;
+              }
+              if (!response.ok) {
+                return;
+              }
+              const audioBlob = await response.blob();
+              if (objectUrlRef.current) {
+                URL.revokeObjectURL(objectUrlRef.current);
+              }
+              objectUrlRef.current = URL.createObjectURL(audioBlob);
+              player.src = objectUrlRef.current;
+            } finally {
+              setLoading(false);
+            }
+          }
+          player.currentTime = 0;
+          const playback = player.play();
+          if (playback && typeof playback.catch === "function") {
+            void playback.catch(() => {});
+          }
+        }}
+        className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+      >
+        {loading ? "Loading…" : "Play"}
+      </button>
+    </div>
+  );
+}
+
+function VoiceAssetRows({ assets }: { assets: LexiconInspectorVoiceAsset[] }) {
+  return (
+    <section className="rounded-lg border border-gray-200 p-4">
+      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Voice assets</p>
+      <div className="mt-3 space-y-3 text-sm text-gray-900">
+        {assets.length ? assets.map((asset) => (
+          <div
+            key={asset.id}
+            className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 md:grid-cols-[12rem_minmax(0,1fr)_7rem] md:items-center"
+          >
+            <div className="space-y-1">
+              <p className="font-medium text-gray-900">
+                {voiceScopeLabel(asset.content_scope)} · {asset.locale} · {asset.voice_role}
+              </p>
+              <p className="text-xs text-gray-500">
+                {asset.provider}/{asset.family} · {asset.voice_id}
+              </p>
+              <p className="text-xs text-gray-500">
+                {asset.profile_key} · {asset.audio_format} · {asset.status}
+              </p>
+            </div>
+            <div className="space-y-1 text-xs">
+              <p className="font-mono text-gray-700">relative: {asset.relative_path ?? "—"}</p>
+              <p className="font-mono text-gray-700">resolved: {resolveVoiceAssetTarget(asset)}</p>
+              <p className="text-gray-500">
+                route: {asset.playback_route_kind} · target: {asset.primary_target_kind}
+              </p>
+            </div>
+            <VoiceAssetPlaybackButton asset={asset} />
+          </div>
+        )) : <p>—</p>}
+      </div>
+    </section>
+  );
 }
 
 export default function LexiconDbInspectorPage() {
@@ -330,53 +439,7 @@ export default function LexiconDbInspectorPage() {
                 </div>
               </div>
               <div className="space-y-3">
-                <section className="rounded-lg border border-gray-200 p-4">
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Voice assets</p>
-                  <div className="mt-3 space-y-2 text-sm text-gray-900">
-                    {detail.voice_assets.length ? detail.voice_assets.map((asset) => (
-                      <div key={asset.id} className="rounded border border-gray-100 bg-gray-50 p-3">
-                        <p className="font-medium">
-                          {voiceScopeLabel(asset.content_scope)} · {asset.locale} · {asset.voice_role}
-                        </p>
-                        <p className="text-gray-600">
-                          {asset.provider}/{asset.family} · {asset.voice_id} · {asset.profile_key} · {asset.audio_format} · {asset.status}
-                        </p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          playback route: {asset.playback_route_kind}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          primary target: {asset.primary_target_kind}
-                        </p>
-                        <p className="break-all text-xs text-gray-500">{asset.playback_url}</p>
-                        <p className="break-all text-xs text-gray-500">{asset.primary_target_base}</p>
-                      </div>
-                    )) : <p>—</p>}
-                  </div>
-                </section>
-                <section className="rounded-lg border border-gray-200 p-4">
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Voice paths by scope</p>
-                  <div className="mt-3 grid gap-3 md:grid-cols-3">
-                    {["word", "definition", "example"].map((scope) => {
-                      const path = detail.voice_paths?.[scope] ?? null;
-                      return (
-                        <div key={scope} className="rounded border border-gray-100 bg-gray-50 p-3 text-sm">
-                          <p className="font-medium text-gray-900">{voicePathTitle(scope)}</p>
-                          {path ? (
-                            <>
-                              <p className="mt-1 text-xs text-gray-500">playback</p>
-                              <p className="break-all text-xs text-gray-700">{path.playback_url}</p>
-                              <p className="mt-2 text-xs text-gray-500">resolved target</p>
-                              <p className="text-xs text-gray-700">{path.resolved_target_kind}</p>
-                              <p className="break-all text-xs text-gray-700">{path.resolved_target_base}</p>
-                            </>
-                          ) : (
-                            <p className="mt-1 text-xs text-gray-500">—</p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
+                <VoiceAssetRows assets={detail.voice_assets} />
                 {detail.meanings.map((meaning) => (
                   <article key={meaning.id} className="rounded-lg border border-gray-200 p-4">
                     <p className="font-medium text-gray-900">{meaning.definition}</p>
@@ -459,30 +522,7 @@ export default function LexiconDbInspectorPage() {
                 <p className="text-gray-500">Seed metadata</p>
                 <pre className="mt-2 overflow-x-auto text-xs text-gray-700">{JSON.stringify(detail.seed_metadata ?? {}, null, 2)}</pre>
               </div>
-              <section className="rounded-lg border border-gray-200 p-4">
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Voice paths by scope</p>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  {["word", "definition", "example"].map((scope) => {
-                    const path = detail.voice_paths?.[scope] ?? null;
-                    return (
-                      <div key={scope} className="rounded border border-gray-100 bg-gray-50 p-3 text-sm">
-                        <p className="font-medium text-gray-900">{voicePathTitle(scope)}</p>
-                        {path ? (
-                          <>
-                            <p className="mt-1 text-xs text-gray-500">playback</p>
-                            <p className="break-all text-xs text-gray-700">{path.playback_url}</p>
-                            <p className="mt-2 text-xs text-gray-500">resolved target</p>
-                            <p className="text-xs text-gray-700">{path.resolved_target_kind}</p>
-                            <p className="break-all text-xs text-gray-700">{path.resolved_target_base}</p>
-                          </>
-                        ) : (
-                          <p className="mt-1 text-xs text-gray-500">—</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
+              <VoiceAssetRows assets={detail.voice_assets} />
               <div className="space-y-3">
                 {detail.senses.length ? detail.senses.map((sense, index) => (
                   <article key={sense.sense_id ?? `${detail.id}-sense-${index + 1}`} className="rounded-lg border border-gray-200 p-4">

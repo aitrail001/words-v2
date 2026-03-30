@@ -165,13 +165,13 @@ class CliTests(unittest.TestCase):
     def test_voice_import_db_emits_runtime_progress_events(self) -> None:
         def fake_run_voice_import_file(*args, progress_callback=None, **kwargs):
             assert progress_callback is not None
-            progress_callback(row={"entry_id": "word:bank", "_progress_label": "Validating 1/2"}, completed_rows=1, total_rows=2)
-            progress_callback(row={"entry_id": "word:bank", "_progress_label": "Skipping existing word: bank"}, completed_rows=1, total_rows=2)
-            progress_callback(row={"entry_id": "word:harbor"}, completed_rows=2, total_rows=2)
+            progress_callback(row={"entry_id": "word:bank", "entry_type": "word", "word": "bank", "_progress_label": "Importing 1/2: bank", "content_scope": "word", "locale": "en-US", "voice_role": "female"}, completed_rows=1, total_rows=2)
+            progress_callback(row={"entry_id": "word:bank", "entry_type": "word", "word": "bank", "_progress_label": "Importing 2/2: bank", "content_scope": "definition", "locale": "en-US", "voice_role": "male"}, completed_rows=2, total_rows=2)
+            progress_callback(row={"entry_id": "word:harbor", "entry_type": "word", "word": "harbor", "_progress_label": "Skipping existing word: harbor", "content_scope": "word", "locale": "en-GB", "voice_role": "female"}, completed_rows=2, total_rows=2)
             return {"created_assets": 1, "updated_assets": 0, "skipped_rows": 1, "failed_rows": 0}
 
         with patch("tools.lexicon.cli.load_voice_manifest_rows", return_value=[{"entry_id": "word:bank"}, {"entry_id": "word:harbor"}]), \
-             patch("tools.lexicon.cli.run_voice_import_file", side_effect=fake_run_voice_import_file):
+             patch("tools.lexicon.cli.run_voice_import_file", side_effect=fake_run_voice_import_file) as mocked_run:
             code, stdout, stderr = self.run_cli([
                 "voice-import-db",
                 "--input",
@@ -180,6 +180,11 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("item-progress", stderr)
+        self.assertIn("item_type=voice-manifest-group", stderr)
+        self.assertIn("entry_label=bank", stderr)
+        self.assertIn("action=skip", stderr)
+        self.assertNotIn(" row=", stderr)
+        self.assertEqual(mocked_run.call_args.kwargs["error_mode"], "continue")
         payload = json.loads(stdout)
         self.assertEqual(payload["command"], "voice-import-db")
         self.assertFalse(payload["dry_run"])

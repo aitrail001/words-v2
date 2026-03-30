@@ -22,15 +22,14 @@ from tools.lexicon.batch_ledger import (
     summarize_batch_jobs,
     write_jsonl_rows,
 )
-from tools.lexicon.batch_ingest import build_batch_output_summary, build_batch_result_rows, ingest_batch_outputs
-from tools.lexicon.batch_client import BatchClient
+from tools.lexicon.batch_ingest import build_batch_output_summary, ingest_batch_outputs
 from tools.lexicon.form_adjudication import adjudicate_forms, load_adjudications
 from tools.lexicon.compile_export import compile_snapshot
 from tools.lexicon.enrich import run_enrichment
 from tools.lexicon.export_db import export_db_fixture
 from tools.lexicon.ids import build_snapshot_id
 from tools.lexicon.inventory import load_seed_rows
-from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, run_import_file, summarize_compiled_rows
+from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, run_import_file
 from tools.lexicon.rerank import RERANK_CANDIDATE_SOURCES
 from tools.lexicon.phrase_pipeline import build_phrase_snapshot_rows, write_phrase_snapshot
 from tools.lexicon.reference_pipeline import build_reference_snapshot_rows, write_reference_snapshot
@@ -48,6 +47,10 @@ from tools.lexicon.phrase_inventory import build_phrase_inventory_records
 
 _REASONING_EFFORT_CHOICES = ['none', 'low', 'medium', 'high']
 _RUNTIME_LOG_LEVEL_CHOICES = ['quiet', 'info', 'debug']
+
+
+def _empty_sense_provider(_word: str) -> list[object]:
+    return []
 
 
 def _utc_now() -> str:
@@ -184,9 +187,9 @@ def _build_base_command(args: argparse.Namespace) -> int:
             print(str(exc), file=sys.stderr)
             return 2
         rank_provider = build_wordfreq_rank_provider()
-        sense_provider = lambda word: []
+        sense_provider = _empty_sense_provider
     if requested_top_words is not None:
-        sense_provider = lambda word: []
+        sense_provider = _empty_sense_provider
 
     inventory_mode = 'seed_words'
     words = list(args.words)
@@ -1058,6 +1061,40 @@ def _voice_generate_command(args: argparse.Namespace) -> int:
 def _voice_import_db_command(args: argparse.Namespace) -> int:
     runtime_logger = getattr(args, 'runtime_logger', None)
     rows = load_voice_manifest_rows(Path(args.input))
+    last_progress_key: tuple[str, str] | None = None
+
+    def _emit_voice_import_progress(*, row: dict[str, object], completed_rows: int, total_rows: int) -> None:
+        nonlocal last_progress_key
+        explicit_label = str(row.get("_progress_label") or "").strip()
+        if explicit_label.startswith("Skipping existing"):
+            action = "skip"
+        elif explicit_label.startswith("Failed"):
+            action = "fail"
+        elif explicit_label.startswith("Validating"):
+            action = "validate"
+        else:
+            action = "import"
+        entry_label = str(row.get("word") or row.get("source_text") or row.get("entry_id") or "").strip() or "unknown"
+        progress_key = (action, str(row.get("entry_id") or entry_label))
+        if progress_key == last_progress_key:
+            return
+        last_progress_key = progress_key
+        _emit_item_progress(
+            runtime_logger,
+            command='voice-import-db',
+            item_type='voice-manifest-group',
+            action=action,
+            entry_id=str(row.get("entry_id") or "").strip() or None,
+            entry_type=str(row.get("entry_type") or "").strip() or None,
+            entry_label=entry_label,
+            content_scope=str(row.get("content_scope") or "").strip() or None,
+            locale=str(row.get("locale") or "").strip() or None,
+            voice_role=str(row.get("voice_role") or "").strip() or None,
+            completed_rows=completed_rows,
+            total_rows=total_rows,
+            progress_label=explicit_label or None,
+        )
+
     summary = run_voice_import_file(
         Path(args.input),
         language=args.language,
@@ -1065,14 +1102,7 @@ def _voice_import_db_command(args: argparse.Namespace) -> int:
         error_mode=args.error_mode,
         dry_run=bool(args.dry_run),
         rows=rows,
-        progress_callback=(
-            lambda **fields: _emit_item_progress(
-                runtime_logger,
-                command='voice-import-db',
-                item_type='voice-manifest-row',
-                **fields,
-            )
-        ),
+        progress_callback=_emit_voice_import_progress,
     )
 
     print(json.dumps({
@@ -1373,7 +1403,7 @@ def build_parser() -> argparse.ArgumentParser:
     voice_import_db.add_argument('--language', default='en', help='default language fallback for word resolution')
     voice_import_db.add_argument('--dry-run', action='store_true', help='validate the manifest and report importability without writing the DB')
     voice_import_db.add_argument('--conflict-mode', choices=('fail', 'upsert', 'skip'), default='upsert', help='behavior when a voice asset already exists in the target DB')
-    voice_import_db.add_argument('--error-mode', choices=('fail_fast', 'continue'), default='fail_fast', help='behavior when a row-level voice import error occurs')
+    voice_import_db.add_argument('--error-mode', choices=('fail_fast', 'continue'), default='continue', help='behavior when a row-level voice import error occurs')
     _add_shared_logging_args(voice_import_db)
     voice_import_db.set_defaults(handler=_voice_import_db_command)
 

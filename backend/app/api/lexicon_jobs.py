@@ -24,6 +24,7 @@ from app.services.lexicon_jsonl_reviews import (
     resolve_decisions_sidecar_path,
     resolve_output_dir_path,
     resolve_repo_local_path,
+    resolve_voice_manifest_path,
 )
 from app.services.lexicon_tool_imports import import_lexicon_tool_module
 from app.tasks.lexicon_jobs import (
@@ -130,7 +131,7 @@ def _resolve_import_input_path(raw_path: str, *, settings: Settings) -> Path:
 
 
 def _resolve_voice_manifest_input_path(raw_path: str, *, settings: Settings) -> Path:
-    path = resolve_repo_local_path(raw_path, settings=settings)
+    path = resolve_voice_manifest_path(raw_path, settings=settings)
     if path.is_dir():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

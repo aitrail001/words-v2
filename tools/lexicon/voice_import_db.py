@@ -24,6 +24,14 @@ class VoiceImportSummary:
     failed_rows: int = 0
 
 
+@dataclass(frozen=True)
+class VoiceManifestGroup:
+    entry_type: str
+    lexical_text: str
+    language: str
+    rows: list[dict[str, Any]]
+
+
 def _increment(summary: VoiceImportSummary, **changes: int) -> VoiceImportSummary:
     values = summary.__dict__.copy()
     for key, delta in changes.items():
@@ -49,6 +57,45 @@ def load_voice_manifest_rows(path: str | Path) -> list[dict[str, Any]]:
             if isinstance(payload, dict):
                 rows.append(payload)
     return rows
+
+
+def _group_sort_key(row: dict[str, Any], original_index: int) -> tuple[int, int]:
+    scope_rank = {
+        "word": 0,
+        "definition": 1,
+        "example": 2,
+    }.get(str(row.get("content_scope") or "").strip().lower(), 99)
+    return scope_rank, original_index
+
+
+def group_voice_manifest_rows(rows: list[dict[str, Any]]) -> list[VoiceManifestGroup]:
+    buckets: dict[tuple[str, str, str], list[tuple[int, dict[str, Any]]]] = {}
+    for original_index, row in enumerate(rows):
+        key = (
+            str(row.get("entry_type") or "word").strip().lower() or "word",
+            str(row.get("word") or "").strip().lower(),
+            str(row.get("language") or "en").strip().lower() or "en",
+        )
+        buckets.setdefault(key, []).append((original_index, row))
+
+    groups: list[VoiceManifestGroup] = []
+    for (entry_type, lexical_text, language), indexed_rows in buckets.items():
+        ordered_rows = [
+            row
+            for index, row in sorted(
+                indexed_rows,
+                key=lambda item: _group_sort_key(item[1], item[0]),
+            )
+        ]
+        groups.append(
+            VoiceManifestGroup(
+                entry_type=entry_type,
+                lexical_text=lexical_text,
+                language=language,
+                rows=ordered_rows,
+            )
+        )
+    return groups
 
 
 def summarize_voice_manifest_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -355,15 +402,6 @@ def _find_or_create_storage_policy(
         select(storage_policy_model).where(storage_policy_model.policy_key == policy_key)
     ).scalar_one_or_none()
     if existing is not None:
-        existing.policy_key = policy_key
-        existing.source_reference = "global"
-        existing.provider = "default"
-        existing.family = "default"
-        existing.locale = "all"
-        existing.primary_storage_kind = primary_storage_kind
-        existing.primary_storage_base = primary_storage_base
-        existing.fallback_storage_kind = fallback_storage_kind
-        existing.fallback_storage_base = fallback_storage_base
         return existing
     created = storage_policy_model(
         policy_key=policy_key,
@@ -380,6 +418,49 @@ def _find_or_create_storage_policy(
     session.add(created)
     session.flush()
     return created
+
+
+def import_voice_manifest_group(
+    session: Any,
+    rows: list[dict[str, Any]],
+    *,
+    default_language: str = "en",
+    conflict_mode: str = "upsert",
+    error_mode: str = "continue",
+    progress_callback: Callable[..., None] | None = None,
+    completed_rows: int = 0,
+    total_rows: int | None = None,
+    error_samples_sink: list[dict[str, str]] | None = None,
+) -> VoiceImportSummary:
+    summary = VoiceImportSummary()
+    total = total_rows if total_rows is not None else completed_rows + len(rows)
+    for offset, row in enumerate(rows, start=1):
+        try:
+            row_summary = import_voice_manifest_rows(
+                session,
+                [row],
+                default_language=default_language,
+                conflict_mode=conflict_mode,
+                progress_callback=progress_callback,
+                completed_rows=completed_rows + offset - 1,
+                total_rows=total,
+            )
+        except RuntimeError as exc:
+            if error_mode == "fail_fast":
+                raise
+            summary = _increment(summary, failed_rows=1)
+            if error_samples_sink is not None:
+                error_samples_sink.append({"entry": _row_label(row), "error": str(exc)})
+            _emit_progress(
+                progress_callback,
+                row=row,
+                completed_rows=completed_rows + offset,
+                total_rows=total,
+                label=f"Failed {completed_rows + offset}/{total}: {_row_label(row)}",
+            )
+            continue
+        summary = _merge_summaries(summary, row_summary)
+    return summary
 
 
 def import_voice_manifest_rows(
@@ -511,17 +592,19 @@ def import_voice_manifest_rows(
             profile_key=str(row.get("profile_key") or "").strip(),
             audio_format=str(row.get("audio_format") or "").strip(),
         )
-        storage_policy = _find_or_create_storage_policy(
-            session,
-            LexiconVoiceStoragePolicy,
-            source_reference=source_reference or "legacy-voice",
-            content_scope=content_scope,
-            provider=str(row.get("provider") or "").strip(),
-            family=str(row.get("family") or "").strip(),
-            locale=str(row.get("locale") or "").strip(),
-            primary_storage_kind=str(row.get("storage_kind") or "").strip() or "local",
-            primary_storage_base=str(row.get("storage_base") or "").strip(),
-        )
+        storage_policy = None
+        if existing is None or getattr(existing, "storage_policy_id", None) is None:
+            storage_policy = _find_or_create_storage_policy(
+                session,
+                LexiconVoiceStoragePolicy,
+                source_reference=source_reference or "legacy-voice",
+                content_scope=content_scope,
+                provider=str(row.get("provider") or "").strip(),
+                family=str(row.get("family") or "").strip(),
+                locale=str(row.get("locale") or "").strip(),
+                primary_storage_kind=str(row.get("storage_kind") or "").strip() or "local",
+                primary_storage_base=str(row.get("storage_base") or "").strip(),
+            )
         if existing is None:
             existing = LexiconVoiceAsset(
                 word_id=word.id if content_scope == "word" and word is not None else None,
@@ -556,7 +639,8 @@ def import_voice_manifest_rows(
             if conflict_mode == "fail":
                 raise RuntimeError(f"voice asset already exists for {_row_label(row)}")
             summary = _increment(summary, updated_assets=1)
-        existing.storage_policy_id = storage_policy.id
+        if storage_policy is not None and getattr(existing, "storage_policy_id", None) is None:
+            existing.storage_policy_id = storage_policy.id
         existing.mime_type = str(row.get("mime_type") or "").strip() or None
         existing.speaking_rate = float(row.get("speaking_rate") or 0.0) or None
         existing.pitch_semitones = float(row.get("pitch_semitones") or 0.0) if row.get("pitch_semitones") is not None else None
@@ -621,44 +705,30 @@ def run_voice_import_file(
     settings = runtime_get_settings()
     engine = runtime_create_engine(settings.database_url_sync)
     try:
-        with runtime_session(engine) as session:
-            if error_mode == "continue":
-                summary = VoiceImportSummary()
-                total_rows = len(loaded_rows)
-                for index, row in enumerate(loaded_rows, start=1):
-                    try:
-                        row_summary = import_voice_manifest_rows(
-                            session,
-                            [row],
-                            default_language=resolved_language,
-                            conflict_mode=conflict_mode,
-                            progress_callback=progress_callback,
-                            completed_rows=index - 1,
-                            total_rows=total_rows,
-                        )
-                    except RuntimeError as exc:
-                        summary = _increment(summary, failed_rows=1)
-                        if error_samples_sink is not None:
-                            error_samples_sink.append({"entry": _row_label(row), "error": str(exc)})
-                        _emit_progress(
-                            progress_callback,
-                            row=row,
-                            completed_rows=index,
-                            total_rows=total_rows,
-                            label=f"Failed {index}/{total_rows}: {_row_label(row)}",
-                        )
-                        continue
-                    summary = _merge_summaries(summary, row_summary)
-            else:
-                summary = import_voice_manifest_rows(
-                    session,
-                    loaded_rows,
-                    default_language=resolved_language,
-                    conflict_mode=conflict_mode,
-                    progress_callback=progress_callback,
-                )
-            session.commit()
-            return summary.__dict__.copy()
+        summary = VoiceImportSummary()
+        total_rows = len(loaded_rows)
+        completed_rows = 0
+        for group in group_voice_manifest_rows(loaded_rows):
+            with runtime_session(engine) as session:
+                try:
+                    group_summary = import_voice_manifest_group(
+                        session,
+                        group.rows,
+                        default_language=resolved_language,
+                        conflict_mode=conflict_mode,
+                        error_mode=error_mode,
+                        progress_callback=progress_callback,
+                        completed_rows=completed_rows,
+                        total_rows=total_rows,
+                        error_samples_sink=error_samples_sink,
+                    )
+                except RuntimeError:
+                    session.rollback()
+                    raise
+                session.commit()
+            completed_rows += len(group.rows)
+            summary = _merge_summaries(summary, group_summary)
+        return summary.__dict__.copy()
     finally:
         engine.dispose()
 

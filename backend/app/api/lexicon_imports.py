@@ -13,7 +13,7 @@ from app.services.lexicon_import_jobs import (
     get_lexicon_import_job,
     serialize_lexicon_import_job,
 )
-from app.services.lexicon_jsonl_reviews import resolve_repo_local_path
+from app.services.lexicon_jsonl_reviews import resolve_repo_local_path, resolve_voice_manifest_path
 from app.services.lexicon_tool_imports import import_lexicon_tool_module
 
 router = APIRouter()
@@ -79,7 +79,7 @@ def _resolve_import_input_path(raw_path: str, *, settings: Settings) -> Path:
 
 
 def _resolve_voice_manifest_input_path(raw_path: str, *, settings: Settings) -> Path:
-    path = resolve_repo_local_path(raw_path, settings=settings)
+    path = resolve_voice_manifest_path(raw_path, settings=settings)
     if path.is_dir():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -20,9 +20,24 @@ jest.mock("@/lib/auth-redirect", () => ({
 describe("LexiconDbInspectorPage", () => {
   const mockBrowse = browseLexiconInspectorEntries as jest.Mock;
   const mockDetail = getLexiconInspectorDetail as jest.Mock;
+  const originalFetch = global.fetch;
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const playMock = jest.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    Object.defineProperty(global.HTMLMediaElement.prototype, "play", {
+      configurable: true,
+      value: playMock,
+    });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob(["fake-mp3"], { type: "audio/mpeg" }),
+    } as Response);
+    URL.createObjectURL = jest.fn(() => "blob:voice-1");
+    URL.revokeObjectURL = jest.fn();
     mockBrowse.mockResolvedValue({
       items: [
         {
@@ -82,6 +97,7 @@ describe("LexiconDbInspectorPage", () => {
           content_scope: "word",
           meaning_id: null,
           meaning_example_id: null,
+          relative_path: "word_bank/word/en_us/female-word-123.mp3",
           locale: "en-US",
           voice_role: "female",
           provider: "google",
@@ -94,6 +110,7 @@ describe("LexiconDbInspectorPage", () => {
           playback_route_kind: "backend_content_route",
           primary_target_kind: "local",
           primary_target_base: "/tmp/voice",
+          resolved_target_url: "/tmp/voice/word_bank/word/en_us/female-word-123.mp3",
           status: "generated",
           generated_at: "2026-03-21T00:00:00Z",
         },
@@ -129,6 +146,12 @@ describe("LexiconDbInspectorPage", () => {
       ],
       enrichment_runs: [],
     });
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
   });
 
   it("renders browse filters and loads detail for the selected entry", async () => {
@@ -179,12 +202,9 @@ describe("LexiconDbInspectorPage", () => {
     expect(screen.getByText(/Common everyday sense\./i)).toBeInTheDocument();
     expect(screen.getByText(/banco/i)).toBeInTheDocument();
     expect(screen.getByText(/Word · en-US · female/i)).toBeInTheDocument();
-    expect(screen.getByText(/playback route: backend_content_route/i)).toBeInTheDocument();
-    expect(screen.getByText(/primary target: local/i)).toBeInTheDocument();
-    expect(screen.getAllByText("/api/words/voice-assets/voice-1/content").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("/tmp/voice").length).toBeGreaterThan(0);
-    expect(screen.getByText("Voice paths by scope")).toBeInTheDocument();
-    expect(screen.getByText(/Word path/i)).toBeInTheDocument();
+    expect(screen.getByText(/relative: word_bank\/word\/en_us\/female-word-123\.mp3/i)).toBeInTheDocument();
+    expect(screen.getByText(/resolved: \/tmp\/voice\/word_bank\/word\/en_us\/female-word-123\.mp3/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /play word voice asset en-us female/i })).toBeInTheDocument();
   });
 
   it("renders phrase senses with grouped examples and translations", async () => {
@@ -266,7 +286,26 @@ describe("LexiconDbInspectorPage", () => {
     expect(screen.getByText("Break a leg tonight.")).toBeInTheDocument();
     expect(screen.getByText(/es: buena suerte/i)).toBeInTheDocument();
     expect(screen.getByText(/Used before a performance\./i)).toBeInTheDocument();
-    expect(screen.getByText("Voice paths by scope")).toBeInTheDocument();
-    expect(screen.getByText(/Definition path/i)).toBeInTheDocument();
+    expect(screen.getByText("Voice assets")).toBeInTheDocument();
+    expect(screen.queryByText("Voice paths by scope")).not.toBeInTheDocument();
+  });
+
+  it("loads voice playback through an authenticated fetch before playing", async () => {
+    const user = userEvent.setup();
+
+    render(<LexiconDbInspectorPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /play word voice asset en-us female/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /play word voice asset en-us female/i }));
+
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith("/api/words/voice-assets/voice-1/content", {
+        headers: {
+          Authorization: "Bearer active-token",
+        },
+      }),
+    );
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(playMock).toHaveBeenCalled();
   });
 });
