@@ -3452,6 +3452,30 @@ class ImportCompiledRowsTests(unittest.TestCase):
 
         self.assertEqual(preflight_validate.call_count, 1)
 
+    def test_run_import_file_reports_skip_progress_for_existing_word(self) -> None:
+        session = MagicMock()
+        existing_word = type("Word", (), {"word": "bank", "language": "en"})()
+        progress_updates: list[tuple[str | None, int, int]] = []
+        rows = [{"word": "bank", "senses": []}]
+
+        with patch("tools.lexicon.import_db._find_existing_word", return_value=existing_word), \
+             patch("tools.lexicon.import_db._preload_existing_words", return_value={("bank", "en"): existing_word}), \
+             patch("tools.lexicon.import_db._default_models", return_value=(MagicMock(), MagicMock(), None, None, None, None, None, None, None, None, None, None, None)):
+            summary = import_compiled_rows(
+                session,
+                rows,
+                source_type="repo_fixture",
+                source_reference="fixture",
+                on_conflict="skip",
+                progress_callback=lambda row, completed_rows, total_rows: progress_updates.append(
+                    (row.get("_progress_label"), completed_rows, total_rows),
+                ),
+                rebuild_learner_catalog=False,
+            )
+
+        self.assertEqual(summary.skipped_words, 1)
+        self.assertEqual(progress_updates, [("Skipping existing word: bank", 1, 1)])
+
     def test_run_import_file_staging_mode_delegates_to_staging_import(self) -> None:
         with patch("tools.lexicon.staging_import.run_staging_import_file", return_value={"created_words": 9}) as mocked_staging:
             summary = run_import_file(

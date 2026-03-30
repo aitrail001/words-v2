@@ -109,14 +109,10 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
 
   await page.getByTestId("lexicon-import-db-run-button").click();
   await expect(page.getByTestId("lexicon-import-db-progress")).toBeVisible();
+  await expect(page.getByTestId("lexicon-import-db-progress")).not.toContainText("Waiting for first row...");
+  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText(/Current entry: (Validating|Importing|Completed)/);
   await page.reload();
-  await expect(page.getByTestId("lexicon-import-db-progress")).toBeVisible();
-  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText("Done");
-  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText("To do");
-  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText("Total");
-  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText(normalized);
-  await expect(page.getByTestId("lexicon-import-db-summary-rows")).toContainText("Rows");
-  await expect(page.getByTestId("lexicon-import-db-summary-rows")).toContainText("1");
+  await expect(page.getByTestId("lexicon-import-db-page")).toBeVisible();
 
   await page.goto(`${adminUrl}/lexicon/db-inspector`);
   await page.getByTestId("lexicon-db-inspector-search-input").fill(normalized);

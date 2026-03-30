@@ -266,6 +266,21 @@ async def create_compiled_review_bulk_update_job(
     return _serialize_job(job)
 
 
+@router.get("", response_model=list[LexiconJobResponse])
+async def list_lexicon_jobs(
+    job_type: str | None = None,
+    limit: int = 10,
+    _: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[LexiconJobResponse]:
+    normalized_limit = max(1, min(limit, 50))
+    stmt = select(LexiconJob).order_by(LexiconJob.created_at.desc()).limit(normalized_limit)
+    if job_type is not None:
+        stmt = stmt.where(LexiconJob.job_type == job_type)
+    result = await db.execute(stmt)
+    return [_serialize_job(job) for job in result.scalars().all()]
+
+
 @router.get("/{job_id}", response_model=LexiconJobResponse)
 async def get_lexicon_job_status(
     job_id: uuid.UUID,

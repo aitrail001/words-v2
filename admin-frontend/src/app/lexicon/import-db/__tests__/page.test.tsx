@@ -17,11 +17,12 @@ jest.mock("@/lib/lexicon-imports-client", () => ({
 jest.mock("@/lib/lexicon-jobs-client", () => ({
   createImportDbLexiconJob: jest.fn(),
   getLexiconJob: jest.fn(),
+  listLexiconJobs: jest.fn(),
 }));
 
 describe("LexiconImportDbPage", () => {
   const { dryRunLexiconImport } = require("@/lib/lexicon-imports-client");
-  const { createImportDbLexiconJob, getLexiconJob } = require("@/lib/lexicon-jobs-client");
+  const { createImportDbLexiconJob, getLexiconJob, listLexiconJobs } = require("@/lib/lexicon-jobs-client");
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -81,6 +82,7 @@ describe("LexiconImportDbPage", () => {
       started_at: "2026-03-23T00:00:01Z",
       completed_at: null,
     });
+    listLexiconJobs.mockResolvedValue([]);
   });
 
   it("renders import dry-run and execute controls", async () => {
@@ -167,17 +169,74 @@ describe("LexiconImportDbPage", () => {
 
     await waitFor(() => expect(getLexiconJob).toHaveBeenCalledWith("job-1"));
     await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Done1"));
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: Completed");
   });
 
-  it("shows the last completed import job in a separate section when there is no active key", async () => {
+  it("shows the last completed import job in recent jobs when there is no active key", async () => {
     window.localStorage.setItem("lexicon-import-db-last-job", "job-1");
+    listLexiconJobs.mockResolvedValue([
+      {
+        id: "job-1",
+        created_by: "user-1",
+        job_type: "import_db",
+        status: "completed",
+        target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+        request_payload: {
+          input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+          source_reference: "lexicon-20260321-wordfreq",
+          conflict_mode: "upsert",
+          error_mode: "continue",
+        },
+        result_payload: { created_words: 1 },
+        progress_total: 1,
+        progress_completed: 1,
+        progress_current_label: "bank",
+        error_message: null,
+        created_at: "2026-03-23T00:00:00Z",
+        started_at: "2026-03-23T00:00:01Z",
+        completed_at: "2026-03-23T00:00:02Z",
+      },
+    ]);
     render(<LexiconImportDbPage />);
 
-    await waitFor(() => expect(getLexiconJob).toHaveBeenCalledWith("job-1"));
     expect(screen.queryByTestId("lexicon-import-db-progress")).not.toBeInTheDocument();
-    expect(screen.getByTestId("lexicon-import-db-last-job")).toHaveTextContent("Last job");
-    expect(screen.getByTestId("lexicon-import-db-last-job")).toHaveTextContent("completed");
-    expect(screen.getByTestId("lexicon-import-db-last-job")).toHaveTextContent("approved.jsonl");
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("completed");
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("approved.jsonl");
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Current entry: Completed");
+  });
+
+  it("renders recent jobs with failed status emphasis", async () => {
+    listLexiconJobs.mockResolvedValue([
+      {
+        id: "job-failed",
+        created_by: "user-1",
+        job_type: "import_db",
+        status: "failed",
+        target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+        request_payload: {
+          input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+          conflict_mode: "skip",
+          error_mode: "continue",
+        },
+        result_payload: { skipped_words: 1, failed_rows: 1 },
+        progress_total: 10,
+        progress_completed: 4,
+        progress_current_label: "Failed before first row",
+        error_message: "usage_note must be a non-empty string",
+        created_at: "2026-03-23T00:00:00Z",
+        started_at: "2026-03-23T00:00:01Z",
+        completed_at: "2026-03-23T00:00:02Z",
+      },
+    ]);
+
+    render(<LexiconImportDbPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Recent jobs");
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("failed");
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("approved.jsonl");
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("usage_note");
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Current entry: Failed after 4/10");
   });
 });

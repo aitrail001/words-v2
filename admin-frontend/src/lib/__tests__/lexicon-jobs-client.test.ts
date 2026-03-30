@@ -2,6 +2,7 @@ import { apiClient } from "@/lib/api-client";
 import {
   createCompiledMaterializeLexiconJob,
   createCompiledReviewBulkUpdateLexiconJob,
+  listLexiconJobs,
 } from "@/lib/lexicon-jobs-client";
 
 jest.mock("@/lib/api-client", () => ({
@@ -38,5 +39,11 @@ describe("admin lexicon-jobs-client", () => {
       decision_reason: "bulk ready",
       scope: "all_pending",
     });
+  });
+
+  it("lists filtered lexicon jobs", async () => {
+    mockApiClient.get.mockResolvedValueOnce([]);
+    await listLexiconJobs({ jobType: "import_db", limit: 6 });
+    expect(mockApiClient.get).toHaveBeenCalledWith("/lexicon-jobs?job_type=import_db&limit=6");
   });
 });
