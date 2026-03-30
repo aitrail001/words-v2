@@ -79,6 +79,38 @@ def _set_job_progress_summary(
     job.request_payload = payload
 
 
+def _voice_current_group_label(row: dict[str, Any]) -> str | None:
+    for key in ("word", "display_form", "display_text", "normalized_form", "entry_id", "source_text"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    progress_label = str(row.get("_progress_label") or "").strip()
+    return progress_label or None
+
+
+def _voice_progress_delta(row: dict[str, Any]) -> tuple[int, int, int]:
+    progress_label = str(row.get("_progress_label") or "").strip()
+    if progress_label.startswith("Importing "):
+        return 1, 0, 0
+    if progress_label.startswith("Skipping "):
+        return 0, 1, 0
+    if progress_label.startswith("Failed "):
+        return 0, 0, 1
+    return 0, 0, 0
+
+
+def _voice_result_progress_counts(result_payload: dict[str, Any]) -> tuple[int, int, int]:
+    skipped_rows = int(result_payload.get("skipped_rows", 0))
+    unresolved_rows = (
+        int(result_payload.get("missing_words", 0))
+        + int(result_payload.get("missing_meanings", 0))
+        + int(result_payload.get("missing_examples", 0))
+    )
+    failed_rows = int(result_payload.get("failed_rows", 0)) + unresolved_rows
+    imported_rows = int(result_payload.get("created_assets", 0)) + int(result_payload.get("updated_assets", 0))
+    return imported_rows, skipped_rows, failed_rows
+
+
 def process_compiled_review_bulk_job(
     db: Session,
     *,
@@ -348,8 +380,9 @@ def run_lexicon_voice_import_db(self, job_id: str) -> dict[str, Any]:
             voice_import_db = _voice_import_db_module()
             row_summary = dict(request_payload.get("row_summary") or {})
             total_rows = int(row_summary.get("row_count") or 0)
-            skipped_rows = 0
-            failed_rows = 0
+            observed_imported_rows = 0
+            observed_skipped_rows = 0
+            observed_failed_rows = 0
 
             def _row_label(row: dict[str, Any], *, default_prefix: str, completed_rows: int, total_rows: int) -> str | None:
                 explicit_label = str(row.get("_progress_label") or "").strip()
@@ -396,31 +429,25 @@ def run_lexicon_voice_import_db(self, job_id: str) -> dict[str, Any]:
                 db.commit()
 
             def _import_progress(row: dict[str, Any], completed_rows: int, total_rows: int) -> None:
-                nonlocal skipped_rows, failed_rows
-                progress_label = str(row.get("_progress_label") or "")
-                if progress_label.startswith("Skipping existing"):
-                    skipped_rows += 1
-                elif progress_label.startswith("Failed "):
-                    failed_rows += 1
+                nonlocal observed_imported_rows, observed_skipped_rows, observed_failed_rows
+                imported_delta, skipped_delta, failed_delta = _voice_progress_delta(row)
+                observed_imported_rows += imported_delta
+                observed_skipped_rows += skipped_delta
+                observed_failed_rows += failed_delta
                 _set_job_progress_summary(
                     job,
                     phase="importing",
                     total=total_rows,
                     validated=total_rows,
-                    imported=max(completed_rows - skipped_rows - failed_rows, 0),
-                    skipped=skipped_rows,
-                    failed=failed_rows,
+                    imported=observed_imported_rows,
+                    skipped=observed_skipped_rows,
+                    failed=observed_failed_rows,
                 )
                 apply_lexicon_job_progress(
                     job,
                     progress_completed=completed_rows,
                     progress_total=total_rows,
-                    current_label=_row_label(
-                        row,
-                        default_prefix="Importing",
-                        completed_rows=completed_rows,
-                        total_rows=total_rows,
-                    ),
+                    current_label=_voice_current_group_label(row),
                 )
                 db.commit()
 
@@ -432,14 +459,7 @@ def run_lexicon_voice_import_db(self, job_id: str) -> dict[str, Any]:
                 preflight_progress_callback=_preflight_progress,
                 progress_callback=_import_progress,
             )
-            skipped_rows = int(result_payload.get("skipped_rows", 0))
-            unresolved_rows = (
-                int(result_payload.get("missing_words", 0))
-                + int(result_payload.get("missing_meanings", 0))
-                + int(result_payload.get("missing_examples", 0))
-            )
-            failed_rows = int(result_payload.get("failed_rows", 0)) + unresolved_rows
-            imported_rows = int(result_payload.get("created_assets", 0)) + int(result_payload.get("updated_assets", 0))
+            imported_rows, skipped_rows, failed_rows = _voice_result_progress_counts(result_payload)
             _set_job_progress_summary(
                 job,
                 phase="completed",

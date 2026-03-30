@@ -252,6 +252,105 @@ class TestLexiconJobsApi:
         }
 
     @pytest.mark.asyncio
+    async def test_get_lexicon_job_status_exposes_voice_group_progress_summary(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=user_id,
+            job_type="voice_import_db",
+            status="running",
+            target_key="voice_import_db:/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+            request_payload={
+                "input_path": "/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+                "row_summary": {"row_count": 12},
+                "progress_summary": {
+                    "phase": "importing",
+                    "total": 12,
+                    "validated": 12,
+                    "imported": 8,
+                    "skipped": 2,
+                    "failed": 1,
+                    "to_validate": 0,
+                    "to_import": 1,
+                },
+            },
+            result_payload=None,
+            progress_total=12,
+            progress_completed=11,
+            progress_current_label="bank",
+        )
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(job)]
+
+        response = await client.get(
+            f"/api/lexicon-jobs/{job.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["progress_current_label"] == "bank"
+        assert response.json()["progress_summary"] == {
+            "phase": "importing",
+            "total": 12,
+            "validated": 12,
+            "imported": 8,
+            "skipped": 2,
+            "failed": 1,
+            "to_validate": 0,
+            "to_import": 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_lexicon_job_status_preserves_failed_voice_progress_summary_before_first_group_callback(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=user_id,
+            job_type="voice_import_db",
+            status="failed",
+            target_key="voice_import_db:/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+            request_payload={
+                "input_path": "/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+                "row_summary": {"row_count": 5},
+                "progress_summary": {
+                    "phase": "failed",
+                    "total": 5,
+                    "validated": 5,
+                    "imported": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "to_validate": 0,
+                    "to_import": 5,
+                },
+            },
+            result_payload=None,
+            progress_total=5,
+            progress_completed=5,
+            progress_current_label="Validating 5/5: bank",
+            error_message="worker interrupted before grouped import callback",
+        )
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(job)]
+
+        response = await client.get(
+            f"/api/lexicon-jobs/{job.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["progress_current_label"] == "Validating 5/5: bank"
+        assert response.json()["progress_summary"] == {
+            "phase": "failed",
+            "total": 5,
+            "validated": 5,
+            "imported": 0,
+            "skipped": 0,
+            "failed": 0,
+            "to_validate": 0,
+            "to_import": 5,
+        }
+
+    @pytest.mark.asyncio
     async def test_list_lexicon_jobs_filters_and_limits(self, client, mock_db):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
