@@ -88,14 +88,14 @@ export default function LexiconImportDbPage() {
     return Number((payload as Record<string, unknown>).skipped_words ?? 0)
       + Number((payload as Record<string, unknown>).skipped_phrases ?? 0)
       + Number((payload as Record<string, unknown>).skipped_reference_entries ?? 0);
-  }, [job?.result_payload, result?.import_summary]);
+  }, [job?.progress_summary, job?.result_payload, result?.import_summary]);
   const failedCount = useMemo(() => {
     if (job?.progress_summary) {
       return Number(job.progress_summary.failed ?? 0);
     }
     const payload = job?.result_payload ?? result?.import_summary ?? {};
     return Number((payload as Record<string, unknown>).failed_rows ?? 0);
-  }, [job?.result_payload, result?.import_summary]);
+  }, [job?.progress_summary, job?.result_payload, result?.import_summary]);
   const skippedForJob = (targetJob: LexiconJob | null): number => {
     const payload = (targetJob?.result_payload ?? {}) as Record<string, unknown>;
     return Number(payload.skipped_words ?? 0)
