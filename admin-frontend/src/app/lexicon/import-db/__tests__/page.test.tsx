@@ -129,6 +129,9 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByText("Reviewed directory")).toBeInTheDocument();
     expect(screen.getByText("Approved import input")).toBeInTheDocument();
     expect(screen.getAllByText("Decision ledger").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("lexicon-db-section-nav")).toHaveTextContent("Enrichment Import");
+    expect(screen.getByTestId("lexicon-db-section-nav")).toHaveTextContent("DB Inspector");
+    expect(screen.getByTestId("lexicon-import-db-form-grid")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("data/lexicon/snapshots/.../reviewed/approved.jsonl")).toBeInTheDocument();
     expect(dryRunLexiconImport).not.toHaveBeenCalled();
     await user.type(screen.getByTestId("lexicon-import-db-input-path"), "data/lexicon/snapshots/demo/words.enriched.jsonl");
@@ -324,5 +327,55 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("approved.jsonl");
     expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("usage_note");
     expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Current entry: Failed after 4/10");
+  });
+
+  it("expands recent jobs when more than the inline limit exists", async () => {
+    listLexiconJobs.mockResolvedValue(
+      Array.from({ length: 8 }, (_, index) => ({
+        id: `job-${index + 1}`,
+        created_by: "user-1",
+        job_type: "import_db",
+        status: "completed",
+        target_key: `import_db:/data/lexicon/snapshots/demo/reviewed/approved-${index + 1}.jsonl`,
+        request_payload: {
+          input_path: `/data/lexicon/snapshots/demo/reviewed/approved-${index + 1}.jsonl`,
+          conflict_mode: "upsert",
+          error_mode: "continue",
+        },
+        result_payload: { created_words: index + 1 },
+        progress_summary: {
+          phase: "completed",
+          total: 1,
+          validated: 1,
+          imported: 1,
+          skipped: 0,
+          failed: 0,
+          to_validate: 0,
+          to_import: 0,
+        },
+        progress_total: 1,
+        progress_completed: 1,
+        progress_current_label: `entry-${index + 1}`,
+        error_message: null,
+        created_at: "2026-03-23T00:00:00Z",
+        started_at: "2026-03-23T00:00:01Z",
+        completed_at: "2026-03-23T00:00:02Z",
+      })),
+    );
+
+    const user = userEvent.setup();
+    render(<LexiconImportDbPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toBeInTheDocument());
+    expect(screen.getByText("/data/lexicon/snapshots/demo/reviewed/approved-1.jsonl")).toBeInTheDocument();
+    expect(screen.getByText("/data/lexicon/snapshots/demo/reviewed/approved-6.jsonl")).toBeInTheDocument();
+    expect(screen.queryByText("/data/lexicon/snapshots/demo/reviewed/approved-7.jsonl")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show all recent jobs" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show all recent jobs" }));
+
+    expect(screen.getByText("/data/lexicon/snapshots/demo/reviewed/approved-7.jsonl")).toBeInTheDocument();
+    expect(screen.getByText("/data/lexicon/snapshots/demo/reviewed/approved-8.jsonl")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show fewer recent jobs" })).toBeInTheDocument();
   });
 });

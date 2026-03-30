@@ -371,6 +371,14 @@ describe("LexiconCompiledReviewPage", () => {
     mockDeleteBatch.mockResolvedValue(undefined);
   });
 
+  it("renders the enrichment review submenu", async () => {
+    render(<LexiconCompiledReviewPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-compiled-review-page")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-enrichment-review-section-nav")).toHaveTextContent("Compiled Review");
+    expect(screen.getByTestId("lexicon-enrichment-review-section-nav")).toHaveTextContent("JSONL Review");
+  });
+
   it("renders batches, applies immediate decisions, advances to the next pending row, and downloads approved export", async () => {
     const user = userEvent.setup();
     window.history.pushState(

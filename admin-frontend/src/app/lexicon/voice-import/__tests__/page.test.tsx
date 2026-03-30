@@ -129,6 +129,10 @@ describe("LexiconVoiceImportPage", () => {
     render(<LexiconVoiceImportPage />);
 
     expect(await screen.findByTestId("lexicon-voice-import-input-path")).toHaveValue("/data/lexicon/voice/voice-roundtrip/voice_manifest.jsonl");
+    expect(screen.getByTestId("lexicon-voice-import-section-nav")).toHaveTextContent("Storage");
+    expect(screen.getByTestId("lexicon-voice-import-section-nav")).toHaveTextContent("Voice Runs");
+    expect(screen.getByTestId("lexicon-voice-import-section-nav")).toHaveTextContent("Voice DB Import");
+    expect(screen.getByTestId("lexicon-voice-import-form-grid")).toBeInTheDocument();
     await user.click(screen.getByTestId("lexicon-voice-import-dry-run"));
 
     await waitFor(() => expect(mockDryRunVoiceImport).toHaveBeenCalled());

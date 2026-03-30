@@ -352,14 +352,14 @@ describe("LexiconOpsPage", () => {
     expect(screen.getByTestId("lexicon-ops-import-run-button")).toBeInTheDocument();
   });
 
-  it("offers a handoff from ops into the dedicated voice page", async () => {
+  it("offers a handoff from ops into voice DB import", async () => {
     const user = userEvent.setup();
     render(<LexiconOpsPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-ops-open-voice-admin")).toBeInTheDocument());
     await user.click(screen.getByTestId("lexicon-ops-open-voice-admin"));
 
-    expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/voice"));
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("/lexicon/voice-import"));
     expect(push).toHaveBeenCalledWith(expect.stringContaining("sourceReference=lexicon-20260312-wordnet-wordfreq"));
   });
 

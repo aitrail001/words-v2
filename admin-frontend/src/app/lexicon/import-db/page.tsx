@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { LexiconSectionNav } from "@/components/lexicon/section-nav";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
@@ -18,6 +19,8 @@ import {
 
 const ACTIVE_JOB_STORAGE_KEY = "lexicon-import-db-active-job";
 const LAST_JOB_STORAGE_KEY = "lexicon-import-db-last-job";
+const INLINE_RECENT_JOB_LIMIT = 6;
+const RECENT_JOB_FETCH_LIMIT = 24;
 
 function searchParam(name: string): string {
   if (typeof window === "undefined") return "";
@@ -34,11 +37,16 @@ export default function LexiconImportDbPage() {
   const [result, setResult] = useState<LexiconImportResult | null>(null);
   const [job, setJob] = useState<LexiconJob | null>(null);
   const [recentJobs, setRecentJobs] = useState<LexiconJob[]>([]);
+  const [showAllRecentJobs, setShowAllRecentJobs] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const loadRecentJobs = useCallback(async () => {
     try {
-      setRecentJobs(await listLexiconJobs({ jobType: "import_db", limit: 6 }));
+      const nextJobs = await listLexiconJobs({ jobType: "import_db", limit: RECENT_JOB_FETCH_LIMIT });
+      setRecentJobs(nextJobs);
+      if (nextJobs.length <= INLINE_RECENT_JOB_LIMIT) {
+        setShowAllRecentJobs(false);
+      }
     } catch {
       // keep the page usable even if the recent-jobs list fails
     }
@@ -79,6 +87,10 @@ export default function LexiconImportDbPage() {
   const importSummaryEntries = useMemo(
     () => Object.entries(result?.import_summary ?? {}),
     [result?.import_summary],
+  );
+  const visibleRecentJobs = useMemo(
+    () => (showAllRecentJobs ? recentJobs : recentJobs.slice(0, INLINE_RECENT_JOB_LIMIT)),
+    [recentJobs, showAllRecentJobs],
   );
   const skippedCount = useMemo(() => {
     if (job?.progress_summary) {
@@ -304,84 +316,97 @@ export default function LexiconImportDbPage() {
             </p>
           </div>
         </div>
+        <div className="mt-4">
+          <LexiconSectionNav
+            testId="lexicon-db-section-nav"
+            items={[
+              { label: "Enrichment Import", href: "/lexicon/import-db", active: true },
+              { label: "DB Inspector", href: "/lexicon/db-inspector" },
+            ]}
+          />
+        </div>
 
         <PathGuidanceCard
           className="mt-4"
           modeNote="Import DB should normally use reviewed/approved.jsonl, not the raw compiled artifact, unless you are intentionally bypassing review."
         />
 
-        <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_10rem_auto]">
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Input path</span>
-            <input
-              data-testid="lexicon-import-db-input-path"
-              value={inputPath}
-              onChange={(event) => setInputPath(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"
-              placeholder="data/lexicon/snapshots/.../reviewed/approved.jsonl"
-            />
-          </label>
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Source reference</span>
-            <input
-              value={sourceReference}
-              onChange={(event) => setSourceReference(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-              placeholder="optional source reference"
-            />
-          </label>
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Language</span>
-            <input
-              value={language}
-              onChange={(event) => setLanguage(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Conflict handling</span>
-            <select
-              value={conflictMode}
-              onChange={(event) => setConflictMode(event.target.value as "fail" | "skip" | "upsert")}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-              data-testid="lexicon-import-db-conflict-mode"
-            >
-              <option value="fail">Fail if exists</option>
-              <option value="skip">Skip existing</option>
-              <option value="upsert">Upsert existing</option>
-            </select>
-          </label>
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Error handling</span>
-            <select
-              value={errorMode}
-              onChange={(event) => setErrorMode(event.target.value as "fail_fast" | "continue")}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-              data-testid="lexicon-import-db-error-mode"
-            >
-              <option value="continue">Continue and report failures</option>
-              <option value="fail_fast">Stop on first error</option>
-            </select>
-          </label>
-          <div className="flex flex-wrap items-end gap-3">
-            <button
-              type="button"
-              data-testid="lexicon-import-db-dry-run-button"
-              onClick={() => void execute("dry-run")}
-              disabled={!canRun || loading}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 disabled:opacity-50"
-            >
-              {loading ? "Working..." : "Dry Run"}
-            </button>
-            <button
-              type="button"
-              data-testid="lexicon-import-db-run-button"
-              onClick={() => void execute("run")}
-              disabled={!canRun || loading}
-              className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              Import
-            </button>
+        <div className="mt-6 space-y-4" data-testid="lexicon-import-db-form-grid">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_10rem]">
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Input path</span>
+              <input
+                data-testid="lexicon-import-db-input-path"
+                value={inputPath}
+                onChange={(event) => setInputPath(event.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"
+                placeholder="data/lexicon/snapshots/.../reviewed/approved.jsonl"
+              />
+            </label>
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Source reference</span>
+              <input
+                value={sourceReference}
+                onChange={(event) => setSourceReference(event.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                placeholder="optional source reference"
+              />
+            </label>
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Language</span>
+              <input
+                value={language}
+                onChange={(event) => setLanguage(event.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,14rem)_minmax(0,16rem)_auto]">
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Conflict handling</span>
+              <select
+                value={conflictMode}
+                onChange={(event) => setConflictMode(event.target.value as "fail" | "skip" | "upsert")}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                data-testid="lexicon-import-db-conflict-mode"
+              >
+                <option value="fail">Fail if exists</option>
+                <option value="skip">Skip existing</option>
+                <option value="upsert">Upsert existing</option>
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Error handling</span>
+              <select
+                value={errorMode}
+                onChange={(event) => setErrorMode(event.target.value as "fail_fast" | "continue")}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                data-testid="lexicon-import-db-error-mode"
+              >
+                <option value="continue">Continue and report failures</option>
+                <option value="fail_fast">Stop on first error</option>
+              </select>
+            </label>
+            <div className="flex flex-wrap items-end gap-3">
+              <button
+                type="button"
+                data-testid="lexicon-import-db-dry-run-button"
+                onClick={() => void execute("dry-run")}
+                disabled={!canRun || loading}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 disabled:opacity-50"
+              >
+                {loading ? "Working..." : "Dry Run"}
+              </button>
+              <button
+                type="button"
+                data-testid="lexicon-import-db-run-button"
+                onClick={() => void execute("run")}
+                disabled={!canRun || loading}
+                className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                Import
+              </button>
+            </div>
           </div>
         </div>
 
@@ -463,7 +488,7 @@ export default function LexiconImportDbPage() {
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm" data-testid="lexicon-import-db-recent-jobs">
           <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Recent jobs</h4>
           <div className="mt-4 grid gap-3">
-            {recentJobs.map((recentJob) => (
+            {visibleRecentJobs.map((recentJob) => (
               <div
                 key={recentJob.id}
                 className={`rounded border p-3 text-sm ${recentJob.status === "failed" ? "border-rose-200 bg-rose-50" : recentJob.status === "completed" ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-white"}`}
@@ -500,6 +525,17 @@ export default function LexiconImportDbPage() {
               </div>
             ))}
           </div>
+          {recentJobs.length > INLINE_RECENT_JOB_LIMIT ? (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => setShowAllRecentJobs((current) => !current)}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                {showAllRecentJobs ? "Show fewer recent jobs" : "Show all recent jobs"}
+              </button>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { LexiconSectionNav } from "@/components/lexicon/section-nav";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import { dryRunVoiceImport, type LexiconVoiceImportResult } from "@/lib/lexicon-imports-client";
@@ -172,71 +173,85 @@ export default function LexiconVoiceImportPage() {
         <p className="mt-1 max-w-3xl text-sm text-gray-600">
           Dry run validates the voice manifest before any DB writes. Import runs the same validation first, then writes voice assets with the selected conflict and error modes.
         </p>
+        <div className="mt-4">
+          <LexiconSectionNav
+            testId="lexicon-voice-import-section-nav"
+            items={[
+              { label: "Storage", href: "/lexicon/voice-storage" },
+              { label: "Voice Runs", href: "/lexicon/voice-runs" },
+              { label: "Voice DB Import", href: "/lexicon/voice-import", active: true },
+            ]}
+          />
+        </div>
 
-        <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_9rem_12rem_12rem_auto]">
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Manifest path</span>
-            <input
-              data-testid="lexicon-voice-import-input-path"
-              value={inputPath}
-              onChange={(event) => setInputPath(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"
-              placeholder="data/lexicon/voice/<run>/voice_manifest.jsonl"
-            />
-          </label>
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Language</span>
-            <input
-              data-testid="lexicon-voice-import-language"
-              value={language}
-              onChange={(event) => setLanguage(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Conflict handling</span>
-            <select
-              data-testid="lexicon-voice-import-conflict-mode"
-              value={conflictMode}
-              onChange={(event) => setConflictMode(event.target.value as "fail" | "skip" | "upsert")}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="fail">Fail if exists</option>
-              <option value="skip">Skip existing</option>
-              <option value="upsert">Upsert existing</option>
-            </select>
-          </label>
-          <label className="grid gap-1 text-sm text-gray-700">
-            <span className="font-medium">Error handling</span>
-            <select
-              data-testid="lexicon-voice-import-error-mode"
-              value={errorMode}
-              onChange={(event) => setErrorMode(event.target.value as "fail_fast" | "continue")}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="continue">Continue and report failures</option>
-              <option value="fail_fast">Stop on first error</option>
-            </select>
-          </label>
-          <div className="flex items-end gap-3">
-            <button
-              type="button"
-              data-testid="lexicon-voice-import-dry-run"
-              disabled={!canRun || loading}
-              onClick={() => void execute("dry-run")}
-              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
-            >
-              {loading ? "Working..." : "Dry Run"}
-            </button>
-            <button
-              type="button"
-              data-testid="lexicon-voice-import-run"
-              disabled={!canRun || loading}
-              onClick={() => void execute("run")}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {loading ? "Working..." : "Import"}
-            </button>
+        <div className="mt-6 space-y-4" data-testid="lexicon-voice-import-form-grid">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem]">
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Manifest path</span>
+              <input
+                data-testid="lexicon-voice-import-input-path"
+                value={inputPath}
+                onChange={(event) => setInputPath(event.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"
+                placeholder="data/lexicon/voice/<run>/voice_manifest.jsonl"
+              />
+            </label>
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Language</span>
+              <input
+                data-testid="lexicon-voice-import-language"
+                value={language}
+                onChange={(event) => setLanguage(event.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,14rem)_minmax(0,16rem)_auto]">
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Conflict handling</span>
+              <select
+                data-testid="lexicon-voice-import-conflict-mode"
+                value={conflictMode}
+                onChange={(event) => setConflictMode(event.target.value as "fail" | "skip" | "upsert")}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="fail">Fail if exists</option>
+                <option value="skip">Skip existing</option>
+                <option value="upsert">Upsert existing</option>
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm text-gray-700">
+              <span className="font-medium">Error handling</span>
+              <select
+                data-testid="lexicon-voice-import-error-mode"
+                value={errorMode}
+                onChange={(event) => setErrorMode(event.target.value as "fail_fast" | "continue")}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="continue">Continue and report failures</option>
+                <option value="fail_fast">Stop on first error</option>
+              </select>
+            </label>
+            <div className="flex flex-wrap items-end gap-3">
+              <button
+                type="button"
+                data-testid="lexicon-voice-import-dry-run"
+                disabled={!canRun || loading}
+                onClick={() => void execute("dry-run")}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+              >
+                {loading ? "Working..." : "Dry Run"}
+              </button>
+              <button
+                type="button"
+                data-testid="lexicon-voice-import-run"
+                disabled={!canRun || loading}
+                onClick={() => void execute("run")}
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {loading ? "Working..." : "Import"}
+              </button>
+            </div>
           </div>
         </div>
         {message ? <p className="mt-4 text-sm text-slate-700">{message}</p> : null}

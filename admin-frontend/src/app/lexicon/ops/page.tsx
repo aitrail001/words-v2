@@ -639,7 +639,7 @@ export default function LexiconOpsPage() {
                     type="button"
                     data-testid="lexicon-ops-open-voice-admin"
                     className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
-                    onClick={() => openWorkflow("/lexicon/voice", {
+                    onClick={() => openWorkflow("/lexicon/voice-import", {
                       sourceReference: selectedSnapshot.snapshot_id ?? selectedSnapshot.snapshot,
                     })}
                   >
