@@ -27,6 +27,29 @@ export type LexiconInspectorListResponse = {
   has_more: boolean;
 };
 
+export type LexiconInspectorVoiceAsset = {
+  id: string;
+  content_scope: string;
+  meaning_id: string | null;
+  meaning_example_id: string | null;
+  relative_path: string | null;
+  locale: string;
+  voice_role: string;
+  provider: string;
+  family: string;
+  voice_id: string;
+  profile_key: string;
+  audio_format: string;
+  mime_type: string | null;
+  playback_url: string;
+  playback_route_kind: string;
+  status: string;
+  generated_at: string | null;
+  primary_target_kind: string;
+  primary_target_base: string;
+  resolved_target_url: string | null;
+};
+
 export type LexiconInspectorWordDetail = {
   family: "word";
   id: string;
@@ -62,29 +85,10 @@ export type LexiconInspectorWordDetail = {
     order_index: number;
     examples: Array<{ id: string; sentence: string; difficulty: string | null; order_index: number }>;
     relations: Array<{ id: string; relation_type: string; related_word: string }>;
-    translations: Array<{ id: string; language: string; translation: string }>;
+      translations: Array<{ id: string; language: string; translation: string }>;
   }>;
   enrichment_runs: Array<{ id: string; generator_model: string | null; validator_model: string | null; prompt_version: string | null; verdict: string | null; created_at: string }>;
-  voice_assets: Array<{
-    id: string;
-    content_scope: string;
-    meaning_id: string | null;
-    meaning_example_id: string | null;
-    locale: string;
-    voice_role: string;
-    provider: string;
-    family: string;
-    voice_id: string;
-    profile_key: string;
-    audio_format: string;
-    mime_type: string | null;
-    playback_url: string;
-    playback_route_kind: string;
-    status: string;
-    generated_at: string | null;
-    primary_target_kind: string;
-    primary_target_base: string;
-  }>;
+  voice_assets: LexiconInspectorVoiceAsset[];
   voice_paths: Record<string, {
     playback_url: string;
     resolved_target_kind: string;
@@ -115,28 +119,9 @@ export type LexiconInspectorPhraseDetail = {
     grammar_patterns: string[] | null;
     usage_note: string | null;
     examples: Array<{ id: string; sentence: string; difficulty: string | null; order_index: number }>;
-    translations: Array<{ locale: string; definition: string | null; usage_note: string | null; examples: string[] }>;
+      translations: Array<{ locale: string; definition: string | null; usage_note: string | null; examples: string[] }>;
   }>;
-  voice_assets: Array<{
-    id: string;
-    content_scope: string;
-    meaning_id: string | null;
-    meaning_example_id: string | null;
-    locale: string;
-    voice_role: string;
-    provider: string;
-    family: string;
-    voice_id: string;
-    profile_key: string;
-    audio_format: string;
-    mime_type: string | null;
-    playback_url: string;
-    playback_route_kind: string;
-    status: string;
-    generated_at: string | null;
-    primary_target_kind: string;
-    primary_target_base: string;
-  }>;
+  voice_assets: LexiconInspectorVoiceAsset[];
   voice_paths: Record<string, {
     playback_url: string;
     resolved_target_kind: string;

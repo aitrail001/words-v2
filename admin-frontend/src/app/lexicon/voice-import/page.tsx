@@ -13,6 +13,8 @@ import {
 } from "@/lib/lexicon-jobs-client";
 
 const ACTIVE_JOB_STORAGE_KEY = "lexicon-voice-import-active-job";
+const INLINE_RECENT_JOB_LIMIT = 6;
+const RECENT_JOB_FETCH_LIMIT = 24;
 
 function searchParam(name: string): string {
   if (typeof window === "undefined") return "";
@@ -47,11 +49,16 @@ export default function LexiconVoiceImportPage() {
   const [result, setResult] = useState<LexiconVoiceImportResult | null>(null);
   const [job, setJob] = useState<LexiconJob | null>(null);
   const [recentJobs, setRecentJobs] = useState<LexiconJob[]>([]);
+  const [showAllRecentJobs, setShowAllRecentJobs] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const loadRecentJobs = useCallback(async () => {
     try {
-      setRecentJobs(await listLexiconJobs({ jobType: "voice_import_db", limit: 6 }));
+      const nextJobs = await listLexiconJobs({ jobType: "voice_import_db", limit: RECENT_JOB_FETCH_LIMIT });
+      setRecentJobs(nextJobs);
+      if (nextJobs.length <= INLINE_RECENT_JOB_LIMIT) {
+        setShowAllRecentJobs(false);
+      }
     } catch {
       // keep page usable if recent jobs fail
     }
@@ -117,6 +124,10 @@ export default function LexiconVoiceImportPage() {
   const resultSummaryEntries = useMemo(
     () => Object.entries(result?.import_summary ?? {}),
     [result?.import_summary],
+  );
+  const visibleRecentJobs = useMemo(
+    () => (showAllRecentJobs ? recentJobs : recentJobs.slice(0, INLINE_RECENT_JOB_LIMIT)),
+    [recentJobs, showAllRecentJobs],
   );
   const skippedCount = Number(progressSummary?.skipped ?? (job?.result_payload?.skipped_rows ?? result?.import_summary?.skipped_rows ?? 0));
   const failedCount = Number(progressSummary?.failed ?? (job?.result_payload?.failed_rows ?? result?.import_summary?.failed_rows ?? 0));
@@ -307,9 +318,27 @@ export default function LexiconVoiceImportPage() {
       ) : null}
 
       <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm" data-testid="lexicon-voice-import-recent-jobs">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Recent jobs</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Recent jobs</p>
+            <p className="mt-1 text-sm text-gray-600">
+              {recentJobs.length > INLINE_RECENT_JOB_LIMIT && !showAllRecentJobs
+                ? `Showing the latest ${INLINE_RECENT_JOB_LIMIT} of ${recentJobs.length} jobs.`
+                : `Showing ${visibleRecentJobs.length} job${visibleRecentJobs.length === 1 ? "" : "s"}.`}
+            </p>
+          </div>
+          {recentJobs.length > INLINE_RECENT_JOB_LIMIT ? (
+            <button
+              type="button"
+              onClick={() => setShowAllRecentJobs((current) => !current)}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700"
+            >
+              {showAllRecentJobs ? "Show fewer jobs" : "Show more jobs"}
+            </button>
+          ) : null}
+        </div>
         <div className="mt-4 space-y-3">
-          {recentJobs.length ? recentJobs.map((recentJob) => (
+          {visibleRecentJobs.length ? visibleRecentJobs.map((recentJob) => (
             <div key={recentJob.id} className={`rounded-md border p-4 ${recentJob.status === "failed" ? "border-rose-200 bg-rose-50/40" : "border-gray-200 bg-gray-50/50"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
