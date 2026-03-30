@@ -119,6 +119,45 @@ class TestLexiconImportsApi:
         assert data["error_samples"] == [{"entry": "fuss over", "error": "usage_note must be a non-empty string"}]
 
     @pytest.mark.asyncio
+    async def test_voice_dry_run_accepts_configured_voice_root(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        voice_root = tmp_path / "shared-voice"
+        voice_root.mkdir()
+        app.dependency_overrides[get_settings] = lambda: Settings(
+            environment="test",
+            lexicon_snapshot_root=str(tmp_path / "snapshots"),
+            lexicon_voice_root=str(voice_root),
+        )
+
+        manifest_path = voice_root / "demo" / "voice_manifest.jsonl"
+        manifest_path.parent.mkdir(parents=True)
+        _write_jsonl(
+            manifest_path,
+            [{"status": "generated", "entry_type": "word", "entry_id": "word:bank", "word": "bank"}],
+        )
+        monkeypatch.setattr("app.api.lexicon_imports._voice_import_db_module", lambda: SimpleNamespace(
+            load_voice_manifest_rows=lambda path: [{"status": "generated", "entry_type": "word", "entry_id": "word:bank", "word": "bank"}],
+            summarize_voice_manifest_rows=lambda rows: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
+            run_voice_import_file=lambda *args, **kwargs: {"row_count": 1, "failed_rows": 0, "dry_run": True},
+        ))
+
+        response = await client.post(
+            "/api/lexicon-imports/voice-dry-run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "input_path": str(manifest_path),
+                "source_type": "voice_manifest",
+                "language": "en",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["artifact_filename"] == "voice_manifest.jsonl"
+        assert response.json()["row_summary"]["generated_count"] == 1
+
+    @pytest.mark.asyncio
     async def test_run_import_executes_import_file_as_background_job(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))

@@ -75,8 +75,17 @@ def _snapshot_root(settings: Settings) -> Path:
     return root
 
 
-def _allowed_roots(settings: Settings) -> list[Path]:
+def _voice_root(settings: Settings) -> Path:
+    root = Path(settings.lexicon_voice_root).expanduser()
+    if not root.is_absolute():
+        root = (Path.cwd() / root).resolve()
+    return root
+
+
+def _allowed_roots(settings: Settings, *, extra_roots: list[Path] | None = None) -> list[Path]:
     roots = [Path.cwd().resolve(), _snapshot_root(settings)]
+    if extra_roots:
+        roots.extend(extra_roots)
     unique_roots: list[Path] = []
     for root in roots:
         if root not in unique_roots:
@@ -84,14 +93,20 @@ def _allowed_roots(settings: Settings) -> list[Path]:
     return unique_roots
 
 
-def resolve_repo_local_path(raw_path: str, *, settings: Settings, allow_missing: bool = False) -> Path:
+def resolve_repo_local_path(
+    raw_path: str,
+    *,
+    settings: Settings,
+    allow_missing: bool = False,
+    extra_roots: list[Path] | None = None,
+) -> Path:
     path = Path(raw_path).expanduser()
     if not path.is_absolute():
         path = (Path.cwd() / path).resolve()
     else:
         path = path.resolve()
 
-    for root in _allowed_roots(settings):
+    for root in _allowed_roots(settings, extra_roots=extra_roots):
         try:
             path.relative_to(root)
             break
@@ -106,6 +121,15 @@ def resolve_repo_local_path(raw_path: str, *, settings: Settings, allow_missing:
     if not allow_missing and not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Path not found: {path}")
     return path
+
+
+def resolve_voice_manifest_path(raw_path: str, *, settings: Settings, allow_missing: bool = False) -> Path:
+    return resolve_repo_local_path(
+        raw_path,
+        settings=settings,
+        allow_missing=allow_missing,
+        extra_roots=[_voice_root(settings)],
+    )
 
 
 def default_decisions_path(artifact_path: Path) -> Path:
