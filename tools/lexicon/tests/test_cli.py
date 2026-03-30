@@ -171,7 +171,7 @@ class CliTests(unittest.TestCase):
             return {"created_assets": 1, "updated_assets": 0, "skipped_rows": 1, "failed_rows": 0}
 
         with patch("tools.lexicon.cli.load_voice_manifest_rows", return_value=[{"entry_id": "word:bank"}, {"entry_id": "word:harbor"}]), \
-             patch("tools.lexicon.cli.run_voice_import_file", side_effect=fake_run_voice_import_file):
+             patch("tools.lexicon.cli.run_voice_import_file", side_effect=fake_run_voice_import_file) as mocked_run:
             code, stdout, stderr = self.run_cli([
                 "voice-import-db",
                 "--input",
@@ -180,6 +180,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("item-progress", stderr)
+        self.assertEqual(mocked_run.call_args.kwargs["error_mode"], "continue")
         payload = json.loads(stdout)
         self.assertEqual(payload["command"], "voice-import-db")
         self.assertFalse(payload["dry_run"])
