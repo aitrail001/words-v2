@@ -104,6 +104,29 @@ class TestLexiconJobsApi:
         mock_delay.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_create_voice_import_db_job_rejects_directory_input(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.side_effect = [_result_with(make_user(user_id))]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        manifest_dir = tmp_path / "voice-run-dir"
+        manifest_dir.mkdir()
+
+        response = await client.post(
+            "/api/lexicon-jobs/voice-import-db",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "input_path": str(manifest_dir),
+                "source_type": "voice_manifest",
+                "language": "en",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Voice import input must be a .jsonl file, not a directory"
+
+    @pytest.mark.asyncio
     @patch("app.api.lexicon_jobs.run_lexicon_jsonl_materialize.delay")
     async def test_create_jsonl_materialize_reuses_active_job(self, mock_delay, client, mock_db, tmp_path: Path):
         user_id = uuid.uuid4()

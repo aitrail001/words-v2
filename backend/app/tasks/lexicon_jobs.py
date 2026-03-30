@@ -433,8 +433,13 @@ def run_lexicon_voice_import_db(self, job_id: str) -> dict[str, Any]:
                 progress_callback=_import_progress,
             )
             skipped_rows = int(result_payload.get("skipped_rows", 0))
-            failed_rows = int(result_payload.get("failed_rows", 0))
-            imported_rows = max(total_rows - skipped_rows - failed_rows, 0)
+            unresolved_rows = (
+                int(result_payload.get("missing_words", 0))
+                + int(result_payload.get("missing_meanings", 0))
+                + int(result_payload.get("missing_examples", 0))
+            )
+            failed_rows = int(result_payload.get("failed_rows", 0)) + unresolved_rows
+            imported_rows = int(result_payload.get("created_assets", 0)) + int(result_payload.get("updated_assets", 0))
             _set_job_progress_summary(
                 job,
                 phase="completed",

@@ -205,6 +205,50 @@ class TestLexiconWorkerTasks:
             "to_import": 0,
         }
 
+    @patch("app.tasks.lexicon_jobs._voice_import_db_module")
+    @patch("app.tasks.lexicon_jobs.Session")
+    def test_voice_import_db_task_completed_summary_uses_actual_imported_assets(self, mock_session_cls, mock_voice_import_module):
+        job = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=uuid.uuid4(),
+            job_type="voice_import_db",
+            target_key="voice_import_db:/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+            request_payload={
+                "input_path": "/app/data/lexicon/voice/demo/voice_manifest.jsonl",
+                "source_type": "voice_manifest",
+                "language": "en",
+                "row_summary": {"row_count": 1},
+            },
+        )
+        self._mock_session(mock_session_cls, self._job_result(job))
+
+        def fake_run_voice_import_file(path, *, preflight_progress_callback=None, **kwargs):
+            assert preflight_progress_callback is not None
+            preflight_progress_callback({"word": "ghost"}, 1, 1)
+            return {
+                "created_assets": 0,
+                "updated_assets": 0,
+                "skipped_rows": 0,
+                "failed_rows": 0,
+                "missing_words": 1,
+            }
+
+        mock_voice_import_module.return_value.run_voice_import_file = fake_run_voice_import_file
+
+        result = run_lexicon_voice_import_db(str(job.id))
+
+        assert result["status"] == "completed"
+        assert job.request_payload["progress_summary"] == {
+            "phase": "completed",
+            "total": 1,
+            "validated": 1,
+            "imported": 0,
+            "skipped": 0,
+            "failed": 1,
+            "to_validate": 0,
+            "to_import": 0,
+        }
+
     @patch("app.tasks.lexicon_jobs.materialize_jsonl_review_outputs")
     @patch("app.tasks.lexicon_jobs.Session")
     def test_jsonl_materialize_task_completes_with_result_payload(self, mock_session_cls, mock_materialize):

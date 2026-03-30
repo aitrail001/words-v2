@@ -129,6 +129,21 @@ def _resolve_import_input_path(raw_path: str, *, settings: Settings) -> Path:
     return path
 
 
+def _resolve_voice_manifest_input_path(raw_path: str, *, settings: Settings) -> Path:
+    path = resolve_repo_local_path(raw_path, settings=settings)
+    if path.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Voice import input must be a .jsonl file, not a directory",
+        )
+    if path.suffix != ".jsonl":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Voice import input must be a .jsonl file",
+        )
+    return path
+
+
 async def _compiled_batch_or_404(batch_id: uuid.UUID, db: AsyncSession) -> LexiconArtifactReviewBatch:
     result = await db.execute(select(LexiconArtifactReviewBatch).where(LexiconArtifactReviewBatch.id == batch_id))
     batch = result.scalar_one_or_none()
@@ -156,7 +171,7 @@ async def create_import_db_job(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> LexiconJobResponse:
-    input_path = _resolve_import_input_path(request.input_path, settings=settings)
+    input_path = _resolve_voice_manifest_input_path(request.input_path, settings=settings)
     import_db = _import_db_module()
     rows = import_db.load_compiled_rows(input_path)
     row_summary = import_db.summarize_compiled_rows(rows)
@@ -189,7 +204,7 @@ async def create_voice_import_db_job(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> LexiconJobResponse:
-    input_path = _resolve_import_input_path(request.input_path, settings=settings)
+    input_path = _resolve_voice_manifest_input_path(request.input_path, settings=settings)
     voice_import_db = _voice_import_db_module()
     rows = voice_import_db.load_voice_manifest_rows(input_path)
     row_summary = voice_import_db.summarize_voice_manifest_rows(rows)

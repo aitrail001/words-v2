@@ -308,6 +308,25 @@ class TestLexiconImportsApi:
         assert data["import_summary"]["dry_run"] == 1
 
     @pytest.mark.asyncio
+    async def test_voice_dry_run_rejects_directory_input(self, client, mock_db, tmp_path: Path):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        mock_db.execute.return_value.scalar_one_or_none.return_value = make_user(user_id)
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        manifest_dir = tmp_path / "voice-run-dir"
+        manifest_dir.mkdir()
+
+        response = await client.post(
+            "/api/lexicon-imports/voice-dry-run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"input_path": str(manifest_dir), "source_type": "voice_manifest"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Voice import input must be a .jsonl file, not a directory"
+
+    @pytest.mark.asyncio
     async def test_run_voice_import_executes_as_background_job(self, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))

@@ -78,13 +78,28 @@ def _resolve_import_input_path(raw_path: str, *, settings: Settings) -> Path:
     return path
 
 
+def _resolve_voice_manifest_input_path(raw_path: str, *, settings: Settings) -> Path:
+    path = resolve_repo_local_path(raw_path, settings=settings)
+    if path.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Voice import input must be a .jsonl file, not a directory",
+        )
+    if path.suffix != ".jsonl":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Voice import input must be a .jsonl file",
+        )
+    return path
+
+
 @router.post("/dry-run", response_model=LexiconImportResponse)
 async def dry_run_lexicon_import(
     request: LexiconImportRequest,
     _: User = Depends(get_current_admin_user),
     settings: Settings = Depends(get_settings),
 ) -> LexiconImportResponse:
-    input_path = _resolve_import_input_path(request.input_path, settings=settings)
+    input_path = _resolve_voice_manifest_input_path(request.input_path, settings=settings)
     import_db = _import_db_module()
     rows = import_db.load_compiled_rows(input_path)
     error_samples: list[dict[str, str]] = []
@@ -125,7 +140,7 @@ async def run_lexicon_import(
     _: User = Depends(get_current_admin_user),
     settings: Settings = Depends(get_settings),
 ) -> LexiconImportJobResponse:
-    input_path = _resolve_import_input_path(request.input_path, settings=settings)
+    input_path = _resolve_voice_manifest_input_path(request.input_path, settings=settings)
     import_db = _import_db_module()
     rows = import_db.load_compiled_rows(input_path)
     job = create_lexicon_import_job(
@@ -162,7 +177,7 @@ async def dry_run_lexicon_voice_import(
     _: User = Depends(get_current_admin_user),
     settings: Settings = Depends(get_settings),
 ) -> LexiconImportResponse:
-    input_path = _resolve_import_input_path(request.input_path, settings=settings)
+    input_path = _resolve_voice_manifest_input_path(request.input_path, settings=settings)
     voice_import_db = _voice_import_db_module()
     rows = voice_import_db.load_voice_manifest_rows(input_path)
     import_summary = voice_import_db.run_voice_import_file(
@@ -191,7 +206,7 @@ async def run_lexicon_voice_import(
     _: User = Depends(get_current_admin_user),
     settings: Settings = Depends(get_settings),
 ) -> LexiconImportJobResponse:
-    input_path = _resolve_import_input_path(request.input_path, settings=settings)
+    input_path = _resolve_voice_manifest_input_path(request.input_path, settings=settings)
     voice_import_db = _voice_import_db_module()
     rows = voice_import_db.load_voice_manifest_rows(input_path)
     job = create_lexicon_import_job(

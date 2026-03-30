@@ -511,18 +511,18 @@ def import_voice_manifest_rows(
             profile_key=str(row.get("profile_key") or "").strip(),
             audio_format=str(row.get("audio_format") or "").strip(),
         )
+        storage_policy = _find_or_create_storage_policy(
+            session,
+            LexiconVoiceStoragePolicy,
+            source_reference=source_reference or "legacy-voice",
+            content_scope=content_scope,
+            provider=str(row.get("provider") or "").strip(),
+            family=str(row.get("family") or "").strip(),
+            locale=str(row.get("locale") or "").strip(),
+            primary_storage_kind=str(row.get("storage_kind") or "").strip() or "local",
+            primary_storage_base=str(row.get("storage_base") or "").strip(),
+        )
         if existing is None:
-            storage_policy = _find_or_create_storage_policy(
-                session,
-                LexiconVoiceStoragePolicy,
-                source_reference=source_reference or "legacy-voice",
-                content_scope=content_scope,
-                provider=str(row.get("provider") or "").strip(),
-                family=str(row.get("family") or "").strip(),
-                locale=str(row.get("locale") or "").strip(),
-                primary_storage_kind=str(row.get("storage_kind") or "").strip() or "local",
-                primary_storage_base=str(row.get("storage_base") or "").strip(),
-            )
             existing = LexiconVoiceAsset(
                 word_id=word.id if content_scope == "word" and word is not None else None,
                 meaning_id=meaning.id if content_scope == "definition" and meaning is not None else None,
@@ -556,18 +556,6 @@ def import_voice_manifest_rows(
             if conflict_mode == "fail":
                 raise RuntimeError(f"voice asset already exists for {_row_label(row)}")
             summary = _increment(summary, updated_assets=1)
-
-        storage_policy = _find_or_create_storage_policy(
-            session,
-            LexiconVoiceStoragePolicy,
-            source_reference=source_reference or "legacy-voice",
-            content_scope=content_scope,
-            provider=str(row.get("provider") or "").strip(),
-            family=str(row.get("family") or "").strip(),
-            locale=str(row.get("locale") or "").strip(),
-            primary_storage_kind=str(row.get("storage_kind") or "").strip() or "local",
-            primary_storage_base=str(row.get("storage_base") or "").strip(),
-        )
         existing.storage_policy_id = storage_policy.id
         existing.mime_type = str(row.get("mime_type") or "").strip() or None
         existing.speaking_rate = float(row.get("speaking_rate") or 0.0) or None
