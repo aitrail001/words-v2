@@ -7,7 +7,11 @@ import json
 
 from tools.lexicon.tests.test_voice_generate import FakeSynthProvider
 from tools.lexicon.voice_generate import run_voice_generation
-from tools.lexicon.voice_import_db import import_voice_manifest_rows, run_voice_import_file
+from tools.lexicon.voice_import_db import (
+    group_voice_manifest_rows,
+    import_voice_manifest_rows,
+    run_voice_import_file,
+)
 
 
 def _phrase_manifest_row(*, content_scope: str, source_text: str, sense_id: str = "take_off.v.01", example_index: int | None = None) -> dict[str, object]:
@@ -157,6 +161,58 @@ def test_import_voice_manifest_rows_skip_existing_honors_conflict_mode_skip():
     session.add.assert_not_called()
 
 
+def test_group_voice_manifest_rows_orders_word_then_definition_then_example() -> None:
+    rows = [
+        _word_manifest_row(
+            word="bank",
+            entry_id="word_bank",
+            source_reference="words-001",
+            content_scope="example",
+            source_text="She went to the bank.",
+            example_index=0,
+            relative_path="bank/example/en_us/example.mp3",
+            source_text_hash="hash-example-1",
+        ),
+        _word_manifest_row(
+            word="bank",
+            entry_id="word_bank",
+            source_reference="words-001",
+            content_scope="word",
+            source_text="bank",
+            relative_path="bank/word/en_us/example.mp3",
+            source_text_hash="hash-word",
+        ),
+        _word_manifest_row(
+            word="bank",
+            entry_id="word_bank",
+            source_reference="words-001",
+            content_scope="definition",
+            source_text="a financial institution",
+            relative_path="bank/definition/en_us/example.mp3",
+            source_text_hash="hash-definition",
+        ),
+        _word_manifest_row(
+            word="bank",
+            entry_id="word_bank",
+            source_reference="words-001",
+            content_scope="example",
+            source_text="The river overflowed the bank.",
+            example_index=1,
+            relative_path="bank/example/en_us/example-2.mp3",
+            source_text_hash="hash-example-2",
+        ),
+    ]
+
+    groups = group_voice_manifest_rows(rows)
+
+    assert len(groups) == 1
+    assert [row["content_scope"] for row in groups[0].rows] == ["word", "definition", "example", "example"]
+    assert [row["source_text"] for row in groups[0].rows[-2:]] == [
+        "She went to the bank.",
+        "The river overflowed the bank.",
+    ]
+
+
 def test_run_voice_import_file_groups_manifest_rows_by_lexical_scope_before_importing(tmp_path: Path):
     manifest_rows = [
         _word_manifest_row(
@@ -222,7 +278,7 @@ def test_run_voice_import_file_groups_manifest_rows_by_lexical_scope_before_impo
     session_cm.__exit__.return_value = None
     imported_groups: list[list[str]] = []
 
-    def fake_import_rows(_session, rows, **kwargs):
+    def fake_import_group(_session, rows, **kwargs):
         imported_groups.append([row["content_scope"] for row in rows])
         return SimpleNamespace(created_assets=len(rows), updated_assets=0, skipped_rows=0, missing_words=0, missing_meanings=0, missing_examples=0, failed_rows=0)
 
@@ -230,10 +286,10 @@ def test_run_voice_import_file_groups_manifest_rows_by_lexical_scope_before_impo
          patch("tools.lexicon.voice_import_db.create_engine"), \
          patch("tools.lexicon.voice_import_db.Session", return_value=session_cm), \
          patch("tools.lexicon.voice_import_db.get_settings", return_value=SimpleNamespace(database_url_sync="postgresql://test")), \
-         patch("tools.lexicon.voice_import_db.import_voice_manifest_rows", side_effect=fake_import_rows):
+         patch("tools.lexicon.voice_import_db.import_voice_manifest_group", side_effect=fake_import_group):
         run_voice_import_file(tmp_path / "voice_manifest.jsonl", rows=manifest_rows)
 
-    assert imported_groups == [["word", "definition", "example"], ["word", "definition"]]
+    assert imported_groups == [["word", "definition", "example", "example"], ["word", "definition"]]
 
 
 def test_run_voice_import_file_continue_mode_commits_partial_group_success(tmp_path: Path):
@@ -282,7 +338,7 @@ def test_run_voice_import_file_continue_mode_commits_partial_group_success(tmp_p
     session_cm.__exit__.return_value = None
     imported_groups: list[list[str]] = []
 
-    def fake_import_rows(_session, rows, **kwargs):
+    def fake_import_group(_session, rows, **kwargs):
         imported_groups.append([row["content_scope"] for row in rows])
         if len(rows) == 3:
             return SimpleNamespace(created_assets=2, updated_assets=0, skipped_rows=0, missing_words=0, missing_meanings=1, missing_examples=0, failed_rows=1)
@@ -292,14 +348,87 @@ def test_run_voice_import_file_continue_mode_commits_partial_group_success(tmp_p
          patch("tools.lexicon.voice_import_db.create_engine"), \
          patch("tools.lexicon.voice_import_db.Session", return_value=session_cm), \
          patch("tools.lexicon.voice_import_db.get_settings", return_value=SimpleNamespace(database_url_sync="postgresql://test")), \
-         patch("tools.lexicon.voice_import_db.import_voice_manifest_rows", side_effect=fake_import_rows):
+         patch("tools.lexicon.voice_import_db.import_voice_manifest_group", side_effect=fake_import_group):
         summary = run_voice_import_file(tmp_path / "voice_manifest.jsonl", rows=manifest_rows, error_mode="continue")
 
     assert imported_groups == [["word", "definition", "example"], ["word"]]
-    assert summary["created_assets"] == 2
+    assert summary["created_assets"] == 3
     assert summary["failed_rows"] == 1
     assert session.commit.call_count == 2
     session.rollback.assert_not_called()
+
+
+def test_run_voice_import_file_fail_fast_rolls_back_only_current_group(tmp_path: Path):
+    manifest_rows = [
+        _word_manifest_row(
+            word="bank",
+            entry_id="word_bank",
+            source_reference="words-001",
+            content_scope="definition",
+            source_text="a financial institution",
+            relative_path="bank/definition/en_us/example.mp3",
+            source_text_hash="hash-definition",
+        ),
+        _word_manifest_row(
+            word="bank",
+            entry_id="word_bank",
+            source_reference="words-001",
+            content_scope="word",
+            source_text="bank",
+            relative_path="bank/word/en_us/example.mp3",
+            source_text_hash="hash-word",
+        ),
+        _word_manifest_row(
+            word="harbor",
+            entry_id="word_harbor",
+            source_reference="words-002",
+            content_scope="word",
+            source_text="harbor",
+            relative_path="harbor/word/en_us/example.mp3",
+            source_text_hash="hash-harbor-word",
+        ),
+    ]
+    bank_session = MagicMock()
+    bank_cm = MagicMock()
+    bank_cm.__enter__.return_value = bank_session
+    bank_cm.__exit__.return_value = None
+    harbor_session = MagicMock()
+    harbor_cm = MagicMock()
+    harbor_cm.__enter__.return_value = harbor_session
+    harbor_cm.__exit__.return_value = None
+    imported_groups: list[list[str]] = []
+
+    def fake_import_group(_session, rows, **kwargs):
+        imported_groups.append([row["content_scope"] for row in rows])
+        if rows[0]["word"] == "harbor":
+            raise RuntimeError("duplicate voice asset")
+        return SimpleNamespace(
+            created_assets=len(rows),
+            updated_assets=0,
+            skipped_rows=0,
+            missing_words=0,
+            missing_meanings=0,
+            missing_examples=0,
+            failed_rows=0,
+        )
+
+    with patch("tools.lexicon.voice_import_db._ensure_backend_path"), \
+         patch("tools.lexicon.voice_import_db.create_engine"), \
+         patch("tools.lexicon.voice_import_db.Session", side_effect=[bank_cm, harbor_cm]), \
+         patch("tools.lexicon.voice_import_db.get_settings", return_value=SimpleNamespace(database_url_sync="postgresql://test")), \
+         patch("tools.lexicon.voice_import_db.import_voice_manifest_group", side_effect=fake_import_group):
+        try:
+            run_voice_import_file(tmp_path / "voice_manifest.jsonl", rows=manifest_rows, error_mode="fail_fast")
+        except RuntimeError as exc:
+            assert str(exc) == "duplicate voice asset"
+        else:
+            raise AssertionError("run_voice_import_file should raise in fail_fast mode")
+
+    assert imported_groups == [["word", "definition"], ["word"]]
+    bank_session.commit.assert_called_once()
+    bank_session.rollback.assert_not_called()
+    harbor_session.rollback.assert_called_once()
+    harbor_session.commit.assert_not_called()
 
 
 def test_import_voice_manifest_rows_updates_relative_path_without_touching_storage_policy_rows():
@@ -323,8 +452,7 @@ def test_import_voice_manifest_rows_updates_relative_path_without_touching_stora
     )
 
     with patch("tools.lexicon.voice_import_db._find_word", return_value=SimpleNamespace(id=uuid.uuid4())), \
-         patch("tools.lexicon.voice_import_db._find_voice_asset", return_value=existing_asset), \
-         patch("tools.lexicon.voice_import_db._find_or_create_storage_policy", return_value=SimpleNamespace(id=uuid.uuid4())):
+         patch("tools.lexicon.voice_import_db._find_voice_asset", return_value=existing_asset):
         summary = import_voice_manifest_rows(session, [row], conflict_mode="upsert")
 
     assert summary.updated_assets == 1

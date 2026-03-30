@@ -1373,7 +1373,7 @@ def build_parser() -> argparse.ArgumentParser:
     voice_import_db.add_argument('--language', default='en', help='default language fallback for word resolution')
     voice_import_db.add_argument('--dry-run', action='store_true', help='validate the manifest and report importability without writing the DB')
     voice_import_db.add_argument('--conflict-mode', choices=('fail', 'upsert', 'skip'), default='upsert', help='behavior when a voice asset already exists in the target DB')
-    voice_import_db.add_argument('--error-mode', choices=('fail_fast', 'continue'), default='fail_fast', help='behavior when a row-level voice import error occurs')
+    voice_import_db.add_argument('--error-mode', choices=('fail_fast', 'continue'), default='continue', help='behavior when a row-level voice import error occurs')
     _add_shared_logging_args(voice_import_db)
     voice_import_db.set_defaults(handler=_voice_import_db_command)
 
