@@ -81,12 +81,18 @@ export default function LexiconImportDbPage() {
     [result?.import_summary],
   );
   const skippedCount = useMemo(() => {
+    if (job?.progress_summary) {
+      return Number(job.progress_summary.skipped ?? 0);
+    }
     const payload = job?.result_payload ?? result?.import_summary ?? {};
     return Number((payload as Record<string, unknown>).skipped_words ?? 0)
       + Number((payload as Record<string, unknown>).skipped_phrases ?? 0)
       + Number((payload as Record<string, unknown>).skipped_reference_entries ?? 0);
   }, [job?.result_payload, result?.import_summary]);
   const failedCount = useMemo(() => {
+    if (job?.progress_summary) {
+      return Number(job.progress_summary.failed ?? 0);
+    }
     const payload = job?.result_payload ?? result?.import_summary ?? {};
     return Number((payload as Record<string, unknown>).failed_rows ?? 0);
   }, [job?.result_payload, result?.import_summary]);
@@ -103,6 +109,7 @@ export default function LexiconImportDbPage() {
   const progressPercent = job && job.progress_total > 0
     ? Math.round((job.progress_completed / job.progress_total) * 100)
     : 0;
+  const progressSummary = job?.progress_summary ?? null;
   const hasContext =
     Boolean(searchParam("inputPath") || searchParam("sourceReference") || searchParam("language")) ||
     inputPath.trim().length > 0 ||
@@ -411,24 +418,34 @@ export default function LexiconImportDbPage() {
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-5">
             <div className="rounded border border-gray-200 p-3">
-              <p className="text-gray-500">Done</p>
-              <p className="font-medium">{job.progress_completed}</p>
+              <p className="text-gray-500">To validate</p>
+              <p className="font-medium">{progressSummary?.to_validate ?? Math.max(job.progress_total - job.progress_completed, 0)}</p>
             </div>
             <div className="rounded border border-gray-200 p-3">
-              <p className="text-gray-500">To do</p>
-              <p className="font-medium">{Math.max(job.progress_total - job.progress_completed, 0)}</p>
+              <p className="text-gray-500">Validated</p>
+              <p className="font-medium">{progressSummary?.validated ?? job.progress_completed}</p>
             </div>
             <div className="rounded border border-gray-200 p-3">
-              <p className="text-gray-500">Total</p>
-              <p className="font-medium">{job.progress_total}</p>
+              <p className="text-gray-500">To import</p>
+              <p className="font-medium">{progressSummary?.to_import ?? Math.max(job.progress_total - job.progress_completed, 0)}</p>
+            </div>
+            <div className="rounded border border-gray-200 p-3">
+              <p className="text-gray-500">Imported</p>
+              <p className="font-medium">{progressSummary?.imported ?? job.progress_completed}</p>
             </div>
             <div className="rounded border border-gray-200 p-3">
               <p className="text-gray-500">Skipped</p>
               <p className="font-medium">{skippedCount}</p>
             </div>
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div className="rounded border border-gray-200 p-3">
               <p className="text-gray-500">Failed</p>
               <p className="font-medium">{failedCount}</p>
+            </div>
+            <div className="rounded border border-gray-200 p-3">
+              <p className="text-gray-500">Total</p>
+              <p className="font-medium">{progressSummary?.total ?? job.progress_total}</p>
             </div>
           </div>
 

@@ -50,6 +50,16 @@ describe("LexiconImportDbPage", () => {
         row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
       },
       result_payload: { created_words: 1 },
+      progress_summary: {
+        phase: "completed",
+        total: 1,
+        validated: 1,
+        imported: 1,
+        skipped: 0,
+        failed: 0,
+        to_validate: 0,
+        to_import: 0,
+      },
       progress_total: 1,
       progress_completed: 1,
       progress_current_label: "bank",
@@ -74,6 +84,16 @@ describe("LexiconImportDbPage", () => {
         row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
       },
       result_payload: null,
+      progress_summary: {
+        phase: "validating",
+        total: 1,
+        validated: 0,
+        imported: 0,
+        skipped: 0,
+        failed: 0,
+        to_validate: 1,
+        to_import: 1,
+      },
       progress_total: 1,
       progress_completed: 0,
       progress_current_label: "bank",
@@ -126,7 +146,10 @@ describe("LexiconImportDbPage", () => {
       errorMode: "continue",
     }));
     expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("To do1");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("To validate");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Validated");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("To import");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Imported");
   });
 
   it("shows failed-before-first-row copy instead of waiting text", async () => {
@@ -180,6 +203,16 @@ describe("LexiconImportDbPage", () => {
         row_summary: { row_count: 3, word_count: 0, phrase_count: 3, reference_count: 0 },
       },
       result_payload: null,
+      progress_summary: {
+        phase: "failed",
+        total: 3,
+        validated: 2,
+        imported: 0,
+        skipped: 0,
+        failed: 0,
+        to_validate: 1,
+        to_import: 3,
+      },
       progress_total: 3,
       progress_completed: 0,
       progress_current_label: "Validating 2/3: fuss over",
@@ -201,7 +234,7 @@ describe("LexiconImportDbPage", () => {
     render(<LexiconImportDbPage />);
 
     await waitFor(() => expect(getLexiconJob).toHaveBeenCalledWith("job-1"));
-    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Done1"));
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Validated1"));
     expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: Completed");
   });
 
@@ -220,8 +253,18 @@ describe("LexiconImportDbPage", () => {
           conflict_mode: "upsert",
           error_mode: "continue",
         },
-        result_payload: { created_words: 1 },
-        progress_total: 1,
+      result_payload: { created_words: 1 },
+      progress_summary: {
+        phase: "completed",
+        total: 1,
+        validated: 1,
+        imported: 1,
+        skipped: 0,
+        failed: 0,
+        to_validate: 0,
+        to_import: 0,
+      },
+      progress_total: 1,
         progress_completed: 1,
         progress_current_label: "bank",
         error_message: null,
@@ -252,8 +295,18 @@ describe("LexiconImportDbPage", () => {
           conflict_mode: "skip",
           error_mode: "continue",
         },
-        result_payload: { skipped_words: 1, failed_rows: 1 },
-        progress_total: 10,
+      result_payload: { skipped_words: 1, failed_rows: 1 },
+      progress_summary: {
+        phase: "failed",
+        total: 10,
+        validated: 10,
+        imported: 3,
+        skipped: 1,
+        failed: 1,
+        to_validate: 0,
+        to_import: 5,
+      },
+      progress_total: 10,
         progress_completed: 4,
         progress_current_label: null,
         error_message: "usage_note must be a non-empty string",

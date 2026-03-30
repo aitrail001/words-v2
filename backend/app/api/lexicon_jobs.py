@@ -31,6 +31,7 @@ from app.tasks.lexicon_jobs import (
     run_lexicon_compiled_materialize,
     run_lexicon_import_db,
     run_lexicon_jsonl_materialize,
+    run_lexicon_voice_import_db,
 )
 
 router = APIRouter()
@@ -47,6 +48,7 @@ class LexiconJobResponse(BaseModel):
     progress_total: int
     progress_completed: int
     progress_current_label: str | None
+    progress_summary: dict[str, int | str] | None
     error_message: str | None
     created_at: datetime
     started_at: datetime | None
@@ -84,6 +86,10 @@ def _import_db_module():
     return import_lexicon_tool_module("tools.lexicon.import_db")
 
 
+def _voice_import_db_module():
+    return import_lexicon_tool_module("tools.lexicon.voice_import_db")
+
+
 def _serialize_job(job: LexiconJob) -> LexiconJobResponse:
     progress_current_label = job.progress_current_label
     if (
@@ -103,6 +109,7 @@ def _serialize_job(job: LexiconJob) -> LexiconJobResponse:
         progress_total=job.progress_total,
         progress_completed=job.progress_completed,
         progress_current_label=progress_current_label,
+        progress_summary=dict((job.request_payload or {}).get("progress_summary") or {}) or None,
         error_message=job.error_message,
         created_at=job.created_at,
         started_at=job.started_at,
@@ -172,6 +179,39 @@ async def create_import_db_job(
         await db.refresh(job)
         await db.commit()
         await _enqueue_or_503(db, job, run_lexicon_import_db)
+    return _serialize_job(job)
+
+
+@router.post("/voice-import-db", response_model=LexiconJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def create_voice_import_db_job(
+    request: LexiconJobImportDbRequest,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LexiconJobResponse:
+    input_path = _resolve_import_input_path(request.input_path, settings=settings)
+    voice_import_db = _voice_import_db_module()
+    rows = voice_import_db.load_voice_manifest_rows(input_path)
+    row_summary = voice_import_db.summarize_voice_manifest_rows(rows)
+    job, created = await create_or_reuse_lexicon_job(
+        db,
+        created_by=current_user.id,
+        job_type="voice_import_db",
+        target_key=f"voice_import_db:{input_path}",
+        request_payload={
+            "input_path": str(input_path),
+            "source_type": request.source_type,
+            "source_reference": request.source_reference,
+            "language": request.language,
+            "conflict_mode": request.conflict_mode,
+            "error_mode": request.error_mode,
+            "row_summary": row_summary,
+        },
+    )
+    if created:
+        await db.refresh(job)
+        await db.commit()
+        await _enqueue_or_503(db, job, run_lexicon_voice_import_db)
     return _serialize_job(job)
 
 

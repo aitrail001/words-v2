@@ -85,6 +85,11 @@ export type LexiconInspectorWordDetail = {
     primary_target_kind: string;
     primary_target_base: string;
   }>;
+  voice_paths: Record<string, {
+    playback_url: string;
+    resolved_target_kind: string;
+    resolved_target_base: string;
+  } | null>;
 };
 
 export type LexiconInspectorPhraseDetail = {
@@ -112,6 +117,31 @@ export type LexiconInspectorPhraseDetail = {
     examples: Array<{ id: string; sentence: string; difficulty: string | null; order_index: number }>;
     translations: Array<{ locale: string; definition: string | null; usage_note: string | null; examples: string[] }>;
   }>;
+  voice_assets: Array<{
+    id: string;
+    content_scope: string;
+    meaning_id: string | null;
+    meaning_example_id: string | null;
+    locale: string;
+    voice_role: string;
+    provider: string;
+    family: string;
+    voice_id: string;
+    profile_key: string;
+    audio_format: string;
+    mime_type: string | null;
+    playback_url: string;
+    playback_route_kind: string;
+    status: string;
+    generated_at: string | null;
+    primary_target_kind: string;
+    primary_target_base: string;
+  }>;
+  voice_paths: Record<string, {
+    playback_url: string;
+    resolved_target_kind: string;
+    resolved_target_base: string;
+  } | null>;
   created_at: string | null;
 };
 

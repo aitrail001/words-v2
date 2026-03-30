@@ -72,6 +72,13 @@ function voiceScopeLabel(value: string): string {
   return value;
 }
 
+function voicePathTitle(scope: string): string {
+  if (scope === "word") return "Word path";
+  if (scope === "definition") return "Definition path";
+  if (scope === "example") return "Example path";
+  return `${scope} path`;
+}
+
 export default function LexiconDbInspectorPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [familyFilter, setFamilyFilter] = useState<LexiconInspectorFamilyFilter>("all");
@@ -346,6 +353,30 @@ export default function LexiconDbInspectorPage() {
                     )) : <p>—</p>}
                   </div>
                 </section>
+                <section className="rounded-lg border border-gray-200 p-4">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Voice paths by scope</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    {["word", "definition", "example"].map((scope) => {
+                      const path = detail.voice_paths?.[scope] ?? null;
+                      return (
+                        <div key={scope} className="rounded border border-gray-100 bg-gray-50 p-3 text-sm">
+                          <p className="font-medium text-gray-900">{voicePathTitle(scope)}</p>
+                          {path ? (
+                            <>
+                              <p className="mt-1 text-xs text-gray-500">playback</p>
+                              <p className="break-all text-xs text-gray-700">{path.playback_url}</p>
+                              <p className="mt-2 text-xs text-gray-500">resolved target</p>
+                              <p className="text-xs text-gray-700">{path.resolved_target_kind}</p>
+                              <p className="break-all text-xs text-gray-700">{path.resolved_target_base}</p>
+                            </>
+                          ) : (
+                            <p className="mt-1 text-xs text-gray-500">—</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
                 {detail.meanings.map((meaning) => (
                   <article key={meaning.id} className="rounded-lg border border-gray-200 p-4">
                     <p className="font-medium text-gray-900">{meaning.definition}</p>
@@ -428,6 +459,30 @@ export default function LexiconDbInspectorPage() {
                 <p className="text-gray-500">Seed metadata</p>
                 <pre className="mt-2 overflow-x-auto text-xs text-gray-700">{JSON.stringify(detail.seed_metadata ?? {}, null, 2)}</pre>
               </div>
+              <section className="rounded-lg border border-gray-200 p-4">
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Voice paths by scope</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  {["word", "definition", "example"].map((scope) => {
+                    const path = detail.voice_paths?.[scope] ?? null;
+                    return (
+                      <div key={scope} className="rounded border border-gray-100 bg-gray-50 p-3 text-sm">
+                        <p className="font-medium text-gray-900">{voicePathTitle(scope)}</p>
+                        {path ? (
+                          <>
+                            <p className="mt-1 text-xs text-gray-500">playback</p>
+                            <p className="break-all text-xs text-gray-700">{path.playback_url}</p>
+                            <p className="mt-2 text-xs text-gray-500">resolved target</p>
+                            <p className="text-xs text-gray-700">{path.resolved_target_kind}</p>
+                            <p className="break-all text-xs text-gray-700">{path.resolved_target_base}</p>
+                          </>
+                        ) : (
+                          <p className="mt-1 text-xs text-gray-500">—</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
               <div className="space-y-3">
                 {detail.senses.length ? detail.senses.map((sense, index) => (
                   <article key={sense.sense_id ?? `${detail.id}-sense-${index + 1}`} className="rounded-lg border border-gray-200 p-4">

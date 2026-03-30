@@ -133,6 +133,12 @@ class InspectorVoiceAssetResponse(BaseModel):
     primary_target_base: str
 
 
+class InspectorVoicePathResponse(BaseModel):
+    playback_url: str
+    resolved_target_kind: str
+    resolved_target_base: str
+
+
 class InspectorMeaningResponse(BaseModel):
     id: str
     definition: str
@@ -174,6 +180,7 @@ class LexiconInspectorWordDetail(BaseModel):
     meanings: list[InspectorMeaningResponse]
     enrichment_runs: list[LexiconEnrichmentRunResponse]
     voice_assets: list[InspectorVoiceAssetResponse]
+    voice_paths: dict[str, InspectorVoicePathResponse | None]
 
 
 class LexiconInspectorPhraseDetail(BaseModel):
@@ -194,6 +201,7 @@ class LexiconInspectorPhraseDetail(BaseModel):
     compiled_payload: dict | None
     senses: list[InspectorPhraseSenseResponse]
     voice_assets: list[InspectorVoiceAssetResponse]
+    voice_paths: dict[str, InspectorVoicePathResponse | None]
     created_at: str | None
 
 
@@ -265,6 +273,24 @@ def _voice_asset_response(asset: LexiconVoiceAsset) -> InspectorVoiceAssetRespon
         primary_target_kind=asset.storage_kind,
         primary_target_base=asset.storage_base,
     )
+
+
+def _voice_paths_response(assets: Sequence[LexiconVoiceAsset]) -> dict[str, InspectorVoicePathResponse | None]:
+    grouped: dict[str, InspectorVoicePathResponse | None] = {
+        "word": None,
+        "definition": None,
+        "example": None,
+    }
+    for scope in ("word", "definition", "example"):
+        asset = next((item for item in assets if item.content_scope == scope), None)
+        if asset is None:
+            continue
+        grouped[scope] = InspectorVoicePathResponse(
+            playback_url=build_voice_asset_playback_url(asset),
+            resolved_target_kind=asset.storage_kind,
+            resolved_target_base=asset.storage_base,
+        )
+    return grouped
 
 
 def _sort_entries(items: list[LexiconInspectorListEntry], sort: InspectorSort) -> list[LexiconInspectorListEntry]:
@@ -776,6 +802,7 @@ async def get_word_inspector_detail(
             for run in enrichment_runs
         ],
         voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
+        voice_paths=_voice_paths_response(voice_assets),
     )
     metrics = finalize_request_db_metrics(
         response,
@@ -874,6 +901,7 @@ async def get_phrase_inspector_detail(
         compiled_payload=entry.compiled_payload,
         senses=senses,
         voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
+        voice_paths=_voice_paths_response(voice_assets),
         created_at=_created_iso(entry.created_at),
     )
     metrics = finalize_request_db_metrics(
