@@ -22,15 +22,14 @@ from tools.lexicon.batch_ledger import (
     summarize_batch_jobs,
     write_jsonl_rows,
 )
-from tools.lexicon.batch_ingest import build_batch_output_summary, build_batch_result_rows, ingest_batch_outputs
-from tools.lexicon.batch_client import BatchClient
+from tools.lexicon.batch_ingest import build_batch_output_summary, ingest_batch_outputs
 from tools.lexicon.form_adjudication import adjudicate_forms, load_adjudications
 from tools.lexicon.compile_export import compile_snapshot
 from tools.lexicon.enrich import run_enrichment
 from tools.lexicon.export_db import export_db_fixture
 from tools.lexicon.ids import build_snapshot_id
 from tools.lexicon.inventory import load_seed_rows
-from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, run_import_file, summarize_compiled_rows
+from tools.lexicon.import_db import _ensure_backend_path, load_compiled_rows, run_import_file
 from tools.lexicon.rerank import RERANK_CANDIDATE_SOURCES
 from tools.lexicon.phrase_pipeline import build_phrase_snapshot_rows, write_phrase_snapshot
 from tools.lexicon.reference_pipeline import build_reference_snapshot_rows, write_reference_snapshot
@@ -48,6 +47,10 @@ from tools.lexicon.phrase_inventory import build_phrase_inventory_records
 
 _REASONING_EFFORT_CHOICES = ['none', 'low', 'medium', 'high']
 _RUNTIME_LOG_LEVEL_CHOICES = ['quiet', 'info', 'debug']
+
+
+def _empty_sense_provider(_word: str) -> list[object]:
+    return []
 
 
 def _utc_now() -> str:
@@ -184,9 +187,9 @@ def _build_base_command(args: argparse.Namespace) -> int:
             print(str(exc), file=sys.stderr)
             return 2
         rank_provider = build_wordfreq_rank_provider()
-        sense_provider = lambda word: []
+        sense_provider = _empty_sense_provider
     if requested_top_words is not None:
-        sense_provider = lambda word: []
+        sense_provider = _empty_sense_provider
 
     inventory_mode = 'seed_words'
     words = list(args.words)
