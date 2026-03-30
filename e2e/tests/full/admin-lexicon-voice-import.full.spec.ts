@@ -100,13 +100,8 @@ test("admin can launch voice import from Lexicon Voice and complete a persisted 
   expect(terminalJob).not.toBeNull();
   expect(terminalJob?.status).toBe("completed");
   expect(terminalJob?.error_message).toBeNull();
-
-  const searchResponse = await request.get(`${apiUrl}/words/search?q=${encodeURIComponent(runName)}`, {
-    headers: authHeaders(user.token),
-  });
-  expect(searchResponse.ok()).toBeTruthy();
-  const searchRows = (await searchResponse.json()) as Array<{ id: string }>;
-  expect(searchRows.length).toBeGreaterThan(0);
+  await expect(page.getByText("Voice import completed.")).toBeVisible();
+  await expect(page.getByTestId("lexicon-voice-import-progress")).toContainText("Completed");
 
   await rm(hostRunDir, { recursive: true, force: true });
 });

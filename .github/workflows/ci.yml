@@ -282,13 +282,14 @@ jobs:
       - name: Collect docker compose logs
         if: failure()
         run: |
-          mkdir -p e2e/test-results/compose-logs
-          docker compose -f docker-compose.yml --profile tests ps > e2e/test-results/compose-logs/ps.txt
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > e2e/test-results/compose-logs/migrate.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > e2e/test-results/compose-logs/worker.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > e2e/test-results/compose-logs/backend.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > e2e/test-results/compose-logs/frontend.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > e2e/test-results/compose-logs/admin-frontend.log || true
+          compose_logs_dir="${RUNNER_TEMP}/e2e-smoke-compose-logs"
+          mkdir -p "${compose_logs_dir}"
+          docker compose -f docker-compose.yml --profile tests ps > "${compose_logs_dir}/ps.txt"
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
 
       - name: Upload Playwright smoke artifacts
         if: always()
@@ -298,6 +299,7 @@ jobs:
           path: |
             e2e/playwright-report
             e2e/test-results
+            ${{ runner.temp }}/e2e-smoke-compose-logs
           if-no-files-found: ignore
 
       - name: Tear down app stack
@@ -400,13 +402,14 @@ jobs:
       - name: Collect docker compose logs
         if: failure()
         run: |
-          mkdir -p e2e/test-results/compose-logs
-          docker compose -f docker-compose.yml --profile tests ps > e2e/test-results/compose-logs/ps.txt
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > e2e/test-results/compose-logs/migrate.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > e2e/test-results/compose-logs/worker.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > e2e/test-results/compose-logs/backend.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > e2e/test-results/compose-logs/frontend.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > e2e/test-results/compose-logs/admin-frontend.log || true
+          compose_logs_dir="${RUNNER_TEMP}/e2e-admin-compose-logs"
+          mkdir -p "${compose_logs_dir}"
+          docker compose -f docker-compose.yml --profile tests ps > "${compose_logs_dir}/ps.txt"
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
 
       - name: Upload Playwright admin artifacts
         if: always()
@@ -416,6 +419,7 @@ jobs:
           path: |
             e2e/playwright-report
             e2e/test-results
+            ${{ runner.temp }}/e2e-admin-compose-logs
           if-no-files-found: ignore
 
       - name: Tear down app stack
@@ -518,13 +522,14 @@ jobs:
       - name: Collect docker compose logs
         if: failure()
         run: |
-          mkdir -p e2e/test-results/compose-logs
-          docker compose -f docker-compose.yml --profile tests ps > e2e/test-results/compose-logs/ps.txt
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > e2e/test-results/compose-logs/migrate.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > e2e/test-results/compose-logs/worker.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > e2e/test-results/compose-logs/backend.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > e2e/test-results/compose-logs/frontend.log || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > e2e/test-results/compose-logs/admin-frontend.log || true
+          compose_logs_dir="${RUNNER_TEMP}/e2e-user-compose-logs"
+          mkdir -p "${compose_logs_dir}"
+          docker compose -f docker-compose.yml --profile tests ps > "${compose_logs_dir}/ps.txt"
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
+          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
 
       - name: Upload Playwright user artifacts
         if: always()
@@ -534,6 +539,7 @@ jobs:
           path: |
             e2e/playwright-report
             e2e/test-results
+            ${{ runner.temp }}/e2e-user-compose-logs
           if-no-files-found: ignore
 
       - name: Tear down app stack
