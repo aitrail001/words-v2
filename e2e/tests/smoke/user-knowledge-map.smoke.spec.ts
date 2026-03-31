@@ -170,15 +170,15 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page.getByRole("heading", { name: /range [\d,]+\s*-\s*[\d,]+/i })).toBeVisible();
   await page.getByRole("button", { name: "Cards view" }).click();
   await expect(page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Use UK accent" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText("/rɪˈzɪl.i.əns/")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use US accent" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
   await page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` }).click();
   await expect
     .poll(() => requestedAudioUrls.at(-1))
     .toContain("/api/words/voice-assets/");
-  await page.getByRole("button", { name: "Use US accent" }).click();
-  await expect(page.getByRole("button", { name: "Use US accent" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
+  await page.getByRole("button", { name: "Use UK accent" }).click();
+  await expect(page.getByRole("button", { name: "Use UK accent" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("/rɪˈzɪl.i.əns/")).toBeVisible();
 
   await page.goto("/");
   const learnNextLink = page.getByRole("link", { name: /learn next:/i });
@@ -204,8 +204,8 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
 
   await page.goto(`/word/${fixture.wordId}`);
   await expect(page.getByRole("heading", { name: KNOWLEDGE_WORD })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Use UK accent" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText("/rɪˈzɪl.i.əns/")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use US accent" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
   await expect(page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
   await expect(page.getByRole("button", { name: `Play definition audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
   await expect(page.getByRole("button", { name: `Play example audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
@@ -215,9 +215,9 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
     .poll(() => requestedAudioUrls.at(-1))
     .toContain("/api/words/voice-assets/");
 
-  await page.getByRole("button", { name: "Use US accent" }).click();
-  await expect(page.getByRole("button", { name: "Use US accent" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
+  await page.getByRole("button", { name: "Use UK accent" }).click();
+  await expect(page.getByRole("button", { name: "Use UK accent" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("/rɪˈzɪl.i.əns/")).toBeVisible();
   await page.getByRole("button", { name: `Play definition audio for ${KNOWLEDGE_WORD}` }).click();
   await page.getByRole("button", { name: `Play example audio for ${KNOWLEDGE_WORD}` }).click();
   await expect.poll(() => requestedAudioUrls.length).toBeGreaterThanOrEqual(3);
