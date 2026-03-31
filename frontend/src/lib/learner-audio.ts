@@ -23,6 +23,10 @@ const localeToAccent = (locale: string | null | undefined): LearnerAccent | null
 const playbackCache = new Map<string, string>();
 let sharedAudio: HTMLAudioElement | null = null;
 
+function normalizePlaybackPath(playbackUrl: string): string {
+  return playbackUrl.startsWith("/api/") ? playbackUrl.slice(4) : playbackUrl;
+}
+
 export function getPlayableLearnerAccents(
   voiceAssets: LearnerVoiceAsset[] | null | undefined,
 ): LearnerAccent[] {
@@ -91,14 +95,15 @@ export function resolveLearnerVoiceAsset(
 }
 
 async function fetchAudioBlobUrl(playbackUrl: string): Promise<string> {
-  const cached = playbackCache.get(playbackUrl);
+  const normalizedPlaybackUrl = normalizePlaybackPath(playbackUrl);
+  const cached = playbackCache.get(normalizedPlaybackUrl);
   if (cached) {
     return cached;
   }
 
-  const blob = await apiClient.getBlob(playbackUrl);
+  const blob = await apiClient.getBlob(normalizedPlaybackUrl);
   const objectUrl = URL.createObjectURL(blob);
-  playbackCache.set(playbackUrl, objectUrl);
+  playbackCache.set(normalizedPlaybackUrl, objectUrl);
   return objectUrl;
 }
 
