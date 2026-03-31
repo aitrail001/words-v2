@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api-client";
-import { playLearnerEntryAudio } from "@/lib/learner-audio";
+import { getPlayableLearnerAccents, playLearnerEntryAudio } from "@/lib/learner-audio";
 
 jest.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -45,5 +45,26 @@ describe("learner-audio", () => {
 
     expect(played).toBe(true);
     expect(mockGetBlob).toHaveBeenCalledWith("/words/voice-assets/voice-1/content");
+  });
+
+  it("recognizes hyphenated imported locales for accent controls", () => {
+    expect(
+      getPlayableLearnerAccents([
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en-US",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+          relative_path: "learner/test/en-US.mp3",
+        },
+        {
+          id: "voice-uk",
+          content_scope: "word",
+          locale: "en-GB",
+          playback_url: "/api/words/voice-assets/voice-uk/content",
+          relative_path: "learner/test/en-GB.mp3",
+        },
+      ]),
+    ).toEqual(["us", "uk"]);
   });
 });
