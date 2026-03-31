@@ -7,7 +7,7 @@ import type { LearnerVoiceAsset } from "@/lib/knowledge-map-client";
 export type LearnerAccent = "us" | "uk" | "au";
 
 const localeToAccent = (locale: string | null | undefined): LearnerAccent | null => {
-  const normalized = (locale ?? "").trim().toLowerCase();
+  const normalized = (locale ?? "").trim().toLowerCase().replace(/-/g, "_");
   if (normalized === "en_us" || normalized === "us") {
     return "us";
   }
