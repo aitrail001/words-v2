@@ -20,7 +20,9 @@ jest.mock("@/lib/knowledge-map-client", () => {
 });
 jest.mock("@/lib/learner-audio", () => ({
   getPlayableLearnerAccents: jest.fn((voiceAssets) => {
-    const locales = new Set((voiceAssets ?? []).map((asset: { locale?: string }) => asset.locale));
+    const locales = new Set(
+      (voiceAssets ?? []).map((asset: { locale?: string }) => asset.locale?.toLowerCase().replace(/-/g, "_")),
+    );
     const accents: Array<"us" | "uk" | "au"> = [];
     if (locales.has("en_us")) {
       accents.push("us");
@@ -33,7 +35,17 @@ jest.mock("@/lib/learner-audio", () => ({
     }
     return accents;
   }),
+  getEntryLevelVoiceAssets: jest.fn((voiceAssets) =>
+    (voiceAssets ?? []).filter((asset: { content_scope?: string }) => asset.content_scope === "word"),
+  ),
   playLearnerEntryAudio: jest.fn(),
+  resolveDisplayedPronunciation: jest.fn(
+    (
+      pronunciation: string | null | undefined,
+      pronunciations: Partial<Record<"us" | "uk" | "au", string>> | undefined,
+      accent: "us" | "uk" | "au",
+    ) => pronunciations?.[accent] ?? pronunciations?.[accent === "us" ? "uk" : "us"] ?? pronunciations?.au ?? pronunciation ?? null,
+  ),
   resolveLearnerVoiceAsset: jest.fn((voiceAssets, accent, filters = {}) => {
     const filtered = (voiceAssets ?? []).filter((asset: {
       content_scope?: string;
@@ -68,7 +80,11 @@ jest.mock("@/lib/learner-audio", () => ({
     });
 
     const exactLocale = accent === "us" ? "en_us" : accent === "uk" ? "en_gb" : "en_au";
-    return filtered.find((asset: { locale?: string }) => asset.locale === exactLocale) ?? filtered[0] ?? null;
+    return (
+      filtered.find((asset: { locale?: string }) => asset.locale?.toLowerCase().replace(/-/g, "_") === exactLocale)
+      ?? filtered[0]
+      ?? null
+    );
   }),
 }));
 jest.mock("@/lib/user-preferences-client");
@@ -114,6 +130,7 @@ describe("KnowledgeEntryDetailPage", () => {
       status: "to_learn",
       cefr_level: "A2",
       pronunciation: "/baŋk/",
+      pronunciations: { us: "/bæŋk/", uk: "/baŋk/" },
       translation: "银行",
       primary_definition: "A financial institution.",
       meanings: [
@@ -330,6 +347,7 @@ describe("KnowledgeEntryDetailPage", () => {
       status: "to_learn",
       cefr_level: "A2",
       pronunciation: "/baŋk/",
+      pronunciations: { us: "/bæŋk/", uk: "/baŋk/" },
       translation: "银行",
       primary_definition: "A financial institution.",
       meanings: [
@@ -452,19 +470,20 @@ describe("KnowledgeEntryDetailPage", () => {
       status: "to_learn",
       cefr_level: "A2",
       pronunciation: "/baŋk/",
+      pronunciations: { us: "/bæŋk/", uk: "/baŋk/" },
       translation: "银行",
       primary_definition: "A financial institution.",
       voice_assets: [
         {
           id: "voice-us",
           content_scope: "word",
-          locale: "en_us",
+          locale: "en-US",
           playback_url: "/api/words/voice-assets/voice-us/content",
         },
         {
           id: "voice-uk",
           content_scope: "word",
-          locale: "en_gb",
+          locale: "en-GB",
           playback_url: "/api/words/voice-assets/voice-uk/content",
         },
       ],
@@ -499,6 +518,7 @@ describe("KnowledgeEntryDetailPage", () => {
 
     expect(await screen.findByRole("button", { name: "Play audio for Bank" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Use UK accent" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("/baŋk/")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Use US accent" }));
 
@@ -511,6 +531,7 @@ describe("KnowledgeEntryDetailPage", () => {
       }),
     );
 
+    await waitFor(() => expect(screen.getByText("/bæŋk/")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Play audio for Bank" }));
 
     expect(mockPlayLearnerEntryAudio).toHaveBeenCalledWith(
@@ -518,17 +539,20 @@ describe("KnowledgeEntryDetailPage", () => {
         {
           id: "voice-us",
           content_scope: "word",
-          locale: "en_us",
+          locale: "en-US",
           playback_url: "/api/words/voice-assets/voice-us/content",
         },
         {
           id: "voice-uk",
           content_scope: "word",
-          locale: "en_gb",
+          locale: "en-GB",
           playback_url: "/api/words/voice-assets/voice-uk/content",
         },
       ],
       "us",
+      {
+        contentScope: "word",
+      },
     );
   });
 

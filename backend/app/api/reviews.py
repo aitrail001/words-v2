@@ -116,6 +116,7 @@ class ReviewDetailResponse(BaseModel):
     entry_id: str
     display_text: str
     pronunciation: str | None = None
+    pronunciations: dict[str, str] = {}
     part_of_speech: str | None = None
     primary_definition: str | None = None
     primary_example: str | None = None

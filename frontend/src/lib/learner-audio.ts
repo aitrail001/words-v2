@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "@/lib/api-client";
-import type { LearnerVoiceAsset } from "@/lib/knowledge-map-client";
+import type { LearnerPronunciations, LearnerVoiceAsset } from "@/lib/knowledge-map-client";
 
 export type LearnerAccent = "us" | "uk" | "au";
 
@@ -38,6 +38,32 @@ export function getPlayableLearnerAccents(
     }
   }
   return accents.size > 0 ? ["us", "uk"] : [];
+}
+
+export function getEntryLevelVoiceAssets(
+  voiceAssets: LearnerVoiceAsset[] | null | undefined,
+): LearnerVoiceAsset[] {
+  return (voiceAssets ?? []).filter((asset) => asset.content_scope === "word");
+}
+
+export function resolveDisplayedPronunciation(
+  pronunciation: string | null | undefined,
+  pronunciations: LearnerPronunciations | null | undefined,
+  accent: LearnerAccent,
+): string | null {
+  const normalized = pronunciations ?? {};
+  const direct = normalized[accent];
+  if (direct) {
+    return direct;
+  }
+  const alternateAccent = accent === "us" ? "uk" : "us";
+  if (normalized[alternateAccent]) {
+    return normalized[alternateAccent] ?? null;
+  }
+  if (normalized.au) {
+    return normalized.au;
+  }
+  return pronunciation ?? null;
 }
 
 export function resolveLearnerVoiceAsset(

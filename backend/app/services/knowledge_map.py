@@ -237,6 +237,19 @@ def select_pronunciation(word: Word, accent: str) -> str | None:
     return None
 
 
+def extract_pronunciations(word: Word) -> dict[str, str]:
+    phonetics = word.phonetics if isinstance(word.phonetics, dict) else {}
+    pronunciations: dict[str, str] = {}
+    for accent in ("us", "uk", "au"):
+        value = phonetics.get(accent) if isinstance(phonetics.get(accent), dict) else {}
+        ipa = value.get("ipa")
+        if isinstance(ipa, str) and ipa.strip():
+            pronunciations[accent] = ipa.strip()
+    if not pronunciations and isinstance(word.phonetic, str) and word.phonetic.strip():
+        pronunciations[DEFAULT_ACCENT] = word.phonetic.strip()
+    return pronunciations
+
+
 def build_word_translation_map(translations: Sequence[Translation], locale: str) -> dict[uuid.UUID, str]:
     translation_map: dict[uuid.UUID, str] = {}
     for translation in translations:

@@ -18,8 +18,10 @@ import {
   type UserPreferences,
 } from "@/lib/user-preferences-client";
 import {
+  getEntryLevelVoiceAssets,
   getPlayableLearnerAccents,
   playLearnerEntryAudio,
+  resolveDisplayedPronunciation,
   resolveLearnerVoiceAsset,
 } from "@/lib/learner-audio";
 
@@ -408,8 +410,14 @@ export function KnowledgeEntryDetailPage({
   const activeAntonyms = activeWordMeaning?.antonyms ?? activePhraseSense?.antonyms ?? [];
   const activeCollocations = activeWordMeaning?.collocations ?? activePhraseSense?.collocations ?? [];
   const translationLanguageLabel = TRANSLATION_LANGUAGE_LABELS[preferences.translation_locale];
-  const accentLabel = detail.pronunciation ? `${ACCENT_LABELS[preferences.accent_preference]} Accent` : null;
-  const playableAccents = getPlayableLearnerAccents(detail.voice_assets);
+  const displayedPronunciation = resolveDisplayedPronunciation(
+    detail.pronunciation,
+    detail.pronunciations,
+    preferences.accent_preference,
+  );
+  const accentLabel = displayedPronunciation ? `${ACCENT_LABELS[preferences.accent_preference]} Accent` : null;
+  const entryLevelVoiceAssets = getEntryLevelVoiceAssets(detail.voice_assets);
+  const playableAccents = getPlayableLearnerAccents(entryLevelVoiceAssets);
   const statusActions =
     detail.status === "undecided"
       ? PRIMARY_STATUS_ACTIONS
@@ -459,7 +467,9 @@ export function KnowledgeEntryDetailPage({
   };
 
   const handlePlayAudio = () => {
-    void playLearnerEntryAudio(detail.voice_assets, preferences.accent_preference).catch(() => undefined);
+    void playLearnerEntryAudio(entryLevelVoiceAssets, preferences.accent_preference, {
+      contentScope: "word",
+    }).catch(() => undefined);
   };
 
   const handlePlayDefinitionAudio = () => {
@@ -535,7 +545,7 @@ export function KnowledgeEntryDetailPage({
                       onClick={handlePlayAudio}
                       className="rounded-full bg-[#eef8ff] px-3 py-1 text-[#1687a6]"
                     >
-                      Play Audio
+                      Play
                     </button>
                   )}
                   {playableAccents.map((accent) => (
@@ -554,12 +564,12 @@ export function KnowledgeEntryDetailPage({
                       {ACCENT_LABELS[accent]}
                     </button>
                   ))}
-                  {!canPlayAudio && accentLabel && detail.pronunciation && (
+                  {!canPlayAudio && accentLabel && displayedPronunciation && (
                     <span className="rounded-full bg-[#eef8ff] px-3 py-1 text-[#1687a6]">
                       {accentLabel}
                     </span>
                   )}
-                  {detail.pronunciation ? <span>{detail.pronunciation}</span> : null}
+                  {displayedPronunciation ? <span>{displayedPronunciation}</span> : null}
                   <span>#{detail.browse_rank.toLocaleString()}</span>
                 </div>
               </div>

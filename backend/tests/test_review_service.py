@@ -267,6 +267,8 @@ class TestQueueDue:
         sentence_result.scalar_one_or_none.return_value = "They jumped the gun and announced it early."
         distractor_result = MagicMock()
         distractor_result.scalars.return_value.all.return_value = ["cut corners", "miss the boat", "take over"]
+        accent_result = MagicMock()
+        accent_result.scalar_one_or_none.return_value = "us"
         history_count_result = MagicMock()
         history_count_result.scalar_one.return_value = 3
         mock_db.execute.side_effect = [
@@ -277,6 +279,7 @@ class TestQueueDue:
             distractor_result,
             sentence_result,
             sentence_result,
+            accent_result,
             history_count_result,
         ]
 
@@ -387,6 +390,8 @@ class TestQueueSubmit:
         ]
         sentence_result = MagicMock()
         sentence_result.scalar_one_or_none.return_value = "He barely made it through the door."
+        accent_result = MagicMock()
+        accent_result.scalar_one_or_none.return_value = "us"
         history_count_result = MagicMock()
         history_count_result.scalar_one.return_value = 4
         mock_db.execute.side_effect = [
@@ -394,6 +399,7 @@ class TestQueueSubmit:
             word_lookup_result,
             meanings_result,
             sentence_result,
+            accent_result,
             history_count_result,
         ]
 
@@ -438,6 +444,8 @@ class TestQueueSubmit:
         ]
         sentence_result = MagicMock()
         sentence_result.scalar_one_or_none.return_value = "Resilience helps teams adapt to change."
+        accent_result = MagicMock()
+        accent_result.scalar_one_or_none.return_value = "us"
         history_count_result = MagicMock()
         history_count_result.scalar_one.return_value = 2
         mock_db.execute.side_effect = [
@@ -445,6 +453,7 @@ class TestQueueSubmit:
             word_lookup_result,
             meanings_result,
             sentence_result,
+            accent_result,
             history_count_result,
         ]
 
@@ -659,6 +668,7 @@ class TestPromptFamilies:
         self, review_service, mock_db, monkeypatch
     ):
         user_id = uuid.uuid4()
+        monkeypatch.setattr(review_service, "_get_user_accent_preference", AsyncMock(return_value="uk"))
         monkeypatch.setattr(
             review_service,
             "_select_prompt_type",
@@ -710,9 +720,42 @@ class TestPromptFamilies:
         assert "A financial institution that stores money." in labels
         assert "A long narrow table." not in labels
         assert prompt["audio"]["preferred_playback_url"] == "/api/words/voice-assets/test-asset/content"
+        assert prompt["audio"]["preferred_locale"] == "us"
         assert prompt["audio_state"] == "ready"
+        audio_loader.assert_awaited_once_with([], preferred_accent="uk")
         review_service._fetch_same_day_definition_distractors.assert_awaited_once()
         review_service._fetch_adjacent_definition_distractors.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_build_word_detail_payload_uses_user_accent_and_exposes_pronunciations(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        word = Word(
+            id=uuid.uuid4(),
+            word="bank",
+            language="en",
+            phonetic="/bæŋk/",
+            phonetics={
+                "us": {"ipa": "/bæŋk/", "confidence": 0.99},
+                "uk": {"ipa": "/baŋk/", "confidence": 0.98},
+            },
+        )
+        meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", part_of_speech="noun")
+        monkeypatch.setattr(review_service, "_get_user_accent_preference", AsyncMock(return_value="uk"))
+        monkeypatch.setattr(review_service, "_fetch_first_meaning_sentence", AsyncMock(return_value="I went to the bank."))
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 3
+        mock_db.execute.return_value = count_result
+
+        payload = await review_service._build_word_detail_payload(
+            user_id=user_id,
+            word=word,
+            meanings=[meaning],
+        )
+
+        assert payload["pronunciation"] == "/baŋk/"
+        assert payload["pronunciations"] == {"us": "/bæŋk/", "uk": "/baŋk/"}
 
     @pytest.mark.asyncio
     async def test_build_card_prompt_uses_adjacent_frequency_distractors_when_same_day_pool_is_small(

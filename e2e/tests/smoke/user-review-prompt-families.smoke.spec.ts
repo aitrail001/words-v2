@@ -22,7 +22,7 @@ test("@smoke review prompt families render, replay audio, and submit mixed flows
     });
   });
 
-  await page.route("**/api/knowledge-map/entries/word/word-situation", async (route) => {
+  await page.route("**/api/knowledge-map/entries/word/word-situation*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -374,7 +374,7 @@ test("@smoke review relearn opens the full detail page with learner audio contro
     });
   });
 
-  await page.route("**/api/knowledge-map/entries/word/word-situation", async (route) => {
+  await page.route("**/api/knowledge-map/entries/word/word-situation*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
