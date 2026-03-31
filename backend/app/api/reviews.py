@@ -76,6 +76,18 @@ class ReviewOption(BaseModel):
     is_correct: bool = False
 
 
+class ReviewPromptAudioVariant(BaseModel):
+    playback_url: str
+    locale: str
+    relative_path: str | None = None
+
+
+class ReviewPromptAudioPayload(BaseModel):
+    preferred_playback_url: str | None = None
+    preferred_locale: str | None = None
+    locales: dict[str, ReviewPromptAudioVariant] = Field(default_factory=dict)
+
+
 class ReviewPrompt(BaseModel):
     mode: str
     prompt_type: str
@@ -89,6 +101,7 @@ class ReviewPrompt(BaseModel):
     source_word_id: str | None = None
     source_meaning_id: str | None = None
     audio_state: str = "not_available"
+    audio: ReviewPromptAudioPayload | None = None
 
 
 class ReviewDetailMeaning(BaseModel):

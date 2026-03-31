@@ -296,6 +296,24 @@ class TestQueueDue:
         }
 
 
+class TestHistoryLookup:
+    @pytest.mark.asyncio
+    async def test_get_latest_history_for_meaning_limits_to_first_row(self, review_service, mock_db):
+        user_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        latest_history = MagicMock()
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = latest_history
+        mock_db.execute.return_value = result
+
+        history = await review_service._get_latest_history_for_meaning(user_id, meaning_id)
+
+        assert history is latest_history
+        result.scalars.return_value.first.assert_called_once()
+        executed_query = mock_db.execute.call_args.args[0]
+        assert executed_query._limit_clause is not None
+
+
 class TestQueueSubmit:
     @pytest.mark.asyncio
     async def test_submit_queue_review_applies_sm2_and_increments_counters(
@@ -635,6 +653,110 @@ class TestPromptFamilies:
         assert prompt["input_mode"] == "speech_placeholder"
         assert prompt["voice_placeholder_text"] is not None
         assert prompt["audio_state"] == "placeholder"
+
+    @pytest.mark.asyncio
+    async def test_build_card_prompt_prefers_same_day_definition_distractors_before_frequency_fallback(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        monkeypatch.setattr(
+            review_service,
+            "_select_prompt_type",
+            MagicMock(return_value=ReviewService.PROMPT_TYPE_AUDIO_TO_DEFINITION),
+        )
+        review_service._fetch_same_day_definition_distractors = AsyncMock(
+            return_value=[
+                "A financial institution that stores money.",
+                "A raised pile of snow.",
+                "A large mass of cloud.",
+            ]
+        )
+        review_service._fetch_adjacent_definition_distractors = AsyncMock(
+            return_value=["A long narrow table."]
+        )
+        review_service._load_prompt_audio_assets = AsyncMock(return_value=[])
+        audio_loader = AsyncMock(
+            return_value={
+                "preferred_playback_url": "/api/words/voice-assets/test-asset/content",
+                "preferred_locale": "us",
+                "locales": {
+                    "us": {
+                        "playback_url": "/api/words/voice-assets/test-asset/content",
+                        "locale": "en_us",
+                        "relative_path": "word_bank/word/en_us/female-word.mp3",
+                    }
+                },
+            }
+        )
+        monkeypatch.setattr(review_service, "_build_prompt_audio_payload", audio_loader)
+
+        prompt = await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            source_text="bank",
+            definition="The land alongside a river.",
+            sentence=None,
+            is_phrase_entry=False,
+            distractor_seed="review",
+            meaning_id=uuid.uuid4(),
+            index=0,
+            alternative_definitions=None,
+            user_id=user_id,
+            source_entry_id=uuid.uuid4(),
+            source_entry_type="word",
+        )
+
+        assert prompt["prompt_type"] == "audio_to_definition"
+        labels = [option["label"] for option in prompt["options"]]
+        assert "A financial institution that stores money." in labels
+        assert "A long narrow table." not in labels
+        assert prompt["audio"]["preferred_playback_url"] == "/api/words/voice-assets/test-asset/content"
+        assert prompt["audio_state"] == "ready"
+        review_service._fetch_same_day_definition_distractors.assert_awaited_once()
+        review_service._fetch_adjacent_definition_distractors.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_build_card_prompt_uses_adjacent_frequency_distractors_when_same_day_pool_is_small(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        monkeypatch.setattr(
+            review_service,
+            "_select_prompt_type",
+            MagicMock(return_value=ReviewService.PROMPT_TYPE_AUDIO_TO_DEFINITION),
+        )
+        review_service._fetch_same_day_definition_distractors = AsyncMock(
+            return_value=["A financial institution that stores money."]
+        )
+        review_service._fetch_adjacent_definition_distractors = AsyncMock(
+            return_value=[
+                "A raised pile of snow.",
+                "A large mass of cloud.",
+            ]
+        )
+        review_service._load_prompt_audio_assets = AsyncMock(return_value=[])
+        audio_loader = AsyncMock(return_value=None)
+        monkeypatch.setattr(review_service, "_build_prompt_audio_payload", audio_loader)
+
+        prompt = await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            source_text="bank",
+            definition="The land alongside a river.",
+            sentence=None,
+            is_phrase_entry=False,
+            distractor_seed="review",
+            meaning_id=uuid.uuid4(),
+            index=0,
+            alternative_definitions=None,
+            user_id=user_id,
+            source_entry_id=uuid.uuid4(),
+            source_entry_type="word",
+        )
+
+        labels = [option["label"] for option in prompt["options"]]
+        assert "A financial institution that stores money." in labels
+        assert "A raised pile of snow." in labels
+        assert "A large mass of cloud." in labels
+        review_service._fetch_adjacent_definition_distractors.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_build_card_prompt_supports_collocation_check(

@@ -1,0 +1,31 @@
+services:
+  postgres:
+    container_name: learner-voice-review-postgres
+    ports:
+      - "5434:5432"
+
+  redis:
+    container_name: learner-voice-review-redis
+    ports:
+      - "6381:6379"
+
+  migrate:
+    container_name: learner-voice-review-migrate
+
+  backend:
+    container_name: learner-voice-review-backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vocabapp:devpassword@postgres:5432/vocabapp_dev
+      - DATABASE_URL_SYNC=postgresql://vocabapp:devpassword@postgres:5432/vocabapp_dev
+      - REDIS_URL=redis://redis:6379
+      - ALLOWED_ORIGINS=http://localhost:3201,http://127.0.0.1:3201,http://frontend:3000
+    ports:
+      - "4200:8000"
+
+  frontend:
+    container_name: learner-voice-review-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=/api
+      - BACKEND_URL=http://backend:8000/api
+    ports:
+      - "3201:3000"

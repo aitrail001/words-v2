@@ -13,12 +13,18 @@ from app.models import review as review_models
 from app.models.meaning_example import MeaningExample
 from app.models.meaning import Meaning
 from app.models.entry_review import EntryReviewEvent, EntryReviewState
+from app.models.lexicon_voice_asset import LexiconVoiceAsset
 from app.models.review import ReviewCard, ReviewSession
 from app.models.phrase_entry import PhraseEntry
 from app.models.phrase_sense import PhraseSense
 from app.models.phrase_sense_example import PhraseSenseExample
 from app.models.word import Word
 from app.spaced_repetition import calculate_next_review
+from app.services.voice_assets import (
+    build_voice_asset_playback_url,
+    load_phrase_voice_assets,
+    load_word_voice_assets,
+)
 
 logger = get_logger(__name__)
 
@@ -98,6 +104,101 @@ class ReviewService:
     def _prompt_value_for_options(value: str | None) -> str:
         normalized = (value or "").strip()
         return normalized if normalized else "Unavailable"
+
+    @staticmethod
+    def _normalize_audio_locale(value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower().replace("-", "_")
+        if not normalized:
+            return None
+        if normalized in {"en_us", "us"}:
+            return "us"
+        if normalized in {"en_gb", "uk", "gb"}:
+            return "uk"
+        if normalized in {"en_au", "au"}:
+            return "au"
+        return normalized
+
+    @classmethod
+    async def _build_prompt_audio_payload(
+        cls,
+        assets: list[LexiconVoiceAsset] | None,
+    ) -> dict[str, Any] | None:
+        locales: dict[str, dict[str, str | None]] = {}
+        for asset in assets or []:
+            locale_key = cls._normalize_audio_locale(getattr(asset, "locale", None))
+            if locale_key is None:
+                continue
+            locales.setdefault(
+                locale_key,
+                {
+                    "playback_url": build_voice_asset_playback_url(asset),
+                    "locale": asset.locale,
+                    "relative_path": asset.relative_path,
+                },
+            )
+
+        if not locales:
+            return None
+
+        preferred_locale = None
+        for candidate in ("us", "uk", "au"):
+            if candidate in locales:
+                preferred_locale = candidate
+                break
+        if preferred_locale is None:
+            preferred_locale = sorted(locales.keys())[0]
+
+        return {
+            "preferred_playback_url": locales[preferred_locale]["playback_url"],
+            "preferred_locale": preferred_locale,
+            "locales": locales,
+        }
+
+    @staticmethod
+    def _start_of_utc_day(now: datetime | None = None) -> tuple[datetime, datetime]:
+        current = now or datetime.now(timezone.utc)
+        day_start = current.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        return day_start, day_start + timedelta(days=1)
+
+    @staticmethod
+    def _same_day_due_condition(day_start: datetime, day_end: datetime):
+        return (
+            (EntryReviewState.recheck_due_at.is_not(None))
+            & (EntryReviewState.recheck_due_at >= day_start)
+            & (EntryReviewState.recheck_due_at < day_end)
+        ) | (
+            (EntryReviewState.next_due_at.is_not(None))
+            & (EntryReviewState.next_due_at >= day_start)
+            & (EntryReviewState.next_due_at < day_end)
+        )
+
+    @classmethod
+    def _merge_distractor_candidates(
+        cls,
+        *,
+        exclude: str | None,
+        primary: list[str],
+        fallback: list[str],
+        limit: int,
+    ) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        excluded = (exclude or "").strip().lower()
+        for source in (primary, fallback):
+            for candidate in source:
+                normalized = cls._normalize_prompt_text(candidate)
+                if normalized is None:
+                    continue
+                lowered = normalized.lower()
+                if lowered == excluded or lowered in seen:
+                    continue
+                seen.add(lowered)
+                merged.append(normalized)
+                if len(merged) >= limit:
+                    return merged
+        return merged
 
     @classmethod
     def _rank_entry_distractors(
@@ -218,7 +319,11 @@ class ReviewService:
         voice_placeholder_text: str | None = None,
         sentence_masked: str | None = None,
         audio_state: str = "not_available",
+        audio: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        resolved_audio_state = audio_state
+        if audio is not None and resolved_audio_state == "not_available":
+            resolved_audio_state = "ready"
         return {
             "mode": review_mode,
             "prompt_type": prompt_type,
@@ -229,7 +334,8 @@ class ReviewService:
             "input_mode": input_mode,
             "voice_placeholder_text": voice_placeholder_text,
             "sentence_masked": sentence_masked,
-            "audio_state": audio_state,
+            "audio_state": resolved_audio_state,
+            "audio": audio,
         }
 
     async def _fetch_word_distractors(self, correct_word: str, limit: int = 3) -> list[str]:
@@ -260,6 +366,121 @@ class ReviewService:
         candidates = [definition for definition in result.scalars().all() if self._normalize_prompt_text(definition)]
         return candidates[:limit]
 
+    async def _fetch_same_day_definition_distractors(
+        self,
+        *,
+        user_id: uuid.UUID,
+        target_meaning_id: uuid.UUID,
+        target_entry_type: str,
+        limit: int,
+    ) -> list[str]:
+        day_start, day_end = self._start_of_utc_day()
+        entry_type = self._normalize_entry_type(target_entry_type)
+
+        if entry_type == "phrase":
+            result = await self.db.execute(
+                select(PhraseSense.definition)
+                .join(PhraseEntry, PhraseSense.phrase_entry_id == PhraseEntry.id)
+                .join(
+                    EntryReviewState,
+                    and_(
+                        EntryReviewState.entry_type == literal("phrase"),
+                        EntryReviewState.entry_id == PhraseEntry.id,
+                    ),
+                )
+                .where(EntryReviewState.user_id == user_id)
+                .where(EntryReviewState.is_suspended.is_(False))
+                .where(self._same_day_due_condition(day_start, day_end))
+                .where(PhraseSense.id != target_meaning_id)
+                .order_by(
+                    EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                    EntryReviewState.next_due_at.asc().nullsfirst(),
+                    PhraseEntry.phrase_text.asc(),
+                    PhraseSense.order_index.asc(),
+                )
+                .limit(limit + 5)
+            )
+            return [
+                definition
+                for definition in result.scalars().all()
+                if self._normalize_prompt_text(definition)
+            ][:limit]
+
+        result = await self.db.execute(
+            select(Meaning.definition)
+            .join(Word, Meaning.word_id == Word.id)
+            .join(
+                EntryReviewState,
+                and_(
+                    EntryReviewState.entry_type == literal("word"),
+                    EntryReviewState.entry_id == Word.id,
+                ),
+            )
+            .where(EntryReviewState.user_id == user_id)
+            .where(EntryReviewState.is_suspended.is_(False))
+            .where(self._same_day_due_condition(day_start, day_end))
+            .where(Meaning.id != target_meaning_id)
+            .order_by(
+                EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                EntryReviewState.next_due_at.asc().nullsfirst(),
+                Word.frequency_rank.asc().nullslast(),
+                Meaning.order_index.asc(),
+            )
+            .limit(limit + 5)
+        )
+        return [
+            definition
+            for definition in result.scalars().all()
+            if self._normalize_prompt_text(definition)
+        ][:limit]
+
+    async def _fetch_adjacent_definition_distractors(
+        self,
+        *,
+        target_meaning_id: uuid.UUID,
+        target_entry_type: str,
+        limit: int,
+    ) -> list[str]:
+        entry_type = self._normalize_entry_type(target_entry_type)
+
+        if entry_type == "phrase":
+            result = await self.db.execute(
+                select(PhraseSense.definition)
+                .join(PhraseEntry, PhraseSense.phrase_entry_id == PhraseEntry.id)
+                .where(PhraseSense.id != target_meaning_id)
+                .order_by(PhraseEntry.phrase_text.asc(), PhraseSense.order_index.asc())
+                .limit(limit + 5)
+            )
+            return [
+                definition
+                for definition in result.scalars().all()
+                if self._normalize_prompt_text(definition)
+            ][:limit]
+
+        target_rank_result = await self.db.execute(
+            select(Word.frequency_rank)
+            .join(Meaning, Meaning.word_id == Word.id)
+            .where(Meaning.id == target_meaning_id)
+        )
+        target_rank = target_rank_result.scalar_one_or_none()
+        fallback_rank = 1_000_000
+        distance_expr = func.abs(
+            func.coalesce(Word.frequency_rank, literal(fallback_rank))
+            - literal(target_rank if target_rank is not None else fallback_rank)
+        )
+        result = await self.db.execute(
+            select(Meaning.definition)
+            .join(Word, Meaning.word_id == Word.id)
+            .where(Meaning.id != target_meaning_id)
+            .order_by(distance_expr.asc(), Word.frequency_rank.asc().nullslast(), Word.word.asc(), Meaning.order_index.asc())
+            .limit(limit + 10)
+        )
+        return [
+            definition
+            for definition in result.scalars().all()
+            if self._normalize_prompt_text(definition)
+        ][:limit]
+
     async def _fetch_phrase_distractors(
         self,
         correct_phrase: str,
@@ -280,6 +501,113 @@ class ReviewService:
             if self._normalize_prompt_text(phrase)
         ]
         return candidates[:limit]
+
+    async def _fetch_same_day_entry_distractors(
+        self,
+        *,
+        user_id: uuid.UUID,
+        target_entry_id: uuid.UUID,
+        target_entry_type: str,
+        limit: int,
+    ) -> list[str]:
+        day_start, day_end = self._start_of_utc_day()
+        entry_type = self._normalize_entry_type(target_entry_type)
+
+        if entry_type == "phrase":
+            result = await self.db.execute(
+                select(PhraseEntry.phrase_text)
+                .join(
+                    EntryReviewState,
+                    and_(
+                        EntryReviewState.entry_type == literal("phrase"),
+                        EntryReviewState.entry_id == PhraseEntry.id,
+                    ),
+                )
+                .where(EntryReviewState.user_id == user_id)
+                .where(EntryReviewState.is_suspended.is_(False))
+                .where(self._same_day_due_condition(day_start, day_end))
+                .where(PhraseEntry.id != target_entry_id)
+                .order_by(
+                    EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                    EntryReviewState.next_due_at.asc().nullsfirst(),
+                    PhraseEntry.phrase_text.asc(),
+                )
+                .limit(limit + 5)
+            )
+            return [
+                phrase
+                for phrase in result.scalars().all()
+                if self._normalize_prompt_text(phrase)
+            ][:limit]
+
+        result = await self.db.execute(
+            select(Word.word)
+            .join(
+                EntryReviewState,
+                and_(
+                    EntryReviewState.entry_type == literal("word"),
+                    EntryReviewState.entry_id == Word.id,
+                ),
+            )
+            .where(EntryReviewState.user_id == user_id)
+            .where(EntryReviewState.is_suspended.is_(False))
+            .where(self._same_day_due_condition(day_start, day_end))
+            .where(Word.id != target_entry_id)
+            .order_by(
+                EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                EntryReviewState.next_due_at.asc().nullsfirst(),
+                Word.frequency_rank.asc().nullslast(),
+            )
+            .limit(limit + 5)
+        )
+        return [
+            word
+            for word in result.scalars().all()
+            if self._normalize_prompt_text(word)
+        ][:limit]
+
+    async def _fetch_adjacent_entry_distractors(
+        self,
+        *,
+        target_entry_id: uuid.UUID,
+        target_entry_type: str,
+        limit: int,
+    ) -> list[str]:
+        entry_type = self._normalize_entry_type(target_entry_type)
+
+        if entry_type == "phrase":
+            result = await self.db.execute(
+                select(PhraseEntry.phrase_text)
+                .where(PhraseEntry.id != target_entry_id)
+                .order_by(PhraseEntry.phrase_text.asc())
+                .limit(limit + 5)
+            )
+            return [
+                phrase
+                for phrase in result.scalars().all()
+                if self._normalize_prompt_text(phrase)
+            ][:limit]
+
+        target_rank_result = await self.db.execute(
+            select(Word.frequency_rank).where(Word.id == target_entry_id)
+        )
+        target_rank = target_rank_result.scalar_one_or_none()
+        fallback_rank = 1_000_000
+        distance_expr = func.abs(
+            func.coalesce(Word.frequency_rank, literal(fallback_rank))
+            - literal(target_rank if target_rank is not None else fallback_rank)
+        )
+        result = await self.db.execute(
+            select(Word.word)
+            .where(Word.id != target_entry_id)
+            .order_by(distance_expr.asc(), Word.frequency_rank.asc().nullslast(), Word.word.asc())
+            .limit(limit + 10)
+        )
+        return [
+            word
+            for word in result.scalars().all()
+            if self._normalize_prompt_text(word)
+        ][:limit]
 
     @staticmethod
     def _format_interval_option_name(value: str) -> str:
@@ -304,6 +632,61 @@ class ReviewService:
             .limit(1)
         )
         return self._normalize_prompt_text(result.scalar_one_or_none())
+
+    async def _load_prompt_audio_assets(
+        self,
+        *,
+        source_entry_type: str,
+        source_entry_id: uuid.UUID,
+    ) -> list[LexiconVoiceAsset]:
+        entry_type = self._normalize_entry_type(source_entry_type)
+        if entry_type == "phrase":
+            return await load_phrase_voice_assets(
+                self.db,
+                phrase_entry_id=source_entry_id,
+                phrase_sense_ids=[],
+                phrase_example_ids=[],
+            )
+        return await load_word_voice_assets(
+            self.db,
+            word_id=source_entry_id,
+            meaning_ids=[],
+            example_ids=[],
+        )
+
+    async def _load_prompt_audio_payload(
+        self,
+        *,
+        entry_type: str,
+        entry_id: uuid.UUID,
+    ) -> dict[str, Any] | None:
+        normalized_entry_type = self._normalize_entry_type(entry_type)
+        if normalized_entry_type == "phrase":
+            assets = await load_phrase_voice_assets(
+                self.db,
+                phrase_entry_id=entry_id,
+                phrase_sense_ids=[],
+                phrase_example_ids=[],
+            )
+            entry_assets = [
+                asset
+                for asset in assets
+                if asset.content_scope == "word" and asset.phrase_entry_id == entry_id
+            ]
+            return await self._build_prompt_audio_payload(entry_assets)
+
+        assets = await load_word_voice_assets(
+            self.db,
+            word_id=entry_id,
+            meaning_ids=[],
+            example_ids=[],
+        )
+        entry_assets = [
+            asset
+            for asset in assets
+            if asset.content_scope == "word" and asset.word_id == entry_id
+        ]
+        return await self._build_prompt_audio_payload(entry_assets)
 
     async def _build_word_detail_payload(
         self,
@@ -616,6 +999,7 @@ class ReviewService:
         distractors: list[str] | None = None,
         sentence: str | None = None,
         alternative_definitions: list[str] | None = None,
+        audio: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         stem, question = await self._resolve_prompt_text(
             prompt_type=prompt_type,
@@ -692,6 +1076,8 @@ class ReviewService:
             expected_input=expected_input,
             input_mode="choice",
             sentence_masked=sentence_masked,
+            audio_state="ready" if prompt_type == self.PROMPT_TYPE_AUDIO_TO_DEFINITION and audio else "not_available",
+            audio=audio,
         )
 
     async def _build_card_prompt(
@@ -706,6 +1092,9 @@ class ReviewService:
         meaning_id: uuid.UUID,
         index: int = 0,
         alternative_definitions: list[str] | None = None,
+        user_id: uuid.UUID | None = None,
+        source_entry_id: uuid.UUID | None = None,
+        source_entry_type: str | None = None,
     ) -> dict[str, Any]:
         available_prompt_types: list[str] = []
         if sentence:
@@ -730,6 +1119,7 @@ class ReviewService:
         )
 
         prompt_type = self._select_prompt_type(available_prompt_types, index=index)
+        normalized_entry_type = self._normalize_entry_type(source_entry_type or ("phrase" if is_phrase_entry else "word"))
         target_is_word = prompt_type in {
             self.PROMPT_TYPE_DEFINITION_TO_ENTRY,
             self.PROMPT_TYPE_SENTENCE_GAP,
@@ -738,13 +1128,34 @@ class ReviewService:
         }
 
         distractors: list[str] = []
+        audio: dict[str, Any] | None = None
         if prompt_type in {
             self.PROMPT_TYPE_DEFINITION_TO_ENTRY,
             self.PROMPT_TYPE_SENTENCE_GAP,
             self.PROMPT_TYPE_COLLOCATION_CHECK,
             self.PROMPT_TYPE_SITUATION_MATCHING,
         }:
-            if is_phrase_entry:
+            if user_id is not None and source_entry_id is not None:
+                same_day = await self._fetch_same_day_entry_distractors(
+                    user_id=user_id,
+                    target_entry_id=source_entry_id,
+                    target_entry_type=normalized_entry_type,
+                    limit=3,
+                )
+                fallback: list[str] = []
+                if len(self._merge_distractor_candidates(exclude=source_text, primary=same_day, fallback=[], limit=3)) < 3:
+                    fallback = await self._fetch_adjacent_entry_distractors(
+                        target_entry_id=source_entry_id,
+                        target_entry_type=normalized_entry_type,
+                        limit=3,
+                    )
+                distractors = self._merge_distractor_candidates(
+                    exclude=source_text,
+                    primary=same_day,
+                    fallback=fallback,
+                    limit=3,
+                )
+            elif is_phrase_entry:
                 distractors = await self._fetch_phrase_distractors(
                     correct_phrase=source_text,
                     limit=3,
@@ -767,10 +1178,38 @@ class ReviewService:
         }:
             distractors = []
         else:
-            distractors = await self._fetch_definition_distractors(
-                correct_meaning_id=meaning_id,
-                limit=3,
+            if user_id is not None and source_entry_id is not None:
+                same_day = await self._fetch_same_day_definition_distractors(
+                    user_id=user_id,
+                    target_meaning_id=meaning_id,
+                    target_entry_type=normalized_entry_type,
+                    limit=3,
+                )
+                fallback = []
+                if len(self._merge_distractor_candidates(exclude=definition, primary=same_day, fallback=[], limit=3)) < 3:
+                    fallback = await self._fetch_adjacent_definition_distractors(
+                        target_meaning_id=meaning_id,
+                        target_entry_type=normalized_entry_type,
+                        limit=3,
+                    )
+                distractors = self._merge_distractor_candidates(
+                    exclude=definition,
+                    primary=same_day,
+                    fallback=fallback,
+                    limit=3,
+                )
+            else:
+                distractors = await self._fetch_definition_distractors(
+                    correct_meaning_id=meaning_id,
+                    limit=3,
+                )
+
+        if prompt_type == self.PROMPT_TYPE_AUDIO_TO_DEFINITION and source_entry_id is not None:
+            audio_assets = await self._load_prompt_audio_assets(
+                source_entry_type=normalized_entry_type,
+                source_entry_id=source_entry_id,
             )
+            audio = await self._build_prompt_audio_payload(audio_assets)
 
         prompt = await self._build_mandated_prompt(
             review_mode=review_mode,
@@ -781,6 +1220,7 @@ class ReviewService:
             distractors=distractors,
             sentence=self._prompt_value_for_options(sentence),
             alternative_definitions=alternative_definitions,
+            audio=audio,
         )
         if prompt_type == self.PROMPT_TYPE_SENTENCE_GAP:
             prompt["sentence_masked"] = self._mask_sentence(
@@ -1212,6 +1652,9 @@ class ReviewService:
                             for item in meanings
                             if item.id != meaning.id
                         ],
+                        user_id=user_id,
+                        source_entry_id=word.id,
+                        source_entry_type="word",
                     )
                     detail = await self._build_word_detail_payload(
                         user_id=user_id,
@@ -1267,13 +1710,16 @@ class ReviewService:
                     sentence=sentence,
                     is_phrase_entry=True,
                     distractor_seed=str(sense.id),
-                    meaning_id=uuid.uuid4(),
+                    meaning_id=sense.id,
                     index=index,
                     alternative_definitions=[
                         self._normalize_prompt_text(item.definition) or "No definition available."
                         for item in senses
                         if item.id != sense.id
                     ],
+                    user_id=user_id,
+                    source_entry_id=phrase.id,
+                    source_entry_type="phrase",
                 )
                 detail = await self._build_phrase_detail_payload(
                     user_id=user_id,
@@ -1405,6 +1851,9 @@ class ReviewService:
                 distractor_seed=str(getattr(item, "meaning_id", "")),
                 meaning_id=meaning_id or uuid.uuid4(),
                 index=len(due_items),
+                user_id=user_id,
+                source_entry_id=source_word_id,
+                source_entry_type="word",
             )
             detail = None
             if source_word_id is not None:
@@ -1454,8 +1903,9 @@ class ReviewService:
                 self.history_model.meaning_id == meaning_id,
             )
             .order_by(self.history_model.created_at.desc())
+            .limit(1)
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def _build_learning_cards_for_word(
         self,
@@ -1497,6 +1947,9 @@ class ReviewService:
                     for definition in alternative_definitions
                     if definition != (self._normalize_prompt_text(meaning.definition) or "No definition available.")
                 ],
+                user_id=user_id,
+                source_entry_id=word.id,
+                source_entry_type="word",
             )
 
             cards.append(
@@ -1547,13 +2000,16 @@ class ReviewService:
                 sentence=sentence,
                 is_phrase_entry=True,
                 distractor_seed=str(sense.id),
-                meaning_id=uuid.uuid4(),
+                meaning_id=sense.id,
                 index=index,
                 alternative_definitions=[
                     definition
                     for definition in alternative_definitions
                     if definition != (self._normalize_prompt_text(sense.definition) or "No definition available.")
                 ],
+                user_id=user_id,
+                source_entry_id=phrase.id,
+                source_entry_type="phrase",
             )
 
             cards.append(
