@@ -337,6 +337,7 @@ class TestKnowledgeMapRange:
             ),
             mappings_one_result({"previous_rank": None, "next_rank": None}),
             scalars_all_result([]),
+            scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([sense]),
             scalars_all_result([sense_localization]),
@@ -363,6 +364,7 @@ class TestKnowledgeMapRange:
                 "primary_definition": "To depend on someone.",
                 "part_of_speech": None,
                 "phrase_kind": "phrasal_verb",
+                "voice_assets": [],
             }
         ]
 
@@ -419,8 +421,6 @@ class TestKnowledgeMapRange:
             localized_definition="contar con",
             localized_usage_note="common",
         )
-        statuses = [LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word.id, status="to_learn")]
-
         mock_db.execute.side_effect = [
             scalar_one_or_none_result(user),
             mappings_all_result(
@@ -448,15 +448,14 @@ class TestKnowledgeMapRange:
                 ]
             ),
             mappings_one_result({"previous_rank": None, "next_rank": None}),
-            scalars_all_result(statuses),
+            scalars_all_result([]),
+            scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([word_meaning]),
             scalars_all_result([translation]),
             scalars_all_result([word]),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
-            scalars_all_result([]),
-            scalars_all_result([]),
         ]
 
         response = await client.get(
@@ -469,12 +468,14 @@ class TestKnowledgeMapRange:
         assert data["range_start"] == 1
         assert len(data["items"]) == 2
         assert data["items"][0]["entry_type"] == "word"
-        assert data["items"][0]["status"] == "to_learn"
+        assert data["items"][0]["status"] == "undecided"
         assert data["items"][0]["pronunciation"] == "/baŋk/"
         assert data["items"][0]["translation"] == "banco"
+        assert data["items"][0]["voice_assets"] == []
         assert data["items"][1]["entry_type"] == "phrase"
         assert data["items"][1]["primary_definition"] == "To depend on someone."
         assert data["items"][1]["translation"] == "contar con"
+        assert data["items"][1]["voice_assets"] == []
 
 
 class TestKnowledgeMapList:
@@ -561,6 +562,7 @@ class TestKnowledgeMapList:
                     }
                 ]
             ),
+            scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([word_new_meaning]),
             scalars_all_result([word_new_translation]),
@@ -581,6 +583,7 @@ class TestKnowledgeMapList:
                     }
                 ]
             ),
+            scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([word_learning_meaning]),
             scalars_all_result([word_learning_translation]),
@@ -601,6 +604,7 @@ class TestKnowledgeMapList:
                     }
                 ]
             ),
+            scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
@@ -666,6 +670,7 @@ class TestKnowledgeMapDetail:
             scalars_all_result([meaning]),
             scalars_all_result([]),
             scalars_all_result([translation]),
+            scalars_all_result([]),
             scalars_all_result([]),
             scalar_one_or_none_result(word_status),
             mappings_all_result(
@@ -817,6 +822,7 @@ class TestKnowledgeMapDetail:
                     relation_proper_noun_duplicate,
                 ]
             ),
+            scalars_all_result([]),
             scalar_one_or_none_result(status),
             mappings_all_result(
                 [
@@ -964,6 +970,7 @@ class TestKnowledgeMapDetail:
             scalars_all_result([example]),
             scalars_all_result([translation]),
             scalars_all_result([synonym, antonym, collocation]),
+            scalars_all_result([]),
             scalar_one_or_none_result(status),
             mappings_all_result(
                 [
@@ -1148,6 +1155,7 @@ class TestKnowledgeMapDetail:
             scalars_all_result([phrase_sense_localization]),
             scalars_all_result([phrase_example]),
             scalars_all_result([phrase_example_localization]),
+            scalars_all_result([]),
             mappings_all_result([]),
             mappings_all_result([]),
         ]
@@ -1285,6 +1293,7 @@ class TestKnowledgeMapDetail:
             scalars_all_result([phrase_sense_localization]),
             scalars_all_result([phrase_example]),
             scalars_all_result([phrase_example_localization]),
+            scalars_all_result([]),
             mappings_all_result(
                 [
                     {
@@ -1504,6 +1513,7 @@ class TestKnowledgeMapDetail:
             scalars_all_result([earlier_localization, later_localization]),
             scalars_all_result([earlier_example, later_example]),
             scalars_all_result([earlier_example_localization, later_example_localization]),
+            scalars_all_result([]),
             mappings_all_result([]),
             mappings_all_result([]),
         ]
@@ -1640,6 +1650,7 @@ class TestKnowledgeMapSearchAndHistory:
                     },
                 ]
             ),
+            scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([meaning]),
             scalars_all_result([translation]),

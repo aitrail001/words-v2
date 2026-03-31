@@ -2,7 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRouter } from "next/navigation";
 import { KnowledgeEntryDetailPage } from "@/components/knowledge-entry-detail-page";
 import { getKnowledgeMapEntryDetail } from "@/lib/knowledge-map-client";
-import { getUserPreferences } from "@/lib/user-preferences-client";
+import { playLearnerEntryAudio } from "@/lib/learner-audio";
+import { getUserPreferences, updateUserPreferences } from "@/lib/user-preferences-client";
 
 jest.mock("next/navigation", () => ({
   useRouter: jest.fn(),
@@ -17,6 +18,59 @@ jest.mock("@/lib/knowledge-map-client", () => {
     normalizeLearnerTranslation: jest.fn(actual.normalizeLearnerTranslation),
   };
 });
+jest.mock("@/lib/learner-audio", () => ({
+  getPlayableLearnerAccents: jest.fn((voiceAssets) => {
+    const locales = new Set((voiceAssets ?? []).map((asset: { locale?: string }) => asset.locale));
+    const accents: Array<"us" | "uk" | "au"> = [];
+    if (locales.has("en_us")) {
+      accents.push("us");
+    }
+    if (locales.has("en_gb")) {
+      accents.push("uk");
+    }
+    if (locales.has("en_au")) {
+      accents.push("au");
+    }
+    return accents;
+  }),
+  playLearnerEntryAudio: jest.fn(),
+  resolveLearnerVoiceAsset: jest.fn((voiceAssets, accent, filters = {}) => {
+    const filtered = (voiceAssets ?? []).filter((asset: {
+      content_scope?: string;
+      meaning_id?: string | null;
+      meaning_example_id?: string | null;
+      phrase_sense_id?: string | null;
+      phrase_sense_example_id?: string | null;
+      locale?: string;
+    }) => {
+      if (filters.contentScope && asset.content_scope !== filters.contentScope) {
+        return false;
+      }
+      if (filters.meaningId !== undefined && (asset.meaning_id ?? null) !== filters.meaningId) {
+        return false;
+      }
+      if (
+        filters.meaningExampleId !== undefined
+        && (asset.meaning_example_id ?? null) !== filters.meaningExampleId
+      ) {
+        return false;
+      }
+      if (filters.phraseSenseId !== undefined && (asset.phrase_sense_id ?? null) !== filters.phraseSenseId) {
+        return false;
+      }
+      if (
+        filters.phraseSenseExampleId !== undefined
+        && (asset.phrase_sense_example_id ?? null) !== filters.phraseSenseExampleId
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const exactLocale = accent === "us" ? "en_us" : accent === "uk" ? "en_gb" : "en_au";
+    return filtered.find((asset: { locale?: string }) => asset.locale === exactLocale) ?? filtered[0] ?? null;
+  }),
+}));
 jest.mock("@/lib/user-preferences-client");
 
 describe("KnowledgeEntryDetailPage", () => {
@@ -25,6 +79,8 @@ describe("KnowledgeEntryDetailPage", () => {
     typeof getKnowledgeMapEntryDetail
   >;
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
+  const mockUpdateUserPreferences = updateUserPreferences as jest.MockedFunction<typeof updateUserPreferences>;
+  const mockPlayLearnerEntryAudio = playLearnerEntryAudio as jest.MockedFunction<typeof playLearnerEntryAudio>;
   const mockNormalizeLearnerTranslation = jest.requireMock("@/lib/knowledge-map-client")
     .normalizeLearnerTranslation as jest.MockedFunction<
     typeof import("@/lib/knowledge-map-client").normalizeLearnerTranslation
@@ -39,6 +95,13 @@ describe("KnowledgeEntryDetailPage", () => {
       knowledge_view_preference: "cards",
       show_translations_by_default: true,
     });
+    mockUpdateUserPreferences.mockResolvedValue({
+      accent_preference: "us",
+      translation_locale: "zh-Hans",
+      knowledge_view_preference: "cards",
+      show_translations_by_default: true,
+    });
+    mockPlayLearnerEntryAudio.mockResolvedValue(true);
   });
 
   it("renders both English and localized text for a word detail", async () => {
@@ -377,5 +440,184 @@ describe("KnowledgeEntryDetailPage", () => {
     expect(screen.getByText("你可以依靠我。")).toBeInTheDocument();
     expect(screen.getByText("We bank on their support every year.")).toBeInTheDocument();
     expect(screen.getByText("我们每年都依靠他们的支持。")).toBeInTheDocument();
+  });
+
+  it("persists accent changes and plays learner audio from the selected accent", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      translation: "银行",
+      primary_definition: "A financial institution.",
+      voice_assets: [
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en_us",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+        },
+        {
+          id: "voice-uk",
+          content_scope: "word",
+          locale: "en_gb",
+          playback_url: "/api/words/voice-assets/voice-uk/content",
+        },
+      ],
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A financial institution.",
+          localized_definition: "银行",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [{ id: "translation-1", language: "zh-Hans", translation: "银行" }],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    expect(await screen.findByRole("button", { name: "Play audio for Bank" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use UK accent" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Use US accent" }));
+
+    await waitFor(() =>
+      expect(mockUpdateUserPreferences).toHaveBeenCalledWith({
+        accent_preference: "us",
+        translation_locale: "zh-Hans",
+        knowledge_view_preference: "cards",
+        show_translations_by_default: true,
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Play audio for Bank" }));
+
+    expect(mockPlayLearnerEntryAudio).toHaveBeenCalledWith(
+      [
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en_us",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+        },
+        {
+          id: "voice-uk",
+          content_scope: "word",
+          locale: "en_gb",
+          playback_url: "/api/words/voice-assets/voice-uk/content",
+        },
+      ],
+      "us",
+    );
+  });
+
+  it("plays definition and example audio for the active meaning", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      translation: "银行",
+      voice_assets: [
+        {
+          id: "voice-definition-us",
+          content_scope: "definition",
+          meaning_id: "meaning-1",
+          locale: "en_us",
+          playback_url: "/api/words/voice-assets/voice-definition-us/content",
+        },
+        {
+          id: "voice-example-us",
+          content_scope: "example",
+          meaning_example_id: "example-1",
+          locale: "en_us",
+          playback_url: "/api/words/voice-assets/voice-example-us/content",
+        },
+      ],
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A financial institution.",
+          localized_definition: "银行",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [
+            {
+              id: "example-1",
+              sentence: "I deposited cash at the bank.",
+              difficulty: "A2",
+              translation: "我在银行存了现金。",
+            },
+          ],
+          translations: [{ id: "translation-1", language: "zh-Hans", translation: "银行" }],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    expect(await screen.findByRole("button", { name: "Play definition audio for Bank" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play example audio for Bank" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Play definition audio for Bank" }));
+    expect(mockPlayLearnerEntryAudio).toHaveBeenCalledWith(
+      expect.any(Array),
+      "uk",
+      {
+        contentScope: "definition",
+        meaningId: "meaning-1",
+        phraseSenseId: undefined,
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Play example audio for Bank" }));
+    expect(mockPlayLearnerEntryAudio).toHaveBeenCalledWith(
+      expect.any(Array),
+      "uk",
+      {
+        contentScope: "example",
+        meaningExampleId: "example-1",
+        phraseSenseExampleId: undefined,
+      },
+    );
   });
 });

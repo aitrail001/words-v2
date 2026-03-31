@@ -14,7 +14,8 @@ import {
   type KnowledgeStatus,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
-import { getUserPreferences } from "@/lib/user-preferences-client";
+import { getPlayableLearnerAccents, playLearnerEntryAudio } from "@/lib/learner-audio";
+import { getUserPreferences, updateUserPreferences, type UserPreferences } from "@/lib/user-preferences-client";
 
 type ViewMode = "cards" | "tags" | "list";
 
@@ -221,7 +222,8 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
   const [activeIndex, setActiveIndex] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [showTranslations, setShowTranslations] = useState(true);
-  const [translationLocale, setTranslationLocale] = useState("zh-Hans");
+  const [translationLocale, setTranslationLocale] = useState<UserPreferences["translation_locale"]>("zh-Hans");
+  const [accentPreference, setAccentPreference] = useState<UserPreferences["accent_preference"]>("us");
   const [loadingRange, setLoadingRange] = useState(true);
   const [rangeError, setRangeError] = useState(false);
   const [activeEntryDetail, setActiveEntryDetail] = useState<KnowledgeMapEntryDetail | null>(null);
@@ -255,6 +257,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
         setViewMode(preferences.knowledge_view_preference);
         setShowTranslations(preferences.show_translations_by_default);
         setTranslationLocale(preferences.translation_locale);
+        setAccentPreference(preferences.accent_preference);
       })
       .catch(() => undefined);
 
@@ -330,7 +333,8 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
               item.pronunciation === detail.pronunciation &&
               item.translation === detail.translation &&
               item.primary_definition === detail.primary_definition &&
-              item.part_of_speech === nextPartOfSpeech
+              item.part_of_speech === nextPartOfSpeech &&
+              item.voice_assets === detail.voice_assets
             ) {
               return item;
             }
@@ -342,6 +346,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
               translation: detail.translation,
               primary_definition: detail.primary_definition,
               part_of_speech: nextPartOfSpeech,
+              voice_assets: detail.voice_assets ?? item.voice_assets,
             };
           });
 
@@ -436,6 +441,31 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
   const canGoPreviousEntry = activeIndex > 0;
   const canGoNextEntry = selectedRange ? activeIndex < selectedRange.items.length - 1 : false;
   const activeCardActions = activeEntry ? getCardActions(activeEntry.status) : [];
+  const activeEntryVoiceAssets = selectedEntryDetail?.voice_assets ?? activeEntry?.voice_assets ?? [];
+  const playableAccents = (() => {
+    const activeAccents = getPlayableLearnerAccents(activeEntryVoiceAssets);
+    if (activeAccents.length > 0) {
+      return activeAccents;
+    }
+    return getPlayableLearnerAccents(activeRangeItems.flatMap((item) => item.voice_assets ?? []));
+  })();
+
+  const updateAccentPreference = (accent: UserPreferences["accent_preference"]) => {
+    if (accent === accentPreference) {
+      return;
+    }
+    setAccentPreference(accent);
+    void updateUserPreferences({
+      accent_preference: accent,
+      translation_locale: translationLocale,
+      knowledge_view_preference: viewMode,
+      show_translations_by_default: showTranslations,
+    }).catch(() => undefined);
+  };
+
+  const handlePlayAudio = (voiceAssets: KnowledgeMapEntrySummary["voice_assets"] | undefined) => {
+    void playLearnerEntryAudio(voiceAssets, accentPreference).catch(() => undefined);
+  };
 
   return (
     <section className="space-y-3 rounded-[0.8rem] bg-[#f1f2f8] px-2 py-2">
@@ -445,6 +475,22 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
           <h4 className="mt-1 text-sm font-semibold text-[#766389]">{activeRangeLabel}</h4>
         </div>
         <div className="flex items-center gap-1.5">
+          {playableAccents.map((accent) => (
+            <button
+              key={accent}
+              type="button"
+              aria-label={`Use ${accent.toUpperCase()} accent`}
+              aria-pressed={accentPreference === accent}
+              onClick={() => updateAccentPreference(accent)}
+              className={`rounded-full px-2.5 py-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] transition ${
+                accentPreference === accent
+                  ? "bg-[#1485a5] text-white"
+                  : "bg-[#e8f5fb] text-[#1687a6]"
+              }`}
+            >
+              {accent.toUpperCase()}
+            </button>
+          ))}
           {VIEW_OPTIONS.map((option) => (
             <button
               key={option.mode}
@@ -491,9 +537,20 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
                   <h4 className="text-[1.25rem] font-semibold leading-none text-[#572a80]">
                     {activeEntry.display_text}
                   </h4>
-                  <p className="mt-1 text-[0.8rem] font-semibold text-[#8f82a1]">
-                    {activeEntry.pronunciation ?? "/.../"} #{activeEntry.browse_rank.toLocaleString()}
-                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[0.8rem] font-semibold text-[#8f82a1]">
+                    {activeEntryVoiceAssets.length > 0 && (
+                      <button
+                        type="button"
+                        aria-label={`Play audio for ${activeEntry.display_text}`}
+                        onClick={() => handlePlayAudio(activeEntryVoiceAssets)}
+                        className="rounded-full bg-[#eef8ff] px-2.5 py-1 text-[0.72rem] text-[#1687a6]"
+                      >
+                        Play Audio
+                      </button>
+                    )}
+                    <span>{activeEntry.pronunciation ?? "/.../"}</span>
+                    <span>#{activeEntry.browse_rank.toLocaleString()}</span>
+                  </div>
                 </div>
                 <span className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-[#87bed4]">
                   {activeEntry.part_of_speech ?? activeEntry.entry_type}
@@ -630,6 +687,16 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
                 >
                   Open
                 </Link>
+                {item.voice_assets && item.voice_assets.length > 0 && (
+                  <button
+                    type="button"
+                    aria-label={`Play audio for ${item.display_text}`}
+                    onClick={() => handlePlayAudio(item.voice_assets)}
+                    className="ml-2 inline-flex rounded-[0.25rem] bg-[#eef8ff] px-2.5 py-1 text-[0.7rem] font-semibold text-[#1687a6]"
+                  >
+                    Play Audio
+                  </button>
+                )}
               </div>
             </div>
           ))}

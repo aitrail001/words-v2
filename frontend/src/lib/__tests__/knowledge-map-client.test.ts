@@ -6,6 +6,7 @@ import {
   getKnowledgeMapOverview,
   getKnowledgeMapRange,
   getKnowledgeMapSearchHistory,
+  resolveLearnerVoicePlaybackUrl,
   searchKnowledgeMap,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
@@ -53,11 +54,31 @@ describe("knowledge-map-client", () => {
   });
 
   it("loads entry detail", async () => {
-    mockApiClient.get.mockResolvedValueOnce({ entry_id: "word-1" });
+    mockApiClient.get.mockResolvedValueOnce({
+      entry_id: "word-1",
+      voice_assets: [
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en_us",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+        },
+      ],
+    });
 
     const result = await getKnowledgeMapEntryDetail("word", "word-1");
 
-    expect(result).toEqual({ entry_id: "word-1" });
+    expect(result).toEqual({
+      entry_id: "word-1",
+      voice_assets: [
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en_us",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+        },
+      ],
+    });
     expect(mockApiClient.get).toHaveBeenCalledWith("/knowledge-map/entries/word/word-1");
   });
 
@@ -122,5 +143,41 @@ describe("knowledge-map-client", () => {
       entry_type: "word",
       entry_id: "word-1",
     });
+  });
+
+  it("resolves learner voice playback urls with accent fallback", () => {
+    const voice = {
+      preferred_locale: "us",
+      preferred_playback_url: "/api/words/voice-assets/voice-us/content",
+      locales: {
+        us: {
+          playback_url: "/api/words/voice-assets/voice-us/content",
+          locale: "en_us",
+        },
+        uk: {
+          playback_url: "/api/words/voice-assets/voice-uk/content",
+          locale: "en_gb",
+        },
+      },
+    };
+
+    expect(resolveLearnerVoicePlaybackUrl(voice, "us")).toBe("/api/words/voice-assets/voice-us/content");
+    expect(resolveLearnerVoicePlaybackUrl(voice, "uk")).toBe("/api/words/voice-assets/voice-uk/content");
+    expect(
+      resolveLearnerVoicePlaybackUrl(
+        {
+          preferred_locale: "au",
+          preferred_playback_url: null,
+          locales: {
+            au: {
+              playback_url: "/api/words/voice-assets/voice-au/content",
+              locale: "en_au",
+            },
+          },
+        },
+        "uk",
+      ),
+    ).toBe("/api/words/voice-assets/voice-au/content");
+    expect(resolveLearnerVoicePlaybackUrl(null, "us")).toBeNull();
   });
 });

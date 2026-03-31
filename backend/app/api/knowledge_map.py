@@ -3,7 +3,7 @@ from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
 
@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.meaning import Meaning
+from app.models.lexicon_voice_asset import LexiconVoiceAsset
 from app.models.phrase_entry import PhraseEntry
 from app.models.search_history import SearchHistory
 from app.models.translation import Translation
@@ -48,6 +49,11 @@ from app.services.knowledge_map import (
     relation_terms,
     resolve_exact_match_target,
     select_pronunciation,
+)
+from app.services.voice_assets import (
+    build_voice_asset_playback_url,
+    load_phrase_voice_assets,
+    load_word_voice_assets,
 )
 
 router = APIRouter()
@@ -104,6 +110,7 @@ class KnowledgeMapEntrySummary(BaseModel):
     primary_definition: str | None
     part_of_speech: str | None
     phrase_kind: str | None
+    voice_assets: list["LearnerVoiceAssetResponse"] = []
 
 
 class KnowledgeMapRangeResponse(BaseModel):
@@ -128,6 +135,35 @@ class MeaningExampleResponse(BaseModel):
     difficulty: str | None
     translation: str | None = None
     linked_entries: list["InlineLinkedEntryResponse"] = []
+
+
+class LearnerVoiceAssetResponse(BaseModel):
+    id: str
+    content_scope: str
+    meaning_id: str | None = None
+    meaning_example_id: str | None = None
+    phrase_sense_id: str | None = None
+    phrase_sense_example_id: str | None = None
+    locale: str
+    voice_role: str
+    provider: str
+    family: str
+    voice_id: str
+    profile_key: str
+    audio_format: str
+    mime_type: str | None = None
+    speaking_rate: float | None = None
+    pitch_semitones: float | None = None
+    lead_ms: int = 0
+    tail_ms: int = 0
+    effects_profile_id: str | None = None
+    playback_url: str
+    storage_kind: str
+    storage_base: str
+    relative_path: str
+    status: str
+    generation_error: str | None = None
+    generated_at: str | None = None
 
 
 class TranslationResponse(BaseModel):
@@ -234,6 +270,7 @@ class KnowledgeMapDetailResponse(BaseModel):
     translation: str | None
     primary_definition: str | None
     supported_translation_locales: list[str] = []
+    voice_assets: list[LearnerVoiceAssetResponse] = []
     forms: WordFormsResponse | None = None
     meanings: list[KnowledgeMeaningResponse] = []
     senses: list[PhraseSenseResponse] = []
@@ -306,7 +343,75 @@ def _summary_from_item(item: dict) -> KnowledgeMapEntrySummary:
         primary_definition=item["primary_definition"],
         part_of_speech=item["part_of_speech"],
         phrase_kind=item["phrase_kind"],
+        voice_assets=item.get("voice_assets", []),
     )
+
+
+def _voice_asset_response(asset: LexiconVoiceAsset) -> LearnerVoiceAssetResponse:
+    return LearnerVoiceAssetResponse(
+        id=str(asset.id),
+        content_scope=asset.content_scope,
+        meaning_id=str(asset.meaning_id) if asset.meaning_id else None,
+        meaning_example_id=str(asset.meaning_example_id) if asset.meaning_example_id else None,
+        phrase_sense_id=str(asset.phrase_sense_id) if asset.phrase_sense_id else None,
+        phrase_sense_example_id=str(asset.phrase_sense_example_id) if asset.phrase_sense_example_id else None,
+        locale=asset.locale,
+        voice_role=asset.voice_role,
+        provider=asset.provider,
+        family=asset.family,
+        voice_id=asset.voice_id,
+        profile_key=asset.profile_key,
+        audio_format=asset.audio_format,
+        mime_type=asset.mime_type,
+        speaking_rate=asset.speaking_rate,
+        pitch_semitones=asset.pitch_semitones,
+        lead_ms=int(asset.lead_ms or 0),
+        tail_ms=int(asset.tail_ms or 0),
+        effects_profile_id=asset.effects_profile_id,
+        playback_url=build_voice_asset_playback_url(asset),
+        storage_kind=asset.storage_kind,
+        storage_base=asset.storage_base,
+        relative_path=asset.relative_path,
+        status=asset.status,
+        generation_error=asset.generation_error,
+        generated_at=asset.generated_at.isoformat() if asset.generated_at else None,
+    )
+
+
+async def _load_summary_voice_assets(
+    db: AsyncSession,
+    items: list[dict],
+) -> dict[tuple[str, uuid.UUID], list[LearnerVoiceAssetResponse]]:
+    word_ids = [item["entry_id"] for item in items if item["entry_type"] == "word"]
+    phrase_ids = [item["entry_id"] for item in items if item["entry_type"] == "phrase"]
+    clauses = []
+    if word_ids:
+        clauses.append(
+            (LexiconVoiceAsset.word_id.in_(word_ids)) & (LexiconVoiceAsset.content_scope == "word")
+        )
+    if phrase_ids:
+        clauses.append(
+            (LexiconVoiceAsset.phrase_entry_id.in_(phrase_ids))
+            & (LexiconVoiceAsset.content_scope == "word")
+        )
+    if not clauses:
+        return {}
+
+    result = await db.execute(
+        select(LexiconVoiceAsset)
+        .options(selectinload(LexiconVoiceAsset.storage_policy))
+        .where(or_(*clauses))
+    )
+    grouped: dict[tuple[str, uuid.UUID], list[LearnerVoiceAssetResponse]] = {}
+    for asset in result.scalars().all():
+        if asset.word_id is not None:
+            key = ("word", asset.word_id)
+        elif asset.phrase_entry_id is not None:
+            key = ("phrase", asset.phrase_entry_id)
+        else:
+            continue
+        grouped.setdefault(key, []).append(_voice_asset_response(asset))
+    return grouped
 
 
 def _adjacent_entry(item: dict | None) -> AdjacentEntryResponse | None:
@@ -366,6 +471,8 @@ async def _hydrate_summary_items(
     if not word_ids and not phrase_ids:
         return items
 
+    voice_assets_by_entry = await _load_summary_voice_assets(db, items)
+
     preferences = await get_preferences(db, user_id)
     if word_ids:
         primary_meanings = await load_word_primary_definitions(db, word_ids)
@@ -399,6 +506,10 @@ async def _hydrate_summary_items(
                 if word is not None
                 else item.get("pronunciation")
             )
+            item["voice_assets"] = [
+                asset.model_dump()
+                for asset in voice_assets_by_entry.get(("word", item["entry_id"]), [])
+            ]
 
     if phrase_ids:
         phrase_summary_map = await load_phrase_summary_map(db, phrase_ids, preferences.translation_locale)
@@ -410,6 +521,10 @@ async def _hydrate_summary_items(
                 continue
             item["translation"] = summary_row["translation"]
             item["primary_definition"] = summary_row["primary_definition"]
+            item["voice_assets"] = [
+                asset.model_dump()
+                for asset in voice_assets_by_entry.get(("phrase", item["entry_id"]), [])
+            ]
 
     return items
 
@@ -574,6 +689,13 @@ async def get_knowledge_map_entry_detail(
         meanings = meanings_result.scalars().all()
         meaning_ids = [meaning.id for meaning in meanings]
         examples_by_meaning, translations_by_meaning, relations_by_meaning = await load_word_detail_relations(db, meaning_ids)
+        example_ids = [example.id for examples in examples_by_meaning.values() for example in examples]
+        voice_assets = await load_word_voice_assets(
+            db,
+            word_id=word.id,
+            meaning_ids=meaning_ids,
+            example_ids=example_ids,
+        )
         status_row = await get_status_row(db, current_user.id, "word", entry_id)
         current_entry, previous_entry, next_entry = await load_catalog_neighbors(db, "word", entry_id)
         forms = normalize_word_forms(word)
@@ -611,6 +733,7 @@ async def get_knowledge_map_entry_detail(
             translation=translation,
             primary_definition=primary_definition,
             supported_translation_locales=list(SUPPORTED_TRANSLATION_LOCALES),
+            voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
             forms=WordFormsResponse(
                 verb_forms=forms["verb_forms"],
                 plural_forms=forms["plural_forms"],
@@ -766,6 +889,14 @@ async def get_knowledge_map_entry_detail(
         phrase.id,
         preferences.translation_locale,
     )
+    phrase_sense_ids = [sense.id for sense in senses_by_phrase]
+    phrase_example_ids = [example.id for examples in examples_by_sense.values() for example in examples]
+    voice_assets = await load_phrase_voice_assets(
+        db,
+        phrase_entry_id=phrase.id,
+        phrase_sense_ids=phrase_sense_ids,
+        phrase_example_ids=phrase_example_ids,
+    )
     lookup_terms = collect_exact_lookup_terms(
         values=[
             *(text for sense in senses_by_phrase for text in list(sense.synonyms or [])),
@@ -866,6 +997,7 @@ async def get_knowledge_map_entry_detail(
         translation=translation,
         primary_definition=primary_definition,
         supported_translation_locales=list(SUPPORTED_TRANSLATION_LOCALES),
+        voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
         forms=None,
         senses=senses,
         relation_groups=[],

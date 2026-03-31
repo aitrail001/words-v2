@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import uuid
 from collections import defaultdict
 from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -66,6 +67,7 @@ class WordResponse(BaseModel):
 
 class WordDetailResponse(WordResponse):
     meanings: list[MeaningResponse]
+    voice_targets: "LearnerVoiceTargetsResponse"
 
 
 class MeaningExampleResponse(BaseModel):
@@ -132,6 +134,37 @@ class VoiceAssetResponse(BaseModel):
     generated_at: str | None
 
 
+class LearnerVoiceVariantResponse(BaseModel):
+    playback_url: str
+    relative_path: str
+    locale: str
+    voice_role: str
+    audio_format: str
+    status: str
+
+
+class LearnerVoiceTargetResponse(BaseModel):
+    preferred_locale: str | None = None
+    preferred_playback_url: str | None = None
+    locales: dict[str, LearnerVoiceVariantResponse] = Field(default_factory=dict)
+
+
+class LearnerVoiceExampleResponse(BaseModel):
+    example_id: str
+    voice: LearnerVoiceTargetResponse | None = None
+
+
+class LearnerMeaningVoiceResponse(BaseModel):
+    meaning_id: str
+    voice: LearnerVoiceTargetResponse | None = None
+    examples: list[LearnerVoiceExampleResponse] = Field(default_factory=list)
+
+
+class LearnerVoiceTargetsResponse(BaseModel):
+    entry: LearnerVoiceTargetResponse | None = None
+    meanings: list[LearnerMeaningVoiceResponse] = Field(default_factory=list)
+
+
 class EnrichedMeaningResponse(MeaningResponse):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -157,6 +190,7 @@ class WordEnrichmentDetailResponse(WordResponse):
     meanings: list[EnrichedMeaningResponse]
     enrichment_runs: list[LexiconEnrichmentRunResponse]
     voice_assets: list[VoiceAssetResponse]
+    voice_targets: LearnerVoiceTargetsResponse = Field(default_factory=LearnerVoiceTargetsResponse)
 
 
 class LookupRequest(BaseModel):
@@ -218,6 +252,88 @@ def _voice_asset_response(asset: LexiconVoiceAsset) -> VoiceAssetResponse:
         status=asset.status,
         generation_error=asset.generation_error,
         generated_at=asset.generated_at.isoformat() if asset.generated_at else None,
+    )
+
+
+def _normalize_learner_locale(value: str | None) -> str | None:
+    if not value:
+        return None
+    lowered = value.strip().lower()
+    if lowered in {"en_us", "us"}:
+        return "us"
+    if lowered in {"en_gb", "uk"}:
+        return "uk"
+    if lowered in {"en_au", "au"}:
+        return "au"
+    return lowered
+
+
+def _learner_voice_variant_response(asset: LexiconVoiceAsset) -> LearnerVoiceVariantResponse:
+    return LearnerVoiceVariantResponse(
+        playback_url=build_voice_asset_playback_url(asset),
+        relative_path=asset.relative_path,
+        locale=asset.locale,
+        voice_role=asset.voice_role,
+        audio_format=asset.audio_format,
+        status=asset.status,
+    )
+
+
+def _finalize_learner_voice_target(
+    locales: dict[str, LearnerVoiceVariantResponse],
+) -> LearnerVoiceTargetResponse | None:
+    if not locales:
+        return None
+
+    preferred_locale = next((locale for locale in ("us", "uk", "au") if locale in locales), next(iter(locales)))
+    preferred = locales[preferred_locale]
+    return LearnerVoiceTargetResponse(
+        preferred_locale=preferred_locale,
+        preferred_playback_url=preferred.playback_url,
+        locales=dict(locales),
+    )
+
+
+def _group_learner_voice_targets(
+    assets: list[LexiconVoiceAsset],
+    *,
+    meanings: list[Meaning],
+    examples_by_meaning: dict[uuid.UUID, list[MeaningExample]],
+) -> LearnerVoiceTargetsResponse:
+    entry_locales: dict[str, LearnerVoiceVariantResponse] = {}
+    meaning_locales: dict[str, dict[str, LearnerVoiceVariantResponse]] = defaultdict(dict)
+    example_locales: dict[str, dict[str, LearnerVoiceVariantResponse]] = defaultdict(dict)
+
+    for asset in assets:
+        locale_key = _normalize_learner_locale(asset.locale)
+        if locale_key is None:
+            continue
+        variant = _learner_voice_variant_response(asset)
+        if asset.content_scope == "word" and asset.word_id is not None:
+            entry_locales.setdefault(locale_key, variant)
+        elif asset.content_scope == "definition" and asset.meaning_id is not None:
+            meaning_locales[str(asset.meaning_id)].setdefault(locale_key, variant)
+        elif asset.content_scope == "example" and asset.meaning_example_id is not None:
+            example_locales[str(asset.meaning_example_id)].setdefault(locale_key, variant)
+
+    return LearnerVoiceTargetsResponse(
+        entry=_finalize_learner_voice_target(entry_locales),
+        meanings=[
+            LearnerMeaningVoiceResponse(
+                meaning_id=str(meaning.id),
+                voice=_finalize_learner_voice_target(meaning_locales.get(str(meaning.id), {})),
+                examples=[
+                        LearnerVoiceExampleResponse(
+                            example_id=str(example.id),
+                            voice=_finalize_learner_voice_target(
+                                example_locales.get(str(example.id), {})
+                            ),
+                        )
+                    for example in examples_by_meaning.get(meaning.id, [])
+                ],
+            )
+            for meaning in meanings
+        ],
     )
 
 
@@ -356,6 +472,12 @@ async def get_word_enrichment(
         example_ids=[example.id for example in examples],
     )
 
+    voice_targets = _group_learner_voice_targets(
+        assets=voice_assets,
+        meanings=meanings,
+        examples_by_meaning=examples_by_meaning,
+    )
+
     return WordEnrichmentDetailResponse(
         id=str(word.id),
         word=word.word,
@@ -427,6 +549,7 @@ async def get_word_enrichment(
             for run in enrichment_runs
         ],
         voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
+        voice_targets=voice_targets,
     )
 
 
@@ -452,10 +575,31 @@ async def get_word(
         .order_by(Meaning.order_index)
     )
     meanings = meanings_result.scalars().all()
+    meaning_ids = [meaning.id for meaning in meanings]
+    examples_by_meaning: dict[uuid.UUID, list[MeaningExample]] = defaultdict(list)
+    if meaning_ids:
+        examples_result = await db.execute(
+            select(MeaningExample)
+            .where(MeaningExample.meaning_id.in_(meaning_ids))
+            .order_by(MeaningExample.meaning_id.asc(), MeaningExample.order_index.asc())
+        )
+        for example in examples_result.scalars().all():
+            examples_by_meaning[example.meaning_id].append(example)
+    voice_assets = await load_word_voice_assets(
+        db,
+        word_id=word.id,
+        meaning_ids=meaning_ids,
+        example_ids=[example.id for examples in examples_by_meaning.values() for example in examples],
+    )
 
     return WordDetailResponse(
         **_word_response(word).model_dump(),
         meanings=[_meaning_response(m) for m in meanings],
+        voice_targets=_group_learner_voice_targets(
+            assets=voice_assets,
+            meanings=meanings,
+            examples_by_meaning=examples_by_meaning,
+        ),
     )
 
 
@@ -479,10 +623,31 @@ async def lookup_word(
             .order_by(Meaning.order_index)
         )
         meanings = meanings_result.scalars().all()
+        meaning_ids = [meaning.id for meaning in meanings]
+        examples_by_meaning: dict[uuid.UUID, list[MeaningExample]] = defaultdict(list)
+        if meaning_ids:
+            examples_result = await db.execute(
+                select(MeaningExample)
+                .where(MeaningExample.meaning_id.in_(meaning_ids))
+                .order_by(MeaningExample.meaning_id.asc(), MeaningExample.order_index.asc())
+            )
+            for example in examples_result.scalars().all():
+                examples_by_meaning[example.meaning_id].append(example)
+        voice_assets = await load_word_voice_assets(
+            db,
+            word_id=word.id,
+            meaning_ids=meaning_ids,
+            example_ids=[example.id for examples in examples_by_meaning.values() for example in examples],
+        )
 
         return WordDetailResponse(
             **_word_response(word).model_dump(),
             meanings=[_meaning_response(m) for m in meanings],
+            voice_targets=_group_learner_voice_targets(
+                assets=voice_assets,
+                meanings=meanings,
+                examples_by_meaning=examples_by_meaning,
+            ),
         )
 
     # Not found locally — return 404 for now

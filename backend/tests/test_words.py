@@ -245,6 +245,10 @@ class TestWordDetail:
         user = make_user(user_id)
         word = make_word("bank")
         meaning = make_meaning(word.id, "A financial institution")
+        examples_result = MagicMock()
+        examples_result.scalars.return_value.all.return_value = []
+        voice_assets_result = MagicMock()
+        voice_assets_result.scalars.return_value.all.return_value = []
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
@@ -252,7 +256,13 @@ class TestWordDetail:
         word_result.scalar_one_or_none.return_value = word
         meanings_result = MagicMock()
         meanings_result.scalars.return_value.all.return_value = [meaning]
-        mock_db.execute.side_effect = [user_result, word_result, meanings_result]
+        mock_db.execute.side_effect = [
+            user_result,
+            word_result,
+            meanings_result,
+            examples_result,
+            voice_assets_result,
+        ]
 
         response = await client.get(
             f"/api/words/{word.id}",
@@ -263,6 +273,59 @@ class TestWordDetail:
         assert data["word"] == "bank"
         assert len(data["meanings"]) == 1
         assert data["meanings"][0]["definition"] == "A financial institution"
+
+    @pytest.mark.asyncio
+    async def test_get_word_by_id_groups_voice_targets(self, client, mock_db, auth_token, monkeypatch):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = make_word("bank")
+        meaning = make_meaning(word.id, "The land alongside a river.")
+        example = make_meaning_example(meaning.id, "We sat on the river bank.")
+
+        entry_us = make_voice_asset(word_id=word.id)
+        entry_us.locale = "en_us"
+        entry_us.relative_path = "word_bank/word/en_us/female-word.mp3"
+        entry_uk = make_voice_asset(word_id=word.id)
+        entry_uk.locale = "en_gb"
+        entry_uk.relative_path = "word_bank/word/en_gb/female-word.mp3"
+        definition_us = make_voice_asset(meaning_id=meaning.id)
+        definition_us.locale = "en_us"
+        definition_us.relative_path = "word_bank/definition/en_us/female-definition.mp3"
+        example_us = make_voice_asset(meaning_example_id=example.id)
+        example_us.locale = "en_us"
+        example_us.relative_path = "word_bank/example/en_us/female-example.mp3"
+
+        loader = AsyncMock(return_value=[entry_us, entry_uk, definition_us, example_us])
+        monkeypatch.setattr("app.api.words.load_word_voice_assets", loader)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = word
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [meaning]
+        examples_result = MagicMock()
+        examples_result.scalars.return_value.all.return_value = [example]
+        mock_db.execute.side_effect = [user_result, word_result, meanings_result, examples_result]
+
+        response = await client.get(
+            f"/api/words/{word.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        loader.assert_awaited_once()
+        assert data["voice_targets"]["entry"]["locales"]["us"]["playback_url"].startswith("/api/words/voice-assets/")
+        assert data["voice_targets"]["entry"]["locales"]["uk"]["playback_url"].startswith("/api/words/voice-assets/")
+        assert (
+            data["voice_targets"]["meanings"][0]["voice"]["locales"]["us"]["relative_path"]
+            == "word_bank/definition/en_us/female-definition.mp3"
+        )
+        assert (
+            data["voice_targets"]["meanings"][0]["examples"][0]["voice"]["locales"]["us"]["relative_path"]
+            == "word_bank/example/en_us/female-example.mp3"
+        )
 
     @pytest.mark.asyncio
     async def test_get_word_not_found(self, client, mock_db, auth_token):
@@ -290,6 +353,10 @@ class TestWordLookup:
         user = make_user(user_id)
         word = make_word("hello")
         meaning = make_meaning(word.id, "A greeting")
+        examples_result = MagicMock()
+        examples_result.scalars.return_value.all.return_value = []
+        voice_assets_result = MagicMock()
+        voice_assets_result.scalars.return_value.all.return_value = []
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
@@ -297,7 +364,13 @@ class TestWordLookup:
         word_result.scalar_one_or_none.return_value = word
         meanings_result = MagicMock()
         meanings_result.scalars.return_value.all.return_value = [meaning]
-        mock_db.execute.side_effect = [user_result, word_result, meanings_result]
+        mock_db.execute.side_effect = [
+            user_result,
+            word_result,
+            meanings_result,
+            examples_result,
+            voice_assets_result,
+        ]
 
         response = await client.post(
             "/api/words/lookup",

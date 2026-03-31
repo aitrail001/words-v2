@@ -12,9 +12,25 @@ const KNOWLEDGE_PHRASE_EXAMPLE_ID = "77777777-7777-7777-7777-777777777780";
 const KNOWLEDGE_PHRASE_EXAMPLE_LOCALIZATION_ID = "77777777-7777-7777-7777-777777777781";
 const KNOWLEDGE_PHRASE_EXAMPLE_TWO_ID = "77777777-7777-7777-7777-777777777782";
 const KNOWLEDGE_PHRASE_EXAMPLE_TWO_LOCALIZATION_ID = "77777777-7777-7777-7777-777777777783";
+const WORD_POLICY_ID = "12121212-1212-1212-1212-121212121212";
+const DEFINITION_POLICY_ID = "13131313-1313-1313-1313-131313131313";
+const EXAMPLE_POLICY_ID = "14141414-1414-1414-1414-141414141414";
+const KNOWLEDGE_WORD_VOICE_US_ID = "15151515-1515-1515-1515-151515151515";
+const KNOWLEDGE_WORD_VOICE_UK_ID = "16161616-1616-1616-1616-161616161616";
+const KNOWLEDGE_MEANING_VOICE_US_ID = "17171717-1717-1717-1717-171717171717";
+const KNOWLEDGE_EXAMPLE_VOICE_US_ID = "18181818-1818-1818-1818-181818181818";
+const KNOWLEDGE_PHRASE_VOICE_US_ID = "19191919-1919-1919-1919-191919191919";
+const KNOWLEDGE_PHRASE_VOICE_UK_ID = "20202020-2020-2020-2020-202020202020";
+const KNOWLEDGE_PHRASE_SENSE_VOICE_US_ID = "21212121-2121-2121-2121-212121212121";
+const KNOWLEDGE_PHRASE_EXAMPLE_VOICE_US_ID = "22222222-2222-2222-2222-222222222222";
 const LEARN_WORD_ID = "88888888-8888-8888-8888-888888888888";
 const LEARN_MEANING_ID = "99999999-9999-9999-9999-999999999999";
 const LEARN_TRANSLATION_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const LEARN_EXAMPLE_ID = "abababab-abab-abab-abab-abababababab";
+const LEARN_WORD_VOICE_US_ID = "b1b1b1b1-b1b1-b1b1-b1b1-b1b1b1b1b1b1";
+const LEARN_WORD_VOICE_UK_ID = "b2b2b2b2-b2b2-b2b2-b2b2-b2b2b2b2b2b2";
+const LEARN_MEANING_VOICE_US_ID = "b3b3b3b3-b3b3-b3b3-b3b3-b3b3b3b3b3b3";
+const LEARN_EXAMPLE_VOICE_US_ID = "b4b4b4b4-b4b4-b4b4-b4b4-b4b4b4b4b4b4";
 
 export const KNOWLEDGE_WORD = "resilience";
 export const KNOWLEDGE_PHRASE = "bank on";
@@ -277,6 +293,39 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
       DO UPDATE SET translation = EXCLUDED.translation
       `,
       [LEARN_TRANSLATION_ID, LEARN_MEANING_ID],
+    );
+
+    await client.query(
+      `
+      INSERT INTO lexicon.meaning_examples (
+        id,
+        meaning_id,
+        sentence,
+        difficulty,
+        order_index,
+        source,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        $3,
+        'B1',
+        0,
+        'e2e-fixture',
+        now()
+      )
+      ON CONFLICT (meaning_id, sentence)
+      DO UPDATE SET
+        difficulty = EXCLUDED.difficulty,
+        order_index = EXCLUDED.order_index,
+        source = EXCLUDED.source
+      `,
+      [
+        LEARN_EXAMPLE_ID,
+        LEARN_MEANING_ID,
+        "The drummer carried the rhythm through the song.",
+      ],
     );
 
     const phraseResult = await client.query<{ id: string }>(
@@ -553,6 +602,275 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
         translation = EXCLUDED.translation
       `,
       [KNOWLEDGE_PHRASE_EXAMPLE_TWO_LOCALIZATION_ID, secondPhraseExampleId],
+    );
+
+    const wordPolicy = await client.query<{ id: string }>(
+      `
+      INSERT INTO lexicon.lexicon_voice_storage_policies (
+        id,
+        policy_key,
+        source_reference,
+        content_scope,
+        provider,
+        family,
+        locale,
+        primary_storage_kind,
+        primary_storage_base,
+        fallback_storage_kind,
+        fallback_storage_base,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        'word_default',
+        'global',
+        'word',
+        'default',
+        'default',
+        'all',
+        'local',
+        '/tmp/voice',
+        NULL,
+        NULL,
+        now()
+      )
+      ON CONFLICT (policy_key)
+      DO UPDATE SET
+        primary_storage_kind = EXCLUDED.primary_storage_kind,
+        primary_storage_base = EXCLUDED.primary_storage_base,
+        fallback_storage_kind = EXCLUDED.fallback_storage_kind,
+        fallback_storage_base = EXCLUDED.fallback_storage_base
+      RETURNING id::text AS id
+      `,
+      [WORD_POLICY_ID],
+    );
+    const definitionPolicy = await client.query<{ id: string }>(
+      `
+      INSERT INTO lexicon.lexicon_voice_storage_policies (
+        id,
+        policy_key,
+        source_reference,
+        content_scope,
+        provider,
+        family,
+        locale,
+        primary_storage_kind,
+        primary_storage_base,
+        fallback_storage_kind,
+        fallback_storage_base,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        'definition_default',
+        'global',
+        'definition',
+        'default',
+        'default',
+        'all',
+        'local',
+        '/tmp/voice',
+        NULL,
+        NULL,
+        now()
+      )
+      ON CONFLICT (policy_key)
+      DO UPDATE SET
+        primary_storage_kind = EXCLUDED.primary_storage_kind,
+        primary_storage_base = EXCLUDED.primary_storage_base,
+        fallback_storage_kind = EXCLUDED.fallback_storage_kind,
+        fallback_storage_base = EXCLUDED.fallback_storage_base
+      RETURNING id::text AS id
+      `,
+      [DEFINITION_POLICY_ID],
+    );
+    const examplePolicy = await client.query<{ id: string }>(
+      `
+      INSERT INTO lexicon.lexicon_voice_storage_policies (
+        id,
+        policy_key,
+        source_reference,
+        content_scope,
+        provider,
+        family,
+        locale,
+        primary_storage_kind,
+        primary_storage_base,
+        fallback_storage_kind,
+        fallback_storage_base,
+        created_at
+      )
+      VALUES (
+        $1::uuid,
+        'example_default',
+        'global',
+        'example',
+        'default',
+        'default',
+        'all',
+        'local',
+        '/tmp/voice',
+        NULL,
+        NULL,
+        now()
+      )
+      ON CONFLICT (policy_key)
+      DO UPDATE SET
+        primary_storage_kind = EXCLUDED.primary_storage_kind,
+        primary_storage_base = EXCLUDED.primary_storage_base,
+        fallback_storage_kind = EXCLUDED.fallback_storage_kind,
+        fallback_storage_base = EXCLUDED.fallback_storage_base
+      RETURNING id::text AS id
+      `,
+      [EXAMPLE_POLICY_ID],
+    );
+
+    const wordPolicyId = wordPolicy.rows[0]?.id;
+    const definitionPolicyId = definitionPolicy.rows[0]?.id;
+    const examplePolicyId = examplePolicy.rows[0]?.id;
+    if (!wordPolicyId || !definitionPolicyId || !examplePolicyId) {
+      throw new Error("Failed to upsert learner voice storage policy fixtures");
+    }
+
+    await client.query(
+      `
+      INSERT INTO lexicon.lexicon_voice_assets (
+        id,
+        word_id,
+        meaning_id,
+        meaning_example_id,
+        phrase_entry_id,
+        phrase_sense_id,
+        phrase_sense_example_id,
+        storage_policy_id,
+        content_scope,
+        locale,
+        voice_role,
+        provider,
+        family,
+        voice_id,
+        profile_key,
+        audio_format,
+        mime_type,
+        relative_path,
+        source_text,
+        source_text_hash,
+        status,
+        created_at
+      )
+      VALUES
+        ($1::uuid, $2::uuid, NULL, NULL, NULL, NULL, NULL, $9::uuid, 'word', 'en_us', 'female', 'default', 'default', 'fixture-word-us', 'default', 'mp3', 'audio/mpeg', 'learner/resilience/word/en_us.mp3', 'resilience', md5('resilience-word-us'), 'generated', now()),
+        ($3::uuid, $2::uuid, NULL, NULL, NULL, NULL, NULL, $9::uuid, 'word', 'en_gb', 'female', 'default', 'default', 'fixture-word-uk', 'default', 'mp3', 'audio/mpeg', 'learner/resilience/word/en_gb.mp3', 'resilience', md5('resilience-word-uk'), 'generated', now()),
+        ($4::uuid, NULL, $5::uuid, NULL, NULL, NULL, NULL, $10::uuid, 'definition', 'en_us', 'female', 'default', 'default', 'fixture-definition-us', 'default', 'mp3', 'audio/mpeg', 'learner/resilience/definition/en_us.mp3', 'The ability to recover quickly from setbacks.', md5('resilience-definition-us'), 'generated', now()),
+        ($6::uuid, NULL, NULL, $7::uuid, NULL, NULL, NULL, $11::uuid, 'example', 'en_us', 'female', 'default', 'default', 'fixture-example-us', 'default', 'mp3', 'audio/mpeg', 'learner/resilience/example/en_us.mp3', 'Resilience helps teams adapt to sudden change.', md5('resilience-example-us'), 'generated', now()),
+        ($8::uuid, NULL, NULL, NULL, $12::uuid, NULL, NULL, $9::uuid, 'word', 'en_us', 'female', 'default', 'default', 'fixture-phrase-word-us', 'default', 'mp3', 'audio/mpeg', 'learner/bank-on/word/en_us.mp3', 'bank on', md5('bank-on-word-us'), 'generated', now()),
+        ($13::uuid, NULL, NULL, NULL, $12::uuid, NULL, NULL, $9::uuid, 'word', 'en_gb', 'female', 'default', 'default', 'fixture-phrase-word-uk', 'default', 'mp3', 'audio/mpeg', 'learner/bank-on/word/en_gb.mp3', 'bank on', md5('bank-on-word-uk'), 'generated', now()),
+        ($14::uuid, NULL, NULL, NULL, NULL, $15::uuid, NULL, $10::uuid, 'definition', 'en_us', 'female', 'default', 'default', 'fixture-phrase-definition-us', 'default', 'mp3', 'audio/mpeg', 'learner/bank-on/definition/en_us.mp3', 'To depend on someone or something.', md5('bank-on-definition-us'), 'generated', now()),
+        ($16::uuid, NULL, NULL, NULL, NULL, NULL, $17::uuid, $11::uuid, 'example', 'en_us', 'female', 'default', 'default', 'fixture-phrase-example-us', 'default', 'mp3', 'audio/mpeg', 'learner/bank-on/example/en_us.mp3', 'You can bank on me when the deadline gets tight.', md5('bank-on-example-us'), 'generated', now())
+      ON CONFLICT (storage_policy_id, relative_path)
+      DO UPDATE SET
+        word_id = EXCLUDED.word_id,
+        meaning_id = EXCLUDED.meaning_id,
+        meaning_example_id = EXCLUDED.meaning_example_id,
+        phrase_entry_id = EXCLUDED.phrase_entry_id,
+        phrase_sense_id = EXCLUDED.phrase_sense_id,
+        phrase_sense_example_id = EXCLUDED.phrase_sense_example_id,
+        locale = EXCLUDED.locale,
+        voice_role = EXCLUDED.voice_role,
+        provider = EXCLUDED.provider,
+        family = EXCLUDED.family,
+        voice_id = EXCLUDED.voice_id,
+        profile_key = EXCLUDED.profile_key,
+        audio_format = EXCLUDED.audio_format,
+        mime_type = EXCLUDED.mime_type,
+        source_text = EXCLUDED.source_text,
+        source_text_hash = EXCLUDED.source_text_hash,
+        status = EXCLUDED.status
+      `,
+      [
+        KNOWLEDGE_WORD_VOICE_US_ID,
+        wordId,
+        KNOWLEDGE_WORD_VOICE_UK_ID,
+        KNOWLEDGE_MEANING_VOICE_US_ID,
+        KNOWLEDGE_MEANING_ID,
+        KNOWLEDGE_EXAMPLE_VOICE_US_ID,
+        KNOWLEDGE_EXAMPLE_ID,
+        KNOWLEDGE_PHRASE_VOICE_US_ID,
+        wordPolicyId,
+        definitionPolicyId,
+        examplePolicyId,
+        phraseId,
+        KNOWLEDGE_PHRASE_VOICE_UK_ID,
+        KNOWLEDGE_PHRASE_SENSE_VOICE_US_ID,
+        phraseSenseId,
+        KNOWLEDGE_PHRASE_EXAMPLE_VOICE_US_ID,
+        phraseExampleId,
+      ],
+    );
+
+    await client.query(
+      `
+      INSERT INTO lexicon.lexicon_voice_assets (
+        id,
+        word_id,
+        meaning_id,
+        meaning_example_id,
+        phrase_entry_id,
+        phrase_sense_id,
+        phrase_sense_example_id,
+        storage_policy_id,
+        content_scope,
+        locale,
+        voice_role,
+        provider,
+        family,
+        voice_id,
+        profile_key,
+        audio_format,
+        mime_type,
+        relative_path,
+        source_text,
+        source_text_hash,
+        status,
+        created_at
+      )
+      VALUES
+        ($1::uuid, $2::uuid, NULL, NULL, NULL, NULL, NULL, $6::uuid, 'word', 'en_us', 'female', 'default', 'default', 'fixture-learn-word-us', 'default', 'mp3', 'audio/mpeg', 'learner/drum/word/en_us.mp3', 'drum', md5('drum-word-us'), 'generated', now()),
+        ($3::uuid, $2::uuid, NULL, NULL, NULL, NULL, NULL, $6::uuid, 'word', 'en_gb', 'female', 'default', 'default', 'fixture-learn-word-uk', 'default', 'mp3', 'audio/mpeg', 'learner/drum/word/en_gb.mp3', 'drum', md5('drum-word-uk'), 'generated', now()),
+        ($4::uuid, NULL, $5::uuid, NULL, NULL, NULL, NULL, $7::uuid, 'definition', 'en_us', 'female', 'default', 'default', 'fixture-learn-definition-us', 'default', 'mp3', 'audio/mpeg', 'learner/drum/definition/en_us.mp3', 'A percussion instrument played by striking it.', md5('drum-definition-us'), 'generated', now()),
+        ($8::uuid, NULL, NULL, $9::uuid, NULL, NULL, NULL, $10::uuid, 'example', 'en_us', 'female', 'default', 'default', 'fixture-learn-example-us', 'default', 'mp3', 'audio/mpeg', 'learner/drum/example/en_us.mp3', 'The drummer carried the rhythm through the song.', md5('drum-example-us'), 'generated', now())
+      ON CONFLICT (storage_policy_id, relative_path)
+      DO UPDATE SET
+        word_id = EXCLUDED.word_id,
+        meaning_id = EXCLUDED.meaning_id,
+        meaning_example_id = EXCLUDED.meaning_example_id,
+        phrase_entry_id = EXCLUDED.phrase_entry_id,
+        phrase_sense_id = EXCLUDED.phrase_sense_id,
+        phrase_sense_example_id = EXCLUDED.phrase_sense_example_id,
+        locale = EXCLUDED.locale,
+        voice_role = EXCLUDED.voice_role,
+        provider = EXCLUDED.provider,
+        family = EXCLUDED.family,
+        voice_id = EXCLUDED.voice_id,
+        profile_key = EXCLUDED.profile_key,
+        audio_format = EXCLUDED.audio_format,
+        mime_type = EXCLUDED.mime_type,
+        source_text = EXCLUDED.source_text,
+        source_text_hash = EXCLUDED.source_text_hash,
+        status = EXCLUDED.status
+      `,
+      [
+        LEARN_WORD_VOICE_US_ID,
+        learnWordId,
+        LEARN_WORD_VOICE_UK_ID,
+        LEARN_MEANING_VOICE_US_ID,
+        LEARN_MEANING_ID,
+        wordPolicyId,
+        definitionPolicyId,
+        LEARN_EXAMPLE_VOICE_US_ID,
+        LEARN_EXAMPLE_ID,
+        examplePolicyId,
+      ],
     );
 
     await client.query(

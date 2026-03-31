@@ -14,8 +14,14 @@ import {
 import {
   getUserPreferences,
   TRANSLATION_LANGUAGE_LABELS,
+  updateUserPreferences,
   type UserPreferences,
 } from "@/lib/user-preferences-client";
+import {
+  getPlayableLearnerAccents,
+  playLearnerEntryAudio,
+  resolveLearnerVoiceAsset,
+} from "@/lib/learner-audio";
 
 const STATUS_LABELS: Record<KnowledgeStatus, string> = {
   undecided: "Undecided",
@@ -403,6 +409,7 @@ export function KnowledgeEntryDetailPage({
   const activeCollocations = activeWordMeaning?.collocations ?? activePhraseSense?.collocations ?? [];
   const translationLanguageLabel = TRANSLATION_LANGUAGE_LABELS[preferences.translation_locale];
   const accentLabel = detail.pronunciation ? `${ACCENT_LABELS[preferences.accent_preference]} Accent` : null;
+  const playableAccents = getPlayableLearnerAccents(detail.voice_assets);
   const statusActions =
     detail.status === "undecided"
       ? PRIMARY_STATUS_ACTIONS
@@ -427,6 +434,49 @@ export function KnowledgeEntryDetailPage({
       ),
   );
   const translationToggleLabel = `${translationLanguageLabel} ${showTranslations ? "On" : "Off"}`;
+  const canPlayAudio = playableAccents.length > 0;
+  const canPlayDefinitionAudio = Boolean(
+    resolveLearnerVoiceAsset(detail.voice_assets, preferences.accent_preference, {
+      contentScope: "definition",
+      meaningId: activeWordMeaning?.id ?? undefined,
+      phraseSenseId: activePhraseSense?.sense_id ?? undefined,
+    }),
+  );
+  const launchedFromReview =
+    typeof window !== "undefined"
+      && new URLSearchParams(window.location.search).get("return_to") === "review";
+  const reviewReturnHref = "/review?resume=1";
+
+  const updateAccentPreference = (accent: UserPreferences["accent_preference"]) => {
+    setPreferences((current) => {
+      if (current.accent_preference === accent) {
+        return current;
+      }
+      const next = { ...current, accent_preference: accent };
+      void updateUserPreferences(next).catch(() => undefined);
+      return next;
+    });
+  };
+
+  const handlePlayAudio = () => {
+    void playLearnerEntryAudio(detail.voice_assets, preferences.accent_preference).catch(() => undefined);
+  };
+
+  const handlePlayDefinitionAudio = () => {
+    void playLearnerEntryAudio(detail.voice_assets, preferences.accent_preference, {
+      contentScope: "definition",
+      meaningId: activeWordMeaning?.id ?? undefined,
+      phraseSenseId: activePhraseSense?.sense_id ?? undefined,
+    }).catch(() => undefined);
+  };
+
+  const handlePlayExampleAudio = (exampleId: string) => {
+    void playLearnerEntryAudio(detail.voice_assets, preferences.accent_preference, {
+      contentScope: "example",
+      meaningExampleId: detail.entry_type === "word" ? exampleId : undefined,
+      phraseSenseExampleId: detail.entry_type === "phrase" ? exampleId : undefined,
+    }).catch(() => undefined);
+  };
 
   return (
     <>
@@ -455,6 +505,17 @@ export function KnowledgeEntryDetailPage({
               •••
             </button>
           </div>
+          {launchedFromReview ? (
+            <div className="absolute inset-x-0 top-14 flex justify-center">
+              <button
+                type="button"
+                onClick={() => router.push(reviewReturnHref)}
+                className="rounded-full bg-white/75 px-4 py-2 text-sm font-semibold text-[#62368f] backdrop-blur"
+              >
+                Back to review
+              </button>
+            </div>
+          ) : null}
 
           <div className="absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(180deg,transparent,rgba(34,12,66,0.32))]" />
         </section>
@@ -467,7 +528,33 @@ export function KnowledgeEntryDetailPage({
                   {detail.display_text}
                 </h1>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-[#7c7395]">
-                  {accentLabel && detail.pronunciation && (
+                  {canPlayAudio && (
+                    <button
+                      type="button"
+                      aria-label={`Play audio for ${detail.display_text}`}
+                      onClick={handlePlayAudio}
+                      className="rounded-full bg-[#eef8ff] px-3 py-1 text-[#1687a6]"
+                    >
+                      Play Audio
+                    </button>
+                  )}
+                  {playableAccents.map((accent) => (
+                    <button
+                      key={accent}
+                      type="button"
+                      aria-label={`Use ${ACCENT_LABELS[accent]} accent`}
+                      aria-pressed={preferences.accent_preference === accent}
+                      onClick={() => updateAccentPreference(accent)}
+                      className={`rounded-full px-3 py-1 ${
+                        preferences.accent_preference === accent
+                          ? "bg-[#eef8ff] text-[#1687a6]"
+                          : "bg-[#f4eefc] text-[#684f85]"
+                      }`}
+                    >
+                      {ACCENT_LABELS[accent]}
+                    </button>
+                  ))}
+                  {!canPlayAudio && accentLabel && detail.pronunciation && (
                     <span className="rounded-full bg-[#eef8ff] px-3 py-1 text-[#1687a6]">
                       {accentLabel}
                     </span>
@@ -489,7 +576,21 @@ export function KnowledgeEntryDetailPage({
 
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-[1.04rem] font-semibold leading-6 text-[#4d295f]">{activeDefinition}</p>
+                <div className="flex items-start gap-3">
+                  <p className="min-w-0 flex-1 text-[1.04rem] font-semibold leading-6 text-[#4d295f]">
+                    {activeDefinition}
+                  </p>
+                  {canPlayDefinitionAudio ? (
+                    <button
+                      type="button"
+                      aria-label={`Play definition audio for ${detail.display_text}`}
+                      onClick={handlePlayDefinitionAudio}
+                      className="shrink-0 rounded-full bg-[#eef8ff] px-3 py-1 text-sm font-semibold text-[#1687a6]"
+                    >
+                      Play
+                    </button>
+                  ) : null}
+                </div>
                 {activeTranslation && (
                   <p className="mt-2 text-sm font-semibold text-[#9a39f2]">{activeTranslation}</p>
                 )}
@@ -512,15 +613,34 @@ export function KnowledgeEntryDetailPage({
                     const exampleTranslation = showTranslations
                       ? normalizeLearnerTranslation(example.translation ?? null)
                       : null;
+                    const canPlayExampleAudio = Boolean(
+                      resolveLearnerVoiceAsset(detail.voice_assets, preferences.accent_preference, {
+                        contentScope: "example",
+                        meaningExampleId: detail.entry_type === "word" ? example.id : undefined,
+                        phraseSenseExampleId: detail.entry_type === "phrase" ? example.id : undefined,
+                      }),
+                    );
                     return (
                       <div key={example.id} className="space-y-2">
-                        <p className="text-[0.92rem] italic leading-6 text-[#5e4a74]">
-                          {renderInlineLinkedSentence(
-                            example.sentence,
-                            example.linked_entries ?? [],
-                            openOverlay,
-                          )}
-                        </p>
+                        <div className="flex items-start gap-3">
+                          <p className="min-w-0 flex-1 text-[0.92rem] italic leading-6 text-[#5e4a74]">
+                            {renderInlineLinkedSentence(
+                              example.sentence,
+                              example.linked_entries ?? [],
+                              openOverlay,
+                            )}
+                          </p>
+                          {canPlayExampleAudio ? (
+                            <button
+                              type="button"
+                              aria-label={`Play example audio for ${detail.display_text}`}
+                              onClick={() => handlePlayExampleAudio(example.id)}
+                              className="shrink-0 rounded-full bg-[#eef8ff] px-3 py-1 text-sm font-semibold text-[#1687a6]"
+                            >
+                              Play
+                            </button>
+                          ) : null}
+                        </div>
                         {exampleTranslation && (
                           <p className="text-sm leading-6 text-[#9a39f2]">{exampleTranslation}</p>
                         )}

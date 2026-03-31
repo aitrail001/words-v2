@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -10,6 +11,7 @@ import {
   type ReviewScheduleOption,
 } from "@/lib/knowledge-map-client";
 import { apiClient } from "@/lib/api-client";
+import { useLearnerAudio } from "@/lib/learner-audio";
 
 type ReviewQueueCard = {
   id?: string;
@@ -38,6 +40,7 @@ type RevealState = {
 };
 
 const TIME_SPENT_MS = 5000;
+const REVIEW_RESUME_STORAGE_KEY = "learner-review-session-v1";
 
 const normalizeCards = (items: ReviewQueueCard[]): ReviewQueueCard[] =>
   items.map((item) => ({
@@ -59,6 +62,54 @@ const getLearningEntryFromUrl = (): { entryType: "word" | "phrase"; entryId: str
     return { entryType, entryId };
   }
   return null;
+};
+
+const isResumeRequested = (): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return new URLSearchParams(window.location.search).get("resume") === "1";
+};
+
+type StoredReviewSession = {
+  cards: ReviewQueueCard[];
+  currentIndex: number;
+  phase: ReviewPhase;
+  revealState: RevealState | null;
+  typedAnswer: string;
+};
+
+const loadStoredReviewSession = (): StoredReviewSession | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(REVIEW_RESUME_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as StoredReviewSession | null;
+    if (!parsed || !Array.isArray(parsed.cards) || parsed.cards.length === 0) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const persistReviewSession = (payload: StoredReviewSession): void => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.sessionStorage.setItem(REVIEW_RESUME_STORAGE_KEY, JSON.stringify(payload));
+};
+
+const clearStoredReviewSession = (): void => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.sessionStorage.removeItem(REVIEW_RESUME_STORAGE_KEY);
 };
 
 const formatPromptQuestion = (card: ReviewQueueCard): string => {
@@ -102,13 +153,46 @@ export default function ReviewPage() {
   const [phase, setPhase] = useState<ReviewPhase>("challenge");
   const [revealState, setRevealState] = useState<RevealState | null>(null);
   const [typedAnswer, setTypedAnswer] = useState("");
+  const [resumeReady, setResumeReady] = useState(false);
+  const { play, loadingUrl } = useLearnerAudio();
+
+  useEffect(() => {
+    const storedSession = isResumeRequested() ? loadStoredReviewSession() : null;
+    if (storedSession) {
+      setCards(normalizeCards(storedSession.cards));
+      setCurrentIndex(storedSession.currentIndex);
+      setPhase(storedSession.phase);
+      setRevealState(storedSession.revealState);
+      setTypedAnswer(storedSession.typedAnswer);
+      setCompleted(false);
+      setStarted(true);
+    }
+    setResumeReady(true);
+  }, []);
 
   useEffect(() => {
     const source = getLearningEntryFromUrl();
+    if (!resumeReady) {
+      return;
+    }
     if (!started && !loading && source) {
       void startLearningMode(source.entryType, source.entryId);
     }
-  }, [started, loading]);
+  }, [started, loading, resumeReady]);
+
+  useEffect(() => {
+    if (!started || completed || cards.length === 0) {
+      clearStoredReviewSession();
+      return;
+    }
+    persistReviewSession({
+      cards,
+      currentIndex,
+      phase,
+      revealState,
+      typedAnswer,
+    });
+  }, [cards, completed, currentIndex, phase, revealState, started, typedAnswer]);
 
   const currentCard = cards[currentIndex] ?? null;
   const prompt = currentCard?.prompt ?? null;
@@ -120,8 +204,10 @@ export default function ReviewPage() {
     () => currentCard?.schedule_options ?? [],
     [currentCard],
   );
+  const promptAudioUrl = prompt?.audio?.preferred_playback_url ?? null;
 
   const startQueueReview = async () => {
+    clearStoredReviewSession();
     setLoading(true);
     try {
       const dueCards = await apiClient.get<ReviewQueueCard[]>("/reviews/queue/due");
@@ -138,6 +224,7 @@ export default function ReviewPage() {
   };
 
   const startLearningMode = async (entryType: "word" | "phrase", entryId: string) => {
+    clearStoredReviewSession();
     setLoading(true);
     try {
       const payload = await startLearningEntry(entryType, entryId);
@@ -170,6 +257,7 @@ export default function ReviewPage() {
       setTypedAnswer("");
       return;
     }
+    clearStoredReviewSession();
     setCompleted(true);
   };
 
@@ -465,6 +553,9 @@ export default function ReviewPage() {
 
   if (phase === "relearn" && revealState) {
     const detail = revealState.detail;
+    const detailHref = detail
+      ? `${detail.entry_type === "word" ? "/word" : "/phrase"}/${detail.entry_id}?return_to=review&resume=1`
+      : null;
     return (
       <div className="space-y-4" data-testid="review-relearn-state">
         <div className="text-sm text-slate-500">
@@ -501,6 +592,14 @@ export default function ReviewPage() {
         >
           Continue
         </button>
+        {detailHref ? (
+          <Link
+            href={detailHref}
+            className="block w-full rounded-md border border-slate-300 px-4 py-2 text-center text-slate-800"
+          >
+            Open full word details
+          </Link>
+        ) : null}
       </div>
     );
   }
@@ -516,13 +615,21 @@ export default function ReviewPage() {
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         {prompt?.stem ? <p className="mb-2 text-sm text-slate-500">{prompt.stem}</p> : null}
-        {prompt?.prompt_type === "audio_to_definition" ? (
-          <div className="mb-4 flex justify-center">
+        {prompt?.prompt_type === "audio_to_definition" && promptAudioUrl ? (
+          <div className="mb-4 flex justify-center gap-3">
             <button
               type="button"
+              onClick={() => void play(promptAudioUrl)}
               className="rounded-full bg-cyan-500 px-5 py-4 text-sm font-semibold text-white"
             >
-              Play audio
+              {loadingUrl === promptAudioUrl ? "Loading..." : "Play audio"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void play(promptAudioUrl)}
+              className="rounded-full border border-cyan-300 px-5 py-4 text-sm font-semibold text-cyan-700"
+            >
+              Play again
             </button>
           </div>
         ) : null}

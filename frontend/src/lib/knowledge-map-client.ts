@@ -3,6 +3,49 @@ import { apiClient } from "@/lib/api-client";
 export type KnowledgeStatus = "undecided" | "to_learn" | "learning" | "known";
 export type KnowledgeEntryType = "word" | "phrase";
 
+export type LearnerVoiceAccent = "us" | "uk" | "au";
+
+export type LearnerVoicePlaybackLocale = {
+  playback_url: string;
+  locale: string;
+  relative_path?: string | null;
+};
+
+export type LearnerVoicePlaybackPayload = {
+  preferred_locale?: LearnerVoiceAccent | null;
+  preferred_playback_url?: string | null;
+  locales?: Partial<Record<LearnerVoiceAccent, LearnerVoicePlaybackLocale>> & Record<string, LearnerVoicePlaybackLocale>;
+};
+
+export type LearnerVoiceAsset = {
+  id: string;
+  content_scope: string;
+  meaning_id?: string | null;
+  meaning_example_id?: string | null;
+  phrase_sense_id?: string | null;
+  phrase_sense_example_id?: string | null;
+  locale: string;
+  voice_role?: string;
+  provider?: string;
+  family?: string;
+  voice_id?: string;
+  profile_key?: string;
+  audio_format?: string;
+  mime_type?: string | null;
+  speaking_rate?: number | null;
+  pitch_semitones?: number | null;
+  lead_ms?: number;
+  tail_ms?: number;
+  effects_profile_id?: string | null;
+  playback_url: string;
+  storage_kind?: string;
+  storage_base?: string;
+  relative_path?: string;
+  status?: string;
+  generation_error?: string | null;
+  generated_at?: string | null;
+};
+
 export type KnowledgeMapEntrySummary = {
   entry_type: KnowledgeEntryType;
   entry_id: string;
@@ -16,6 +59,8 @@ export type KnowledgeMapEntrySummary = {
   primary_definition: string | null;
   part_of_speech: string | null;
   phrase_kind: string | null;
+  voice_assets?: LearnerVoiceAsset[];
+  voice?: LearnerVoicePlaybackPayload | null;
 };
 
 export type KnowledgeMapOverview = {
@@ -77,6 +122,7 @@ export type ReviewPromptPayload = {
   source_word_id?: string | null;
   source_meaning_id?: string | null;
   audio_state?: string;
+  audio?: LearnerVoicePlaybackPayload | null;
 };
 
 export type ReviewDetailMeaning = {
@@ -100,6 +146,7 @@ export type ReviewDetailPayload = {
   compare_with: string[];
   meanings: ReviewDetailMeaning[];
   audio_state?: string;
+  audio?: LearnerVoicePlaybackPayload | null;
 };
 
 export type ReviewScheduleOption = {
@@ -207,6 +254,8 @@ export type KnowledgeMapEntryDetail = {
   translation: string | null;
   primary_definition: string | null;
   supported_translation_locales?: string[];
+  voice_assets?: LearnerVoiceAsset[];
+  voice?: LearnerVoicePlaybackPayload | null;
   forms?: {
     verb_forms: Record<string, string>;
     plural_forms: string[];
@@ -252,6 +301,29 @@ export function normalizeLearnerTranslation(value: string | null | undefined): s
   }
 
   return trimmed;
+}
+
+export function resolveLearnerVoicePlaybackUrl(
+  voice: LearnerVoicePlaybackPayload | null | undefined,
+  accent: LearnerVoiceAccent,
+): string | null {
+  if (!voice) {
+    return null;
+  }
+
+  const accentedLocale = voice.locales?.[accent];
+  if (accentedLocale?.playback_url) {
+    return accentedLocale.playback_url;
+  }
+
+  if (voice.preferred_playback_url) {
+    return voice.preferred_playback_url;
+  }
+
+  const fallbackLocale = Object.values(voice.locales ?? {}).find(
+    (locale): locale is LearnerVoicePlaybackLocale => Boolean(locale?.playback_url),
+  );
+  return fallbackLocale?.playback_url ?? null;
 }
 
 export const getKnowledgeMapOverview = (): Promise<KnowledgeMapOverview> =>

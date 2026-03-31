@@ -144,8 +144,53 @@ class ApiClient {
     return parseJsonBody(response);
   }
 
+  private async requestBlob(
+    path: string,
+    options: RequestInit = {},
+    allowRefresh = true,
+  ): Promise<Blob> {
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string>),
+    };
+
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 401 && this.shouldHandleAuthFailure(path)) {
+      if (allowRefresh) {
+        const refreshSucceeded = await this.refreshAccessToken();
+        if (refreshSucceeded) {
+          return this.requestBlob(path, options, false);
+        }
+      }
+
+      this.clearSessionAndRedirect();
+      throw new ApiError(401, "Authentication required");
+    }
+
+    if (!response.ok) {
+      const body = await parseJsonBody(response);
+      throw new ApiError(
+        response.status,
+        body?.detail ?? `Request failed: ${response.status}`,
+      );
+    }
+
+    return response.blob();
+  }
+
   get<T>(path: string): Promise<T> {
     return this.request<T>(path);
+  }
+
+  getBlob(path: string): Promise<Blob> {
+    return this.requestBlob(path);
   }
 
   post<T>(path: string, body?: unknown): Promise<T> {

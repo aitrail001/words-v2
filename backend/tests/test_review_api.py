@@ -273,6 +273,80 @@ class TestQueueDue:
         assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
 
     @pytest.mark.asyncio
+    async def test_get_due_queue_items_returns_audio_prompt_with_playback_url(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        due_item = ReviewCard(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            word_id=uuid.uuid4(),
+            meaning_id=uuid.uuid4(),
+            card_type="flashcard",
+            next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_due_queue_items(self, user_id, limit=20):
+            return [
+                {
+                    "item": due_item,
+                    "word": "bank",
+                    "definition": "The land alongside a river.",
+                    "review_mode": "mcq",
+                    "prompt": {
+                        "mode": "mcq",
+                        "prompt_type": "audio_to_definition",
+                        "stem": "Listen, then choose the best matching definition.",
+                        "question": "bank",
+                        "options": [
+                            {"option_id": "A", "label": "The land alongside a river.", "is_correct": True},
+                            {"option_id": "B", "label": "A financial institution.", "is_correct": False},
+                            {"option_id": "C", "label": "A mass of cloud.", "is_correct": False},
+                            {"option_id": "D", "label": "A pile of snow.", "is_correct": False},
+                        ],
+                        "audio_state": "ready",
+                        "audio": {
+                            "preferred_playback_url": "/api/words/voice-assets/test-asset/content",
+                            "preferred_locale": "us",
+                            "locales": {
+                                "us": {
+                                    "playback_url": "/api/words/voice-assets/test-asset/content",
+                                    "locale": "en_us",
+                                    "relative_path": "word_bank/word/en_us/female-word.mp3",
+                                }
+                            },
+                        },
+                    },
+                    "source_entry_type": "word",
+                    "source_entry_id": str(due_item.word_id),
+                    "detail": None,
+                    "schedule_options": [],
+                }
+            ]
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_due_queue_items",
+            fake_get_due_queue_items,
+        )
+
+        response = await client.get(
+            "/api/reviews/queue/due?limit=5",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert (
+            data[0]["prompt"]["audio"]["preferred_playback_url"]
+            == "/api/words/voice-assets/test-asset/content"
+        )
+
+    @pytest.mark.asyncio
     async def test_get_queue_stats_emits_query_metrics_headers(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)
