@@ -254,6 +254,7 @@ async def build_card_prompt(
     user_id: uuid.UUID | None = None,
     source_entry_id: uuid.UUID | None = None,
     source_entry_type: str | None = None,
+    queue_item_id: uuid.UUID | None = None,
     previous_prompt_type: str | None = None,
     active_target_count: int = 1,
 ) -> dict[str, Any]:
@@ -334,4 +335,13 @@ async def build_card_prompt(
     )
     prompt["source_meaning_id"] = str(meaning_id)
     prompt["source_entry_type"] = normalized_entry_type
-    return prompt
+    prompt["source_entry_id"] = str(source_entry_id) if source_entry_id is not None else None
+
+    prompt_token = service._encode_prompt_token(
+        service._build_prompt_token_payload(
+            prompt=prompt,
+            user_id=user_id,
+            queue_item_id=queue_item_id,
+        )
+    )
+    return service._sanitize_prompt_for_client(prompt=prompt, prompt_token=prompt_token)

@@ -85,6 +85,7 @@ async def submit_entry_state_review(
     quality: int,
     time_spent_ms: int,
     user_id: uuid.UUID,
+    prompt_token: str | None,
     review_mode: str | None,
     outcome: str | None,
     selected_option_id: str | None,
@@ -93,23 +94,51 @@ async def submit_entry_state_review(
     prompt: dict[str, Any] | None,
     schedule_override: str | None,
 ) -> EntryReviewState:
-    normalized_review_mode = service._normalize_review_mode(review_mode)
-    resolved_outcome = service._derive_outcome(
-        review_mode=normalized_review_mode,
-        explicit_outcome=outcome,
-        quality=quality,
-        prompt=prompt,
-        selected_option_id=selected_option_id,
-        typed_answer=typed_answer,
+    prompt_token_payload = service._decode_prompt_token(prompt_token)
+    if prompt_token_payload is None:
+        raise ValueError("Invalid prompt token")
+    if prompt_token_payload.get("queue_item_id") not in {None, str(entry_state.id)}:
+        raise ValueError("Prompt token does not match queue item")
+    if prompt_token_payload.get("user_id") not in {None, str(user_id)}:
+        raise ValueError("Prompt token does not match user")
+
+    prompt_id = str(prompt_token_payload.get("prompt_id") or "")
+    if prompt_id and getattr(entry_state, "last_submission_prompt_id", None) == prompt_id:
+        entry_state.detail = entry_state.detail or await build_entry_state_detail(
+            service,
+            user_id=user_id,
+            entry_state=entry_state,
+        )
+        entry_state.schedule_options = entry_state.schedule_options or service._build_schedule_options(
+            int(getattr(entry_state, "interval_days", 0) or 0)
+        )
+        return entry_state
+
+    normalized_review_mode = service._normalize_review_mode(
+        review_mode or prompt_token_payload.get("review_mode")
+    )
+    explicit_outcome = outcome if outcome in {"remember", "lookup"} else None
+    resolved_outcome = (
+        explicit_outcome
+        if explicit_outcome is not None
+        else service._derive_objective_outcome_from_prompt_token(
+            prompt_token_payload=prompt_token_payload,
+            selected_option_id=selected_option_id,
+            typed_answer=typed_answer,
+        )
     )
     review_result = calculate_next_review(
         outcome=resolved_outcome,
-        prompt_type=(prompt or {}).get("prompt_type") or service.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+        prompt_type=str(
+            prompt_token_payload.get("prompt_type") or service.PROMPT_TYPE_DEFINITION_TO_ENTRY
+        ),
         stability=float(entry_state.stability or 0.3),
         difficulty=float(entry_state.difficulty or 0.5),
         grade=service._derive_review_grade(
             outcome=resolved_outcome,
-            prompt=prompt,
+            prompt={
+                "prompt_type": prompt_token_payload.get("prompt_type"),
+            },
             quality=quality,
             time_spent_ms=time_spent_ms,
         ),
@@ -126,7 +155,7 @@ async def submit_entry_state_review(
         entry_state=entry_state,
         review_result=review_result,
         resolved_outcome=resolved_outcome,
-        prompt=prompt,
+        prompt={"prompt_type": prompt_token_payload.get("prompt_type")},
         resolved_interval_days=resolved_interval_days,
         resolved_next_review=resolved_next_review,
     )
@@ -141,8 +170,10 @@ async def submit_entry_state_review(
         target_type=entry_state.target_type
         or ("meaning" if entry_state.entry_type == "word" else "phrase_sense"),
         target_id=entry_state.target_id
-        or service._parse_optional_uuid((prompt or {}).get("source_meaning_id")),
-        prompt_type=(prompt or {}).get("prompt_type") or service.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+        or service._parse_optional_uuid(prompt_token_payload.get("source_meaning_id")),
+        prompt_type=str(
+            prompt_token_payload.get("prompt_type") or service.PROMPT_TYPE_DEFINITION_TO_ENTRY
+        ),
         outcome=resolved_outcome,
         selected_option_id=selected_option_id,
         typed_answer=typed_answer,
@@ -150,12 +181,24 @@ async def submit_entry_state_review(
         scheduled_interval_days=resolved_interval_days,
         scheduled_by=scheduled_by,
         time_spent_ms=time_spent_ms,
-        prompt=prompt,
+        prompt={"input_mode": prompt_token_payload.get("input_mode")},
     )
     entry_state.quality_rating = service._derive_quality(
         review_mode=normalized_review_mode,
         quality=quality,
-        prompt=prompt,
+        prompt={
+            "prompt_type": prompt_token_payload.get("prompt_type"),
+            "expected_input": prompt_token_payload.get("expected_input"),
+            "source_entry_type": prompt_token_payload.get("source_entry_type"),
+            "options": [
+                {
+                    "option_id": prompt_token_payload.get("correct_option_id"),
+                    "is_correct": True,
+                }
+            ]
+            if prompt_token_payload.get("correct_option_id")
+            else [],
+        },
         selected_option_id=selected_option_id,
         typed_answer=typed_answer,
     )
@@ -168,8 +211,9 @@ async def submit_entry_state_review(
         "meaning" if entry_state.entry_type == "word" else "phrase_sense"
     )
     entry_state.target_id = entry_state.target_id or service._parse_optional_uuid(
-        (prompt or {}).get("source_meaning_id")
+        prompt_token_payload.get("source_meaning_id")
     )
+    entry_state.last_submission_prompt_id = prompt_id or None
     entry_state.detail = detail
     entry_state.schedule_options = service._build_schedule_options(resolved_interval_days)
     await service.db.commit()
@@ -184,6 +228,7 @@ async def submit_legacy_queue_review(
     time_spent_ms: int,
     user_id: uuid.UUID,
     card_type: str | None,
+    prompt_token: str | None,
     review_mode: str | None,
     outcome: str | None,
     selected_option_id: str | None,
@@ -191,19 +236,43 @@ async def submit_legacy_queue_review(
     prompt: dict[str, Any] | None,
     schedule_override: str | None,
 ) -> Any:
-    normalized_review_mode = service._normalize_review_mode(review_mode)
-    resolved_outcome = service._derive_outcome(
-        review_mode=normalized_review_mode,
-        explicit_outcome=outcome,
-        quality=quality,
-        prompt=prompt,
-        selected_option_id=selected_option_id,
-        typed_answer=typed_answer,
+    prompt_token_payload = service._decode_prompt_token(prompt_token)
+    if prompt_token_payload is None:
+        raise ValueError("Invalid prompt token")
+    if prompt_token_payload.get("queue_item_id") not in {None, str(getattr(item, "id", None))}:
+        raise ValueError("Prompt token does not match queue item")
+    if prompt_token_payload.get("user_id") not in {None, str(user_id)}:
+        raise ValueError("Prompt token does not match user")
+
+    normalized_review_mode = service._normalize_review_mode(
+        review_mode or prompt_token_payload.get("review_mode")
+    )
+    explicit_outcome = outcome if outcome in {"remember", "lookup"} else None
+    resolved_outcome = (
+        explicit_outcome
+        if explicit_outcome is not None
+        else service._derive_objective_outcome_from_prompt_token(
+            prompt_token_payload=prompt_token_payload,
+            selected_option_id=selected_option_id,
+            typed_answer=typed_answer,
+        )
     )
     resolved_quality = service._derive_quality(
         review_mode=normalized_review_mode,
         quality=quality,
-        prompt=prompt,
+        prompt={
+            "prompt_type": prompt_token_payload.get("prompt_type"),
+            "expected_input": prompt_token_payload.get("expected_input"),
+            "source_entry_type": prompt_token_payload.get("source_entry_type"),
+            "options": [
+                {
+                    "option_id": prompt_token_payload.get("correct_option_id"),
+                    "is_correct": True,
+                }
+            ]
+            if prompt_token_payload.get("correct_option_id")
+            else [],
+        },
         selected_option_id=selected_option_id,
         typed_answer=typed_answer,
     )
@@ -236,12 +305,14 @@ async def submit_legacy_queue_review(
 
     review_result = calculate_next_review(
         outcome=resolved_outcome,
-        prompt_type=(prompt or {}).get("prompt_type") or service.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+        prompt_type=str(
+            prompt_token_payload.get("prompt_type") or service.PROMPT_TYPE_DEFINITION_TO_ENTRY
+        ),
         stability=previous_stability,
         difficulty=previous_difficulty,
         grade=service._derive_review_grade(
             outcome=resolved_outcome,
-            prompt=prompt,
+            prompt={"prompt_type": prompt_token_payload.get("prompt_type")},
             quality=resolved_quality,
             time_spent_ms=time_spent_ms,
         ),
@@ -328,6 +399,7 @@ async def submit_queue_review(
     time_spent_ms: int,
     user_id: uuid.UUID,
     card_type: str | None = None,
+    prompt_token: str | None = None,
     review_mode: str | None = None,
     outcome: str | None = None,
     selected_option_id: str | None = None,
@@ -340,7 +412,7 @@ async def submit_queue_review(
         select(EntryReviewState).where(
             EntryReviewState.id == item_id,
             EntryReviewState.user_id == user_id,
-        )
+        ).with_for_update()
     )
     entry_state = state_lookup.scalar_one_or_none()
     if isinstance(entry_state, EntryReviewState):
@@ -350,6 +422,7 @@ async def submit_queue_review(
             quality=quality,
             time_spent_ms=time_spent_ms,
             user_id=user_id,
+            prompt_token=prompt_token,
             review_mode=review_mode,
             outcome=outcome,
             selected_option_id=selected_option_id,
@@ -384,6 +457,7 @@ async def submit_queue_review(
         time_spent_ms=time_spent_ms,
         user_id=user_id,
         card_type=card_type,
+        prompt_token=prompt_token,
         review_mode=review_mode,
         outcome=outcome,
         selected_option_id=selected_option_id,

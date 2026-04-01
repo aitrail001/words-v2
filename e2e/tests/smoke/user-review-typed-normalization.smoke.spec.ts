@@ -24,9 +24,10 @@ test("@smoke typed review normalization submits once and accepts punctuation/cas
           prompt: {
             mode: "mcq",
             prompt_type: "typed_recall",
+            prompt_token: "prompt-state-typed",
             stem: "Type the word or phrase that matches this definition.",
             question: "To search for information.",
-            expected_input: "look up",
+            input_mode: "typed",
             source_entry_type: "phrase",
             audio_state: "not_available",
           },
@@ -93,5 +94,6 @@ test("@smoke typed review normalization submits once and accepts punctuation/cas
   expect(submitPayloads).toHaveLength(1);
   expect(submitPayloads[0]).toMatchObject({
     typed_answer: "  Look, up!! ",
+    prompt_token: "prompt-state-typed",
   });
 });

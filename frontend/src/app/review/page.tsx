@@ -41,7 +41,6 @@ type RevealState = {
   persisted?: boolean;
 };
 
-const TIME_SPENT_MS = 5000;
 const REVIEW_RESUME_STORAGE_KEY = "learner-review-session-v1";
 
 const normalizeCards = (items: ReviewQueueCard[]): ReviewQueueCard[] =>
@@ -158,6 +157,7 @@ export default function ReviewPage() {
   const [resumeReady, setResumeReady] = useState(false);
   const [reviewPreferences, setReviewPreferences] = useState<UserPreferences | null>(null);
   const [audioReplayCount, setAudioReplayCount] = useState(0);
+  const [challengeStartedAtMs, setChallengeStartedAtMs] = useState<number | null>(null);
   const { play, loadingUrl } = useLearnerAudio();
 
   useEffect(() => {
@@ -170,6 +170,7 @@ export default function ReviewPage() {
       setTypedAnswer(storedSession.typedAnswer);
       setCompleted(false);
       setStarted(true);
+      setChallengeStartedAtMs(Date.now());
     }
     setResumeReady(true);
   }, []);
@@ -235,11 +236,12 @@ export default function ReviewPage() {
     card: ReviewQueueCard,
     extras: Record<string, unknown>,
   ): Record<string, unknown> => ({
-    time_spent_ms: TIME_SPENT_MS,
+    time_spent_ms:
+      challengeStartedAtMs === null ? 0 : Math.max(0, Date.now() - challengeStartedAtMs),
     audio_replay_count: Math.max(0, audioReplayCount - 1),
     card_type: card.card_type,
+    prompt_token: card.prompt?.prompt_token,
     review_mode: card.review_mode,
-    prompt: card.prompt,
     ...extras,
   });
 
@@ -264,6 +266,7 @@ export default function ReviewPage() {
       setTypedAnswer("");
       setCompleted(false);
       setStarted(true);
+      setChallengeStartedAtMs(Date.now());
     } finally {
       setLoading(false);
     }
@@ -282,6 +285,7 @@ export default function ReviewPage() {
       setTypedAnswer("");
       setCompleted(false);
       setStarted(true);
+      setChallengeStartedAtMs(Date.now());
     } finally {
       setLoading(false);
     }
@@ -303,10 +307,12 @@ export default function ReviewPage() {
       setRevealState(null);
       setTypedAnswer("");
       setAudioReplayCount(0);
+      setChallengeStartedAtMs(Date.now());
       return;
     }
     clearStoredReviewSession();
     setCompleted(true);
+    setChallengeStartedAtMs(null);
   };
 
   const buildRevealState = (
@@ -350,7 +356,11 @@ export default function ReviewPage() {
   };
 
   const onSubmitTypedAnswer = async () => {
-    if (!currentCard?.prompt?.expected_input || loading) {
+    if (
+      !currentCard?.prompt ||
+      !["typed", "speech_placeholder"].includes(currentCard.prompt.input_mode ?? "") ||
+      loading
+    ) {
       return;
     }
     const rawTypedAnswer = typedAnswer;
@@ -358,21 +368,7 @@ export default function ReviewPage() {
     if (!normalizedTyped) {
       return;
     }
-
     if (!currentCard.queue_item_id) {
-      const normalizedExpected = currentCard.prompt.expected_input.trim().toLowerCase();
-      const fallbackOutcome: ReviewOutcome =
-        normalizedTyped === normalizedExpected ? "correct_tested" : "wrong";
-      setRevealState(
-        buildRevealState(
-          currentCard,
-          fallbackOutcome,
-          currentCard.detail ?? null,
-          currentCard.schedule_options ?? [],
-          { typedResponseValue: rawTypedAnswer.trim() || undefined },
-        ),
-      );
-      setPhase(fallbackOutcome === "correct_tested" ? "reveal" : "relearn");
       return;
     }
 
@@ -405,28 +401,29 @@ export default function ReviewPage() {
     if (!currentCard?.prompt?.options || loading) {
       return;
     }
-    const matched = currentCard.prompt.options.find((option) => option.option_id === optionId);
-    const outcome: ReviewOutcome = matched?.is_correct ? "correct_tested" : "wrong";
-    if (outcome === "correct_tested") {
-      setRevealState(
-        buildRevealState(
-          currentCard,
-          outcome,
-          currentCard.detail ?? null,
-          currentCard.schedule_options ?? [],
-          { selectedOptionId: optionId },
-        ),
-      );
-      setPhase("reveal");
+    if (!currentCard.queue_item_id) {
       return;
     }
     setLoading(true);
     try {
-      const response = await submitOutcome(currentCard, outcome);
+      const response = await apiClient.post<{
+        outcome?: ReviewOutcome;
+        detail?: ReviewDetailPayload | null;
+        schedule_options?: ReviewScheduleOption[];
+      }>(`/reviews/queue/${currentCard.queue_item_id}/submit`, buildQueueSubmitPayload(currentCard, {
+        quality: 4,
+        selected_option_id: optionId,
+      }));
       const detail = response.detail ?? currentCard.detail ?? null;
       const options = response.schedule_options ?? currentCard.schedule_options ?? [];
-      setRevealState(buildRevealState(currentCard, outcome, detail, options));
-      setPhase("relearn");
+      const outcome = response.outcome ?? "wrong";
+      setRevealState(
+        buildRevealState(currentCard, outcome, detail, options, {
+          selectedOptionId: optionId,
+          persisted: outcome === "wrong" || outcome === "lookup",
+        }),
+      );
+      setPhase(outcome === "correct_tested" ? "reveal" : "relearn");
     } finally {
       setLoading(false);
     }
@@ -739,7 +736,7 @@ export default function ReviewPage() {
             {option.label}
           </button>
         ))}
-        {!prompt?.options?.length && prompt?.expected_input ? (
+        {!prompt?.options?.length && ["typed", "speech_placeholder"].includes(prompt?.input_mode ?? "") ? (
           <div className="space-y-2">
             {isSpeechPlaceholderPrompt ? (
               <div

@@ -38,6 +38,7 @@ class EntryReviewState(Base):
     exposure_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     times_remembered: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     last_prompt_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_submission_prompt_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
     is_fragile: Mapped[bool] = mapped_column(Boolean, nullable=False, insert_default=False)
     is_suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, insert_default=False)

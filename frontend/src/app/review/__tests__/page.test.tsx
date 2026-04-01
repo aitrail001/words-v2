@@ -23,6 +23,9 @@ jest.mock("@/lib/user-preferences-client", () => ({
   getUserPreferences: jest.fn(),
 }));
 
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+  true;
+
 describe("ReviewPage", () => {
   const mockGet = apiClient.get as jest.MockedFunction<typeof apiClient.get>;
   const mockPost = apiClient.post as jest.MockedFunction<typeof apiClient.post>;
@@ -63,11 +66,12 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "definition_to_entry",
+          prompt_token: "prompt-state-1",
           stem: "Choose the word or phrase that matches this definition.",
           question: "Only just, by a very small margin.",
           options: [
-            { option_id: "A", label: "Barely", is_correct: true },
-            { option_id: "B", label: "Bravely", is_correct: false },
+            { option_id: "A", label: "Barely" },
+            { option_id: "B", label: "Bravely" },
           ],
           audio_state: "not_available",
         },
@@ -90,12 +94,37 @@ describe("ReviewPage", () => {
         ],
       },
     ] as never);
-    mockPost.mockResolvedValue({} as never);
+    mockPost
+      .mockResolvedValueOnce({
+        outcome: "correct_tested",
+        detail: {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "barely",
+          primary_definition: "Only just, by a very small margin.",
+          primary_example: "He barely made it through the door.",
+          meaning_count: 1,
+          remembered_count: 4,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+          coverage_summary: "deep_coverage",
+        },
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      } as never)
+      .mockResolvedValueOnce({} as never);
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /a barely/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /a barely/i }));
+    });
 
     expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
     expect(screen.getByText("barely")).toBeInTheDocument();
@@ -107,7 +136,16 @@ describe("ReviewPage", () => {
       fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     });
 
-    expect(mockPost).toHaveBeenCalledWith(
+    expect(mockPost).toHaveBeenNthCalledWith(
+      1,
+      "/reviews/queue/state-1/submit",
+      expect.objectContaining({
+        selected_option_id: "A",
+        prompt_token: "prompt-state-1",
+      }),
+    );
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
       "/reviews/queue/state-1/submit",
       expect.objectContaining({
         outcome: "correct_tested",
@@ -128,11 +166,12 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "definition_to_entry",
+          prompt_token: "prompt-state-2",
           stem: "Choose the word or phrase that matches this definition.",
           question: "To do something too soon.",
           options: [
-            { option_id: "A", label: "Miss the boat", is_correct: false },
-            { option_id: "B", label: "Jump the gun", is_correct: true },
+            { option_id: "A", label: "Miss the boat" },
+            { option_id: "B", label: "Jump the gun" },
           ],
           audio_state: "not_available",
         },
@@ -161,6 +200,7 @@ describe("ReviewPage", () => {
       },
     ] as never);
     mockPost.mockResolvedValue({
+      outcome: "wrong",
       detail: {
         entry_type: "phrase",
         entry_id: "phrase-1",
@@ -184,8 +224,12 @@ describe("ReviewPage", () => {
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /a miss the boat/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /a miss the boat/i }));
+    });
 
     expect(await screen.findByTestId("review-relearn-state")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open full word details/i })).toHaveAttribute(
@@ -196,7 +240,8 @@ describe("ReviewPage", () => {
     expect(mockPost).toHaveBeenCalledWith(
       "/reviews/queue/state-2/submit",
       expect.objectContaining({
-        outcome: "wrong",
+        selected_option_id: "A",
+        prompt_token: "prompt-state-2",
       }),
     );
   });
@@ -212,10 +257,11 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "typed_recall",
+          prompt_token: "prompt-state-3",
           stem: "Type the word or phrase that matches this definition.",
           question: "To search for information.",
           options: null,
-          expected_input: "look up",
+          input_mode: "typed",
           audio_state: "not_available",
         },
         detail: {
@@ -256,11 +302,15 @@ describe("ReviewPage", () => {
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
     fireEvent.change(await screen.findByPlaceholderText(/type the word or phrase/i), {
       target: { value: "  Look, up!! " },
     });
-    fireEvent.click(screen.getByRole("button", { name: /check answer/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /check answer/i }));
+    });
 
     expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
     expect(mockPost).toHaveBeenCalledWith(
@@ -288,10 +338,11 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "typed_recall",
+          prompt_token: "prompt-state-4",
           stem: "Type the word or phrase that matches this definition.",
           question: "The capacity to recover quickly from difficulties.",
           options: null,
-          expected_input: "resilience",
+          input_mode: "typed",
           audio_state: "not_available",
         },
         detail: {
@@ -319,6 +370,7 @@ describe("ReviewPage", () => {
       },
     ] as never);
     mockPost.mockResolvedValue({
+      outcome: "wrong",
       detail: {
         entry_type: "word",
         entry_id: "word-4",
@@ -342,11 +394,15 @@ describe("ReviewPage", () => {
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
     fireEvent.change(await screen.findByPlaceholderText(/type the word or phrase/i), {
       target: { value: "reliance" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /check answer/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /check answer/i }));
+    });
 
     expect(await screen.findByTestId("review-relearn-state")).toBeInTheDocument();
     expect(mockPost).toHaveBeenCalledWith(
@@ -368,11 +424,12 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "definition_to_entry",
+          prompt_token: "prompt-state-default",
           stem: "Choose the word or phrase that matches this definition.",
           question: "Only just, by a very small margin.",
           options: [
-            { option_id: "A", label: "Barely", is_correct: true },
-            { option_id: "B", label: "Bravely", is_correct: false },
+            { option_id: "A", label: "Barely" },
+            { option_id: "B", label: "Bravely" },
           ],
           audio_state: "not_available",
         },
@@ -395,15 +452,34 @@ describe("ReviewPage", () => {
         ],
       },
     ] as never);
-    mockPost.mockResolvedValue({} as never);
+    mockPost.mockResolvedValue({
+      outcome: "correct_tested",
+      detail: {
+        entry_type: "word",
+        entry_id: "word-default",
+        display_text: "barely",
+        primary_definition: "Only just, by a very small margin.",
+        primary_example: "He barely made it through the door.",
+        meaning_count: 1,
+        remembered_count: 1,
+        compare_with: [],
+        meanings: [],
+        audio_state: "not_available",
+        coverage_summary: "familiar_with_1_meaning",
+      },
+      schedule_options: [
+        { value: "1d", label: "Tomorrow", is_default: true },
+        { value: "7d", label: "In a week", is_default: false },
+      ],
+    } as never);
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /a barely/i }));
-
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /a barely/i }));
     });
 
     expect(mockPost).toHaveBeenCalledWith(
@@ -425,11 +501,12 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "collocation_check",
+          prompt_token: "prompt-state-5",
           stem: "Choose the word or phrase that completes this common expression.",
           question: "They ___ whenever a draft appears.",
           options: [
-            { option_id: "A", label: "jump the gun", is_correct: true },
-            { option_id: "B", label: "miss the boat", is_correct: false },
+            { option_id: "A", label: "jump the gun" },
+            { option_id: "B", label: "miss the boat" },
           ],
           sentence_masked: "They ___ whenever a draft appears.",
           audio_state: "not_available",
@@ -441,7 +518,9 @@ describe("ReviewPage", () => {
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
 
     const prompt = await screen.findByTestId("review-collocation-prompt");
     expect(prompt).toBeInTheDocument();
@@ -460,11 +539,12 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "situation_matching",
+          prompt_token: "prompt-state-6",
           stem: "Which word or phrase best fits this situation?",
           question: "Resilience helps teams adapt after major setbacks.",
           options: [
-            { option_id: "A", label: "resilience", is_correct: true },
-            { option_id: "B", label: "overreaction", is_correct: false },
+            { option_id: "A", label: "resilience" },
+            { option_id: "B", label: "overreaction" },
           ],
           audio_state: "not_available",
         },
@@ -475,7 +555,9 @@ describe("ReviewPage", () => {
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
 
     const prompt = await screen.findByTestId("review-situation-prompt");
     expect(prompt).toBeInTheDocument();
@@ -494,10 +576,10 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "speak_recall",
+          prompt_token: "prompt-state-7",
           stem: "Say the word or phrase that matches this definition.",
           question: "The capacity to recover quickly from difficulties.",
           options: null,
-          expected_input: "resilience",
           input_mode: "speech_placeholder",
           voice_placeholder_text: "Voice answer coming soon. Type the answer for now.",
           audio_state: "placeholder",
@@ -509,7 +591,9 @@ describe("ReviewPage", () => {
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
 
     const prompt = await screen.findByTestId("review-speech-placeholder");
     expect(prompt).toBeInTheDocument();
@@ -528,13 +612,14 @@ describe("ReviewPage", () => {
         prompt: {
           mode: "mcq",
           prompt_type: "audio_to_definition",
+          prompt_token: "prompt-state-audio",
           stem: "Listen, then choose the best matching definition.",
           question: "bank",
           options: [
-            { option_id: "A", label: "The land alongside a river.", is_correct: true },
-            { option_id: "B", label: "A financial institution.", is_correct: false },
-            { option_id: "C", label: "A pile of snow.", is_correct: false },
-            { option_id: "D", label: "A mass of cloud.", is_correct: false },
+            { option_id: "A", label: "The land alongside a river." },
+            { option_id: "B", label: "A financial institution." },
+            { option_id: "C", label: "A pile of snow." },
+            { option_id: "D", label: "A mass of cloud." },
           ],
           audio_state: "ready",
           audio: {
@@ -563,10 +648,28 @@ describe("ReviewPage", () => {
         schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
       },
     ] as never);
+    mockPost.mockResolvedValue({
+      outcome: "correct_tested",
+      detail: {
+        entry_type: "word",
+        entry_id: "word-audio",
+        display_text: "bank",
+        primary_definition: "The land alongside a river.",
+        primary_example: "We sat on the river bank.",
+        meaning_count: 1,
+        remembered_count: 0,
+        compare_with: [],
+        meanings: [],
+        audio_state: "ready",
+      },
+      schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
+    } as never);
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
 
     fireEvent.click(await screen.findByRole("button", { name: /play audio/i }));
     expect(mockPlay).toHaveBeenCalledWith("/api/words/voice-assets/audio-1/content");
@@ -575,18 +678,17 @@ describe("ReviewPage", () => {
     expect(mockPlay).toHaveBeenCalledTimes(2);
     expect(screen.getAllByRole("button", { name: /^[A-D] /i })).toHaveLength(4);
 
-    fireEvent.click(screen.getByRole("button", { name: /a the land alongside a river\./i }));
-    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
-
-    mockPost.mockResolvedValue({} as never);
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+      fireEvent.click(screen.getByRole("button", { name: /a the land alongside a river\./i }));
     });
+    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
 
     expect(mockPost).toHaveBeenCalledWith(
       "/reviews/queue/state-audio/submit",
       expect.objectContaining({
         audio_replay_count: 1,
+        selected_option_id: "A",
+        prompt_token: "prompt-state-audio",
       }),
     );
   });
@@ -609,11 +711,12 @@ describe("ReviewPage", () => {
             prompt: {
               mode: "mcq",
               prompt_type: "definition_to_entry",
+              prompt_token: "prompt-state-phrase-9",
               stem: "Choose the word or phrase that matches this definition.",
               question: "To do something too soon.",
               options: [
-                { option_id: "A", label: "Jump the gun", is_correct: true },
-                { option_id: "B", label: "Miss the boat", is_correct: false },
+                { option_id: "A", label: "Jump the gun" },
+                { option_id: "B", label: "Miss the boat" },
               ],
               audio_state: "not_available",
             },
@@ -634,24 +737,38 @@ describe("ReviewPage", () => {
         },
         schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
       } as never)
-      .mockResolvedValueOnce({} as never);
+      .mockResolvedValueOnce({
+        outcome: "correct_tested",
+        detail: {
+          entry_type: "phrase",
+          entry_id: "phrase-9",
+          display_text: "jump the gun",
+          primary_definition: "To do something too soon.",
+          primary_example: "They jumped the gun and announced it early.",
+          meaning_count: 1,
+          remembered_count: 0,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+        },
+        schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
+      } as never);
 
     render(<ReviewPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /a jump the gun/i }));
-    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
-
+    const answerButton = await screen.findByRole("button", { name: /a jump the gun/i });
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+      fireEvent.click(answerButton);
     });
+    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
 
     expect(mockPost).toHaveBeenNthCalledWith(1, "/reviews/entry/phrase/phrase-9/learning/start");
     expect(mockPost).toHaveBeenNthCalledWith(
       2,
       "/reviews/queue/state-phrase-9/submit",
       expect.objectContaining({
-        outcome: "correct_tested",
         selected_option_id: "A",
+        prompt_token: "prompt-state-phrase-9",
       }),
     );
     window.history.pushState({}, "", "/review");
@@ -672,11 +789,12 @@ describe("ReviewPage", () => {
             prompt: {
               mode: "mcq",
               prompt_type: "definition_to_entry",
+              prompt_token: "prompt-state-1",
               stem: "Choose the word or phrase that matches this definition.",
               question: "Only just, by a very small margin.",
               options: [
-                { option_id: "A", label: "Barely", is_correct: true },
-                { option_id: "B", label: "Bravely", is_correct: false },
+                { option_id: "A", label: "Barely" },
+                { option_id: "B", label: "Bravely" },
               ],
               audio_state: "not_available",
             },
@@ -703,11 +821,12 @@ describe("ReviewPage", () => {
             prompt: {
               mode: "mcq",
               prompt_type: "definition_to_entry",
+              prompt_token: "prompt-state-2",
               stem: "Choose the word or phrase that matches this definition.",
               question: "To do something too soon.",
               options: [
-                { option_id: "A", label: "Jump the gun", is_correct: true },
-                { option_id: "B", label: "Miss the boat", is_correct: false },
+                { option_id: "A", label: "Jump the gun" },
+                { option_id: "B", label: "Miss the boat" },
               ],
               audio_state: "not_available",
             },

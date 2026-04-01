@@ -171,13 +171,14 @@ test("@smoke learner audio covers range cards and review replay", async ({
           prompt: {
             mode: "mcq",
             prompt_type: "audio_to_definition",
+            prompt_token: "prompt-state-audio",
             stem: "Listen and choose the matching meaning.",
             question: "Which definition matches the audio?",
             options: [
-              { option_id: "A", label: "The capacity to recover quickly from difficulties.", is_correct: true },
-              { option_id: "B", label: "A severe reaction to small changes.", is_correct: false },
-              { option_id: "C", label: "A habit of avoiding effort.", is_correct: false },
-              { option_id: "D", label: "A formal request for help.", is_correct: false },
+              { option_id: "A", label: "The capacity to recover quickly from difficulties." },
+              { option_id: "B", label: "A severe reaction to small changes." },
+              { option_id: "C", label: "A habit of avoiding effort." },
+              { option_id: "D", label: "A formal request for help." },
             ],
             audio_state: "ready",
             audio: {
@@ -214,13 +215,14 @@ test("@smoke learner audio covers range cards and review replay", async ({
           prompt: {
             mode: "mcq",
             prompt_type: "situation_matching",
+            prompt_token: "prompt-state-situation",
             stem: "Which word or phrase best fits this situation?",
             question: "A team keeps adapting after repeated setbacks.",
             options: [
-              { option_id: "A", label: "overreaction", is_correct: false },
-              { option_id: "B", label: "resilience", is_correct: true },
-              { option_id: "C", label: "avoidance", is_correct: false },
-              { option_id: "D", label: "confusion", is_correct: false },
+              { option_id: "A", label: "overreaction" },
+              { option_id: "B", label: "resilience" },
+              { option_id: "C", label: "avoidance" },
+              { option_id: "D", label: "confusion" },
             ],
             audio_state: "not_available",
           },
@@ -254,11 +256,35 @@ test("@smoke learner audio covers range cards and review replay", async ({
     const urlSegments = route.request().url().split("/");
     const itemId = urlSegments[urlSegments.length - 2] ?? "";
 
+    if (itemId === "state-audio" && payload.selected_option_id === "A") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          outcome: "correct_tested",
+          detail: {
+            entry_type: "word",
+            entry_id: "word-audio",
+            display_text: "resilience",
+            primary_definition: "The capacity to recover quickly from difficulties.",
+            primary_example: "Resilience helps teams adapt after major setbacks.",
+            meaning_count: 1,
+            remembered_count: 1,
+            compare_with: [],
+            meanings: [],
+            audio_state: "ready",
+          },
+          schedule_options: [{ value: "2d", label: "In 2 days", is_default: true }],
+        }),
+      });
+      return;
+    }
     if (itemId === "state-situation") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
+          outcome: "wrong",
           detail: {
             entry_type: "word",
             entry_id: "word-situation",
@@ -320,11 +346,17 @@ test("@smoke learner audio covers range cards and review replay", async ({
   expect(submitPayloads).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
-        outcome: "correct_tested",
         selected_option_id: "A",
+        prompt_token: "prompt-state-audio",
       }),
       expect.objectContaining({
-        outcome: "wrong",
+        outcome: "correct_tested",
+        selected_option_id: "A",
+        prompt_token: "prompt-state-audio",
+      }),
+      expect.objectContaining({
+        selected_option_id: "A",
+        prompt_token: "prompt-state-situation",
       }),
     ]),
   );

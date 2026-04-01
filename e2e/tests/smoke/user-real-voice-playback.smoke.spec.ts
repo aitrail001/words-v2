@@ -153,12 +153,13 @@ test("@smoke real local voice assets play through authenticated detail and revie
           prompt: {
             mode: "mcq",
             prompt_type: "audio_to_definition",
+            prompt_token: "prompt-real-audio-review",
             stem: "Listen and choose the matching meaning.",
             question: "Which definition matches the audio?",
             options: [
-              { option_id: "A", label: "The power or skill needed to do something.", is_correct: true },
-              { option_id: "B", label: "A container for money.", is_correct: false },
-              { option_id: "C", label: "A surprising good outcome after trouble.", is_correct: false },
+              { option_id: "A", label: "The power or skill needed to do something." },
+              { option_id: "B", label: "A container for money." },
+              { option_id: "C", label: "A surprising good outcome after trouble." },
             ],
             audio_state: "ready",
             audio: {

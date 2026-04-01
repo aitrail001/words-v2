@@ -119,7 +119,7 @@ class TestSubmitReview:
         assert updated.interval_days > 1
         assert updated.next_review is not None
 
-        executed_query = mock_db.execute.call_args.args[0]
+        executed_query = mock_db.execute.await_args_list[0].args[0]
         assert "review_sessions.user_id" in str(executed_query)
         assert user_id in executed_query.compile().params.values()
 
@@ -325,7 +325,7 @@ class TestHistoryLookup:
 
         assert history is latest_history
         result.scalars.return_value.first.assert_called_once()
-        executed_query = mock_db.execute.call_args.args[0]
+        executed_query = mock_db.execute.await_args_list[0].args[0]
         assert executed_query._limit_clause is not None
 
 
@@ -357,6 +357,19 @@ class TestQueueSubmit:
         card_result = MagicMock()
         card_result.scalar_one_or_none.return_value = card
         mock_db.execute.return_value = card_result
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": str(uuid.uuid4()),
+                "user_id": str(user_id),
+                "queue_item_id": str(card.id),
+                "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(card.word_id),
+                "source_meaning_id": str(card.meaning_id),
+                "correct_option_id": "A",
+            }
+        )
 
         updated = await review_service.submit_queue_review(
             item_id=card.id,
@@ -364,6 +377,8 @@ class TestQueueSubmit:
             time_spent_ms=1500,
             user_id=user_id,
             card_type="listening",
+            prompt_token=prompt_token,
+            selected_option_id="A",
         )
 
         assert updated.ease_factor > 2.5
@@ -406,6 +421,19 @@ class TestQueueSubmit:
         accent_result.scalar_one_or_none.return_value = "us"
         history_count_result = MagicMock()
         history_count_result.scalar_one.return_value = 4
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": str(uuid.uuid4()),
+                "user_id": str(user_id),
+                "queue_item_id": str(state.id),
+                "prompt_type": ReviewService.PROMPT_TYPE_SENTENCE_GAP,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(word_id),
+                "source_meaning_id": str(uuid.uuid4()),
+                "correct_option_id": "A",
+            }
+        )
         mock_db.execute.side_effect = [
             state_lookup_result,
             word_lookup_result,
@@ -421,7 +449,7 @@ class TestQueueSubmit:
             time_spent_ms=1500,
             user_id=user_id,
             outcome="wrong",
-            prompt={"prompt_type": "sentence_gap"},
+            prompt_token=prompt_token,
         )
 
         assert updated.outcome == "wrong"
@@ -460,6 +488,21 @@ class TestQueueSubmit:
         accent_result.scalar_one_or_none.return_value = "us"
         history_count_result = MagicMock()
         history_count_result.scalar_one.return_value = 2
+        source_meaning_id = uuid.uuid4()
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": str(uuid.uuid4()),
+                "user_id": str(user_id),
+                "queue_item_id": str(state.id),
+                "prompt_type": ReviewService.PROMPT_TYPE_TYPED_RECALL,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "input_mode": "typed",
+                "source_entry_type": "word",
+                "source_entry_id": str(word_id),
+                "source_meaning_id": str(source_meaning_id),
+                "expected_input": "resilience",
+            }
+        )
         mock_db.execute.side_effect = [
             state_lookup_result,
             word_lookup_result,
@@ -474,12 +517,7 @@ class TestQueueSubmit:
             quality=4,
             time_spent_ms=1200,
             user_id=user_id,
-            prompt={
-                "prompt_type": "typed_recall",
-                "input_mode": "typed",
-                "audio_state": "not_available",
-                "source_meaning_id": str(uuid.uuid4()),
-            },
+            prompt_token=prompt_token,
             typed_answer="resilience",
         )
 
@@ -700,7 +738,9 @@ class TestPromptFamilies:
 
         assert prompt["prompt_type"] == "typed_recall"
         assert prompt["options"] is None
-        assert prompt["expected_input"] == "resilience"
+        assert prompt["expected_input"] is None
+        assert prompt["input_mode"] == "typed"
+        assert prompt["prompt_token"]
         assert prompt["source_meaning_id"] is not None
         assert "type the word or phrase" in prompt["stem"].lower()
 
@@ -728,6 +768,69 @@ class TestPromptFamilies:
         assert prompt["input_mode"] == "speech_placeholder"
         assert prompt["voice_placeholder_text"] is not None
         assert prompt["audio_state"] == "placeholder"
+        assert prompt["expected_input"] is None
+        assert prompt["prompt_token"]
+
+    @pytest.mark.asyncio
+    async def test_build_card_prompt_strips_answer_truth_from_mcq_options(
+        self, review_service, mock_db
+    ):
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_audio_spelling=False,
+                enable_confidence_check=True,
+            )
+        )
+        prompt = await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            source_text="barely",
+            definition="Only just, by a very small margin.",
+            sentence=None,
+            is_phrase_entry=False,
+            distractor_seed="seed",
+            meaning_id=uuid.uuid4(),
+            index=0,
+            alternative_definitions=[
+                "Only just, by a very small margin.",
+                "With great courage.",
+                "Almost never.",
+            ],
+            user_id=uuid.uuid4(),
+            source_entry_id=uuid.uuid4(),
+            source_entry_type="word",
+            queue_item_id=uuid.uuid4(),
+        )
+
+        assert prompt["prompt_token"]
+        assert prompt["options"]
+        assert all("is_correct" not in option for option in prompt["options"])
+
+    @pytest.mark.asyncio
+    async def test_fetch_word_distractors_avoids_random_order(
+        self, review_service, mock_db
+    ):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = ["alpha", "beta", "gamma"]
+        mock_db.execute.return_value = result
+
+        await review_service._fetch_word_distractors("delta", limit=3)
+
+        executed_query = mock_db.execute.await_args_list[0].args[0]
+        assert "random()" not in str(executed_query).lower()
+
+    @pytest.mark.asyncio
+    async def test_fetch_definition_distractors_avoids_random_order(
+        self, review_service, mock_db
+    ):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = ["alpha", "beta", "gamma"]
+        mock_db.execute.return_value = result
+
+        await review_service._fetch_definition_distractors(uuid.uuid4(), limit=3)
+
+        executed_query = mock_db.execute.call_args.args[0]
+        assert "random()" not in str(executed_query).lower()
 
     @pytest.mark.asyncio
     async def test_build_card_prompt_prefers_same_day_definition_distractors_before_frequency_fallback(
@@ -1617,6 +1720,21 @@ class TestReviewRedesignGaps:
         assert len(due_items) == 1
         assert due_items[0]["source_meaning_id"] == str(first_meaning_id)
 
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_overfetches_before_burying_siblings(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = state_result
+
+        await review_service.get_due_queue_items(user_id=user_id, limit=5)
+
+        executed_query = mock_db.execute.await_args_list[0].args[0]
+        compiled = executed_query.compile(compile_kwargs={"literal_binds": True})
+        assert "LIMIT 20" in str(compiled)
+
 
 class TestCompleteSession:
     @pytest.mark.asyncio
@@ -1684,3 +1802,135 @@ class TestEntryReviewStateConcurrency:
 
         assert state is recovered_state
         assert mock_db.execute.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_treats_same_prompt_token_as_idempotent(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        state_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        prompt_id = str(uuid.uuid4())
+        entry_state = EntryReviewState(
+            id=state_id,
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.4,
+        )
+        entry_state.last_submission_prompt_id = prompt_id
+        entry_state.detail = {"entry_type": "word", "entry_id": str(entry_id), "display_text": "bank"}
+        entry_state.schedule_options = [{"value": "1d", "label": "Tomorrow", "is_default": True}]
+
+        locked_result = MagicMock()
+        locked_result.scalar_one_or_none.return_value = entry_state
+        mock_db.execute.return_value = locked_result
+
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": prompt_id,
+                "user_id": str(user_id),
+                "queue_item_id": str(state_id),
+                "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(entry_id),
+                "source_meaning_id": str(meaning_id),
+                "correct_option_id": "A",
+            }
+        )
+
+        updated = await review_service.submit_queue_review(
+            item_id=state_id,
+            quality=4,
+            time_spent_ms=5000,
+            user_id=user_id,
+            selected_option_id="A",
+            prompt_token=prompt_token,
+        )
+
+        assert updated is entry_state
+        mock_db.add.assert_not_called()
+        mock_db.commit.assert_not_awaited()
+
+
+class TestPromptTokenHardening:
+    def test_prompt_token_round_trips_without_exposing_answer_truth(self, review_service):
+        payload = {
+            "prompt_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "queue_item_id": str(uuid.uuid4()),
+            "prompt_type": ReviewService.PROMPT_TYPE_TYPED_RECALL,
+            "review_mode": ReviewService.REVIEW_MODE_MCQ,
+            "input_mode": "typed",
+            "source_entry_type": "word",
+            "source_entry_id": str(uuid.uuid4()),
+            "source_meaning_id": str(uuid.uuid4()),
+            "correct_option_id": "A",
+            "expected_input": "resilience",
+        }
+
+        token = review_service._encode_prompt_token(payload)
+
+        assert "." not in token
+        assert "resilience" not in token
+        assert "correct_option_id" not in token
+        assert review_service._decode_prompt_token(token)["expected_input"] == "resilience"
+
+    def test_prompt_token_rejects_tampering(self, review_service):
+        token = review_service._encode_prompt_token(
+            {
+                "prompt_id": str(uuid.uuid4()),
+                "user_id": str(uuid.uuid4()),
+                "queue_item_id": str(uuid.uuid4()),
+                "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+            }
+        )
+
+        tampered = f"{token[:-1]}A"
+        assert review_service._decode_prompt_token(tampered) is None
+
+
+class TestReviewGradeDerivation:
+    def test_derive_review_grade_ignores_timing_for_objective_typed_prompts(self):
+        prompt = {"prompt_type": ReviewService.PROMPT_TYPE_TYPED_RECALL}
+
+        fast = ReviewService._derive_review_grade(
+            outcome="correct_tested",
+            prompt=prompt,
+            quality=4,
+            time_spent_ms=500,
+        )
+        slow = ReviewService._derive_review_grade(
+            outcome="correct_tested",
+            prompt=prompt,
+            quality=4,
+            time_spent_ms=12000,
+        )
+
+        assert fast == "good_pass"
+        assert slow == "good_pass"
+
+    def test_derive_review_grade_ignores_timing_for_mcq_prompts(self):
+        prompt = {"prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY}
+
+        fast = ReviewService._derive_review_grade(
+            outcome="correct_tested",
+            prompt=prompt,
+            quality=4,
+            time_spent_ms=500,
+        )
+        slow = ReviewService._derive_review_grade(
+            outcome="correct_tested",
+            prompt=prompt,
+            quality=4,
+            time_spent_ms=12000,
+        )
+
+        assert fast == "good_pass"
+        assert slow == "good_pass"

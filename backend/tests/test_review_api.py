@@ -301,13 +301,14 @@ class TestQueueDue:
                     "prompt": {
                         "mode": "mcq",
                         "prompt_type": "audio_to_definition",
+                        "prompt_token": "opaque-prompt-token",
                         "stem": "Listen, then choose the best matching definition.",
                         "question": "bank",
                         "options": [
-                            {"option_id": "A", "label": "The land alongside a river.", "is_correct": True},
-                            {"option_id": "B", "label": "A financial institution.", "is_correct": False},
-                            {"option_id": "C", "label": "A mass of cloud.", "is_correct": False},
-                            {"option_id": "D", "label": "A pile of snow.", "is_correct": False},
+                            {"option_id": "A", "label": "The land alongside a river."},
+                            {"option_id": "B", "label": "A financial institution."},
+                            {"option_id": "C", "label": "A mass of cloud."},
+                            {"option_id": "D", "label": "A pile of snow."},
                         ],
                         "audio_state": "ready",
                         "audio": {
@@ -345,6 +346,8 @@ class TestQueueDue:
             data[0]["prompt"]["audio"]["preferred_playback_url"]
             == "/api/words/voice-assets/test-asset/content"
         )
+        assert data[0]["prompt"]["prompt_token"] == "opaque-prompt-token"
+        assert "is_correct" not in data[0]["prompt"]["options"][0]
 
     @pytest.mark.asyncio
     async def test_get_queue_stats_emits_query_metrics_headers(self, client, mock_db, auth_token):
@@ -400,6 +403,7 @@ class TestQueueSubmit:
 
         async def fake_submit_queue_review(self, **kwargs):
             assert kwargs["audio_replay_count"] == 2
+            assert kwargs["prompt_token"] == "opaque-prompt-token"
             item.quality_rating = 4
             item.time_spent_ms = 1234
             item.card_type = "listening"
@@ -412,7 +416,13 @@ class TestQueueSubmit:
 
         response = await client.post(
             f"/api/reviews/queue/{item.id}/submit",
-            json={"quality": 4, "time_spent_ms": 1234, "audio_replay_count": 2, "card_type": "listening"},
+            json={
+                "quality": 4,
+                "time_spent_ms": 1234,
+                "audio_replay_count": 2,
+                "card_type": "listening",
+                "prompt_token": "opaque-prompt-token",
+            },
             headers={"Authorization": f"Bearer {token}"},
         )
 

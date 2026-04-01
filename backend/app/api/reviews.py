@@ -54,6 +54,7 @@ class QueueSubmitRequest(BaseModel):
     time_spent_ms: int = Field(..., ge=0)
     audio_replay_count: int = Field(default=0, ge=0)
     card_type: str | None = Field(default=None, min_length=1, max_length=32)
+    prompt_token: str | None = Field(default=None, min_length=1, max_length=4096)
     review_mode: str | None = None
     outcome: str | None = Field(default=None, max_length=32)
     selected_option_id: str | None = Field(default=None, min_length=1, max_length=1)
@@ -74,7 +75,6 @@ class QueueSubmitRequest(BaseModel):
 class ReviewOption(BaseModel):
     option_id: str
     label: str
-    is_correct: bool = False
 
 
 class ReviewPromptAudioVariant(BaseModel):
@@ -92,6 +92,7 @@ class ReviewPromptAudioPayload(BaseModel):
 class ReviewPrompt(BaseModel):
     mode: str
     prompt_type: str
+    prompt_token: str | None = None
     stem: str | None = None
     question: str
     options: list[ReviewOption] | None = None
@@ -415,6 +416,7 @@ async def submit_queue_review(
             time_spent_ms=request.time_spent_ms,
             audio_replay_count=request.audio_replay_count,
             card_type=request.card_type,
+            prompt_token=request.prompt_token,
             review_mode=request.review_mode,
             outcome=request.outcome,
             prompt=request.prompt,

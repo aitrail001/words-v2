@@ -108,12 +108,12 @@ export type KnowledgeMapRange = {
 export type ReviewPromptOption = {
   option_id: string;
   label: string;
-  is_correct?: boolean;
 };
 
 export type ReviewPromptPayload = {
   mode: string;
   prompt_type: string;
+  prompt_token?: string | null;
   stem?: string | null;
   question: string;
   options?: ReviewPromptOption[];

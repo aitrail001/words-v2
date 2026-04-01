@@ -1,14 +1,19 @@
+import base64
+import hashlib
+import json
 import uuid
 import re
 import random
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import and_, func, literal, literal_column, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models import review as review_models
 from app.models.meaning_example import MeaningExample
@@ -46,6 +51,7 @@ from app.services.voice_assets import (
 )
 
 logger = get_logger(__name__)
+settings = get_settings()
 
 
 class ReviewService:
@@ -190,6 +196,132 @@ class ReviewService:
             return uuid.UUID(str(value))
         except (ValueError, TypeError, AttributeError):
             return None
+
+    @staticmethod
+    def _prompt_token_expiry() -> datetime:
+        return datetime.now(timezone.utc) + timedelta(hours=12)
+
+    @staticmethod
+    def _prompt_token_cipher() -> Fernet:
+        key_material = hashlib.sha256(settings.jwt_secret.encode("utf-8")).digest()
+        return Fernet(base64.urlsafe_b64encode(key_material))
+
+    @staticmethod
+    def _encode_prompt_token(payload: dict[str, Any]) -> str:
+        token_payload = json.dumps(
+            {
+                **payload,
+                "token_type": "review_prompt",
+                "exp": ReviewService._prompt_token_expiry().isoformat(),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return ReviewService._prompt_token_cipher().encrypt(token_payload).decode("utf-8")
+
+    @staticmethod
+    def _decode_prompt_token(token: str | None) -> dict[str, Any] | None:
+        if not token:
+            return None
+        try:
+            decrypted = ReviewService._prompt_token_cipher().decrypt(token.encode("utf-8"))
+            payload = json.loads(decrypted.decode("utf-8"))
+        except (InvalidToken, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if payload.get("token_type") != "review_prompt":
+            return None
+        expiry = payload.get("exp")
+        if not isinstance(expiry, str):
+            return None
+        try:
+            expires_at = datetime.fromisoformat(expiry)
+        except ValueError:
+            return None
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            return None
+        return payload
+
+    def _build_prompt_token_payload(
+        self,
+        *,
+        prompt: dict[str, Any],
+        user_id: uuid.UUID | None,
+        queue_item_id: uuid.UUID | None,
+    ) -> dict[str, Any]:
+        options = prompt.get("options") or []
+        correct_option_id = next(
+            (str(option.get("option_id")) for option in options if option.get("is_correct")),
+            None,
+        )
+        expected_input = prompt.get("expected_input")
+        return {
+            "prompt_id": str(uuid.uuid4()),
+            "user_id": str(user_id) if user_id is not None else None,
+            "queue_item_id": str(queue_item_id) if queue_item_id is not None else None,
+            "prompt_type": prompt.get("prompt_type"),
+            "review_mode": prompt.get("mode"),
+            "input_mode": prompt.get("input_mode"),
+            "source_entry_type": prompt.get("source_entry_type"),
+            "source_entry_id": prompt.get("source_word_id") or prompt.get("source_entry_id"),
+            "source_meaning_id": prompt.get("source_meaning_id"),
+            "correct_option_id": correct_option_id,
+            "expected_input": expected_input,
+        }
+
+    def _sanitize_prompt_for_client(
+        self,
+        *,
+        prompt: dict[str, Any],
+        prompt_token: str,
+    ) -> dict[str, Any]:
+        sanitized_options = [
+            {
+                "option_id": str(option.get("option_id")),
+                "label": str(option.get("label")),
+            }
+            for option in (prompt.get("options") or [])
+        ] or None
+        input_mode = prompt.get("input_mode")
+        return {
+            "mode": prompt.get("mode"),
+            "prompt_type": prompt.get("prompt_type"),
+            "prompt_token": prompt_token,
+            "stem": prompt.get("stem"),
+            "question": prompt.get("question"),
+            "options": sanitized_options,
+            "expected_input": None if input_mode in {"typed", "speech_placeholder"} else None,
+            "input_mode": input_mode,
+            "voice_placeholder_text": prompt.get("voice_placeholder_text"),
+            "sentence_masked": prompt.get("sentence_masked"),
+            "source_entry_type": prompt.get("source_entry_type"),
+            "source_word_id": prompt.get("source_word_id"),
+            "source_meaning_id": prompt.get("source_meaning_id"),
+            "audio_state": prompt.get("audio_state", "not_available"),
+            "audio": prompt.get("audio"),
+        }
+
+    def _derive_objective_outcome_from_prompt_token(
+        self,
+        *,
+        prompt_token_payload: dict[str, Any],
+        selected_option_id: str | None,
+        typed_answer: str | None,
+    ) -> str:
+        input_mode = prompt_token_payload.get("input_mode")
+        if input_mode in {"typed", "speech_placeholder"}:
+            comparison = self._compare_typed_answer(
+                expected_input=prompt_token_payload.get("expected_input"),
+                typed_answer=typed_answer,
+                entry_type=prompt_token_payload.get("source_entry_type") or "word",
+            )
+            return "correct_tested" if comparison["is_correct"] else "wrong"
+        return (
+            "correct_tested"
+            if str(selected_option_id or "") == str(prompt_token_payload.get("correct_option_id") or "")
+            else "wrong"
+        )
 
     @classmethod
     async def _build_prompt_audio_payload(
@@ -491,7 +623,7 @@ class ReviewService:
         result = await self.db.execute(
             select(Word.word)
             .where(func.lower(Word.word) != correct_word.lower())
-            .order_by(func.random())
+            .order_by(Word.frequency_rank.asc().nullslast(), Word.word.asc())
             .limit(limit + 5)
         )
 
@@ -539,7 +671,7 @@ class ReviewService:
         result = await self.db.execute(
             select(Meaning.definition)
             .where(Meaning.id != correct_meaning_id)
-            .order_by(func.random())
+            .order_by(Meaning.word_id.asc(), Meaning.order_index.asc(), Meaning.id.asc())
             .limit(limit + 5)
         )
         candidates = [definition for definition in result.scalars().all() if self._normalize_prompt_text(definition)]
@@ -671,7 +803,7 @@ class ReviewService:
         result = await self.db.execute(
             select(PhraseEntry.phrase_text)
             .where(func.lower(PhraseEntry.phrase_text) != correct_phrase.lower())
-            .order_by(func.random())
+            .order_by(PhraseEntry.phrase_text.asc(), PhraseEntry.id.asc())
             .limit(limit + 5)
         )
         candidates = [
@@ -1525,6 +1657,7 @@ class ReviewService:
         user_id: uuid.UUID | None = None,
         source_entry_id: uuid.UUID | None = None,
         source_entry_type: str | None = None,
+        queue_item_id: uuid.UUID | None = None,
         previous_prompt_type: str | None = None,
         active_target_count: int = 1,
     ) -> dict[str, Any]:
@@ -1542,6 +1675,7 @@ class ReviewService:
             user_id=user_id,
             source_entry_id=source_entry_id,
             source_entry_type=source_entry_type,
+            queue_item_id=queue_item_id,
             previous_prompt_type=previous_prompt_type,
             active_target_count=active_target_count,
         )
@@ -1680,16 +1814,13 @@ class ReviewService:
         quality: int,
         time_spent_ms: int,
     ) -> str:
+        del time_spent_ms
         if outcome in {"lookup", "wrong"} or quality < 3:
             return "fail"
         prompt_type = (prompt or {}).get("prompt_type") or cls.PROMPT_TYPE_DEFINITION_TO_ENTRY
         if outcome == "remember":
             return "hard_pass"
         if prompt_type in {cls.PROMPT_TYPE_TYPED_RECALL, cls.PROMPT_TYPE_SPEAK_RECALL}:
-            if time_spent_ms <= 2000:
-                return "easy_pass"
-            if time_spent_ms >= 6000:
-                return "hard_pass"
             return "good_pass"
         if prompt_type in {
             cls.PROMPT_TYPE_SENTENCE_GAP,
@@ -1697,15 +1828,7 @@ class ReviewService:
             cls.PROMPT_TYPE_COLLOCATION_CHECK,
             cls.PROMPT_TYPE_SITUATION_MATCHING,
         }:
-            if time_spent_ms >= 6000:
-                return "hard_pass"
-            if time_spent_ms <= 2000:
-                return "easy_pass"
             return "good_pass"
-        if time_spent_ms >= 6000:
-            return "hard_pass"
-        if time_spent_ms <= 2000:
-            return "easy_pass"
         return "good_pass"
 
     @classmethod
@@ -2053,6 +2176,7 @@ class ReviewService:
     ) -> list[dict[str, Any]]:
         """Get due queue items scoped to a user including prompt metadata."""
         now = datetime.now(timezone.utc)
+        fetch_limit = max(limit * 4, limit + 8)
         state_result = await self.db.execute(
             select(EntryReviewState)
             .where(EntryReviewState.user_id == user_id)
@@ -2067,9 +2191,9 @@ class ReviewService:
                 EntryReviewState.next_due_at.asc().nullsfirst(),
                 EntryReviewState.created_at.asc(),
             )
-            .limit(limit)
+            .limit(fetch_limit)
         )
-        review_states = self._apply_sibling_bury_rule(list(state_result.scalars().all()))
+        review_states = self._apply_sibling_bury_rule(list(state_result.scalars().all()))[:limit]
         if review_states:
             prefs = await self._get_user_review_preferences(user_id)
             active_cap = self._review_depth_cap(getattr(prefs, "review_depth_preset", None))
@@ -2185,6 +2309,7 @@ class ReviewService:
                         user_id=user_id,
                         source_entry_id=word.id,
                         source_entry_type="word",
+                        queue_item_id=state.id,
                         previous_prompt_type=state.last_prompt_type,
                     )
                     detail = await self._build_word_detail_payload(
@@ -2268,6 +2393,7 @@ class ReviewService:
                     user_id=user_id,
                     source_entry_id=phrase.id,
                     source_entry_type="phrase",
+                    queue_item_id=state.id,
                     previous_prompt_type=state.last_prompt_type,
                 )
                 detail = await self._build_phrase_detail_payload(
@@ -2409,6 +2535,7 @@ class ReviewService:
                 user_id=user_id,
                 source_entry_id=source_word_id,
                 source_entry_type="word",
+                queue_item_id=getattr(item, "id", None),
                 previous_prompt_type=getattr(item, "last_prompt_type", None),
             )
             detail = None
@@ -2536,6 +2663,7 @@ class ReviewService:
                 user_id=user_id,
                 source_entry_id=word.id,
                 source_entry_type="word",
+                queue_item_id=target_state.id,
                 previous_prompt_type=getattr(target_state, "last_prompt_type", None),
                 active_target_count=len(active_meanings),
             )
@@ -2619,6 +2747,7 @@ class ReviewService:
                 user_id=user_id,
                 source_entry_id=phrase.id,
                 source_entry_type="phrase",
+                queue_item_id=target_state.id,
                 previous_prompt_type=getattr(target_state, "last_prompt_type", None),
                 active_target_count=len(active_senses),
             )
@@ -2720,6 +2849,7 @@ class ReviewService:
         time_spent_ms: int,
         user_id: uuid.UUID,
         card_type: str | None = None,
+        prompt_token: str | None = None,
         review_mode: str | None = None,
         outcome: str | None = None,
         selected_option_id: str | None = None,
@@ -2735,6 +2865,7 @@ class ReviewService:
             time_spent_ms=time_spent_ms,
             user_id=user_id,
             card_type=card_type,
+            prompt_token=prompt_token,
             review_mode=review_mode,
             outcome=outcome,
             selected_option_id=selected_option_id,
