@@ -401,4 +401,68 @@ describe("KnowledgeMapRangeDetail", () => {
       },
     );
   });
+
+  it("hides list play controls when only non-entry audio exists", async () => {
+    mockGetKnowledgeMapRange.mockResolvedValue({
+      range_start: 1,
+      range_end: 100,
+      previous_range_start: null,
+      next_range_start: null,
+      items: [
+        {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "Bank",
+          normalized_form: "bank",
+          browse_rank: 20,
+          status: "to_learn",
+          cefr_level: "A2",
+          pronunciation: "/baŋk/",
+          translation: "银行",
+          primary_definition: "A financial institution.",
+          part_of_speech: "noun",
+          phrase_kind: null,
+          voice_assets: [
+            {
+              id: "voice-definition-us",
+              content_scope: "definition",
+              locale: "en-US",
+              playback_url: "/api/words/voice-assets/voice-definition-us/content",
+            },
+          ],
+        },
+      ],
+    });
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      translation: "银行",
+      primary_definition: "A financial institution.",
+      voice_assets: [
+        {
+          id: "voice-definition-us",
+          content_scope: "definition",
+          locale: "en-US",
+          playback_url: "/api/words/voice-assets/voice-definition-us/content",
+        },
+      ],
+      meanings: [],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeMapRangeDetail initialRangeStart={1} />);
+
+    await screen.findByText("A financial institution.");
+    expect(screen.queryByRole("button", { name: "Play audio for Bank" })).not.toBeInTheDocument();
+  });
 });

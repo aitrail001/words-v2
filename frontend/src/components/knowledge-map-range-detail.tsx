@@ -705,7 +705,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
                 >
                   Open
                 </Link>
-                {item.voice_assets && item.voice_assets.length > 0 && (
+                {getEntryLevelVoiceAssets(item.voice_assets).length > 0 && (
                   <button
                     type="button"
                     aria-label={`Play audio for ${item.display_text}`}
