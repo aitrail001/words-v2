@@ -12,6 +12,7 @@ import {
 } from "@/lib/knowledge-map-client";
 import { apiClient } from "@/lib/api-client";
 import { useLearnerAudio } from "@/lib/learner-audio";
+import { getUserPreferences, type UserPreferences } from "@/lib/user-preferences-client";
 
 type ReviewQueueCard = {
   id?: string;
@@ -37,6 +38,7 @@ type RevealState = {
   selectedSchedule: string;
   selectedOptionId?: string;
   typedResponseValue?: string;
+  persisted?: boolean;
 };
 
 const TIME_SPENT_MS = 5000;
@@ -154,6 +156,8 @@ export default function ReviewPage() {
   const [revealState, setRevealState] = useState<RevealState | null>(null);
   const [typedAnswer, setTypedAnswer] = useState("");
   const [resumeReady, setResumeReady] = useState(false);
+  const [reviewPreferences, setReviewPreferences] = useState<UserPreferences | null>(null);
+  const [audioReplayCount, setAudioReplayCount] = useState(0);
   const { play, loadingUrl } = useLearnerAudio();
 
   useEffect(() => {
@@ -181,6 +185,20 @@ export default function ReviewPage() {
   }, [started, loading, resumeReady]);
 
   useEffect(() => {
+    let active = true;
+    void getUserPreferences()
+      .then((preferences) => {
+        if (active) {
+          setReviewPreferences(preferences);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!started || completed || cards.length === 0) {
       clearStoredReviewSession();
       return;
@@ -205,9 +223,37 @@ export default function ReviewPage() {
     [currentCard],
   );
   const promptAudioUrl = prompt?.audio?.preferred_playback_url ?? null;
+  const reviewDepthPreset = reviewPreferences?.review_depth_preset ?? "balanced";
+  const reviewDepthBanner = (
+    <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+      <span>Current review depth</span>
+      <span className="font-semibold capitalize">{reviewDepthPreset}</span>
+    </div>
+  );
+
+  const buildQueueSubmitPayload = (
+    card: ReviewQueueCard,
+    extras: Record<string, unknown>,
+  ): Record<string, unknown> => ({
+    time_spent_ms: TIME_SPENT_MS,
+    audio_replay_count: Math.max(0, audioReplayCount - 1),
+    card_type: card.card_type,
+    review_mode: card.review_mode,
+    prompt: card.prompt,
+    ...extras,
+  });
+
+  const playPromptAudio = () => {
+    if (!promptAudioUrl) {
+      return;
+    }
+    setAudioReplayCount((value) => value + 1);
+    void play(promptAudioUrl);
+  };
 
   const startQueueReview = async () => {
     clearStoredReviewSession();
+    setAudioReplayCount(0);
     setLoading(true);
     try {
       const dueCards = await apiClient.get<ReviewQueueCard[]>("/reviews/queue/due");
@@ -225,6 +271,7 @@ export default function ReviewPage() {
 
   const startLearningMode = async (entryType: "word" | "phrase", entryId: string) => {
     clearStoredReviewSession();
+    setAudioReplayCount(0);
     setLoading(true);
     try {
       const payload = await startLearningEntry(entryType, entryId);
@@ -255,6 +302,7 @@ export default function ReviewPage() {
       setPhase("challenge");
       setRevealState(null);
       setTypedAnswer("");
+      setAudioReplayCount(0);
       return;
     }
     clearStoredReviewSession();
@@ -269,6 +317,7 @@ export default function ReviewPage() {
     answerState?: {
       selectedOptionId?: string;
       typedResponseValue?: string;
+      persisted?: boolean;
     },
   ): RevealState => ({
     outcome,
@@ -277,6 +326,7 @@ export default function ReviewPage() {
     selectedSchedule: defaultScheduleValue(options),
     selectedOptionId: answerState?.selectedOptionId,
     typedResponseValue: answerState?.typedResponseValue,
+    persisted: answerState?.persisted ?? false,
   });
 
   const submitOutcome = async (card: ReviewQueueCard, outcome: ReviewOutcome) => {
@@ -291,50 +341,61 @@ export default function ReviewPage() {
       detail?: ReviewDetailPayload | null;
       schedule_options?: ReviewScheduleOption[];
     }>(`/reviews/queue/${card.queue_item_id}/submit`, {
-      quality: outcome === "wrong" || outcome === "lookup" ? 1 : 4,
-      time_spent_ms: TIME_SPENT_MS,
-      card_type: card.card_type,
-        review_mode: card.review_mode,
-        prompt: card.prompt,
-        outcome,
-        typed_answer: typedAnswer.trim() || undefined,
-      });
+      ...buildQueueSubmitPayload(card, {
+        quality: outcome === "wrong" || outcome === "lookup" ? 1 : 4,
+      }),
+      outcome,
+      typed_answer: typedAnswer.trim() || undefined,
+    });
   };
 
   const onSubmitTypedAnswer = async () => {
     if (!currentCard?.prompt?.expected_input || loading) {
       return;
     }
-    const normalizedTyped = typedAnswer.trim().toLowerCase();
-    const normalizedExpected = currentCard.prompt.expected_input.trim().toLowerCase();
+    const rawTypedAnswer = typedAnswer;
+    const normalizedTyped = rawTypedAnswer.trim().toLowerCase();
     if (!normalizedTyped) {
       return;
     }
 
-    const outcome: ReviewOutcome =
-      normalizedTyped === normalizedExpected ? "correct_tested" : "wrong";
-
-    if (outcome === "correct_tested") {
+    if (!currentCard.queue_item_id) {
+      const normalizedExpected = currentCard.prompt.expected_input.trim().toLowerCase();
+      const fallbackOutcome: ReviewOutcome =
+        normalizedTyped === normalizedExpected ? "correct_tested" : "wrong";
       setRevealState(
         buildRevealState(
           currentCard,
-          outcome,
+          fallbackOutcome,
           currentCard.detail ?? null,
           currentCard.schedule_options ?? [],
-          { typedResponseValue: typedAnswer.trim() || undefined },
+          { typedResponseValue: rawTypedAnswer.trim() || undefined },
         ),
       );
-      setPhase("reveal");
+      setPhase(fallbackOutcome === "correct_tested" ? "reveal" : "relearn");
       return;
     }
 
     setLoading(true);
     try {
-      const response = await submitOutcome(currentCard, outcome);
+      const response = await apiClient.post<{
+        outcome?: ReviewOutcome;
+        detail?: ReviewDetailPayload | null;
+        schedule_options?: ReviewScheduleOption[];
+      }>(`/reviews/queue/${currentCard.queue_item_id}/submit`, buildQueueSubmitPayload(currentCard, {
+        quality: 4,
+        typed_answer: rawTypedAnswer,
+      }));
       const detail = response.detail ?? currentCard.detail ?? null;
       const options = response.schedule_options ?? currentCard.schedule_options ?? [];
-      setRevealState(buildRevealState(currentCard, outcome, detail, options));
-      setPhase("relearn");
+      const outcome = response.outcome ?? "wrong";
+      setRevealState(
+        buildRevealState(currentCard, outcome, detail, options, {
+          typedResponseValue: rawTypedAnswer,
+          persisted: true,
+        }),
+      );
+      setPhase(outcome === "correct_tested" ? "reveal" : "relearn");
     } finally {
       setLoading(false);
     }
@@ -413,23 +474,24 @@ export default function ReviewPage() {
     }
     if (
       currentCard.queue_item_id &&
+      !revealState.persisted &&
       revealState.selectedSchedule &&
       revealState.outcome !== "wrong" &&
       revealState.outcome !== "lookup"
     ) {
       setLoading(true);
       try {
-        await apiClient.post(`/reviews/queue/${currentCard.queue_item_id}/submit`, {
+        const defaultSchedule = defaultScheduleValue(revealState.scheduleOptions);
+        await apiClient.post(`/reviews/queue/${currentCard.queue_item_id}/submit`, buildQueueSubmitPayload(currentCard, {
           quality: 4,
-          time_spent_ms: TIME_SPENT_MS,
-          card_type: currentCard.card_type,
-          review_mode: currentCard.review_mode,
-          prompt: currentCard.prompt,
           outcome: revealState.outcome,
           selected_option_id: revealState.selectedOptionId,
           typed_answer: revealState.typedResponseValue,
-          schedule_override: revealState.selectedSchedule,
-        });
+          schedule_override:
+            revealState.selectedSchedule !== defaultSchedule
+              ? revealState.selectedSchedule
+              : undefined,
+        }));
       } finally {
         setLoading(false);
       }
@@ -492,6 +554,7 @@ export default function ReviewPage() {
         <div className="text-sm text-slate-500">
           Review {currentIndex + 1}/{cards.length}
         </div>
+        {reviewDepthBanner}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-xs uppercase tracking-wide text-slate-500">
             {revealState.outcome === "correct_tested" ? "Remembered" : "Kept in memory"}
@@ -510,6 +573,11 @@ export default function ReviewPage() {
           {detail?.pro_tip ? (
             <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
               {detail.pro_tip}
+            </div>
+          ) : null}
+          {detail?.coverage_summary ? (
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+              Coverage: {detail.coverage_summary.replaceAll("_", " ")}
             </div>
           ) : null}
           {detail?.compare_with?.length ? (
@@ -561,6 +629,7 @@ export default function ReviewPage() {
         <div className="text-sm text-slate-500">
           Review {currentIndex + 1}/{cards.length}
         </div>
+        {reviewDepthBanner}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-xs uppercase tracking-wide text-amber-600">Relearn</div>
           <h2 className="mt-2 text-2xl font-semibold">{detail?.display_text ?? currentCard.word}</h2>
@@ -582,6 +651,11 @@ export default function ReviewPage() {
           {detail?.pro_tip ? (
             <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
               {detail.pro_tip}
+            </div>
+          ) : null}
+          {detail?.coverage_summary ? (
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+              Coverage: {detail.coverage_summary.replaceAll("_", " ")}
             </div>
           ) : null}
           <p className="mt-4 text-sm text-slate-500">We will bring this entry back sooner.</p>
@@ -612,6 +686,7 @@ export default function ReviewPage() {
           Review {currentIndex + 1}/{cards.length}
         </span>
       </div>
+      {reviewDepthBanner}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         {prompt?.stem ? <p className="mb-2 text-sm text-slate-500">{prompt.stem}</p> : null}
@@ -619,14 +694,14 @@ export default function ReviewPage() {
           <div className="mb-4 flex justify-center gap-3">
             <button
               type="button"
-              onClick={() => void play(promptAudioUrl)}
+              onClick={playPromptAudio}
               className="rounded-full bg-cyan-500 px-5 py-4 text-sm font-semibold text-white"
             >
               {loadingUrl === promptAudioUrl ? "Loading..." : "Play audio"}
             </button>
             <button
               type="button"
-              onClick={() => void play(promptAudioUrl)}
+              onClick={playPromptAudio}
               className="rounded-full border border-cyan-300 px-5 py-4 text-sm font-semibold text-cyan-700"
             >
               Play again

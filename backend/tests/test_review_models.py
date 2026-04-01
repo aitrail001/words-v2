@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy import UniqueConstraint
 
+from app.models.entry_review import EntryReviewState
 from app.models.review import (
     LearningQueueItem,
     ReviewCard,
@@ -112,3 +113,24 @@ class TestReviewHistoryModel:
         assert history.quality_rating == 4
         assert history.time_spent_ms is None
         assert history.created_at is not None
+
+
+class TestEntryReviewStateModel:
+    def test_state_can_track_target_identity_separately_from_parent_entry(self):
+        user_id = uuid.uuid4()
+        parent_entry_id = uuid.uuid4()
+        target_id = uuid.uuid4()
+
+        state = EntryReviewState(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=parent_entry_id,
+            target_type="meaning",
+            target_id=target_id,
+        )
+
+        assert state.user_id == user_id
+        assert state.entry_type == "word"
+        assert state.entry_id == parent_entry_id
+        assert state.target_type == "meaning"
+        assert state.target_id == target_id

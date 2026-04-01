@@ -399,6 +399,7 @@ class TestQueueSubmit:
         mock_db.execute.side_effect = [user_result]
 
         async def fake_submit_queue_review(self, **kwargs):
+            assert kwargs["audio_replay_count"] == 2
             item.quality_rating = 4
             item.time_spent_ms = 1234
             item.card_type = "listening"
@@ -411,7 +412,7 @@ class TestQueueSubmit:
 
         response = await client.post(
             f"/api/reviews/queue/{item.id}/submit",
-            json={"quality": 4, "time_spent_ms": 1234, "card_type": "listening"},
+            json={"quality": 4, "time_spent_ms": 1234, "audio_replay_count": 2, "card_type": "listening"},
             headers={"Authorization": f"Bearer {token}"},
         )
 
@@ -565,6 +566,8 @@ class TestReviewAnalyticsSummary:
                 "days": days,
                 "total_events": 4,
                 "audio_placeholder_events": 1,
+                "total_audio_replays": 2,
+                "audio_replay_counts": [{"value": "0", "count": 3}],
                 "prompt_families": [{"value": "typed_recall", "count": 2}],
                 "outcomes": [{"value": "correct_tested", "count": 3}],
                 "response_input_modes": [{"value": "typed", "count": 2}],
@@ -585,6 +588,7 @@ class TestReviewAnalyticsSummary:
         assert data["days"] == 14
         assert data["total_events"] == 4
         assert data["audio_placeholder_events"] == 1
+        assert data["total_audio_replays"] == 2
         assert data["prompt_families"][0]["value"] == "typed_recall"
         assert int(response.headers["X-Reviews-Query-Count"]) >= 1
         assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0

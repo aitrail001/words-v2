@@ -256,7 +256,31 @@ test("@smoke review prompt families render, replay audio, and submit mixed flows
     const payload = route.request().postDataJSON() as Record<string, unknown>;
     submitPayloads.push(payload);
 
-    const itemId = route.request().url().split("/").pop() ?? "";
+    const urlSegments = route.request().url().split("/");
+    const itemId = urlSegments[urlSegments.length - 2] ?? "";
+    if (itemId === "state-speak" && payload.typed_answer) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          outcome: "correct_tested",
+          detail: {
+            entry_type: "word",
+            entry_id: "word-speak",
+            display_text: "resilience",
+            primary_definition: "The capacity to recover quickly from difficulties.",
+            primary_example: "Resilience helps teams adapt to change.",
+            meaning_count: 1,
+            remembered_count: 4,
+            compare_with: [],
+            meanings: [],
+            audio_state: "placeholder",
+          },
+          schedule_options: [{ value: "7d", label: "In a week", is_default: true }],
+        }),
+      });
+      return;
+    }
     if (payload.outcome === "wrong" && itemId === "state-situation") {
       await route.fulfill({
         status: 200,
@@ -335,23 +359,25 @@ test("@smoke review prompt families render, replay audio, and submit mixed flows
       expect.objectContaining({
         outcome: "correct_tested",
         selected_option_id: "A",
-        schedule_override: "2d",
       }),
       expect.objectContaining({
         outcome: "correct_tested",
         selected_option_id: "A",
-        schedule_override: "3d",
       }),
       expect.objectContaining({
         outcome: "wrong",
       }),
       expect.objectContaining({
-        outcome: "correct_tested",
         typed_answer: "resilience",
-        schedule_override: "7d",
       }),
     ]),
   );
+
+  expect(submitPayloads).toHaveLength(4);
+  expect(submitPayloads[0]).not.toHaveProperty("schedule_override");
+  expect(submitPayloads[1]).not.toHaveProperty("schedule_override");
+  expect(submitPayloads[3]).not.toHaveProperty("outcome");
+  expect(submitPayloads[3]).not.toHaveProperty("schedule_override");
 });
 
 test("@smoke review relearn opens the full detail page with learner audio controls", async ({

@@ -369,12 +369,14 @@ describe("KnowledgeMapRangeDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Use US accent" }));
 
     await waitFor(() =>
-      expect(mockUpdateUserPreferences).toHaveBeenCalledWith({
+      expect(mockUpdateUserPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({
         accent_preference: "us",
         translation_locale: "zh-Hans",
         knowledge_view_preference: "cards",
         show_translations_by_default: true,
-      }),
+        }),
+      ),
     );
 
     expect(screen.getByText("/bæŋk/")).toBeInTheDocument();

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import ReviewPage from "@/app/review/page";
 import { apiClient } from "@/lib/api-client";
 import { useLearnerAudio } from "@/lib/learner-audio";
+import { getUserPreferences } from "@/lib/user-preferences-client";
 
 jest.mock("next/navigation", () => ({
   useRouter: jest.fn(() => ({ push: jest.fn() })),
@@ -18,10 +19,15 @@ jest.mock("@/lib/learner-audio", () => ({
   useLearnerAudio: jest.fn(),
 }));
 
+jest.mock("@/lib/user-preferences-client", () => ({
+  getUserPreferences: jest.fn(),
+}));
+
 describe("ReviewPage", () => {
   const mockGet = apiClient.get as jest.MockedFunction<typeof apiClient.get>;
   const mockPost = apiClient.post as jest.MockedFunction<typeof apiClient.post>;
   const mockUseLearnerAudio = useLearnerAudio as jest.MockedFunction<typeof useLearnerAudio>;
+  const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
   const mockPlay = jest.fn();
 
   beforeEach(() => {
@@ -32,6 +38,17 @@ describe("ReviewPage", () => {
       play: mockPlay,
       loadingUrl: null,
       playingUrl: null,
+    });
+    mockGetUserPreferences.mockResolvedValue({
+      accent_preference: "us",
+      translation_locale: "zh-Hans",
+      knowledge_view_preference: "cards",
+      show_translations_by_default: true,
+      review_depth_preset: "balanced",
+      enable_confidence_check: true,
+      enable_word_spelling: true,
+      enable_audio_spelling: false,
+      show_pictures_in_questions: false,
     });
   });
 
@@ -65,6 +82,7 @@ describe("ReviewPage", () => {
           compare_with: [],
           meanings: [],
           audio_state: "not_available",
+          coverage_summary: "deep_coverage",
         },
         schedule_options: [
           { value: "1d", label: "Tomorrow", is_default: true },
@@ -81,6 +99,8 @@ describe("ReviewPage", () => {
 
     expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
     expect(screen.getByText("barely")).toBeInTheDocument();
+    expect(screen.getByText(/current review depth/i)).toBeInTheDocument();
+    expect(screen.getByText(/coverage: deep coverage/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "7d" } });
     await act(async () => {
@@ -133,6 +153,7 @@ describe("ReviewPage", () => {
             },
           ],
           audio_state: "not_available",
+          coverage_summary: "partial_coverage",
         },
         schedule_options: [
           { value: "10m", label: "Later today", is_default: true },
@@ -185,29 +206,30 @@ describe("ReviewPage", () => {
       {
         id: "state-3",
         queue_item_id: "state-3",
-        word: "resilience",
-        definition: "The capacity to recover quickly from difficulties.",
+        word: "look up",
+        definition: "To search for information.",
         review_mode: "mcq",
         prompt: {
           mode: "mcq",
           prompt_type: "typed_recall",
           stem: "Type the word or phrase that matches this definition.",
-          question: "The capacity to recover quickly from difficulties.",
+          question: "To search for information.",
           options: null,
-          expected_input: "resilience",
+          expected_input: "look up",
           audio_state: "not_available",
         },
         detail: {
-          entry_type: "word",
-          entry_id: "word-3",
-          display_text: "resilience",
-          primary_definition: "The capacity to recover quickly from difficulties.",
-          primary_example: "Resilience helps teams adapt to change.",
+          entry_type: "phrase",
+          entry_id: "phrase-3",
+          display_text: "look up",
+          primary_definition: "To search for information.",
+          primary_example: "Look up the address before you leave.",
           meaning_count: 1,
           remembered_count: 2,
           compare_with: [],
           meanings: [],
           audio_state: "not_available",
+          coverage_summary: "familiar_with_1_meaning",
         },
         schedule_options: [
           { value: "3d", label: "In 3 days", is_default: true },
@@ -215,30 +237,44 @@ describe("ReviewPage", () => {
       },
     ] as never);
 
+    mockPost.mockResolvedValue({
+      outcome: "correct_tested",
+      detail: {
+        entry_type: "word",
+        entry_id: "word-3",
+        display_text: "look up",
+        primary_definition: "To search for information.",
+        primary_example: "Look up the address before you leave.",
+        meaning_count: 1,
+        remembered_count: 2,
+        compare_with: [],
+        meanings: [],
+        audio_state: "not_available",
+      },
+      schedule_options: [{ value: "3d", label: "In 3 days", is_default: true }],
+    } as never);
+
     render(<ReviewPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
     fireEvent.change(await screen.findByPlaceholderText(/type the word or phrase/i), {
-      target: { value: "resilience" },
+      target: { value: "  Look, up!! " },
     });
     fireEvent.click(screen.getByRole("button", { name: /check answer/i }));
 
     expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
-    expect(screen.getByText("resilience")).toBeInTheDocument();
-    expect(mockPost).not.toHaveBeenCalled();
-
-    mockPost.mockResolvedValue({} as never);
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    });
-
     expect(mockPost).toHaveBeenCalledWith(
       "/reviews/queue/state-3/submit",
       expect.objectContaining({
-        outcome: "correct_tested",
-        typed_answer: "resilience",
+        typed_answer: "  Look, up!! ",
       }),
     );
+
+    const callsBeforeContinue = mockPost.mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    });
+    expect(mockPost.mock.calls).toHaveLength(callsBeforeContinue);
   });
 
   it("shows the relearn step after a wrong typed recall answer", async () => {
@@ -275,6 +311,7 @@ describe("ReviewPage", () => {
             },
           ],
           audio_state: "not_available",
+          coverage_summary: "familiar_with_1_meaning",
         },
         schedule_options: [
           { value: "10m", label: "Later today", is_default: true },
@@ -315,8 +352,64 @@ describe("ReviewPage", () => {
     expect(mockPost).toHaveBeenCalledWith(
       "/reviews/queue/state-4/submit",
       expect.objectContaining({
-        outcome: "wrong",
         typed_answer: "reliance",
+      }),
+    );
+  });
+
+  it("does not send schedule_override when the learner keeps the default recommendation", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-default",
+        queue_item_id: "state-default",
+        word: "barely",
+        definition: "Only just, by a very small margin.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "definition_to_entry",
+          stem: "Choose the word or phrase that matches this definition.",
+          question: "Only just, by a very small margin.",
+          options: [
+            { option_id: "A", label: "Barely", is_correct: true },
+            { option_id: "B", label: "Bravely", is_correct: false },
+          ],
+          audio_state: "not_available",
+        },
+        detail: {
+          entry_type: "word",
+          entry_id: "word-default",
+          display_text: "barely",
+          primary_definition: "Only just, by a very small margin.",
+          primary_example: "He barely made it through the door.",
+          meaning_count: 1,
+          remembered_count: 1,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+          coverage_summary: "familiar_with_1_meaning",
+        },
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+    ] as never);
+    mockPost.mockResolvedValue({} as never);
+
+    render(<ReviewPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /a barely/i }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    });
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/reviews/queue/state-default/submit",
+      expect.not.objectContaining({
+        schedule_override: "1d",
       }),
     );
   });
@@ -467,7 +560,7 @@ describe("ReviewPage", () => {
           meanings: [],
           audio_state: "ready",
         },
-        schedule_options: [],
+        schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
       },
     ] as never);
 
@@ -481,6 +574,21 @@ describe("ReviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /play again/i }));
     expect(mockPlay).toHaveBeenCalledTimes(2);
     expect(screen.getAllByRole("button", { name: /^[A-D] /i })).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole("button", { name: /a the land alongside a river\./i }));
+    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
+
+    mockPost.mockResolvedValue({} as never);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    });
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/reviews/queue/state-audio/submit",
+      expect.objectContaining({
+        audio_replay_count: 1,
+      }),
+    );
   });
 
   it("submits phrase learning answers using the entry review state id", async () => {

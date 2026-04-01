@@ -89,6 +89,11 @@ class TestUserPreferencesApi:
         assert data["translation_locale"] == "zh-Hans"
         assert data["knowledge_view_preference"] == "cards"
         assert data["show_translations_by_default"] is True
+        assert data["review_depth_preset"] == "balanced"
+        assert data["enable_confidence_check"] is True
+        assert data["enable_word_spelling"] is True
+        assert data["enable_audio_spelling"] is False
+        assert data["show_pictures_in_questions"] is False
 
     @pytest.mark.asyncio
     async def test_put_upserts_preferences(self, client, mock_db, auth_token):
@@ -107,6 +112,11 @@ class TestUserPreferencesApi:
                 "translation_locale": "es",
                 "knowledge_view_preference": "list",
                 "show_translations_by_default": False,
+                "review_depth_preset": "deep",
+                "enable_confidence_check": False,
+                "enable_word_spelling": False,
+                "enable_audio_spelling": True,
+                "show_pictures_in_questions": True,
             },
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -117,6 +127,11 @@ class TestUserPreferencesApi:
         assert data["translation_locale"] == "es"
         assert data["knowledge_view_preference"] == "list"
         assert data["show_translations_by_default"] is False
+        assert data["review_depth_preset"] == "deep"
+        assert data["enable_confidence_check"] is False
+        assert data["enable_word_spelling"] is False
+        assert data["enable_audio_spelling"] is True
+        assert data["show_pictures_in_questions"] is True
 
     @pytest.mark.asyncio
     async def test_put_updates_existing_preferences(self, client, mock_db, auth_token):
@@ -128,6 +143,11 @@ class TestUserPreferencesApi:
             translation_locale="zh-Hans",
             knowledge_view_preference="cards",
             show_translations_by_default=True,
+            review_depth_preset="balanced",
+            enable_confidence_check=True,
+            enable_word_spelling=True,
+            enable_audio_spelling=False,
+            show_pictures_in_questions=False,
         )
 
         mock_db.execute.side_effect = [
@@ -142,6 +162,11 @@ class TestUserPreferencesApi:
                 "translation_locale": "ja",
                 "knowledge_view_preference": "tags",
                 "show_translations_by_default": False,
+                "review_depth_preset": "gentle",
+                "enable_confidence_check": False,
+                "enable_word_spelling": False,
+                "enable_audio_spelling": True,
+                "show_pictures_in_questions": True,
             },
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -152,6 +177,11 @@ class TestUserPreferencesApi:
         assert data["translation_locale"] == "ja"
         assert data["knowledge_view_preference"] == "tags"
         assert data["show_translations_by_default"] is False
+        assert data["review_depth_preset"] == "gentle"
+        assert data["enable_confidence_check"] is False
+        assert data["enable_word_spelling"] is False
+        assert data["enable_audio_spelling"] is True
+        assert data["show_pictures_in_questions"] is True
         assert existing.accent_preference == "uk"
         assert existing.show_translations_by_default is False
         mock_db.add.assert_not_called()

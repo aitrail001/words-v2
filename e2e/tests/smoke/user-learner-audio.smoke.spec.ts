@@ -251,7 +251,8 @@ test("@smoke learner audio covers range cards and review replay", async ({
   await page.route("**/api/reviews/queue/*/submit", async (route) => {
     const payload = route.request().postDataJSON() as Record<string, unknown>;
     submitPayloads.push(payload);
-    const itemId = route.request().url().split("/").pop() ?? "";
+    const urlSegments = route.request().url().split("/");
+    const itemId = urlSegments[urlSegments.length - 2] ?? "";
 
     if (itemId === "state-situation") {
       await route.fulfill({

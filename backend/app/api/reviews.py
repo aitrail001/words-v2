@@ -52,6 +52,7 @@ class QueueAddRequest(BaseModel):
 class QueueSubmitRequest(BaseModel):
     quality: int = Field(..., ge=0, le=5)
     time_spent_ms: int = Field(..., ge=0)
+    audio_replay_count: int = Field(default=0, ge=0)
     card_type: str | None = Field(default=None, min_length=1, max_length=32)
     review_mode: str | None = None
     outcome: str | None = Field(default=None, max_length=32)
@@ -98,6 +99,7 @@ class ReviewPrompt(BaseModel):
     input_mode: str | None = None
     voice_placeholder_text: str | None = None
     sentence_masked: str | None = None
+    source_entry_type: str | None = None
     source_word_id: str | None = None
     source_meaning_id: str | None = None
     audio_state: str = "not_available"
@@ -126,6 +128,7 @@ class ReviewDetailResponse(BaseModel):
     compare_with: list[str] = []
     meanings: list[ReviewDetailMeaning] = []
     audio_state: str = "not_available"
+    coverage_summary: str | None = None
 
 
 class ScheduleOptionResponse(BaseModel):
@@ -160,6 +163,8 @@ class QueueItemResponse(BaseModel):
     session_id: str | None = None
     word_id: str | None = None
     meaning_id: str
+    target_type: str | None = None
+    target_id: str | None = None
     card_type: str | None = None
     quality_rating: int | None = None
     time_spent_ms: int | None = None
@@ -201,6 +206,8 @@ class ReviewAnalyticsSummaryResponse(BaseModel):
     days: int
     total_events: int
     audio_placeholder_events: int
+    total_audio_replays: int = 0
+    audio_replay_counts: list[ReviewAnalyticsBucketResponse] = []
     prompt_families: list[ReviewAnalyticsBucketResponse] = []
     outcomes: list[ReviewAnalyticsBucketResponse] = []
     response_input_modes: list[ReviewAnalyticsBucketResponse] = []
@@ -243,6 +250,8 @@ def _to_queue_item_response(
         else None,
         word_id=str(getattr(item, "word_id", "")) if getattr(item, "word_id", None) else None,
         meaning_id=str(item_meaning_id) if item_meaning_id else "",
+        target_type=getattr(item, "target_type", None),
+        target_id=str(getattr(item, "target_id", "")) if getattr(item, "target_id", None) else None,
         card_type=getattr(item, "card_type", None),
         quality_rating=getattr(item, "quality_rating", None),
         time_spent_ms=getattr(item, "time_spent_ms", None),
@@ -404,6 +413,7 @@ async def submit_queue_review(
             item_id=item_id,
             quality=request.quality,
             time_spent_ms=request.time_spent_ms,
+            audio_replay_count=request.audio_replay_count,
             card_type=request.card_type,
             review_mode=request.review_mode,
             outcome=request.outcome,

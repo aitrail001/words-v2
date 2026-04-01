@@ -23,12 +23,22 @@ describe("SettingsPage", () => {
       translation_locale: "zh-Hans",
       knowledge_view_preference: "cards",
       show_translations_by_default: true,
+      review_depth_preset: "balanced",
+      enable_confidence_check: true,
+      enable_word_spelling: true,
+      enable_audio_spelling: false,
+      show_pictures_in_questions: false,
     });
     mockUpdateUserPreferences.mockResolvedValue({
       accent_preference: "us",
       translation_locale: "es",
       knowledge_view_preference: "cards",
       show_translations_by_default: false,
+      review_depth_preset: "deep",
+      enable_confidence_check: false,
+      enable_word_spelling: false,
+      enable_audio_spelling: true,
+      show_pictures_in_questions: true,
     });
   });
 
@@ -48,6 +58,7 @@ describe("SettingsPage", () => {
     expect(await screen.findByDisplayValue("Chinese (Simplified)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /uk accent/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /cards view/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /balanced review depth/i })).toBeInTheDocument();
   });
 
   it("shows the full supported translation language names", async () => {
@@ -78,7 +89,31 @@ describe("SettingsPage", () => {
         translation_locale: "zh-Hans",
         knowledge_view_preference: "cards",
         show_translations_by_default: false,
+        review_depth_preset: "balanced",
+        enable_confidence_check: true,
+        enable_word_spelling: true,
+        enable_audio_spelling: false,
+        show_pictures_in_questions: false,
       });
+    });
+  });
+
+  it("persists review depth and spelling toggles", async () => {
+    const user = userEvent.setup();
+    mockUpdateUserPreferences.mockImplementation(async (nextPreferences) => nextPreferences);
+
+    render(<SettingsPage />);
+
+    await user.click(await screen.findByRole("button", { name: /deep review depth/i }));
+    await user.click(screen.getByRole("button", { name: /audio spelling/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateUserPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({
+          review_depth_preset: "deep",
+          enable_audio_spelling: true,
+        }),
+      );
     });
   });
 });

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.services.review import ReviewService
 from app.models.review import ReviewSession, ReviewCard
@@ -14,10 +15,18 @@ from app.spaced_repetition import calculate_next_review
 
 @pytest.fixture
 def mock_db():
+    class AsyncNullContext:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
     session = AsyncMock()
     session.execute = AsyncMock()
     session.commit = AsyncMock()
     session.add = MagicMock()
+    session.begin_nested = MagicMock(return_value=AsyncNullContext())
     return session
 
 
@@ -259,28 +268,31 @@ class TestQueueDue:
 
         state_result = MagicMock()
         state_result.scalars.return_value.all.return_value = [state]
-        word_result = MagicMock()
-        word_result.scalar_one_or_none.return_value = word
-        meanings_result = MagicMock()
-        meanings_result.scalars.return_value.all.return_value = meanings
-        sentence_result = MagicMock()
-        sentence_result.scalar_one_or_none.return_value = "They jumped the gun and announced it early."
-        distractor_result = MagicMock()
-        distractor_result.scalars.return_value.all.return_value = ["cut corners", "miss the boat", "take over"]
+        prefs_result = MagicMock()
+        prefs_result.scalar_one_or_none.return_value = None
         accent_result = MagicMock()
         accent_result.scalar_one_or_none.return_value = "us"
+        word_result = MagicMock()
+        word_result.scalars.return_value.all.return_value = [word]
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = meanings
+        sentence_map_result = MagicMock()
+        sentence_map_result.all.return_value = [
+            (meaning_id, "They jumped the gun and announced it early.")
+        ]
+        distractor_result = MagicMock()
+        distractor_result.scalars.return_value.all.return_value = ["cut corners", "miss the boat", "take over"]
         history_count_result = MagicMock()
-        history_count_result.scalar_one.return_value = 3
+        history_count_result.all.return_value = [(meaning_id, 3)]
         mock_db.execute.side_effect = [
             state_result,
+            prefs_result,
+            accent_result,
             word_result,
             meanings_result,
-            sentence_result,
-            distractor_result,
-            sentence_result,
-            sentence_result,
-            accent_result,
+            sentence_map_result,
             history_count_result,
+            distractor_result,
         ]
 
         due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
@@ -466,6 +478,7 @@ class TestQueueSubmit:
                 "prompt_type": "typed_recall",
                 "input_mode": "typed",
                 "audio_state": "not_available",
+                "source_meaning_id": str(uuid.uuid4()),
             },
             typed_answer="resilience",
         )
@@ -476,9 +489,12 @@ class TestQueueSubmit:
             if call.args and hasattr(call.args[0], "prompt_type")
         )
         assert event.prompt_family == "typed_recall"
+        assert event.target_type == "meaning"
+        assert event.target_id is not None
         assert event.response_input_mode == "typed"
         assert event.response_value == "resilience"
         assert event.used_audio_placeholder is False
+        assert event.audio_replay_count == 0
 
 
 class TestAnalyticsSummary:
@@ -505,12 +521,21 @@ class TestAnalyticsSummary:
             MagicMock(value="typed", count=3),
             MagicMock(value="choice", count=2),
         ]
+        audio_replay_total_result = MagicMock()
+        audio_replay_total_result.scalar_one.return_value = 7
+        audio_replay_count_result = MagicMock()
+        audio_replay_count_result.all.return_value = [
+            MagicMock(value=0, count=3),
+            MagicMock(value=1, count=2),
+        ]
         mock_db.execute.side_effect = [
             total_result,
             placeholder_result,
             prompt_family_result,
             outcome_result,
             input_mode_result,
+            audio_replay_total_result,
+            audio_replay_count_result,
         ]
 
         summary = await review_service.get_review_analytics_summary(uuid.uuid4(), days=14)
@@ -530,9 +555,48 @@ class TestAnalyticsSummary:
             {"value": "typed", "count": 3},
             {"value": "choice", "count": 2},
         ]
+        assert summary["total_audio_replays"] == 7
+        assert summary["audio_replay_counts"] == [
+            {"value": "0", "count": 3},
+            {"value": "1", "count": 2},
+        ]
 
 
 class TestPromptFamilies:
+    def test_select_review_mode_respects_confidence_setting(self, review_service):
+        item = MagicMock(id=uuid.UUID(int=0))
+
+        assert (
+            review_service._select_review_mode(
+                item=item,
+                word="bank",
+                sentence="We sat on the river bank.",
+                allow_confidence=True,
+            )
+            == ReviewService.REVIEW_MODE_CONFIDENCE
+        )
+        assert (
+            review_service._select_review_mode(
+                item=item,
+                word="bank",
+                sentence="We sat on the river bank.",
+                allow_confidence=False,
+            )
+            == ReviewService.REVIEW_MODE_MCQ
+        )
+
+    def test_build_mcq_options_uses_only_real_choices_when_distractors_are_thin(
+        self, review_service
+    ):
+        options = review_service._build_mcq_options(
+            correct="barely",
+            distractors=["bravely", "rarely"],
+        )
+
+        assert len(options) == 3
+        assert {option["label"] for option in options} == {"barely", "bravely", "rarely"}
+        assert not any(option["label"].startswith("Option ") for option in options)
+
     @pytest.mark.asyncio
     async def test_build_review_prompt_sets_definition_to_entry_answer_to_entry(
         self, review_service, mock_db
@@ -611,7 +675,8 @@ class TestPromptFamilies:
 
         assert prompt["prompt_type"] == "meaning_discrimination"
         assert prompt["question"] == "rocky"
-        assert len(prompt["options"]) == 4
+        assert len(prompt["options"]) == 3
+        assert not any(option["label"].startswith("Option ") for option in prompt["options"])
 
     @pytest.mark.asyncio
     async def test_build_card_prompt_supports_typed_recall(
@@ -636,6 +701,7 @@ class TestPromptFamilies:
         assert prompt["prompt_type"] == "typed_recall"
         assert prompt["options"] is None
         assert prompt["expected_input"] == "resilience"
+        assert prompt["source_meaning_id"] is not None
         assert "type the word or phrase" in prompt["stem"].lower()
 
     @pytest.mark.asyncio
@@ -668,6 +734,13 @@ class TestPromptFamilies:
         self, review_service, mock_db, monkeypatch
     ):
         user_id = uuid.uuid4()
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_audio_spelling=False,
+                enable_confidence_check=True,
+            )
+        )
         monkeypatch.setattr(review_service, "_get_user_accent_preference", AsyncMock(return_value="uk"))
         monkeypatch.setattr(
             review_service,
@@ -727,6 +800,55 @@ class TestPromptFamilies:
         review_service._fetch_adjacent_definition_distractors.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_build_card_prompt_prefers_word_confusables_for_definition_to_entry(
+        self, review_service, mock_db, monkeypatch
+    ):
+        source_entry_id = uuid.uuid4()
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_audio_spelling=False,
+                enable_confidence_check=True,
+            )
+        )
+        monkeypatch.setattr(
+            review_service,
+            "_select_prompt_type",
+            MagicMock(return_value=ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY),
+        )
+        review_service._fetch_word_confusable_distractors = AsyncMock(
+            return_value=["barley", "bare", "barren"]
+        )
+        review_service._fetch_same_day_entry_distractors = AsyncMock(return_value=["hardly"])
+        review_service._fetch_adjacent_entry_distractors = AsyncMock(return_value=["boldly"])
+
+        prompt = await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            source_text="barely",
+            definition="Only just, by a very small margin.",
+            sentence=None,
+            is_phrase_entry=False,
+            distractor_seed="seed",
+            meaning_id=uuid.uuid4(),
+            index=0,
+            alternative_definitions=None,
+            user_id=uuid.uuid4(),
+            source_entry_id=source_entry_id,
+            source_entry_type="word",
+        )
+
+        labels = [option["label"] for option in prompt["options"]]
+        assert "barley" in labels
+        assert "hardly" not in labels
+        assert "boldly" not in labels
+        review_service._fetch_word_confusable_distractors.assert_awaited_once_with(
+            target_entry_id=source_entry_id,
+            limit=3,
+        )
+        review_service._fetch_same_day_entry_distractors.assert_not_awaited()
+        review_service._fetch_adjacent_entry_distractors.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_build_word_detail_payload_uses_user_accent_and_exposes_pronunciations(
         self, review_service, mock_db, monkeypatch
     ):
@@ -742,16 +864,14 @@ class TestPromptFamilies:
             },
         )
         meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", part_of_speech="noun")
-        monkeypatch.setattr(review_service, "_get_user_accent_preference", AsyncMock(return_value="uk"))
-        monkeypatch.setattr(review_service, "_fetch_first_meaning_sentence", AsyncMock(return_value="I went to the bank."))
-        count_result = MagicMock()
-        count_result.scalar_one.return_value = 3
-        mock_db.execute.return_value = count_result
 
         payload = await review_service._build_word_detail_payload(
             user_id=user_id,
             word=word,
             meanings=[meaning],
+            example_by_meaning_id={meaning.id: "I went to the bank."},
+            remembered_count=3,
+            accent="uk",
         )
 
         assert payload["pronunciation"] == "/baŋk/"
@@ -762,6 +882,14 @@ class TestPromptFamilies:
         self, review_service, mock_db, monkeypatch
     ):
         user_id = uuid.uuid4()
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_audio_spelling=False,
+                enable_confidence_check=True,
+            )
+        )
+        monkeypatch.setattr(review_service, "_get_user_accent_preference", AsyncMock(return_value="us"))
         monkeypatch.setattr(
             review_service,
             "_select_prompt_type",
@@ -868,6 +996,111 @@ class TestPromptFamilies:
         assert len(prompt["options"]) == 4
 
     @pytest.mark.asyncio
+    async def test_build_card_prompt_gentle_preset_skips_typed_and_audio_spelling(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        prefs = MagicMock()
+        prefs.review_depth_preset = "gentle"
+        prefs.enable_audio_spelling = False
+        prefs.enable_word_spelling = True
+        prefs.enable_confidence_check = True
+        prefs.show_pictures_in_questions = False
+
+        monkeypatch.setattr(
+            review_service,
+            "_get_user_review_preferences",
+            AsyncMock(return_value=prefs),
+        )
+        review_service._fetch_same_day_entry_distractors = AsyncMock(return_value=[])
+        review_service._fetch_adjacent_entry_distractors = AsyncMock(return_value=[])
+        review_service._fetch_same_day_definition_distractors = AsyncMock(return_value=[])
+        review_service._fetch_adjacent_definition_distractors = AsyncMock(return_value=[])
+        review_service._load_prompt_audio_assets = AsyncMock(return_value=[])
+        select_prompt_type = MagicMock(
+            side_effect=lambda prompt_candidates, index=0, previous_prompt_type=None: prompt_candidates[0]
+        )
+        monkeypatch.setattr(review_service, "_select_prompt_type", select_prompt_type)
+
+        await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            source_text="bank",
+            definition="The land alongside a river.",
+            sentence="We sat on the river bank.",
+            is_phrase_entry=False,
+            distractor_seed="seed",
+            meaning_id=uuid.uuid4(),
+            index=0,
+            alternative_definitions=[
+                "A financial institution that stores money.",
+                "A raised pile of snow.",
+                "A large mass of cloud.",
+            ],
+            user_id=user_id,
+            source_entry_id=uuid.uuid4(),
+            source_entry_type="word",
+        )
+
+        candidates = select_prompt_type.call_args.args[0]
+        assert ReviewService.PROMPT_TYPE_TYPED_RECALL not in candidates
+        assert ReviewService.PROMPT_TYPE_SPEAK_RECALL not in candidates
+        assert ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY in candidates
+        assert ReviewService.PROMPT_TYPE_ENTRY_TO_DEFINITION in candidates
+
+    @pytest.mark.asyncio
+    async def test_build_card_prompt_deep_preset_includes_spelling_and_audio_spelling(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        prefs = MagicMock()
+        prefs.review_depth_preset = "deep"
+        prefs.enable_audio_spelling = True
+        prefs.enable_word_spelling = True
+        prefs.enable_confidence_check = True
+        prefs.show_pictures_in_questions = False
+
+        monkeypatch.setattr(
+            review_service,
+            "_get_user_review_preferences",
+            AsyncMock(return_value=prefs),
+        )
+        review_service._fetch_same_day_entry_distractors = AsyncMock(return_value=[])
+        review_service._fetch_adjacent_entry_distractors = AsyncMock(return_value=[])
+        review_service._fetch_same_day_definition_distractors = AsyncMock(return_value=[])
+        review_service._fetch_adjacent_definition_distractors = AsyncMock(return_value=[])
+        review_service._load_prompt_audio_assets = AsyncMock(return_value=[])
+        select_prompt_type = MagicMock(
+            side_effect=lambda prompt_candidates, index=0, previous_prompt_type=None: prompt_candidates[0]
+        )
+        monkeypatch.setattr(review_service, "_select_prompt_type", select_prompt_type)
+
+        await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            source_text="resilience",
+            definition="The capacity to recover quickly from difficulties.",
+            sentence="Resilience helps teams adapt after major setbacks.",
+            is_phrase_entry=False,
+            distractor_seed="seed",
+            meaning_id=uuid.uuid4(),
+            index=0,
+            alternative_definitions=[
+                "The capacity to recover quickly from difficulties.",
+                "A tendency to overreact.",
+                "A refusal to listen.",
+            ],
+            user_id=user_id,
+            source_entry_id=uuid.uuid4(),
+            source_entry_type="word",
+        )
+
+        candidates = select_prompt_type.call_args.args[0]
+        assert ReviewService.PROMPT_TYPE_TYPED_RECALL in candidates
+        assert ReviewService.PROMPT_TYPE_SPEAK_RECALL in candidates
+        assert candidates.index(ReviewService.PROMPT_TYPE_TYPED_RECALL) < candidates.index(
+            ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY
+        )
+
+    @pytest.mark.asyncio
     async def test_scheduler_accepts_collocation_and_situation_prompt_types(self):
         collocation = calculate_next_review(
             outcome="correct_tested",
@@ -897,6 +1130,32 @@ class TestPromptFamilies:
 
         assert typed.interval_days > 0
         assert typed.stability > 3
+
+    @pytest.mark.asyncio
+    async def test_scheduler_distinguishes_grade_buckets(self):
+        hard = calculate_next_review(
+            outcome="correct_tested",
+            prompt_type="typed_recall",
+            stability=3,
+            difficulty=0.5,
+            grade="hard_pass",
+        )
+        good = calculate_next_review(
+            outcome="correct_tested",
+            prompt_type="typed_recall",
+            stability=3,
+            difficulty=0.5,
+            grade="good_pass",
+        )
+        easy = calculate_next_review(
+            outcome="correct_tested",
+            prompt_type="typed_recall",
+            stability=3,
+            difficulty=0.5,
+            grade="easy_pass",
+        )
+
+        assert hard.interval_days < good.interval_days < easy.interval_days
 
     @pytest.mark.asyncio
     async def test_submit_queue_review_raises_when_item_not_found_for_user(
@@ -942,7 +1201,7 @@ class TestQueueStats:
 
 class TestLearningStart:
     @pytest.mark.asyncio
-    async def test_start_learning_entry_for_phrase_uses_entry_state_as_queue_item_id(
+    async def test_start_learning_entry_for_phrase_uses_phrase_target_state_as_queue_item_id(
         self, review_service, mock_db
     ):
         user_id = uuid.uuid4()
@@ -958,6 +1217,8 @@ class TestLearningStart:
             user_id=user_id,
             entry_type="phrase",
             entry_id=phrase_id,
+            target_type="phrase_sense",
+            target_id=sense_id,
             stability=3,
             difficulty=0.5,
         )
@@ -971,7 +1232,14 @@ class TestLearningStart:
         senses_result = MagicMock()
         senses_result.scalars.return_value.all.return_value = [sense]
 
-        review_service._ensure_entry_review_state = AsyncMock(return_value=state)
+        review_service._ensure_target_review_state = AsyncMock(return_value=state)
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_confidence_check=True,
+                enable_audio_spelling=False,
+            )
+        )
         review_service._build_phrase_detail_payload = AsyncMock(
             return_value={
                 "entry_type": "phrase",
@@ -983,8 +1251,8 @@ class TestLearningStart:
                 "meanings": [],
             }
         )
-        review_service._fetch_first_sense_sentence = AsyncMock(
-            return_value="They jumped the gun and announced it early."
+        review_service._fetch_first_sense_sentence_map = AsyncMock(
+            return_value={sense_id: "They jumped the gun and announced it early."}
         )
         review_service._build_card_prompt = AsyncMock(
             return_value={
@@ -1004,6 +1272,350 @@ class TestLearningStart:
 
         assert payload["queue_item_ids"] == [str(state_id)]
         assert payload["cards"][0]["queue_item_id"] == str(state_id)
+
+
+class TestReviewRedesignGaps:
+    def test_normalize_typed_answer_ignores_case_punctuation_and_extra_whitespace(
+        self, review_service
+    ):
+        normalized = review_service._normalize_typed_answer("  Look,   up!! ")
+
+        assert normalized == "look up"
+
+    def test_compare_typed_answer_returns_particle_feedback_for_phrase_mismatch(
+        self, review_service
+    ):
+        comparison = review_service._compare_typed_answer(
+            expected_input="look up",
+            typed_answer="look in",
+            entry_type="phrase",
+        )
+
+        assert comparison["is_correct"] is False
+        assert comparison["feedback_note"] == (
+            "The verb is right, but the particle is different. Changing the particle changes the phrase."
+        )
+
+    @pytest.mark.asyncio
+    async def test_build_card_prompt_suppresses_ambiguous_audio_for_multi_sense_parent(
+        self, review_service
+    ):
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_audio_spelling=False,
+                enable_confidence_check=True,
+            )
+        )
+        review_service._fetch_same_day_entry_distractors = AsyncMock(return_value=["set in", "set up"])
+        review_service._fetch_adjacent_entry_distractors = AsyncMock(return_value=["set aside"])
+
+        prompt = await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            source_text="set off",
+            definition="To start a journey.",
+            sentence="They set off before sunrise.",
+            is_phrase_entry=True,
+            distractor_seed="sense-1",
+            meaning_id=uuid.uuid4(),
+            index=0,
+            alternative_definitions=[
+                "To start a journey.",
+                "To cause an alarm to ring.",
+            ],
+            active_target_count=2,
+            user_id=uuid.uuid4(),
+            source_entry_id=uuid.uuid4(),
+            source_entry_type="phrase",
+        )
+
+        assert prompt["prompt_type"] in {
+            ReviewService.PROMPT_TYPE_SENTENCE_GAP,
+            ReviewService.PROMPT_TYPE_MEANING_DISCRIMINATION,
+            ReviewService.PROMPT_TYPE_TYPED_RECALL,
+        }
+
+    def test_select_prompt_audio_assets_prefers_example_then_sense_then_entry(
+        self, review_service
+    ):
+        entry_asset = MagicMock()
+        entry_asset.content_scope = "word"
+        entry_asset.meaning_example_id = None
+        entry_asset.meaning_id = None
+        entry_asset.word_id = uuid.uuid4()
+
+        sense_asset = MagicMock()
+        sense_asset.content_scope = "definition"
+        sense_asset.meaning_example_id = None
+        sense_asset.meaning_id = uuid.uuid4()
+        sense_asset.word_id = None
+
+        example_asset = MagicMock()
+        example_asset.content_scope = "example"
+        example_asset.meaning_example_id = uuid.uuid4()
+        example_asset.meaning_id = None
+        example_asset.word_id = None
+
+        selected = review_service._select_prompt_audio_assets(
+            assets=[entry_asset, sense_asset, example_asset],
+            target_entry_type="word",
+            target_id=sense_asset.meaning_id,
+            example_id=example_asset.meaning_example_id,
+        )
+
+        assert selected == [example_asset, sense_asset, entry_asset]
+
+    @pytest.mark.asyncio
+    async def test_start_learning_entry_for_word_returns_meaning_target_state_id(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        target_state_id = uuid.uuid4()
+
+        word = Word(id=word_id, word="resilience", language="en")
+        meaning = Meaning(id=meaning_id, word_id=word_id, definition="The capacity to recover quickly.")
+        target_state = EntryReviewState(
+            id=target_state_id,
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=0.3,
+            difficulty=0.5,
+        )
+
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = word
+        meaning_result = MagicMock()
+        meaning_result.scalars.return_value.all.return_value = [meaning]
+        mock_db.execute.side_effect = [word_result, meaning_result]
+
+        review_service._ensure_entry_review_state = AsyncMock(
+            side_effect=AssertionError("parent entry state helper should not be used")
+        )
+        review_service._ensure_target_review_state = AsyncMock(return_value=target_state)
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_confidence_check=True,
+                enable_audio_spelling=False,
+            )
+        )
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={
+                "entry_type": "word",
+                "entry_id": str(word_id),
+                "display_text": "resilience",
+                "meaning_count": 1,
+                "remembered_count": 0,
+                "compare_with": [],
+                "meanings": [],
+            }
+        )
+        review_service._get_user_accent_preference = AsyncMock(return_value="us")
+        review_service._fetch_first_meaning_sentence_map = AsyncMock(return_value={meaning_id: None})
+        review_service._fetch_history_count_by_word_id = AsyncMock(return_value={word_id: 0})
+        review_service._build_card_prompt = AsyncMock(
+            return_value={
+                "mode": "mcq",
+                "prompt_type": "definition_to_entry",
+                "question": "The capacity to recover quickly.",
+                "options": [],
+            }
+        )
+
+        payload = await review_service.start_learning_entry(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+        )
+
+        assert payload["queue_item_ids"] == [str(target_state_id)]
+        assert payload["cards"][0]["queue_item_id"] == str(target_state_id)
+
+    def test_bury_sibling_targets_keeps_only_one_due_target_per_parent(self, review_service):
+        parent_entry_id = uuid.uuid4()
+        sibling_one = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=parent_entry_id,
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=2,
+            difficulty=0.5,
+        )
+        sibling_two = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=sibling_one.user_id,
+            entry_type="word",
+            entry_id=parent_entry_id,
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=4,
+            difficulty=0.5,
+        )
+
+        filtered = review_service._apply_sibling_bury_rule([sibling_one, sibling_two])
+
+        assert filtered == [sibling_one]
+
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_uses_target_meaning_state_identity(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        target_meaning_id = uuid.uuid4()
+        sibling_meaning_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=target_meaning_id,
+            stability=5,
+            difficulty=0.5,
+        )
+        state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        word = Word(id=word_id, word="resilience", language="en")
+        target_meaning = Meaning(
+            id=target_meaning_id,
+            word_id=word_id,
+            definition="The capacity to recover quickly from difficulties.",
+        )
+        sibling_meaning = Meaning(
+            id=sibling_meaning_id,
+            word_id=word_id,
+            definition="A tendency to bounce back after setbacks.",
+        )
+
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = [state]
+        accent_result = MagicMock()
+        accent_result.scalar_one_or_none.return_value = "us"
+        word_result = MagicMock()
+        word_result.scalars.return_value.all.return_value = [word]
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [sibling_meaning, target_meaning]
+        sentence_map_result = MagicMock()
+        sentence_map_result.all.return_value = []
+        history_count_result = MagicMock()
+        history_count_result.all.return_value = []
+        mock_db.execute.side_effect = [
+            state_result,
+            accent_result,
+            word_result,
+            meanings_result,
+            sentence_map_result,
+            history_count_result,
+        ]
+
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(review_depth_preset="balanced", enable_confidence_check=True)
+        )
+        review_service._build_card_prompt = AsyncMock(return_value={"prompt_type": "definition_to_entry"})
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={
+                "entry_type": "word",
+                "entry_id": str(word_id),
+                "display_text": "resilience",
+                "meaning_count": 2,
+                "remembered_count": 1,
+                "compare_with": [],
+                "meanings": [],
+            }
+        )
+
+        due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
+
+        assert len(due_items) == 1
+        assert due_items[0]["definition"] == target_meaning.definition
+        assert due_items[0]["source_meaning_id"] == str(target_meaning_id)
+
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_buries_due_sibling_targets_for_same_parent(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        first_meaning_id = uuid.uuid4()
+        second_meaning_id = uuid.uuid4()
+
+        first_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=first_meaning_id,
+            stability=2,
+            difficulty=0.5,
+        )
+        first_state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+        second_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=second_meaning_id,
+            stability=4,
+            difficulty=0.5,
+        )
+        second_state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = [first_state, second_state]
+        accent_result = MagicMock()
+        accent_result.scalar_one_or_none.return_value = "us"
+        word_result = MagicMock()
+        word_result.scalars.return_value.all.return_value = [
+            Word(id=word_id, word="resilience", language="en")
+        ]
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [
+            Meaning(id=first_meaning_id, word_id=word_id, definition="Definition one"),
+            Meaning(id=second_meaning_id, word_id=word_id, definition="Definition two"),
+        ]
+        sentence_map_result = MagicMock()
+        sentence_map_result.all.return_value = []
+        history_count_result = MagicMock()
+        history_count_result.all.return_value = []
+        mock_db.execute.side_effect = [
+            state_result,
+            accent_result,
+            word_result,
+            meanings_result,
+            sentence_map_result,
+            history_count_result,
+        ]
+
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(review_depth_preset="balanced", enable_confidence_check=True)
+        )
+        review_service._build_card_prompt = AsyncMock(return_value={"prompt_type": "definition_to_entry"})
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={
+                "entry_type": "word",
+                "entry_id": str(word_id),
+                "display_text": "resilience",
+                "meaning_count": 2,
+                "remembered_count": 1,
+                "compare_with": [],
+                "meanings": [],
+            }
+        )
+
+        due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
+
+        assert len(due_items) == 1
+        assert due_items[0]["source_meaning_id"] == str(first_meaning_id)
 
 
 class TestCompleteSession:
@@ -1034,3 +1646,41 @@ class TestCompleteSession:
 
         with pytest.raises(ValueError, match=f"Review session {session_id} not found"):
             await review_service.complete_session(session_id, user_id)
+
+
+class TestEntryReviewStateConcurrency:
+    @pytest.mark.asyncio
+    async def test_ensure_target_review_state_recovers_from_concurrent_insert(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        target_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        recovered_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            target_type="meaning",
+            target_id=target_id,
+            entry_type="word",
+            entry_id=entry_id,
+            stability=0.3,
+            difficulty=0.5,
+        )
+
+        first_lookup = MagicMock()
+        first_lookup.scalar_one_or_none.return_value = None
+        second_lookup = MagicMock()
+        second_lookup.scalar_one_or_none.return_value = recovered_state
+        mock_db.execute.side_effect = [first_lookup, second_lookup]
+        mock_db.flush.side_effect = IntegrityError("insert", {}, Exception("duplicate key"))
+
+        state = await review_service._ensure_target_review_state(
+            user_id=user_id,
+            target_type="meaning",
+            target_id=target_id,
+            entry_type="word",
+            entry_id=entry_id,
+        )
+
+        assert state is recovered_state
+        assert mock_db.execute.await_count == 2

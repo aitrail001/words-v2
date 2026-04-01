@@ -1,0 +1,46 @@
+services:
+  postgres:
+    container_name: words-srs-review-postgres
+    ports:
+      - "5433:5432"
+
+  redis:
+    container_name: words-srs-review-redis
+    ports:
+      - "6380:6379"
+
+  migrate:
+    container_name: words-srs-review-migrate
+
+  backend:
+    container_name: words-srs-review-backend
+    environment:
+      - ALLOWED_ORIGINS=http://127.0.0.1:3200,http://127.0.0.1:3201,http://frontend:3000,http://admin-frontend:3001
+    ports:
+      - "4200:8000"
+
+  worker:
+    container_name: words-srs-review-worker
+
+  frontend:
+    container_name: words-srs-review-frontend
+    ports:
+      - "3200:3000"
+
+  admin-frontend:
+    container_name: words-srs-review-admin-frontend
+    ports:
+      - "3201:3001"
+
+  playwright:
+    container_name: words-srs-review-playwright
+    environment:
+      - E2E_BASE_URL=http://frontend:3000
+      - E2E_API_URL=http://backend:8000/api
+      - E2E_ADMIN_URL=http://admin-frontend:3001
+
+  pgadmin:
+    container_name: words-srs-review-pgadmin
+
+  redis-commander:
+    container_name: words-srs-review-redis-commander
