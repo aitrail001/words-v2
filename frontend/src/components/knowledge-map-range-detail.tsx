@@ -14,7 +14,12 @@ import {
   type KnowledgeStatus,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
-import { getPlayableLearnerAccents, playLearnerEntryAudio } from "@/lib/learner-audio";
+import {
+  getEntryLevelVoiceAssets,
+  getPlayableLearnerAccents,
+  playLearnerEntryAudio,
+  resolveDisplayedPronunciation,
+} from "@/lib/learner-audio";
 import { getUserPreferences, updateUserPreferences, type UserPreferences } from "@/lib/user-preferences-client";
 
 type ViewMode = "cards" | "tags" | "list";
@@ -331,6 +336,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
 
             if (
               item.pronunciation === detail.pronunciation &&
+              JSON.stringify(item.pronunciations ?? {}) === JSON.stringify(detail.pronunciations ?? {}) &&
               item.translation === detail.translation &&
               item.primary_definition === detail.primary_definition &&
               item.part_of_speech === nextPartOfSpeech &&
@@ -343,6 +349,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
             return {
               ...item,
               pronunciation: detail.pronunciation,
+              pronunciations: detail.pronunciations,
               translation: detail.translation,
               primary_definition: detail.primary_definition,
               part_of_speech: nextPartOfSpeech,
@@ -441,7 +448,16 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
   const canGoPreviousEntry = activeIndex > 0;
   const canGoNextEntry = selectedRange ? activeIndex < selectedRange.items.length - 1 : false;
   const activeCardActions = activeEntry ? getCardActions(activeEntry.status) : [];
-  const activeEntryVoiceAssets = selectedEntryDetail?.voice_assets ?? activeEntry?.voice_assets ?? [];
+  const activeEntryVoiceAssets = getEntryLevelVoiceAssets(
+    selectedEntryDetail?.voice_assets ?? activeEntry?.voice_assets ?? [],
+  );
+  const activeDisplayedPronunciation = activeEntry
+    ? resolveDisplayedPronunciation(
+        selectedEntryDetail?.pronunciation ?? activeEntry.pronunciation,
+        selectedEntryDetail?.pronunciations ?? activeEntry.pronunciations,
+        accentPreference,
+      )
+    : null;
   const playableAccents = (() => {
     const activeAccents = getPlayableLearnerAccents(activeEntryVoiceAssets);
     if (activeAccents.length > 0) {
@@ -464,7 +480,9 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
   };
 
   const handlePlayAudio = (voiceAssets: KnowledgeMapEntrySummary["voice_assets"] | undefined) => {
-    void playLearnerEntryAudio(voiceAssets, accentPreference).catch(() => undefined);
+    void playLearnerEntryAudio(getEntryLevelVoiceAssets(voiceAssets), accentPreference, {
+      contentScope: "word",
+    }).catch(() => undefined);
   };
 
   return (
@@ -545,10 +563,10 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
                         onClick={() => handlePlayAudio(activeEntryVoiceAssets)}
                         className="rounded-full bg-[#eef8ff] px-2.5 py-1 text-[0.72rem] text-[#1687a6]"
                       >
-                        Play Audio
+                        Play
                       </button>
                     )}
-                    <span>{activeEntry.pronunciation ?? "/.../"}</span>
+                    <span>{activeDisplayedPronunciation ?? "/.../"}</span>
                     <span>#{activeEntry.browse_rank.toLocaleString()}</span>
                   </div>
                 </div>
@@ -687,14 +705,14 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
                 >
                   Open
                 </Link>
-                {item.voice_assets && item.voice_assets.length > 0 && (
+                {getEntryLevelVoiceAssets(item.voice_assets).length > 0 && (
                   <button
                     type="button"
                     aria-label={`Play audio for ${item.display_text}`}
                     onClick={() => handlePlayAudio(item.voice_assets)}
                     className="ml-2 inline-flex rounded-[0.25rem] bg-[#eef8ff] px-2.5 py-1 text-[0.7rem] font-semibold text-[#1687a6]"
                   >
-                    Play Audio
+                    Play
                   </button>
                 )}
               </div>

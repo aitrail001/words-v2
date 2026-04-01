@@ -4,6 +4,7 @@ export type KnowledgeStatus = "undecided" | "to_learn" | "learning" | "known";
 export type KnowledgeEntryType = "word" | "phrase";
 
 export type LearnerVoiceAccent = "us" | "uk" | "au";
+export type LearnerPronunciations = Partial<Record<LearnerVoiceAccent, string>>;
 
 export type LearnerVoicePlaybackLocale = {
   playback_url: string;
@@ -55,6 +56,7 @@ export type KnowledgeMapEntrySummary = {
   status: KnowledgeStatus;
   cefr_level: string | null;
   pronunciation: string | null;
+  pronunciations?: LearnerPronunciations;
   translation: string | null;
   primary_definition: string | null;
   part_of_speech: string | null;
@@ -137,6 +139,7 @@ export type ReviewDetailPayload = {
   entry_id: string;
   display_text: string;
   pronunciation?: string | null;
+  pronunciations?: LearnerPronunciations;
   part_of_speech?: string | null;
   primary_definition?: string | null;
   primary_example?: string | null;
@@ -251,6 +254,7 @@ export type KnowledgeMapEntryDetail = {
   status: KnowledgeStatus;
   cefr_level: string | null;
   pronunciation: string | null;
+  pronunciations?: LearnerPronunciations;
   translation: string | null;
   primary_definition: string | null;
   supported_translation_locales?: string[];

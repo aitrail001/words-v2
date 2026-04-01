@@ -18,8 +18,10 @@ from app.models.review import ReviewCard, ReviewSession
 from app.models.phrase_entry import PhraseEntry
 from app.models.phrase_sense import PhraseSense
 from app.models.phrase_sense_example import PhraseSenseExample
+from app.models.user_preference import UserPreference
 from app.models.word import Word
 from app.spaced_repetition import calculate_next_review
+from app.services.knowledge_map import extract_pronunciations, select_pronunciation
 from app.services.voice_assets import (
     build_voice_asset_playback_url,
     load_phrase_voice_assets,
@@ -124,6 +126,7 @@ class ReviewService:
     async def _build_prompt_audio_payload(
         cls,
         assets: list[LexiconVoiceAsset] | None,
+        preferred_accent: str | None = None,
     ) -> dict[str, Any] | None:
         locales: dict[str, dict[str, str | None]] = {}
         for asset in assets or []:
@@ -143,7 +146,10 @@ class ReviewService:
             return None
 
         preferred_locale = None
-        for candidate in ("us", "uk", "au"):
+        candidate_order = [preferred_accent, "us", "uk", "au"]
+        for candidate in candidate_order:
+            if candidate is None:
+                continue
             if candidate in locales:
                 preferred_locale = candidate
                 break
@@ -155,6 +161,19 @@ class ReviewService:
             "preferred_locale": preferred_locale,
             "locales": locales,
         }
+
+    async def _get_user_accent_preference(self, user_id: uuid.UUID) -> str:
+        if not hasattr(self, "_accent_preference_cache"):
+            self._accent_preference_cache: dict[uuid.UUID, str] = {}
+        cached = self._accent_preference_cache.get(user_id)
+        if cached:
+            return cached
+        result = await self.db.execute(
+            select(UserPreference.accent_preference).where(UserPreference.user_id == user_id)
+        )
+        accent = result.scalar_one_or_none() or "us"
+        self._accent_preference_cache[user_id] = accent
+        return accent
 
     @staticmethod
     def _start_of_utc_day(now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -657,9 +676,11 @@ class ReviewService:
     async def _load_prompt_audio_payload(
         self,
         *,
+        user_id: uuid.UUID,
         entry_type: str,
         entry_id: uuid.UUID,
     ) -> dict[str, Any] | None:
+        preferred_accent = await self._get_user_accent_preference(user_id)
         normalized_entry_type = self._normalize_entry_type(entry_type)
         if normalized_entry_type == "phrase":
             assets = await load_phrase_voice_assets(
@@ -673,7 +694,7 @@ class ReviewService:
                 for asset in assets
                 if asset.content_scope == "word" and asset.phrase_entry_id == entry_id
             ]
-            return await self._build_prompt_audio_payload(entry_assets)
+            return await self._build_prompt_audio_payload(entry_assets, preferred_accent=preferred_accent)
 
         assets = await load_word_voice_assets(
             self.db,
@@ -686,7 +707,7 @@ class ReviewService:
             for asset in assets
             if asset.content_scope == "word" and asset.word_id == entry_id
         ]
-        return await self._build_prompt_audio_payload(entry_assets)
+        return await self._build_prompt_audio_payload(entry_assets, preferred_accent=preferred_accent)
 
     async def _build_word_detail_payload(
         self,
@@ -696,6 +717,7 @@ class ReviewService:
         meanings: list[Meaning],
     ) -> dict[str, Any]:
         primary = meanings[0] if meanings else None
+        accent = await self._get_user_accent_preference(user_id)
         meaning_items: list[dict[str, Any]] = []
         for meaning in meanings[:5]:
             meaning_items.append(
@@ -721,9 +743,8 @@ class ReviewService:
             "entry_type": "word",
             "entry_id": str(word.id),
             "display_text": self._normalize_prompt_text(word.word) or "Unavailable",
-            "pronunciation": self._normalize_prompt_text(
-                getattr(word, "phonetic", None) or getattr(word, "phonetics", None)
-            ),
+            "pronunciation": select_pronunciation(word, accent),
+            "pronunciations": extract_pronunciations(word),
             "part_of_speech": primary.part_of_speech if primary is not None else None,
             "primary_definition": primary.definition if primary is not None else None,
             "primary_example": meaning_items[0]["example"] if meaning_items else None,
@@ -760,6 +781,7 @@ class ReviewService:
             "entry_id": str(phrase.id),
             "display_text": self._normalize_prompt_text(phrase.phrase_text) or "Unavailable",
             "pronunciation": None,
+            "pronunciations": {},
             "part_of_speech": primary.part_of_speech if primary is not None else None,
             "primary_definition": primary.definition if primary is not None else None,
             "primary_example": meaning_items[0]["example"] if meaning_items else None,
@@ -1209,7 +1231,8 @@ class ReviewService:
                 source_entry_type=normalized_entry_type,
                 source_entry_id=source_entry_id,
             )
-            audio = await self._build_prompt_audio_payload(audio_assets)
+            preferred_accent = await self._get_user_accent_preference(user_id) if user_id is not None else "us"
+            audio = await self._build_prompt_audio_payload(audio_assets, preferred_accent=preferred_accent)
 
         prompt = await self._build_mandated_prompt(
             review_mode=review_mode,

@@ -45,6 +45,7 @@ from app.services.knowledge_map import (
     normalize_confusable_words,
     normalize_meaning_metadata,
     normalize_translation_examples,
+    extract_pronunciations,
     normalize_word_forms,
     relation_terms,
     resolve_exact_match_target,
@@ -106,6 +107,7 @@ class KnowledgeMapEntrySummary(BaseModel):
     status: str
     cefr_level: str | None
     pronunciation: str | None
+    pronunciations: dict[str, str] = {}
     translation: str | None
     primary_definition: str | None
     part_of_speech: str | None
@@ -267,6 +269,7 @@ class KnowledgeMapDetailResponse(BaseModel):
     status: str
     cefr_level: str | None
     pronunciation: str | None
+    pronunciations: dict[str, str] = {}
     translation: str | None
     primary_definition: str | None
     supported_translation_locales: list[str] = []
@@ -339,6 +342,7 @@ def _summary_from_item(item: dict) -> KnowledgeMapEntrySummary:
         status=item["status"],
         cefr_level=item["cefr_level"],
         pronunciation=item["pronunciation"],
+        pronunciations=item.get("pronunciations", {}),
         translation=item["translation"],
         primary_definition=item["primary_definition"],
         part_of_speech=item["part_of_speech"],
@@ -506,6 +510,7 @@ async def _hydrate_summary_items(
                 if word is not None
                 else item.get("pronunciation")
             )
+            item["pronunciations"] = extract_pronunciations(word) if word is not None else {}
             item["voice_assets"] = [
                 asset.model_dump()
                 for asset in voice_assets_by_entry.get(("word", item["entry_id"]), [])
@@ -734,6 +739,7 @@ async def get_knowledge_map_entry_detail(
             primary_definition=primary_definition,
             supported_translation_locales=list(SUPPORTED_TRANSLATION_LOCALES),
             voice_assets=[_voice_asset_response(asset) for asset in voice_assets],
+            pronunciations=extract_pronunciations(word),
             forms=WordFormsResponse(
                 verb_forms=forms["verb_forms"],
                 plural_forms=forms["plural_forms"],
@@ -994,6 +1000,7 @@ async def get_knowledge_map_entry_detail(
         status=status_row.status if status_row else "undecided",
         cefr_level=phrase.cefr_level,
         pronunciation=None,
+        pronunciations={},
         translation=translation,
         primary_definition=primary_definition,
         supported_translation_locales=list(SUPPORTED_TRANSLATION_LOCALES),

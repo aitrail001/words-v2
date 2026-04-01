@@ -25,7 +25,9 @@ jest.mock("@/lib/knowledge-map-client", () => {
 });
 jest.mock("@/lib/learner-audio", () => ({
   getPlayableLearnerAccents: jest.fn((voiceAssets) => {
-    const locales = new Set((voiceAssets ?? []).map((asset: { locale?: string }) => asset.locale));
+    const locales = new Set(
+      (voiceAssets ?? []).map((asset: { locale?: string }) => asset.locale?.toLowerCase().replace(/-/g, "_")),
+    );
     const accents: Array<"us" | "uk" | "au"> = [];
     if (locales.has("en_us")) {
       accents.push("us");
@@ -38,6 +40,16 @@ jest.mock("@/lib/learner-audio", () => ({
     }
     return accents;
   }),
+  getEntryLevelVoiceAssets: jest.fn((voiceAssets) =>
+    (voiceAssets ?? []).filter((asset: { content_scope?: string }) => asset.content_scope === "word"),
+  ),
+  resolveDisplayedPronunciation: jest.fn(
+    (
+      pronunciation: string | null | undefined,
+      pronunciations: Partial<Record<"us" | "uk" | "au", string>> | undefined,
+      accent: "us" | "uk" | "au",
+    ) => pronunciations?.[accent] ?? pronunciations?.[accent === "us" ? "uk" : "us"] ?? pronunciations?.au ?? pronunciation ?? null,
+  ),
   playLearnerEntryAudio: jest.fn(),
 }));
 jest.mock("@/lib/user-preferences-client");
@@ -89,6 +101,7 @@ describe("KnowledgeMapRangeDetail", () => {
           status: "to_learn",
           cefr_level: "A2",
           pronunciation: "/baŋk/",
+          pronunciations: { us: "/bæŋk/", uk: "/baŋk/" },
           translation: "银行",
           primary_definition: "A financial institution.",
           part_of_speech: "noun",
@@ -301,14 +314,120 @@ describe("KnowledgeMapRangeDetail", () => {
             {
               id: "voice-us",
               content_scope: "word",
-              locale: "en_us",
+              locale: "en-US",
               playback_url: "/api/words/voice-assets/voice-us/content",
             },
             {
               id: "voice-uk",
               content_scope: "word",
-              locale: "en_gb",
+              locale: "en-GB",
               playback_url: "/api/words/voice-assets/voice-uk/content",
+            },
+          ],
+        },
+      ],
+    });
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      pronunciations: { us: "/bæŋk/", uk: "/baŋk/" },
+      translation: "银行",
+      primary_definition: "A financial institution.",
+      voice_assets: [
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en-US",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+        },
+        {
+          id: "voice-uk",
+          content_scope: "word",
+          locale: "en-GB",
+          playback_url: "/api/words/voice-assets/voice-uk/content",
+        },
+      ],
+      meanings: [],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeMapRangeDetail initialRangeStart={1} />);
+
+    expect(await screen.findByRole("button", { name: "Play audio for Bank" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cards view" }));
+    expect(await screen.findByText("/baŋk/")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use US accent" }));
+
+    await waitFor(() =>
+      expect(mockUpdateUserPreferences).toHaveBeenCalledWith({
+        accent_preference: "us",
+        translation_locale: "zh-Hans",
+        knowledge_view_preference: "cards",
+        show_translations_by_default: true,
+      }),
+    );
+
+    expect(screen.getByText("/bæŋk/")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Play audio for Bank" }));
+
+    expect(mockPlayLearnerEntryAudio).toHaveBeenCalledWith(
+      [
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en-US",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+        },
+        {
+          id: "voice-uk",
+          content_scope: "word",
+          locale: "en-GB",
+          playback_url: "/api/words/voice-assets/voice-uk/content",
+        },
+      ],
+      "us",
+      {
+        contentScope: "word",
+      },
+    );
+  });
+
+  it("hides list play controls when only non-entry audio exists", async () => {
+    mockGetKnowledgeMapRange.mockResolvedValue({
+      range_start: 1,
+      range_end: 100,
+      previous_range_start: null,
+      next_range_start: null,
+      items: [
+        {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "Bank",
+          normalized_form: "bank",
+          browse_rank: 20,
+          status: "to_learn",
+          cefr_level: "A2",
+          pronunciation: "/baŋk/",
+          translation: "银行",
+          primary_definition: "A financial institution.",
+          part_of_speech: "noun",
+          phrase_kind: null,
+          voice_assets: [
+            {
+              id: "voice-definition-us",
+              content_scope: "definition",
+              locale: "en-US",
+              playback_url: "/api/words/voice-assets/voice-definition-us/content",
             },
           ],
         },
@@ -327,16 +446,10 @@ describe("KnowledgeMapRangeDetail", () => {
       primary_definition: "A financial institution.",
       voice_assets: [
         {
-          id: "voice-us",
-          content_scope: "word",
-          locale: "en_us",
-          playback_url: "/api/words/voice-assets/voice-us/content",
-        },
-        {
-          id: "voice-uk",
-          content_scope: "word",
-          locale: "en_gb",
-          playback_url: "/api/words/voice-assets/voice-uk/content",
+          id: "voice-definition-us",
+          content_scope: "definition",
+          locale: "en-US",
+          playback_url: "/api/words/voice-assets/voice-definition-us/content",
         },
       ],
       meanings: [],
@@ -349,36 +462,7 @@ describe("KnowledgeMapRangeDetail", () => {
 
     render(<KnowledgeMapRangeDetail initialRangeStart={1} />);
 
-    expect(await screen.findByRole("button", { name: "Play audio for Bank" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Use US accent" }));
-
-    await waitFor(() =>
-      expect(mockUpdateUserPreferences).toHaveBeenCalledWith({
-        accent_preference: "us",
-        translation_locale: "zh-Hans",
-        knowledge_view_preference: "list",
-        show_translations_by_default: true,
-      }),
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Play audio for Bank" }));
-
-    expect(mockPlayLearnerEntryAudio).toHaveBeenCalledWith(
-      [
-        {
-          id: "voice-us",
-          content_scope: "word",
-          locale: "en_us",
-          playback_url: "/api/words/voice-assets/voice-us/content",
-        },
-        {
-          id: "voice-uk",
-          content_scope: "word",
-          locale: "en_gb",
-          playback_url: "/api/words/voice-assets/voice-uk/content",
-        },
-      ],
-      "us",
-    );
+    await screen.findByText("A financial institution.");
+    expect(screen.queryByRole("button", { name: "Play audio for Bank" })).not.toBeInTheDocument();
   });
 });

@@ -360,6 +360,7 @@ class TestKnowledgeMapRange:
                 "status": "undecided",
                 "cefr_level": None,
                 "pronunciation": None,
+                "pronunciations": {},
                 "translation": "contar con",
                 "primary_definition": "To depend on someone.",
                 "part_of_speech": None,
@@ -470,6 +471,7 @@ class TestKnowledgeMapRange:
         assert data["items"][0]["entry_type"] == "word"
         assert data["items"][0]["status"] == "undecided"
         assert data["items"][0]["pronunciation"] == "/baŋk/"
+        assert data["items"][0]["pronunciations"] == {"us": "/bæŋk/", "uk": "/baŋk/"}
         assert data["items"][0]["translation"] == "banco"
         assert data["items"][0]["voice_assets"] == []
         assert data["items"][1]["entry_type"] == "phrase"
@@ -731,6 +733,7 @@ class TestKnowledgeMapDetail:
         assert data["browse_rank"] == 20
         assert data["status"] == "learning"
         assert data["pronunciation"] == "/baŋk/"
+        assert data["pronunciations"] == {"us": "/bæŋk/", "uk": "/baŋk/"}
         assert data["translation"] == "banco"
         assert data["next_entry"]["entry_id"] == str(lender_id)
         assert data["forms"]["derivations"] == [
@@ -851,6 +854,7 @@ class TestKnowledgeMapDetail:
         assert data["entry_type"] == "word"
         assert data["status"] == "learning"
         assert data["pronunciation"] == "/baŋk/"
+        assert data["pronunciations"] == {"us": "/bæŋk/", "uk": "/baŋk/"}
         assert data["translation"] == "banco"
         assert data["confusable_words"] == [
             {"word": "bench", "note": "Different object.", "target": None},
@@ -1669,6 +1673,7 @@ class TestKnowledgeMapSearchAndHistory:
         assert len(data["items"]) == 2
         assert data["items"][0]["display_text"] == "bank"
         assert data["items"][0]["pronunciation"] == "/baŋk/"
+        assert data["items"][0]["pronunciations"] == {"us": "/bæŋk/", "uk": "/baŋk/"}
         assert data["items"][0]["translation"] == "banco"
         assert data["items"][0]["primary_definition"] == "A financial institution"
         assert data["items"][1]["display_text"] == "bank on"

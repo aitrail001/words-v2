@@ -1,5 +1,10 @@
 import { apiClient } from "@/lib/api-client";
-import { getPlayableLearnerAccents, playLearnerEntryAudio } from "@/lib/learner-audio";
+import {
+  getEntryLevelVoiceAssets,
+  getPlayableLearnerAccents,
+  playLearnerEntryAudio,
+  resolveDisplayedPronunciation,
+} from "@/lib/learner-audio";
 
 jest.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -66,5 +71,25 @@ describe("learner-audio", () => {
         },
       ]),
     ).toEqual(["us", "uk"]);
+  });
+
+  it("filters entry-level voice assets for hero playback", () => {
+    expect(
+      getEntryLevelVoiceAssets([
+        { id: "word-1", content_scope: "word", locale: "en-US", playback_url: "/api/a" },
+        { id: "definition-1", content_scope: "definition", locale: "en-US", playback_url: "/api/b" },
+      ]),
+    ).toEqual([
+      { id: "word-1", content_scope: "word", locale: "en-US", playback_url: "/api/a" },
+    ]);
+  });
+
+  it("resolves displayed pronunciation from the selected accent when available", () => {
+    expect(
+      resolveDisplayedPronunciation("/baŋk/", { us: "/bæŋk/", uk: "/baŋk/" }, "us"),
+    ).toBe("/bæŋk/");
+    expect(
+      resolveDisplayedPronunciation("/baŋk/", { uk: "/baŋk/" }, "us"),
+    ).toBe("/baŋk/");
   });
 });
