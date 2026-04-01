@@ -170,6 +170,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page.getByRole("heading", { name: /range [\d,]+\s*-\s*[\d,]+/i })).toBeVisible();
   await page.getByRole("button", { name: "Cards view" }).click();
   await expect(page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
+  await page.getByRole("button", { name: "Use US accent" }).first().click();
   await expect(page.getByRole("button", { name: "Use US accent" }).first()).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -210,6 +211,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
 
   await page.goto(`/word/${fixture.wordId}`);
   await expect(page.getByRole("heading", { name: KNOWLEDGE_WORD })).toBeVisible();
+  await page.getByRole("button", { name: "Use US accent" }).click();
   await expect(page.getByRole("button", { name: "Use US accent" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
   await expect(page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
