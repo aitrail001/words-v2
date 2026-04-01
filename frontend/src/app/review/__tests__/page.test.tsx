@@ -32,11 +32,21 @@ describe("ReviewPage", () => {
   const mockUseLearnerAudio = useLearnerAudio as jest.MockedFunction<typeof useLearnerAudio>;
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
   const mockPlay = jest.fn();
+  let consoleErrorSpy: jest.SpyInstance;
+
+  const renderPage = async () => {
+    await act(async () => {
+      render(<ReviewPage />);
+    });
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
     window.sessionStorage.clear();
     window.history.pushState({}, "", "/review");
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation((message?: unknown) => {
+      throw new Error(`Unexpected console.error during test: ${String(message)}`);
+    });
     mockUseLearnerAudio.mockReturnValue({
       play: mockPlay,
       loadingUrl: null,
@@ -53,6 +63,10 @@ describe("ReviewPage", () => {
       enable_audio_spelling: false,
       show_pictures_in_questions: false,
     });
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
   });
 
   it("shows the reveal step for a correct answer and submits the chosen schedule", async () => {
@@ -117,7 +131,7 @@ describe("ReviewPage", () => {
       } as never)
       .mockResolvedValueOnce({} as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -222,7 +236,7 @@ describe("ReviewPage", () => {
       schedule_options: [{ value: "10m", label: "Later today", is_default: true }],
     } as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -300,7 +314,7 @@ describe("ReviewPage", () => {
       schedule_options: [{ value: "3d", label: "In 3 days", is_default: true }],
     } as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -392,7 +406,7 @@ describe("ReviewPage", () => {
       schedule_options: [{ value: "10m", label: "Later today", is_default: true }],
     } as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -473,7 +487,7 @@ describe("ReviewPage", () => {
       ],
     } as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -516,7 +530,7 @@ describe("ReviewPage", () => {
       },
     ] as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -553,7 +567,7 @@ describe("ReviewPage", () => {
       },
     ] as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -589,7 +603,7 @@ describe("ReviewPage", () => {
       },
     ] as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -665,7 +679,7 @@ describe("ReviewPage", () => {
       schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
     } as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
@@ -754,7 +768,7 @@ describe("ReviewPage", () => {
         schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
       } as never);
 
-    render(<ReviewPage />);
+    await renderPage();
 
     const answerButton = await screen.findByRole("button", { name: /a jump the gun/i });
     await act(async () => {
@@ -868,7 +882,7 @@ describe("ReviewPage", () => {
       }),
     );
 
-    render(<ReviewPage />);
+    await renderPage();
 
     expect(await screen.findByTestId("review-relearn-state")).toBeInTheDocument();
     expect(screen.getByText(/review 2\/2/i)).toBeInTheDocument();
