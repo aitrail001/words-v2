@@ -97,7 +97,7 @@ test("admin can launch final import from Lexicon Ops and verify in DB Inspector"
 
   await expect(page).toHaveURL(/\/lexicon\/import-db/);
   await expect(page.getByTestId("lexicon-import-db-input-path")).toHaveValue(new RegExp(`${snapshotName}/reviewed/approved\\.jsonl$`));
-  await expect(page.getByTestId("lexicon-import-db-conflict-mode")).toHaveValue("upsert");
+  await expect(page.getByTestId("lexicon-import-db-conflict-mode")).toHaveValue("fail");
   await expect(page.getByTestId("lexicon-import-db-error-mode")).toHaveValue("continue");
   await expect(page.getByText("Import dry-run complete.")).not.toBeVisible();
   await expect(page.getByTestId("lexicon-import-db-summary-rows")).toHaveCount(0);
