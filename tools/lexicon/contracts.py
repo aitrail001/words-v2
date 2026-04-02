@@ -6,6 +6,7 @@ import math
 from typing import Any
 
 from tools.lexicon.models import SenseExample
+from tools.lexicon.text_safety import validate_no_control_characters
 
 ALLOWED_CEFR_LEVELS = ("A1", "A2", "B1", "B2", "C1", "C2")
 ALLOWED_REGISTERS = ("neutral", "formal", "informal")
@@ -37,7 +38,7 @@ def _payload_error(field: str, message: str) -> RuntimeError:
 def require_non_empty_string(value: Any, *, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise _payload_error(field, "must be a non-empty string")
-    return value.strip()
+    return validate_no_control_characters(value.strip(), field=field)
 
 
 def normalize_optional_enum(value: Any, *, field: str, allowed: tuple[str, ...] | list[str] | set[str]) -> str | None:
@@ -46,6 +47,7 @@ def normalize_optional_enum(value: Any, *, field: str, allowed: tuple[str, ...] 
     if not isinstance(value, str) or not value.strip():
         raise _payload_error(field, f"must be one of {sorted(allowed)}")
     normalized = value.strip()
+    validate_no_control_characters(normalized, field=field)
     if normalized not in allowed:
         raise _payload_error(field, f"must be one of {sorted(allowed)}")
     return normalized
@@ -64,6 +66,7 @@ def normalize_string_list_field(value: Any, *, field: str) -> list[str] | None:
         candidate = item.strip()
         if not candidate:
             continue
+        validate_no_control_characters(candidate, field=f"{field}[{index}]")
         normalized.append(candidate)
     return normalized
 
@@ -117,7 +120,10 @@ def normalize_forms(value: Any) -> dict[str, Any] | None:
             raise _payload_error("forms.verb_forms", "must use non-empty string keys")
         if not isinstance(subvalue, str):
             raise _payload_error(f"forms.verb_forms.{subfield}", "must be a string")
-        normalized_verb_forms[subfield] = subvalue.strip()
+        normalized_verb_forms[subfield] = validate_no_control_characters(
+            subvalue.strip(),
+            field=f"forms.verb_forms.{subfield}",
+        )
 
     comparative = value.get("comparative")
     if comparative is not None and not isinstance(comparative, str):
@@ -126,6 +132,11 @@ def normalize_forms(value: Any) -> dict[str, Any] | None:
     superlative = value.get("superlative")
     if superlative is not None and not isinstance(superlative, str):
         raise _payload_error("forms.superlative", "must be a string or null")
+
+    if isinstance(comparative, str):
+        validate_no_control_characters(comparative.strip(), field="forms.comparative")
+    if isinstance(superlative, str):
+        validate_no_control_characters(superlative.strip(), field="forms.superlative")
 
     return {
         "plural_forms": plural_forms or [],
@@ -150,7 +161,15 @@ def normalize_confusable_words(value: Any) -> list[dict[str, str]] | None:
         note_value = item.get("note")
         if not isinstance(note_value, str):
             raise _payload_error(f"confusable_words[{index}].note", "must be a string")
-        normalized.append({"word": word, "note": note_value.strip()})
+        normalized.append(
+            {
+                "word": word,
+                "note": validate_no_control_characters(
+                    note_value.strip(),
+                    field=f"confusable_words[{index}].note",
+                ),
+            }
+        )
     return normalized
 
 

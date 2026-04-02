@@ -151,6 +151,40 @@ class TestLexiconCompiledReviewApi:
         assert data["approved_count"] == 0
 
     @pytest.mark.asyncio
+    async def test_import_compiled_batch_sanitizes_control_characters_before_persist(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        existing_batch_result = MagicMock()
+        existing_batch_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [user_result, existing_batch_result]
+
+        row = make_item(uuid.uuid4()).compiled_payload
+        row["senses"][0]["translations"]["es"]["definition"] = "da\x00nar o impedir"
+        row["senses"][0]["translations"]["ar"]["examples"][0] = "\x00هذا الشكل"
+
+        response = await client.post(
+            "/api/lexicon-compiled-reviews/batches/import",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"source_reference": "snapshot-001"},
+            files={"file": ("words.enriched.jsonl", build_jsonl_bytes(row), "application/x-ndjson")},
+        )
+
+        assert response.status_code == 201
+        persisted_items = [
+            call.args[0]
+            for call in mock_db.add.call_args_list
+            if isinstance(call.args[0], LexiconArtifactReviewItem)
+        ]
+        assert len(persisted_items) == 1
+        persisted_payload = persisted_items[0].compiled_payload
+        assert persisted_payload["senses"][0]["translations"]["es"]["definition"] == "danar o impedir"
+        assert persisted_payload["senses"][0]["translations"]["ar"]["examples"][0] == "هذا الشكل"
+
+    @pytest.mark.asyncio
     async def test_list_items_returns_compiled_metadata(self, client, mock_db):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))

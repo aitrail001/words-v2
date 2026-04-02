@@ -12,6 +12,7 @@ from tools.lexicon.contracts import (
     require_non_empty_string,
     REQUIRED_TRANSLATION_LOCALES,
 )
+from tools.lexicon.text_safety import validate_no_control_characters
 
 ALLOWED_PHRASE_KINDS = ("idiom", "multiword_expression", "phrasal_verb")
 
@@ -142,7 +143,10 @@ def _normalize_phrase_translation_usage_note(*, source_usage_note: Any, translat
         if translated_usage_note is None:
             return ""
         if isinstance(translated_usage_note, str):
-            return translated_usage_note.strip()
+            return validate_no_control_characters(
+                translated_usage_note.strip(),
+                field=f"translations.{locale}.usage_note",
+            )
         raise RuntimeError(
             f"OpenAI-compatible enrichment payload field 'translations.{locale}.usage_note' must be a string or null"
         )
@@ -152,7 +156,10 @@ def _normalize_phrase_translation_usage_note(*, source_usage_note: Any, translat
             "OpenAI-compatible enrichment payload field "
             f"'translations.{locale}.usage_note' missing_translated_usage_note_with_source_note_present"
         )
-    return translated_usage_note.strip()
+    return validate_no_control_characters(
+        translated_usage_note.strip(),
+        field=f"translations.{locale}.usage_note",
+    )
 
 
 def normalize_phrase_enrichment_payload(response: dict[str, Any]) -> dict[str, Any]:

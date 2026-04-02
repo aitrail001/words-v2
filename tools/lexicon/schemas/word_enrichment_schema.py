@@ -20,6 +20,7 @@ from tools.lexicon.contracts import (
     require_non_empty_string,
     REQUIRED_TRANSLATION_LOCALES,
 )
+from tools.lexicon.text_safety import validate_no_control_characters
 
 _PHONETIC_ACCENTS = ("us", "uk", "au")
 
@@ -211,6 +212,11 @@ def normalize_word_enrichment_payload(response: dict[str, Any]) -> dict[str, Any
         normalized[field] = normalize_string_list_field(response.get(field), field=field)
     normalized["forms"] = normalize_forms(response.get("forms"))
     normalized["confusable_words"] = normalize_confusable_words(response.get("confusable_words"))
+    primary_domain = response.get("primary_domain")
+    if primary_domain is not None and not isinstance(primary_domain, str):
+        raise RuntimeError("OpenAI-compatible enrichment payload field 'primary_domain' must be a string or null")
+    if isinstance(primary_domain, str):
+        validate_no_control_characters(primary_domain, field="primary_domain")
     normalized["translations"] = normalize_translation_payload(
         response.get("translations"),
         example_count=len(normalized["examples"]),

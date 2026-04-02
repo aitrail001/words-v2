@@ -159,3 +159,23 @@ class PhraseEnrichmentSchemaTests(unittest.TestCase):
             normalized["senses"][0]["translations"]["es"]["examples"],
             ["es:Break a leg tonight.", "es:Break a leg tonight."],
         )
+
+    def test_normalize_phrase_enrichment_payload_rejects_control_characters(self) -> None:
+        payload = {
+            "phrase_kind": "idiom",
+            "confidence": 0.87,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "Break a leg tonight.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Usually said before a performance.",
+                    "translations": _translations("Break a leg tonight."),
+                }
+            ],
+        }
+        payload["senses"][0]["translations"]["pt-BR"]["usage_note"] = "frequ\x00eancia"
+
+        with self.assertRaisesRegex(RuntimeError, "control character"):
+            normalize_phrase_enrichment_payload(payload)
