@@ -27,9 +27,12 @@ function downloadTextFile(filename: string, text: string): void {
 
 export default function LexiconVoiceRunsPage() {
   const router = useRouter();
-  const RUNS_PER_PAGE = 2;
+  const RUNS_PER_PAGE = 10;
   const [runs, setRuns] = useState<LexiconVoiceRunSummary[]>([]);
+  const [runTotal, setRunTotal] = useState(0);
   const [runPage, setRunPage] = useState(0);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedRunName, setSelectedRunName] = useState("");
   const [selectedRunDetail, setSelectedRunDetail] = useState<LexiconVoiceRunDetail | null>(null);
   const [runsLoading, setRunsLoading] = useState(false);
@@ -41,30 +44,32 @@ export default function LexiconVoiceRunsPage() {
   const loadRuns = useCallback(async (activeRunName: string) => {
     setRunsLoading(true);
     try {
-      const result = await getLexiconVoiceRuns();
-      setRuns(result);
-      setRunPage((current) => {
-        const maxPage = Math.max(0, Math.ceil(result.length / RUNS_PER_PAGE) - 1);
-        return Math.min(current, maxPage);
+      const result = await getLexiconVoiceRuns({
+        q: searchQuery || undefined,
+        limit: RUNS_PER_PAGE,
+        offset: runPage * RUNS_PER_PAGE,
       });
+      setRuns(result.items);
+      setRunTotal(result.total);
       setRunsError(null);
-      if (!result.length) {
+      if (!result.items.length) {
         setSelectedRunName("");
         setSelectedRunDetail(null);
         return;
       }
-      if (activeRunName && result.some((run) => run.run_name === activeRunName)) {
+      if (activeRunName && result.items.some((run) => run.run_name === activeRunName)) {
         setSelectedRunName(activeRunName);
         return;
       }
-      setSelectedRunName(result[0].run_name);
+      setSelectedRunName(result.items[0].run_name);
     } catch (error) {
       setRuns([]);
+      setRunTotal(0);
       setRunsError(error instanceof Error ? error.message : "Failed to load voice runs.");
     } finally {
       setRunsLoading(false);
     }
-  }, []);
+  }, [runPage, searchQuery]);
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -137,8 +142,7 @@ export default function LexiconVoiceRunsPage() {
     router.push(`/lexicon/voice-import?${params.toString()}`);
   }
 
-  const totalRunPages = Math.max(1, Math.ceil(runs.length / RUNS_PER_PAGE));
-  const visibleRuns = runs.slice(runPage * RUNS_PER_PAGE, (runPage + 1) * RUNS_PER_PAGE);
+  const totalRunPages = Math.max(1, Math.ceil(runTotal / RUNS_PER_PAGE));
 
   return (
     <div className="space-y-6" data-testid="lexicon-voice-page">
@@ -165,6 +169,25 @@ export default function LexiconVoiceRunsPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Recent voice runs</p>
             <p className="mt-1 text-sm text-slate-600">Paged horizontal cards keep run history compact while preserving quick access to details.</p>
+          </div>
+          <div className="flex min-w-[22rem] items-center justify-end gap-2">
+            <input
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              placeholder="Search voice runs"
+              data-testid="lexicon-voice-runs-search"
+              className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery(searchDraft.trim());
+                setRunPage(0);
+              }}
+              className="rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              Apply
+            </button>
           </div>
           <div className="flex min-w-[18rem] items-center justify-end gap-2" data-testid="lexicon-voice-run-pagination">
             <button
@@ -201,7 +224,7 @@ export default function LexiconVoiceRunsPage() {
         {runsLoading ? <p className="mt-3 text-sm text-slate-500">Loading voice runs...</p> : null}
         {runs.length ? (
           <div className="mt-4 grid gap-4 xl:grid-cols-2" data-testid="lexicon-voice-run-page">
-            {visibleRuns.map((run) => (
+            {runs.map((run) => (
               <div
                 key={run.run_name}
                 className={`w-full rounded border p-3 text-left text-sm ${selectedRunName === run.run_name ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}

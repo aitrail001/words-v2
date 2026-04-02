@@ -9,6 +9,7 @@ import {
   listLexiconOpsSnapshots,
   type LexiconOpsSnapshotArtifact,
   type LexiconOpsSnapshotDetail,
+  type LexiconOpsSnapshotListResponse,
   type LexiconOpsSnapshotSummary,
 } from "@/lib/lexicon-ops-client";
 import { dryRunLexiconImport, runLexiconImport, type LexiconImportResult } from "@/lib/lexicon-imports-client";
@@ -207,7 +208,9 @@ function actionStateForImport(importArtifactPath: string): WorkflowActionState {
 export default function LexiconOpsPage() {
   const router = useRouter();
   const [snapshots, setSnapshots] = useState<LexiconOpsSnapshotSummary[]>([]);
+  const [snapshotTotal, setSnapshotTotal] = useState(0);
   const [selectedSnapshotName, setSelectedSnapshotName] = useState<string | null>(null);
+  const [snapshotSearchDraft, setSnapshotSearchDraft] = useState("");
   const [snapshotSearch, setSnapshotSearch] = useState("");
   const [snapshotsPage, setSnapshotsPage] = useState(1);
   const [urlStateReady, setUrlStateReady] = useState(false);
@@ -226,48 +229,43 @@ export default function LexiconOpsPage() {
     () => snapshots.find((snapshot) => snapshot.snapshot === selectedSnapshotName) ?? null,
     [selectedSnapshotName, snapshots],
   );
-  const filteredSnapshots = useMemo(() => {
-    const normalizedQuery = snapshotSearch.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return snapshots;
-    }
-    return snapshots.filter((snapshot) =>
-      snapshot.snapshot.toLowerCase().includes(normalizedQuery) ||
-      snapshot.snapshot_id?.toLowerCase().includes(normalizedQuery) ||
-      snapshot.snapshot_path.toLowerCase().includes(normalizedQuery),
-    );
-  }, [snapshotSearch, snapshots]);
-  const totalSnapshotPages = Math.max(1, Math.ceil(filteredSnapshots.length / SNAPSHOTS_PAGE_SIZE));
-  const pagedSnapshots = useMemo(() => {
-    const start = (snapshotsPage - 1) * SNAPSHOTS_PAGE_SIZE;
-    return filteredSnapshots.slice(start, start + SNAPSHOTS_PAGE_SIZE);
-  }, [filteredSnapshots, snapshotsPage]);
+  const totalSnapshotPages = Math.max(1, Math.ceil(snapshotTotal / SNAPSHOTS_PAGE_SIZE));
   const workflow = useMemo(() => workflowStage(selectedSnapshot), [selectedSnapshot]);
   const handleSnapshotSearchChange = useCallback((value: string) => {
-    setSnapshotSearch(value);
-    setSnapshotsPage(1);
+    setSnapshotSearchDraft(value);
   }, []);
   const handleSnapshotSelect = useCallback((snapshotName: string) => {
-    const snapshotIndex = filteredSnapshots.findIndex((snapshot) => snapshot.snapshot === snapshotName);
-    if (snapshotIndex >= 0) {
-      setSnapshotsPage(Math.floor(snapshotIndex / SNAPSHOTS_PAGE_SIZE) + 1);
-    }
     setSelectedSnapshotName(snapshotName);
-  }, [filteredSnapshots]);
+  }, []);
 
   const loadSnapshots = useCallback(async () => {
     setSnapshotsLoading(true);
     setSnapshotsError(null);
     try {
-      const nextSnapshots = await listLexiconOpsSnapshots();
-      setSnapshots(nextSnapshots);
+      const response = await listLexiconOpsSnapshots({
+        q: snapshotSearch || undefined,
+        limit: SNAPSHOTS_PAGE_SIZE,
+        offset: (snapshotsPage - 1) * SNAPSHOTS_PAGE_SIZE,
+      });
+      const nextSnapshots: LexiconOpsSnapshotListResponse = Array.isArray(response)
+        ? {
+            items: response,
+            total: response.length,
+            limit: SNAPSHOTS_PAGE_SIZE,
+            offset: (snapshotsPage - 1) * SNAPSHOTS_PAGE_SIZE,
+            has_more: false,
+            q: snapshotSearch || null,
+          }
+        : response;
+      setSnapshots(nextSnapshots.items);
+      setSnapshotTotal(nextSnapshots.total);
       setSelectedSnapshotName((existingSelected) => {
-        if (!nextSnapshots.length) {
+        if (!nextSnapshots.items.length) {
           return null;
         }
         return (
-          nextSnapshots.find((snapshot) => snapshot.snapshot === existingSelected)?.snapshot ??
-          nextSnapshots[0]?.snapshot ??
+          nextSnapshots.items.find((snapshot) => snapshot.snapshot === existingSelected)?.snapshot ??
+          nextSnapshots.items[0]?.snapshot ??
           null
         );
       });
@@ -276,7 +274,7 @@ export default function LexiconOpsPage() {
     } finally {
       setSnapshotsLoading(false);
     }
-  }, []);
+  }, [snapshotSearch, snapshotsPage]);
 
   const loadDetail = useCallback(async (snapshotName: string) => {
     setDetail(null);
@@ -294,7 +292,9 @@ export default function LexiconOpsPage() {
   }, []);
 
   useEffect(() => {
-    setSnapshotSearch(searchParam("q"));
+    const initialSearch = searchParam("q");
+    setSnapshotSearch(initialSearch);
+    setSnapshotSearchDraft(initialSearch);
     const rawPage = Number.parseInt(searchParam("page"), 10);
     setSnapshotsPage(Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1);
     setUrlStateReady(true);
@@ -309,18 +309,21 @@ export default function LexiconOpsPage() {
   }, [loadSnapshots]);
 
   useEffect(() => {
+    if (snapshotsLoading) {
+      return;
+    }
+    if (snapshotTotal > 0 && snapshots.length === 0 && snapshotsPage > totalSnapshotPages) {
+      setSnapshotsPage(totalSnapshotPages);
+    }
+  }, [snapshotTotal, snapshots.length, snapshotsLoading, snapshotsPage, totalSnapshotPages]);
+
+  useEffect(() => {
     if (!selectedSnapshotName) {
       setDetail(null);
       return;
     }
     void loadDetail(selectedSnapshotName);
   }, [loadDetail, selectedSnapshotName]);
-
-  useEffect(() => {
-    if (snapshotsPage > totalSnapshotPages) {
-      setSnapshotsPage(totalSnapshotPages);
-    }
-  }, [snapshotsPage, totalSnapshotPages]);
 
   useEffect(() => {
     if (!urlStateReady || typeof window === "undefined") {
@@ -493,15 +496,27 @@ export default function LexiconOpsPage() {
           <div className="space-y-2" data-testid="lexicon-ops-snapshots-list">
             <label className="grid gap-1 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
               <span className="font-medium">Search snapshots</span>
-              <input
-                data-testid="lexicon-ops-snapshots-search"
-                value={snapshotSearch}
-                onChange={(event) => handleSnapshotSearchChange(event.target.value)}
-                placeholder="Filter by snapshot, id, or path"
-                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
-              />
+              <div className="flex gap-2">
+                <input
+                  data-testid="lexicon-ops-snapshots-search"
+                  value={snapshotSearchDraft}
+                  onChange={(event) => handleSnapshotSearchChange(event.target.value)}
+                  placeholder="Filter by snapshot, id, or path"
+                  className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSnapshotSearch(snapshotSearchDraft.trim());
+                    setSnapshotsPage(1);
+                  }}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+                >
+                  Apply
+                </button>
+              </div>
             </label>
-            {filteredSnapshots.length > SNAPSHOTS_PAGE_SIZE ? (
+            {snapshotTotal > SNAPSHOTS_PAGE_SIZE ? (
               <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
                 <span>
                   Page {snapshotsPage} of {totalSnapshotPages}
@@ -528,7 +543,7 @@ export default function LexiconOpsPage() {
                 </div>
               </div>
             ) : null}
-            {filteredSnapshots.length > SNAPSHOTS_PAGE_SIZE ? (
+            {snapshotTotal > SNAPSHOTS_PAGE_SIZE ? (
               <div className="flex flex-wrap gap-2 rounded-md border border-gray-200 bg-white px-3 py-2">
                 {Array.from({ length: totalSnapshotPages }, (_, index) => index + 1).map((pageNumber) => (
                   <button
@@ -547,10 +562,10 @@ export default function LexiconOpsPage() {
                 ))}
               </div>
             ) : null}
-            {filteredSnapshots.length === 0 && !snapshotsLoading ? (
+            {snapshots.length === 0 && !snapshotsLoading ? (
               <p className="text-sm text-gray-500">No snapshots found.</p>
             ) : (
-              pagedSnapshots.map((snapshot) => (
+              snapshots.map((snapshot) => (
                 <button
                   key={snapshot.snapshot}
                   type="button"

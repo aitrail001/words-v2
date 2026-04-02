@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from app.api.auth import get_current_admin_user
@@ -12,7 +12,9 @@ from app.core.config import Settings, get_settings
 from app.models.user import User
 from app.services.lexicon_jsonl_reviews import (
     build_materialized_review_outputs,
+    browse_jsonl_review_items,
     bulk_update_jsonl_review_decisions,
+    get_jsonl_review_session_summary,
     load_jsonl_review_session,
     materialize_jsonl_review_outputs,
     resolve_compiled_artifact_path,
@@ -84,6 +86,36 @@ class LexiconJsonlReviewSessionResponse(BaseModel):
     items: list[LexiconJsonlReviewItemResponse]
 
 
+class LexiconJsonlReviewSessionSummaryResponse(BaseModel):
+    artifact_filename: str
+    artifact_path: str
+    artifact_sha256: str
+    decisions_path: str
+    output_dir: str | None = None
+    total_items: int
+    pending_count: int
+    approved_count: int
+    rejected_count: int
+
+
+class LexiconJsonlReviewBrowseResponse(LexiconJsonlReviewSessionSummaryResponse):
+    items: list[LexiconJsonlReviewItemResponse]
+    filtered_total: int
+    limit: int
+    offset: int
+    has_more: bool
+    search: str | None = None
+    review_status: str = "all"
+
+
+class LexiconJsonlReviewItemMutationResponse(BaseModel):
+    item: LexiconJsonlReviewItemResponse
+    total_items: int
+    pending_count: int
+    approved_count: int
+    rejected_count: int
+
+
 class LexiconJsonlReviewMaterializeResponse(BaseModel):
     artifact_sha256: str
     decision_count: int
@@ -137,20 +169,78 @@ async def load_lexicon_jsonl_review_session(
     return LexiconJsonlReviewSessionResponse(**payload, output_dir=output_dir)
 
 
-@router.patch("/items/{entry_id}", response_model=LexiconJsonlReviewItemResponse)
+@router.get("/session", response_model=LexiconJsonlReviewSessionSummaryResponse)
+async def get_lexicon_jsonl_review_session(
+    artifact_path: str,
+    decisions_path: str | None = Query(default=None),
+    output_dir: str | None = Query(default=None),
+    _: User = Depends(get_current_admin_user),
+    settings: Settings = Depends(get_settings),
+) -> LexiconJsonlReviewSessionSummaryResponse:
+    artifact_path, decisions_path, output_dir = _resolve_paths(
+        artifact_path=artifact_path,
+        decisions_path=decisions_path,
+        output_dir=output_dir,
+        settings=settings,
+    )
+    payload = get_jsonl_review_session_summary(
+        artifact_path=resolve_compiled_artifact_path(artifact_path, settings=settings),
+        decisions_path=resolve_decisions_sidecar_path(
+            resolve_compiled_artifact_path(artifact_path, settings=settings),
+            decisions_path,
+            settings=settings,
+        ),
+    )
+    return LexiconJsonlReviewSessionSummaryResponse(**payload, output_dir=output_dir)
+
+
+@router.get("/items", response_model=LexiconJsonlReviewBrowseResponse)
+async def browse_lexicon_jsonl_review_items(
+    artifact_path: str,
+    decisions_path: str | None = Query(default=None),
+    output_dir: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    review_status: str = Query(default="all"),
+    limit: int = Query(default=25, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    _: User = Depends(get_current_admin_user),
+    settings: Settings = Depends(get_settings),
+) -> LexiconJsonlReviewBrowseResponse:
+    artifact_path, decisions_path, output_dir = _resolve_paths(
+        artifact_path=artifact_path,
+        decisions_path=decisions_path,
+        output_dir=output_dir,
+        settings=settings,
+    )
+    payload = browse_jsonl_review_items(
+        artifact_path=resolve_compiled_artifact_path(artifact_path, settings=settings),
+        decisions_path=resolve_decisions_sidecar_path(
+            resolve_compiled_artifact_path(artifact_path, settings=settings),
+            decisions_path,
+            settings=settings,
+        ),
+        limit=limit,
+        offset=offset,
+        search=search,
+        review_status=review_status,
+    )
+    return LexiconJsonlReviewBrowseResponse(**payload, output_dir=output_dir)
+
+
+@router.patch("/items/{entry_id}", response_model=LexiconJsonlReviewItemMutationResponse)
 async def update_lexicon_jsonl_review_item(
     entry_id: str,
     request: LexiconJsonlReviewItemUpdateRequest,
     current_user: User = Depends(get_current_admin_user),
     settings: Settings = Depends(get_settings),
-) -> LexiconJsonlReviewItemResponse:
+) -> LexiconJsonlReviewItemMutationResponse:
     artifact_path, decisions_path, _ = _resolve_paths(
         artifact_path=request.artifact_path,
         decisions_path=request.decisions_path,
         output_dir=None,
         settings=settings,
     )
-    payload = update_jsonl_review_decision(
+    item = update_jsonl_review_decision(
         artifact_path=resolve_compiled_artifact_path(artifact_path, settings=settings),
         decisions_path=resolve_decisions_sidecar_path(
             resolve_compiled_artifact_path(artifact_path, settings=settings),
@@ -162,15 +252,29 @@ async def update_lexicon_jsonl_review_item(
         decision_reason=request.decision_reason,
         reviewed_by=str(current_user.id),
     )
-    return LexiconJsonlReviewItemResponse(**payload)
+    summary = get_jsonl_review_session_summary(
+        artifact_path=resolve_compiled_artifact_path(artifact_path, settings=settings),
+        decisions_path=resolve_decisions_sidecar_path(
+            resolve_compiled_artifact_path(artifact_path, settings=settings),
+            decisions_path,
+            settings=settings,
+        ),
+    )
+    return LexiconJsonlReviewItemMutationResponse(
+        item=LexiconJsonlReviewItemResponse(**item),
+        total_items=summary["total_items"],
+        pending_count=summary["pending_count"],
+        approved_count=summary["approved_count"],
+        rejected_count=summary["rejected_count"],
+    )
 
 
-@router.post("/bulk-update", response_model=LexiconJsonlReviewSessionResponse)
+@router.post("/bulk-update", response_model=LexiconJsonlReviewSessionSummaryResponse)
 async def bulk_update_lexicon_jsonl_review_items(
     request: LexiconJsonlReviewBulkUpdateRequest,
     current_user: User = Depends(get_current_admin_user),
     settings: Settings = Depends(get_settings),
-) -> LexiconJsonlReviewSessionResponse:
+) -> LexiconJsonlReviewSessionSummaryResponse:
     artifact_path, decisions_path, output_dir = _resolve_paths(
         artifact_path=request.artifact_path,
         decisions_path=request.decisions_path,
@@ -188,7 +292,7 @@ async def bulk_update_lexicon_jsonl_review_items(
         decision_reason=request.decision_reason,
         reviewed_by=str(current_user.id),
     )
-    return LexiconJsonlReviewSessionResponse(**payload, output_dir=output_dir)
+    return LexiconJsonlReviewSessionSummaryResponse(**payload, output_dir=output_dir)
 
 
 @router.post("/materialize", response_model=LexiconJsonlReviewMaterializeResponse)

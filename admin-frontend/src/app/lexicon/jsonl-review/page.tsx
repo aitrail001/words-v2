@@ -3,21 +3,22 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { PathGuidanceCard } from "@/components/lexicon/path-guidance-card";
-import { PagedRecordList } from "@/components/lexicon/paged-record-list";
 import { ReviewerSummaryCard } from "@/components/lexicon/reviewer-summary-card";
 import { LexiconSectionNav } from "@/components/lexicon/section-nav";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
   bulkUpdateLexiconJsonlReviewItems,
+  browseLexiconJsonlReviewItems,
+  getLexiconJsonlReviewSession,
   type LexiconJsonlReviewMaterializeResult,
   downloadApprovedLexiconJsonlReviewOutput,
   downloadDecisionLexiconJsonlReviewOutput,
   downloadRegenerateLexiconJsonlReviewOutput,
   downloadRejectedLexiconJsonlReviewOutput,
+  LexiconJsonlReviewBrowseResponse,
   LexiconJsonlReviewItem,
-  LexiconJsonlReviewSession,
-  loadLexiconJsonlReviewSession,
+  LexiconJsonlReviewSessionSummary,
   updateLexiconJsonlReviewItem,
 } from "@/lib/lexicon-jsonl-reviews-client";
 import {
@@ -28,6 +29,7 @@ import {
 import { derivePhraseDetails, deriveReviewSummary } from "@/lib/lexicon-review-summary";
 
 type ReviewDecisionStatus = "pending" | "approved" | "rejected";
+const PAGE_LIMIT = 25;
 
 function downloadTextFile(filename: string, text: string): void {
   const blob = new Blob([text], { type: "application/x-ndjson" });
@@ -52,21 +54,6 @@ function formatDateTime(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function compareReviewItems(a: LexiconJsonlReviewItem, b: LexiconJsonlReviewItem): number {
-  const warningDelta = (b.warning_count ?? 0) - (a.warning_count ?? 0);
-  if (warningDelta !== 0) return warningDelta;
-
-  const pendingA = a.review_status === "pending" ? 0 : 1;
-  const pendingB = b.review_status === "pending" ? 0 : 1;
-  if (pendingA !== pendingB) return pendingA - pendingB;
-
-  const rankA = a.frequency_rank ?? Number.MAX_SAFE_INTEGER;
-  const rankB = b.frequency_rank ?? Number.MAX_SAFE_INTEGER;
-  if (rankA !== rankB) return rankA - rankB;
-
-  return a.display_text.localeCompare(b.display_text);
-}
-
 function nextPendingEntryId(items: LexiconJsonlReviewItem[], currentEntryId: string): string | null {
   const pendingItems = items.filter((item) => item.review_status === "pending");
   if (!pendingItems.length) return null;
@@ -81,23 +68,17 @@ function nextPendingEntryId(items: LexiconJsonlReviewItem[], currentEntryId: str
   return pendingItems[0]?.entry_id ?? null;
 }
 
-function sessionCounts(items: LexiconJsonlReviewItem[]) {
-  const approved = items.filter((item) => item.review_status === "approved").length;
-  const rejected = items.filter((item) => item.review_status === "rejected").length;
-  return {
-    approved,
-    rejected,
-    pending: items.length - approved - rejected,
-  };
-}
-
 export default function LexiconJsonlReviewPage() {
   const [artifactPath, setArtifactPath] = useState("");
   const [decisionsPath, setDecisionsPath] = useState("");
   const [outputDir, setOutputDir] = useState("");
   const [sourceReference, setSourceReference] = useState("");
-  const [session, setSession] = useState<LexiconJsonlReviewSession | null>(null);
+  const [sessionSummary, setSessionSummary] = useState<LexiconJsonlReviewSessionSummary | null>(null);
+  const [items, setItems] = useState<LexiconJsonlReviewItem[]>([]);
+  const [filteredTotal, setFilteredTotal] = useState(0);
+  const [pageOffset, setPageOffset] = useState(0);
   const [selectedItemId, setSelectedItemId] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [decisionReason, setDecisionReason] = useState("");
@@ -110,10 +91,9 @@ export default function LexiconJsonlReviewPage() {
   const artifactPathHint = "Use a container-visible repo path like data/lexicon/snapshots/... or /app/data/lexicon/snapshots/....";
   const decisionsPathHint = "File-backed decision ledger path. Optional. Defaults to reviewed/review.decisions.jsonl under the snapshot.";
   const outputDirHint = "Optional. Defaults to the shared reviewed/ directory under the artifact snapshot.";
-  const selectedCount = session?.items.length ?? 0;
-  const contextArtifactPath = session?.artifact_path ?? artifactPath;
-  const contextDecisionsPath = session?.decisions_path ?? decisionsPath;
-  const contextOutputDir = session?.output_dir ?? outputDir;
+  const contextArtifactPath = sessionSummary?.artifact_path ?? artifactPath;
+  const contextDecisionsPath = sessionSummary?.decisions_path ?? decisionsPath;
+  const contextOutputDir = sessionSummary?.output_dir ?? outputDir;
   const materializeResultFromJob = useCallback((job: LexiconJob): LexiconJsonlReviewMaterializeResult | null => {
     if (!job.result_payload) {
       return null;
@@ -137,6 +117,66 @@ export default function LexiconJsonlReviewPage() {
     }
   }, []);
 
+  const applyBrowseResponse = useCallback((response: LexiconJsonlReviewBrowseResponse) => {
+    setSessionSummary((current) => {
+      const nextSummary = {
+        artifact_filename: response.artifact_filename,
+        artifact_path: response.artifact_path,
+        artifact_sha256: response.artifact_sha256,
+        decisions_path: response.decisions_path,
+        output_dir: response.output_dir ?? null,
+        total_items: response.total_items,
+        pending_count: response.pending_count,
+        approved_count: response.approved_count,
+        rejected_count: response.rejected_count,
+      };
+      if (
+        current &&
+        current.artifact_filename === nextSummary.artifact_filename &&
+        current.artifact_path === nextSummary.artifact_path &&
+        current.artifact_sha256 === nextSummary.artifact_sha256 &&
+        current.decisions_path === nextSummary.decisions_path &&
+        current.output_dir === nextSummary.output_dir &&
+        current.total_items === nextSummary.total_items &&
+        current.pending_count === nextSummary.pending_count &&
+        current.approved_count === nextSummary.approved_count &&
+        current.rejected_count === nextSummary.rejected_count
+      ) {
+        return current;
+      }
+      return nextSummary;
+    });
+    setItems(response.items);
+    setFilteredTotal(response.filtered_total);
+    setPageOffset(response.offset);
+    setSelectedItemId((current) => {
+      if (response.items.some((item) => item.entry_id === current)) {
+        return current;
+      }
+      return response.items[0]?.entry_id ?? "";
+    });
+  }, []);
+
+  const loadBrowsePage = useCallback(async (
+    nextArtifactPath: string,
+    nextDecisionsPath: string,
+    nextOutputDir: string,
+    nextOffset: number,
+    nextSearch: string,
+    nextStatusFilter: "all" | "pending" | "approved" | "rejected",
+  ) => {
+    const response = await browseLexiconJsonlReviewItems({
+      artifactPath: nextArtifactPath,
+      decisionsPath: nextDecisionsPath || undefined,
+      outputDir: nextOutputDir || undefined,
+      offset: nextOffset,
+      limit: PAGE_LIMIT,
+      search: nextSearch || undefined,
+      reviewStatus: nextStatusFilter,
+    });
+    applyBrowseResponse(response);
+  }, [applyBrowseResponse]);
+
   const loadSessionForPaths = useCallback(async (
     nextArtifactPath: string,
     nextDecisionsPath?: string,
@@ -146,22 +186,33 @@ export default function LexiconJsonlReviewPage() {
     setMessage(null);
     setMaterializeResult(null);
     try {
-      const nextSession = await loadLexiconJsonlReviewSession({
+      const nextSession = await getLexiconJsonlReviewSession({
         artifactPath: nextArtifactPath,
         decisionsPath: nextDecisionsPath || undefined,
         outputDir: nextOutputDir || undefined,
       });
-      setSession(nextSession);
+      setSessionSummary(nextSession);
       setArtifactPath(nextSession.artifact_path);
       setDecisionsPath(nextSession.decisions_path);
       setOutputDir(nextSession.output_dir ?? nextOutputDir ?? "");
+      await loadBrowsePage(
+        nextSession.artifact_path,
+        nextSession.decisions_path,
+        nextSession.output_dir ?? nextOutputDir ?? "",
+        0,
+        "",
+        "all",
+      );
+      setSearchDraft("");
+      setSearch("");
+      setStatusFilter("all");
       setMessage(`Loaded ${nextSession.artifact_filename}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load artifact.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadBrowsePage]);
 
   useEffect(() => {
     const nextArtifactPath = searchParam("artifactPath");
@@ -177,27 +228,9 @@ export default function LexiconJsonlReviewPage() {
     }
   }, [loadSessionForPaths]);
 
-  const filteredItems = useMemo(() => {
-    const items = session?.items ?? [];
-    const normalizedSearch = search.trim().toLowerCase();
-    return items
-      .filter((item) => {
-      if (statusFilter !== "all" && item.review_status !== statusFilter) return false;
-      if (!normalizedSearch) return true;
-      return [
-        item.entry_id,
-        item.display_text,
-        item.normalized_form ?? "",
-        ...(item.warning_labels ?? []),
-        item.review_summary?.primary_definition ?? "",
-      ].some((value) => value.toLowerCase().includes(normalizedSearch));
-      })
-      .sort(compareReviewItems);
-  }, [search, session?.items, statusFilter]);
-
   const selectedItem = useMemo(
-    () => filteredItems.find((item) => item.entry_id === selectedItemId) ?? filteredItems[0] ?? null,
-    [filteredItems, selectedItemId],
+    () => items.find((item) => item.entry_id === selectedItemId) ?? items[0] ?? null,
+    [items, selectedItemId],
   );
   const selectedPhraseDetails = useMemo(
     () => (selectedItem ? derivePhraseDetails(selectedItem.entry_type, selectedItem.compiled_payload) : null),
@@ -225,42 +258,70 @@ export default function LexiconJsonlReviewPage() {
     setDecisionReason(selectedItem?.decision_reason ?? "");
   }, [selectedItem?.decision_reason, selectedItem?.entry_id]);
 
+  useEffect(() => {
+    if (!sessionSummary) {
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setMessage(null);
+    void loadBrowsePage(
+      sessionSummary.artifact_path,
+      decisionsPath || sessionSummary.decisions_path,
+      outputDir || sessionSummary.output_dir || "",
+      pageOffset,
+      search,
+      statusFilter,
+    )
+      .catch((error) => {
+        if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : "Failed to browse review items.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [decisionsPath, loadBrowsePage, outputDir, pageOffset, search, sessionSummary, statusFilter]);
+
   const loadSession = async (event: FormEvent) => {
     event.preventDefault();
     await loadSessionForPaths(artifactPath, decisionsPath, outputDir);
   };
 
-  const replaceItem = (updated: LexiconJsonlReviewItem) => {
-    setSession((current) => {
-      if (!current) return current;
-      const items = current.items.map((item) => (item.entry_id === updated.entry_id ? updated : item));
-      const approvedCount = items.filter((item) => item.review_status === "approved").length;
-      const rejectedCount = items.filter((item) => item.review_status === "rejected").length;
-      return {
-        ...current,
-        items,
-        approved_count: approvedCount,
-        rejected_count: rejectedCount,
-        pending_count: items.length - approvedCount - rejectedCount,
-      };
-    });
-  };
-
   const confirmDecision = useCallback(async (reviewStatus: ReviewDecisionStatus) => {
-    if (!selectedItem || !session) return;
-    const nextEntryId = nextPendingEntryId([...(session.items ?? [])].sort(compareReviewItems), selectedItem.entry_id);
+    if (!selectedItem || !sessionSummary) return;
+    const nextEntryId = nextPendingEntryId(items, selectedItem.entry_id);
     setSaving(true);
     setMessage(null);
     try {
       const updated = await updateLexiconJsonlReviewItem(selectedItem.entry_id, {
-        artifactPath: session.artifact_path,
-        decisionsPath: decisionsPath || session.decisions_path,
+        artifactPath: sessionSummary.artifact_path,
+        decisionsPath: decisionsPath || sessionSummary.decisions_path,
         reviewStatus,
         decisionReason: decisionReason || null,
       });
-      replaceItem(updated);
-      setMessage(`Saved ${updated.entry_id} as ${updated.review_status}.`);
-      if (nextEntryId && nextEntryId !== updated.entry_id) {
+      setSessionSummary((current) => current ? {
+        ...current,
+        total_items: updated.total_items,
+        pending_count: updated.pending_count,
+        approved_count: updated.approved_count,
+        rejected_count: updated.rejected_count,
+      } : current);
+      await loadBrowsePage(
+        sessionSummary.artifact_path,
+        decisionsPath || sessionSummary.decisions_path,
+        outputDir || sessionSummary.output_dir || "",
+        pageOffset,
+        search,
+        statusFilter,
+      );
+      setMessage(`Saved ${updated.item.entry_id} as ${updated.item.review_status}.`);
+      if (nextEntryId && nextEntryId !== updated.item.entry_id) {
         setSelectedItemId(nextEntryId);
       }
     } catch (error) {
@@ -268,37 +329,44 @@ export default function LexiconJsonlReviewPage() {
     } finally {
       setSaving(false);
     }
-  }, [decisionsPath, selectedItem, session, decisionReason]);
+  }, [decisionsPath, decisionReason, items, loadBrowsePage, outputDir, pageOffset, search, selectedItem, sessionSummary, statusFilter]);
 
   const confirmBulkDecision = useCallback(async (reviewStatus: ReviewDecisionStatus) => {
-    if (!session) return;
+    if (!sessionSummary) return;
     setSaving(true);
     setMessage(null);
     try {
       const nextSession = await bulkUpdateLexiconJsonlReviewItems({
-        artifactPath: session.artifact_path,
-        decisionsPath: decisionsPath || session.decisions_path,
+        artifactPath: sessionSummary.artifact_path,
+        decisionsPath: decisionsPath || sessionSummary.decisions_path,
         reviewStatus,
         decisionReason: decisionReason || null,
       });
-      setSession(nextSession);
-      setSelectedItemId(nextSession.items.find((item) => item.review_status === "pending")?.entry_id ?? nextSession.items[0]?.entry_id ?? "");
+      setSessionSummary((current) => current ? { ...current, ...nextSession } : current);
+      await loadBrowsePage(
+        sessionSummary.artifact_path,
+        decisionsPath || sessionSummary.decisions_path,
+        outputDir || sessionSummary.output_dir || "",
+        0,
+        search,
+        statusFilter,
+      );
       setPendingBulkDecision(null);
-      setMessage(`Updated ${nextSession.items.length} rows to ${reviewStatus}.`);
+      setMessage(`Updated ${nextSession.total_items} rows to ${reviewStatus}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to save bulk decision.");
     } finally {
       setSaving(false);
     }
-  }, [decisionReason, decisionsPath, session]);
+  }, [decisionReason, decisionsPath, loadBrowsePage, outputDir, search, sessionSummary, statusFilter]);
 
   const materialize = async () => {
-    if (!session) return;
+    if (!sessionSummary) return;
     setMessage(null);
     try {
       const job = await createJsonlMaterializeLexiconJob({
-        artifactPath: session.artifact_path,
-        decisionsPath: decisionsPath || session.decisions_path,
+        artifactPath: sessionSummary.artifact_path,
+        decisionsPath: decisionsPath || sessionSummary.decisions_path,
         outputDir: outputDir || undefined,
       });
       setMaterializeJob(job);
@@ -332,13 +400,13 @@ export default function LexiconJsonlReviewPage() {
   }, [materializeJob, materializeResultFromJob]);
 
   const downloadOutput = async (kind: "approved" | "decisions" | "rejected" | "regenerate") => {
-    if (!session) return;
+    if (!sessionSummary) return;
     setSaving(true);
     setMessage(null);
     try {
       const input = {
-        artifactPath: session.artifact_path,
-        decisionsPath: decisionsPath || session.decisions_path,
+        artifactPath: sessionSummary.artifact_path,
+        decisionsPath: decisionsPath || sessionSummary.decisions_path,
         outputDir: outputDir || undefined,
       };
       const text =
@@ -370,26 +438,26 @@ export default function LexiconJsonlReviewPage() {
         return;
       }
 
-      if (!filteredItems.length || saving || loading) {
+      if (!items.length || saving || loading) {
         return;
       }
 
-      const currentIndex = filteredItems.findIndex((item) => item.entry_id === selectedItem?.entry_id);
+      const currentIndex = items.findIndex((item) => item.entry_id === selectedItem?.entry_id);
       if (event.key === "j") {
         event.preventDefault();
-        const nextIndex = currentIndex >= 0 ? Math.min(currentIndex + 1, filteredItems.length - 1) : 0;
-        setSelectedItemId(filteredItems[nextIndex]?.entry_id ?? "");
+        const nextIndex = currentIndex >= 0 ? Math.min(currentIndex + 1, items.length - 1) : 0;
+        setSelectedItemId(items[nextIndex]?.entry_id ?? "");
         return;
       }
 
       if (event.key === "k") {
         event.preventDefault();
         const nextIndex = currentIndex >= 0 ? Math.max(currentIndex - 1, 0) : 0;
-        setSelectedItemId(filteredItems[nextIndex]?.entry_id ?? "");
+        setSelectedItemId(items[nextIndex]?.entry_id ?? "");
         return;
       }
 
-      if (!selectedItem || !session) {
+      if (!selectedItem || !sessionSummary) {
         return;
       }
 
@@ -407,7 +475,7 @@ export default function LexiconJsonlReviewPage() {
 
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
-  }, [confirmDecision, filteredItems, loading, saving, selectedItem, session]);
+  }, [confirmDecision, items, loading, saving, selectedItem, sessionSummary]);
 
   return (
     <div className="space-y-6" data-testid="lexicon-jsonl-review-page">
@@ -434,19 +502,19 @@ export default function LexiconJsonlReviewPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("approved")} className="rounded-md border border-blue-300 px-3 py-2 text-sm text-blue-700 disabled:opacity-50">
+            <button type="button" disabled={!sessionSummary || saving} onClick={() => void downloadOutput("approved")} className="rounded-md border border-blue-300 px-3 py-2 text-sm text-blue-700 disabled:opacity-50">
               Download Approved Rows
             </button>
-            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("decisions")} className="rounded-md border border-emerald-300 px-3 py-2 text-sm text-emerald-700 disabled:opacity-50">
+            <button type="button" disabled={!sessionSummary || saving} onClick={() => void downloadOutput("decisions")} className="rounded-md border border-emerald-300 px-3 py-2 text-sm text-emerald-700 disabled:opacity-50">
               Download Decision Ledger
             </button>
-            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("rejected")} className="rounded-md border border-amber-300 px-3 py-2 text-sm text-amber-700 disabled:opacity-50">
+            <button type="button" disabled={!sessionSummary || saving} onClick={() => void downloadOutput("rejected")} className="rounded-md border border-amber-300 px-3 py-2 text-sm text-amber-700 disabled:opacity-50">
               Download Rejected Overlay
             </button>
-            <button type="button" disabled={!session || saving} onClick={() => void downloadOutput("regenerate")} className="rounded-md border border-violet-300 px-3 py-2 text-sm text-violet-700 disabled:opacity-50">
+            <button type="button" disabled={!sessionSummary || saving} onClick={() => void downloadOutput("regenerate")} className="rounded-md border border-violet-300 px-3 py-2 text-sm text-violet-700 disabled:opacity-50">
               Download Regeneration Requests
             </button>
-            <button type="button" disabled={!session || saving} onClick={() => void materialize()} className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">
+            <button type="button" disabled={!sessionSummary || saving} onClick={() => void materialize()} className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">
               Materialize Reviewed Outputs
             </button>
           </div>
@@ -544,29 +612,22 @@ export default function LexiconJsonlReviewPage() {
         {message ? <div className="mt-3 text-sm text-slate-700">{message}</div> : null}
       </section>
 
-      {session ? (
+      {sessionSummary ? (
         <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <div className="mb-4 grid grid-cols-3 gap-3 text-sm">
-              {(() => {
-                const counts = sessionCounts(session.items);
-                return (
-                  <>
-                    <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Pending</p>
-                      <p className="mt-1 text-xl font-semibold text-amber-950">{counts.pending}</p>
-                    </div>
-                    <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Approved</p>
-                      <p className="mt-1 text-xl font-semibold text-emerald-950">{counts.approved}</p>
-                    </div>
-                    <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Rejected</p>
-                      <p className="mt-1 text-xl font-semibold text-rose-950">{counts.rejected}</p>
-                    </div>
-                  </>
-                );
-              })()}
+              <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">Pending</p>
+                <p className="mt-1 text-xl font-semibold text-amber-950">{sessionSummary.pending_count}</p>
+              </div>
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Approved</p>
+                <p className="mt-1 text-xl font-semibold text-emerald-950">{sessionSummary.approved_count}</p>
+              </div>
+              <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Rejected</p>
+                <p className="mt-1 text-xl font-semibold text-rose-950">{sessionSummary.rejected_count}</p>
+              </div>
             </div>
             <div className="grid gap-2">
               <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
@@ -576,14 +637,17 @@ export default function LexiconJsonlReviewPage() {
                 Shortcuts: <span className="font-semibold text-slate-900">j</span>/<span className="font-semibold text-slate-900">k</span> move, <span className="font-semibold text-emerald-700">a</span> approve, <span className="font-semibold text-rose-700">r</span> reject, <span className="font-semibold text-slate-700">p</span> reopen
               </div>
               <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                value={searchDraft}
+                onChange={(event) => setSearchDraft(event.target.value)}
                 placeholder="Search entry id or display text"
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
               />
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as "all" | "pending" | "approved" | "rejected")}
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as "all" | "pending" | "approved" | "rejected");
+                  setPageOffset(0);
+                }}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
               >
                 <option value="all">All statuses</option>
@@ -591,33 +655,72 @@ export default function LexiconJsonlReviewPage() {
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
               </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch(searchDraft.trim());
+                  setPageOffset(0);
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                Apply filters
+              </button>
             </div>
             <div className="mt-4">
-              <PagedRecordList
-                items={filteredItems}
-                selectedId={selectedItem?.entry_id ?? null}
-                getId={(item) => item.entry_id}
-                onSelect={setSelectedItemId}
-                title="Entries"
-                testId="jsonl-review-items-list"
-                pageSize={5}
-                emptyState={<p className="text-sm text-gray-500">No items match the current filter.</p>}
-                renderItem={(item) => (
-                  <div>
-                    <p className="font-medium text-gray-900">{item.display_text}</p>
-                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.entry_type}</span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.review_status}</span>
-                      {item.entity_category ? <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.entity_category}</span> : null}
-                      {(item.warning_labels ?? []).map((warning) => (
-                        <span key={warning} className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
-                          {warning}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              />
+              <div className="space-y-3" data-testid="jsonl-review-items-list">
+                <div className="flex items-center justify-between gap-3">
+                  <h5 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Entries</h5>
+                  <span className="text-xs text-gray-500">
+                    {filteredTotal.toLocaleString()} matches · page {Math.floor(pageOffset / PAGE_LIMIT) + 1}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {items.map((item) => {
+                    const selected = item.entry_id === selectedItem?.entry_id;
+                    return (
+                      <button
+                        key={item.entry_id}
+                        type="button"
+                        onClick={() => setSelectedItemId(item.entry_id)}
+                        className={`w-full rounded-lg border p-3 text-left ${selected ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                      >
+                        <p className="font-medium text-gray-900">{item.display_text}</p>
+                        <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.entry_type}</span>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.review_status}</span>
+                          {item.entity_category ? <span className="rounded-full bg-slate-100 px-2 py-0.5">{item.entity_category}</span> : null}
+                          {(item.warning_labels ?? []).map((warning) => (
+                            <span key={warning} className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
+                              {warning}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {!items.length ? <p className="text-sm text-gray-500">No items match the current filter.</p> : null}
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    data-testid="jsonl-review-items-list-prev-page"
+                    onClick={() => setPageOffset((current) => Math.max(0, current - PAGE_LIMIT))}
+                    disabled={pageOffset === 0}
+                    className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="jsonl-review-items-list-next-page"
+                    onClick={() => setPageOffset((current) => current + PAGE_LIMIT)}
+                    disabled={!items.length || pageOffset + PAGE_LIMIT >= filteredTotal}
+                    className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -738,7 +841,7 @@ export default function LexiconJsonlReviewPage() {
         </section>
       ) : null}
 
-      {session && selectedItem ? (
+      {sessionSummary && selectedItem ? (
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
             <div>

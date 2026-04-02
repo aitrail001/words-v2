@@ -16,6 +16,15 @@ export type LexiconOpsSnapshotSummary = {
   outside_portal_steps: string[];
 };
 
+export type LexiconOpsSnapshotListResponse = {
+  items: LexiconOpsSnapshotSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  q: string | null;
+};
+
 export type LexiconOpsSnapshotArtifact = {
   file_name: string;
   exists: boolean;
@@ -85,6 +94,15 @@ export type LexiconVoiceRunSummary = {
   failed_count: number;
 };
 
+export type LexiconVoiceRunListResponse = {
+  items: LexiconVoiceRunSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  q: string | null;
+};
+
 export type LexiconVoiceRunDetail = LexiconVoiceRunSummary & {
   locale_counts: Record<string, number>;
   voice_role_counts: Record<string, number>;
@@ -95,8 +113,17 @@ export type LexiconVoiceRunDetail = LexiconVoiceRunSummary & {
   latest_error_rows: Record<string, unknown>[];
 };
 
-export const listLexiconOpsSnapshots = (): Promise<LexiconOpsSnapshotSummary[]> =>
-  apiClient.get<LexiconOpsSnapshotSummary[]>("/lexicon-ops/snapshots");
+export const listLexiconOpsSnapshots = (input?: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<LexiconOpsSnapshotListResponse> => {
+  const params = new URLSearchParams();
+  if (input?.q?.trim()) params.set("q", input.q.trim());
+  params.set("limit", String(input?.limit ?? 25));
+  params.set("offset", String(input?.offset ?? 0));
+  return apiClient.get<LexiconOpsSnapshotListResponse>(`/lexicon-ops/snapshots?${params.toString()}`);
+};
 
 export const getLexiconOpsSnapshot = (snapshotName: string): Promise<LexiconOpsSnapshotDetail> =>
   apiClient.get<LexiconOpsSnapshotDetail>(`/lexicon-ops/snapshots/${encodeURIComponent(snapshotName)}`);
@@ -118,8 +145,17 @@ export const getLexiconVoiceStoragePolicies = (
     `/lexicon-ops/voice-storage/policies${sourceReference ? `?source_reference=${encodeURIComponent(sourceReference)}` : ""}`,
   );
 
-export const getLexiconVoiceRuns = (): Promise<LexiconVoiceRunSummary[]> =>
-  apiClient.get<LexiconVoiceRunSummary[]>("/lexicon-ops/voice-runs");
+export const getLexiconVoiceRuns = (input?: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<LexiconVoiceRunListResponse> => {
+  const params = new URLSearchParams();
+  if (input?.q?.trim()) params.set("q", input.q.trim());
+  params.set("limit", String(input?.limit ?? 25));
+  params.set("offset", String(input?.offset ?? 0));
+  return apiClient.get<LexiconVoiceRunListResponse>(`/lexicon-ops/voice-runs?${params.toString()}`);
+};
 
 export const getLexiconVoiceRunDetail = (
   runName: string,

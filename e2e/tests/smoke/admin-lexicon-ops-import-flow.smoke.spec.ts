@@ -75,8 +75,10 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
         if (!response.ok()) {
           return false;
         }
-        const snapshots = (await response.json()) as Array<{ snapshot: string }>;
-        return snapshots.some((snapshot) => snapshot.snapshot === snapshotName);
+        const snapshots = (await response.json()) as {
+          items: Array<{ snapshot: string }>;
+        };
+        return snapshots.items.some((snapshot) => snapshot.snapshot === snapshotName);
       },
       {
         timeout: 15_000,
@@ -116,6 +118,7 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
 
   await page.goto(`${adminUrl}/lexicon/db-inspector`);
   await page.getByTestId("lexicon-db-inspector-search-input").fill(normalized);
+  await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.getByRole("button", { name: new RegExp(`^${normalized}\\b`) })).toBeVisible();
   await expect(page.getByRole("heading", { name: normalized })).toBeVisible();
 

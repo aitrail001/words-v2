@@ -153,6 +153,7 @@ test("@smoke admin can browse mixed-family final DB entries", async ({ page, req
 
   await page.getByTestId("lexicon-db-inspector-family-filter").selectOption("reference");
   await page.getByTestId("lexicon-db-inspector-search-input").fill(referenceText);
+  await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.getByTestId("lexicon-db-inspector-results")).toContainText(referenceText);
   await page.getByRole("button", { name: new RegExp(`^${referenceText}`) }).click();
   await expect(page.getByTestId("lexicon-db-inspector-detail")).toContainText("reference");

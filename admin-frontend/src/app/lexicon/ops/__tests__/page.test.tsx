@@ -177,10 +177,31 @@ describe("LexiconOpsPage", () => {
     ],
   };
 
+  function snapshotPageResponse(
+    items: typeof snapshots,
+    options?: {
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+      q?: string | null;
+    },
+  ) {
+    return {
+      items,
+      total: options?.total ?? items.length,
+      limit: options?.limit ?? 10,
+      offset: options?.offset ?? 0,
+      has_more: options?.has_more ?? false,
+      q: options?.q ?? null,
+    };
+  }
+
   beforeEach(() => {
     jest.clearAllMocks();
+    window.history.pushState({}, "", "/lexicon/ops");
     mockReadAccessToken.mockReturnValue("active-token");
-    mockListLexiconOpsSnapshots.mockResolvedValue(snapshots);
+    mockListLexiconOpsSnapshots.mockResolvedValue(snapshotPageResponse(snapshots));
     mockGetLexiconOpsSnapshot.mockResolvedValue(detail);
     mockRewriteLexiconVoiceStorage.mockResolvedValue({
       matched_count: 3,
@@ -218,6 +239,49 @@ describe("LexiconOpsPage", () => {
     expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
       "Word",
     );
+  });
+
+  it("clamps an out-of-range snapshot page back to the last available page", async () => {
+    window.history.pushState({}, "", "/lexicon/ops?page=99");
+    mockListLexiconOpsSnapshots
+      .mockResolvedValueOnce(
+        snapshotPageResponse([], {
+          total: 3,
+          limit: 10,
+          offset: 980,
+          has_more: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        snapshotPageResponse(snapshots, {
+          total: 3,
+          limit: 10,
+          offset: 0,
+          has_more: false,
+        }),
+      );
+
+    render(<LexiconOpsPage />);
+
+    await waitFor(() =>
+      expect(mockListLexiconOpsSnapshots.mock.calls).toContainEqual([
+        {
+          q: undefined,
+          limit: 10,
+          offset: 980,
+        },
+      ]),
+    );
+    await waitFor(() =>
+      expect(mockListLexiconOpsSnapshots.mock.calls).toContainEqual([
+        {
+          q: undefined,
+          limit: 10,
+          offset: 0,
+        },
+      ]),
+    );
+    await waitFor(() => expect(screen.getByTestId("lexicon-ops-snapshot-words-100-20260312")).toBeVisible());
   });
 
   it("refreshes snapshots from the refresh action", async () => {
@@ -418,13 +482,19 @@ describe("LexiconOpsPage", () => {
 
   it("paginates the snapshot list when lexicon operations grow beyond one page", async () => {
     const user = userEvent.setup();
-    mockListLexiconOpsSnapshots.mockResolvedValue(
-      Array.from({ length: 12 }, (_, index) => ({
+    const allSnapshots = Array.from({ length: 12 }, (_, index) => ({
         ...snapshots[0],
         snapshot: `words-${index + 1}`,
         snapshot_path: `/data/lexicon/snapshots/words-${index + 1}`,
         snapshot_id: `snapshot-${index + 1}`,
-      })),
+      }));
+    mockListLexiconOpsSnapshots.mockImplementation(async ({ limit = 10, offset = 0 } = {}) =>
+      snapshotPageResponse(allSnapshots.slice(offset, offset + limit), {
+        total: allSnapshots.length,
+        limit,
+        offset,
+        has_more: offset + limit < allSnapshots.length,
+      }),
     );
     mockGetLexiconOpsSnapshot.mockResolvedValue({
       ...detail,
@@ -459,14 +529,29 @@ describe("LexiconOpsPage", () => {
 
   it("filters snapshots by search before pagination", async () => {
     const user = userEvent.setup();
-    mockListLexiconOpsSnapshots.mockResolvedValue(
-      Array.from({ length: 12 }, (_, index) => ({
+    const allSnapshots = Array.from({ length: 12 }, (_, index) => ({
         ...snapshots[0],
         snapshot: `words-${index + 1}`,
         snapshot_path: `/data/lexicon/snapshots/words-${index + 1}`,
         snapshot_id: index === 10 ? "target-snapshot" : `snapshot-${index + 1}`,
-      })),
-    );
+      }));
+    mockListLexiconOpsSnapshots.mockImplementation(async ({ q, limit = 10, offset = 0 } = {}) => {
+      const filtered = q
+        ? allSnapshots.filter(
+            (snapshot) =>
+              snapshot.snapshot.includes(q) ||
+              snapshot.snapshot_id?.includes(q) ||
+              snapshot.snapshot_path.includes(q),
+          )
+        : allSnapshots;
+      return snapshotPageResponse(filtered.slice(offset, offset + limit), {
+        total: filtered.length,
+        limit,
+        offset,
+        has_more: offset + limit < filtered.length,
+        q: q ?? null,
+      });
+    });
     render(<LexiconOpsPage />);
 
     await waitFor(() =>
@@ -474,6 +559,7 @@ describe("LexiconOpsPage", () => {
     );
 
     await user.type(screen.getByTestId("lexicon-ops-snapshots-search"), "target");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
 
     await waitFor(() =>
       expect(within(screen.getByTestId("lexicon-ops-snapshots-list")).getByTestId("lexicon-ops-snapshot-words-11")).toBeInTheDocument(),
@@ -484,14 +570,29 @@ describe("LexiconOpsPage", () => {
 
   it("restores search and page state from the url and keeps them updated", async () => {
     const user = userEvent.setup();
-    mockListLexiconOpsSnapshots.mockResolvedValue(
-      Array.from({ length: 12 }, (_, index) => ({
+    const allSnapshots = Array.from({ length: 12 }, (_, index) => ({
         ...snapshots[0],
         snapshot: `words-${index + 1}`,
         snapshot_path: `/data/lexicon/snapshots/words-${index + 1}`,
         snapshot_id: `snapshot-${index + 1}`,
-      })),
-    );
+      }));
+    mockListLexiconOpsSnapshots.mockImplementation(async ({ q, limit = 10, offset = 0 } = {}) => {
+      const filtered = q
+        ? allSnapshots.filter(
+            (snapshot) =>
+              snapshot.snapshot.includes(q) ||
+              snapshot.snapshot_id?.includes(q) ||
+              snapshot.snapshot_path.includes(q),
+          )
+        : allSnapshots;
+      return snapshotPageResponse(filtered.slice(offset, offset + limit), {
+        total: filtered.length,
+        limit,
+        offset,
+        has_more: offset + limit < filtered.length,
+        q: q ?? null,
+      });
+    });
 
     window.history.pushState({}, "", "/lexicon/ops?q=words");
     render(<LexiconOpsPage />);
@@ -509,6 +610,7 @@ describe("LexiconOpsPage", () => {
     expect(window.location.search).toContain("page=2");
 
     await user.clear(screen.getByTestId("lexicon-ops-snapshots-search"));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
 
     await waitFor(() =>
       expect(screen.getByTestId("lexicon-ops-snapshots-search")).toHaveValue(""),
