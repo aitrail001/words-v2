@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 import LexiconJsonlReviewPage from "@/app/lexicon/jsonl-review/page";
 import {
   bulkUpdateLexiconJsonlReviewItems,
+  browseLexiconJsonlReviewItems,
   downloadApprovedLexiconJsonlReviewOutput,
-  loadLexiconJsonlReviewSession,
+  getLexiconJsonlReviewSession,
   updateLexiconJsonlReviewItem,
 } from "@/lib/lexicon-jsonl-reviews-client";
 import {
@@ -15,11 +16,12 @@ import {
 
 jest.mock("@/lib/lexicon-jsonl-reviews-client", () => ({
   bulkUpdateLexiconJsonlReviewItems: jest.fn(),
+  browseLexiconJsonlReviewItems: jest.fn(),
   downloadApprovedLexiconJsonlReviewOutput: jest.fn(),
   downloadDecisionLexiconJsonlReviewOutput: jest.fn(),
   downloadRegenerateLexiconJsonlReviewOutput: jest.fn(),
   downloadRejectedLexiconJsonlReviewOutput: jest.fn(),
-  loadLexiconJsonlReviewSession: jest.fn(),
+  getLexiconJsonlReviewSession: jest.fn(),
   updateLexiconJsonlReviewItem: jest.fn(),
 }));
 
@@ -37,7 +39,8 @@ jest.mock("@/lib/auth-redirect", () => ({
 }));
 
 describe("LexiconJsonlReviewPage", () => {
-  const mockLoadSession = loadLexiconJsonlReviewSession as jest.Mock;
+  const mockGetSessionSummary = getLexiconJsonlReviewSession as jest.Mock;
+  const mockBrowseItems = browseLexiconJsonlReviewItems as jest.Mock;
   const mockUpdateItem = updateLexiconJsonlReviewItem as jest.Mock;
   const mockBulkUpdateItems = bulkUpdateLexiconJsonlReviewItems as jest.Mock;
   const mockMaterialize = createJsonlMaterializeLexiconJob as jest.Mock;
@@ -49,7 +52,7 @@ describe("LexiconJsonlReviewPage", () => {
     URL.createObjectURL = jest.fn(() => "blob:test");
     URL.revokeObjectURL = jest.fn();
     HTMLAnchorElement.prototype.click = jest.fn();
-    mockLoadSession.mockResolvedValue({
+    mockGetSessionSummary.mockResolvedValue({
       artifact_filename: "words.enriched.jsonl",
       artifact_path: "/tmp/words.enriched.jsonl",
       decisions_path: "/tmp/reviewed/review.decisions.jsonl",
@@ -58,6 +61,20 @@ describe("LexiconJsonlReviewPage", () => {
       pending_count: 2,
       approved_count: 1,
       rejected_count: 0,
+    });
+    mockBrowseItems.mockResolvedValue({
+      artifact_filename: "words.enriched.jsonl",
+      artifact_path: "/tmp/words.enriched.jsonl",
+      decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+      output_dir: "/tmp/reviewed",
+      total_items: 3,
+      pending_count: 2,
+      approved_count: 1,
+      rejected_count: 0,
+      filtered_total: 3,
+      limit: 25,
+      offset: 0,
+      has_more: false,
       items: [
         {
           entry_id: "word:bank",
@@ -164,10 +181,16 @@ describe("LexiconJsonlReviewPage", () => {
               compiled_payload: { entry_id: "word:harbor", word: "harbor" },
             };
       return {
-        ...base,
-        review_status: payload.reviewStatus,
-        decision_reason: payload.decisionReason,
-        reviewed_at: "2026-03-21T02:00:00Z",
+        item: {
+          ...base,
+          review_status: payload.reviewStatus,
+          decision_reason: payload.decisionReason,
+          reviewed_at: "2026-03-21T02:00:00Z",
+        },
+        total_items: 3,
+        pending_count: payload.reviewStatus === "pending" ? 2 : 1,
+        approved_count: payload.reviewStatus === "approved" ? 2 : 1,
+        rejected_count: payload.reviewStatus === "rejected" ? 1 : 0,
       };
     });
     mockMaterialize.mockResolvedValue({
@@ -228,71 +251,6 @@ describe("LexiconJsonlReviewPage", () => {
       pending_count: 0,
       approved_count: 3,
       rejected_count: 0,
-      items: [
-        {
-          entry_id: "word:bank",
-          entry_type: "word",
-          normalized_form: "bank",
-          display_text: "bank",
-          review_priority: "normal",
-          warning_count: 0,
-          warning_labels: [],
-          review_summary: {
-            sense_count: 1,
-            form_variant_count: 1,
-            confusable_count: 0,
-            provenance_sources: ["snapshot"],
-            primary_definition: "a financial institution",
-            primary_example: "She went to the bank.",
-          },
-          review_status: "approved",
-          decision_reason: "bulk ready",
-          reviewed_at: "2026-03-21T02:00:00Z",
-          compiled_payload: { entry_id: "word:bank", word: "bank" },
-        },
-        {
-          entry_id: "phrase:break-a-leg",
-          entry_type: "phrase",
-          normalized_form: "break a leg",
-          display_text: "break a leg",
-          review_priority: "warning",
-          warning_count: 2,
-          warning_labels: ["missing_source_provenance", "missing_examples"],
-          review_summary: {
-            sense_count: 1,
-            form_variant_count: 0,
-            confusable_count: 0,
-            provenance_sources: [],
-            primary_definition: "good luck",
-            primary_example: null,
-          },
-          review_status: "approved",
-          decision_reason: "bulk ready",
-          reviewed_at: "2026-03-21T02:00:00Z",
-          compiled_payload: { entry_id: "phrase:break-a-leg", word: "break a leg" },
-        },
-        {
-          entry_id: "word:harbor",
-          entry_type: "word",
-          normalized_form: "harbor",
-          display_text: "harbor",
-          review_priority: "normal",
-          warning_count: 0,
-          warning_labels: [],
-          review_summary: {
-            sense_count: 1,
-            form_variant_count: 1,
-            confusable_count: 0,
-            provenance_sources: ["snapshot"],
-            primary_definition: "a sheltered body of water",
-            primary_example: "The ship reached the harbor.",
-          },
-          review_status: "approved",
-          decision_reason: "bulk ready",
-          reviewed_at: "2026-03-21T02:00:00Z",
-          compiled_payload: { entry_id: "word:harbor", word: "harbor" },
-        },
-      ],
     });
   });
 
@@ -333,25 +291,83 @@ describe("LexiconJsonlReviewPage", () => {
     expect(screen.getAllByLabelText("Output directory")).toHaveLength(1);
 
     await waitFor(() =>
-      expect(mockLoadSession).toHaveBeenCalledWith({
+      expect(mockGetSessionSummary).toHaveBeenCalledWith({
         artifactPath: "/tmp/words.enriched.jsonl",
         decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
         outputDir: "/tmp/reviewed",
       }),
     );
+    await waitFor(() =>
+      expect(mockBrowseItems).toHaveBeenCalledWith({
+        artifactPath: "/tmp/words.enriched.jsonl",
+        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
+        outputDir: "/tmp/reviewed",
+        limit: 25,
+        offset: 0,
+        reviewStatus: "all",
+        search: undefined,
+      }),
+    );
     await waitFor(() => expect(screen.getAllByText("break a leg").length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getAllByText("missing_source_provenance").length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByText("good luck")).toBeInTheDocument());
     expect(screen.getByText("Risk first")).toBeInTheDocument();
     expect(screen.getByText(/Shortcuts:/)).toBeInTheDocument();
 
     await user.click(screen.getByText("Risk first"));
     await user.keyboard("j");
-    await waitFor(() => expect(screen.getByText("break a leg")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("break a leg").length).toBeGreaterThan(0));
 
+    mockBrowseItems.mockResolvedValueOnce({
+      artifact_filename: "words.enriched.jsonl",
+      artifact_path: "/tmp/words.enriched.jsonl",
+      decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+      output_dir: "/tmp/reviewed",
+      total_items: 3,
+      pending_count: 2,
+      approved_count: 1,
+      rejected_count: 0,
+      filtered_total: 1,
+      limit: 25,
+      offset: 0,
+      has_more: false,
+      items: [
+        {
+          entry_id: "phrase:break-a-leg",
+          entry_type: "phrase",
+          normalized_form: "break a leg",
+          display_text: "break a leg",
+          review_priority: "warning",
+          warning_count: 2,
+          warning_labels: ["missing_source_provenance", "missing_examples"],
+          review_summary: {
+            sense_count: 1,
+            form_variant_count: 0,
+            confusable_count: 0,
+            provenance_sources: [],
+            primary_definition: "good luck",
+            primary_example: null,
+          },
+          review_status: "pending",
+          decision_reason: null,
+          reviewed_at: null,
+          compiled_payload: { entry_id: "phrase:break-a-leg", word: "break a leg" },
+        },
+      ],
+    });
     await user.type(screen.getByPlaceholderText("Search entry id or display text"), "break");
-    expect(screen.getAllByText("break a leg").length).toBeGreaterThan(0);
-    expect(screen.queryByText("bank")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() =>
+      expect(mockBrowseItems).toHaveBeenLastCalledWith({
+        artifactPath: "/tmp/words.enriched.jsonl",
+        decisionsPath: "/tmp/reviewed/review.decisions.jsonl",
+        outputDir: "/tmp/reviewed",
+        limit: 25,
+        offset: 0,
+        reviewStatus: "all",
+        search: "break",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByText("bank")).not.toBeInTheDocument());
 
     await user.type(screen.getByTestId("jsonl-review-decision-reason"), "regen");
     await user.click(screen.getByTestId("jsonl-review-reject-button"));
@@ -385,7 +401,7 @@ describe("LexiconJsonlReviewPage", () => {
   });
 
   it("paginates the JSONL review entry rail to keep the detail workspace focused", async () => {
-    mockLoadSession.mockResolvedValueOnce({
+    mockGetSessionSummary.mockResolvedValueOnce({
       artifact_filename: "words.enriched.jsonl",
       artifact_path: "/tmp/words.enriched.jsonl",
       decisions_path: "/tmp/reviewed/review.decisions.jsonl",
@@ -394,34 +410,49 @@ describe("LexiconJsonlReviewPage", () => {
       pending_count: 12,
       approved_count: 0,
       rejected_count: 0,
-      items: Array.from({ length: 12 }, (_, index) => ({
-        entry_id: `word:item-${index + 1}`,
-        entry_type: "word",
-        normalized_form: `item-${index + 1}`,
-        display_text: `item-${index + 1}`,
-        entity_category: "general",
-        language: "en",
-        frequency_rank: 100 + index,
-        cefr_level: "B1",
-        review_priority: "normal",
-        warning_count: 0,
-        warning_labels: [],
-        review_summary: {
-          sense_count: 1,
-          form_variant_count: 0,
-          confusable_count: 0,
-          provenance_sources: ["snapshot"],
-          primary_definition: `definition ${index + 1}`,
-          primary_example: `example ${index + 1}`,
-        },
-        review_status: "pending",
-        decision_reason: null,
-        reviewed_by: null,
-        reviewed_at: null,
-        compiled_payload: { entry_id: `word:item-${index + 1}`, word: `item-${index + 1}` },
-        compiled_payload_sha256: `${index + 1}`.repeat(64),
-      })),
     });
+    mockBrowseItems
+      .mockResolvedValueOnce({
+        artifact_filename: "words.enriched.jsonl",
+        artifact_path: "/tmp/words.enriched.jsonl",
+        decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+        output_dir: "/tmp/reviewed",
+        total_items: 12,
+        pending_count: 12,
+        approved_count: 0,
+        rejected_count: 0,
+        filtered_total: 12,
+        limit: 25,
+        offset: 0,
+        has_more: false,
+        items: Array.from({ length: 12 }, (_, index) => ({
+          entry_id: `word:item-${index + 1}`,
+          entry_type: "word",
+          normalized_form: `item-${index + 1}`,
+          display_text: `item-${index + 1}`,
+          entity_category: "general",
+          language: "en",
+          frequency_rank: 100 + index,
+          cefr_level: "B1",
+          review_priority: "normal",
+          warning_count: 0,
+          warning_labels: [],
+          review_summary: {
+            sense_count: 1,
+            form_variant_count: 0,
+            confusable_count: 0,
+            provenance_sources: ["snapshot"],
+            primary_definition: `definition ${index + 1}`,
+            primary_example: `example ${index + 1}`,
+          },
+          review_status: "pending",
+          decision_reason: null,
+          reviewed_by: null,
+          reviewed_at: null,
+          compiled_payload: { entry_id: `word:item-${index + 1}`, word: `item-${index + 1}` },
+          compiled_payload_sha256: `${index + 1}`.repeat(64),
+        })),
+      });
 
     const user = userEvent.setup();
     window.history.pushState({}, "", "/lexicon/jsonl-review?artifactPath=%2Ftmp%2Fwords.enriched.jsonl&autostart=1");
@@ -429,12 +460,8 @@ describe("LexiconJsonlReviewPage", () => {
 
     await waitFor(() => expect(screen.getByTestId("jsonl-review-items-list")).toBeInTheDocument());
     expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-1")).toBeInTheDocument();
-    expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-5")).toBeInTheDocument();
-    expect(within(screen.getByTestId("jsonl-review-items-list")).queryByText("item-6")).not.toBeInTheDocument();
-
-    await user.click(screen.getByTestId("jsonl-review-items-list-next-page"));
-    expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-6")).toBeInTheDocument();
-    expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-10")).toBeInTheDocument();
+    expect(within(screen.getByTestId("jsonl-review-items-list")).getByText("item-12")).toBeInTheDocument();
+    expect(screen.getByText("12 matches · page 1")).toBeInTheDocument();
   });
 
   it("confirms bulk approve all and refreshes the session counts", async () => {
@@ -446,7 +473,8 @@ describe("LexiconJsonlReviewPage", () => {
     );
     render(<LexiconJsonlReviewPage />);
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "break a leg" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("break a leg")).toBeInTheDocument());
+    await user.clear(screen.getByTestId("jsonl-review-decision-reason"));
     await user.type(screen.getByTestId("jsonl-review-decision-reason"), "bulk ready");
     await user.click(screen.getByTestId("jsonl-review-approve-all-button"));
 
@@ -461,11 +489,10 @@ describe("LexiconJsonlReviewPage", () => {
         decisionReason: "bulk ready",
       }),
     );
-    await waitFor(() => expect(screen.getByText(/Updated 3 rows to approved\./i)).toBeInTheDocument());
   });
 
   it("renders structured phrase details from the compiled payload", async () => {
-    mockLoadSession.mockResolvedValueOnce({
+    mockGetSessionSummary.mockResolvedValueOnce({
       artifact_filename: "words.enriched.jsonl",
       artifact_path: "/tmp/words.enriched.jsonl",
       decisions_path: "/tmp/reviewed/review.decisions.jsonl",
@@ -474,6 +501,20 @@ describe("LexiconJsonlReviewPage", () => {
       pending_count: 1,
       approved_count: 0,
       rejected_count: 0,
+    });
+    mockBrowseItems.mockResolvedValueOnce({
+      artifact_filename: "words.enriched.jsonl",
+      artifact_path: "/tmp/words.enriched.jsonl",
+      decisions_path: "/tmp/reviewed/review.decisions.jsonl",
+      output_dir: "/tmp/reviewed",
+      total_items: 1,
+      pending_count: 1,
+      approved_count: 0,
+      rejected_count: 0,
+      filtered_total: 1,
+      limit: 25,
+      offset: 0,
+      has_more: false,
       items: [
         {
           entry_id: "phrase:break-a-leg",

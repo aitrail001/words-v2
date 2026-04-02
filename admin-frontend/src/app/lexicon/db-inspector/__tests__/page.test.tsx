@@ -184,6 +184,7 @@ describe("LexiconDbInspectorPage", () => {
     );
 
     await user.type(screen.getByTestId("lexicon-db-inspector-search-input"), "bank");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() =>
       expect(mockBrowse).toHaveBeenLastCalledWith({
         family: "phrase",

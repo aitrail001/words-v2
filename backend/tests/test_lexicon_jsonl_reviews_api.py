@@ -307,9 +307,11 @@ class TestLexiconJsonlReviewsApi:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["entry_id"] == "word:bank"
-        assert data["review_status"] == "approved"
-        assert data["decision_reason"] == "ready for import"
+        assert data["item"]["entry_id"] == "word:bank"
+        assert data["item"]["review_status"] == "approved"
+        assert data["item"]["decision_reason"] == "ready for import"
+        assert data["approved_count"] == 1
+        assert data["pending_count"] == 1
 
         persisted_rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         assert len(persisted_rows) == 1
@@ -347,8 +349,9 @@ class TestLexiconJsonlReviewsApi:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["review_status"] == "pending"
-        assert data["decision_reason"] == "needs another look"
+        assert data["item"]["review_status"] == "pending"
+        assert data["item"]["decision_reason"] == "needs another look"
+        assert data["pending_count"] == 2
 
         persisted_rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         assert len(persisted_rows) == 1
@@ -382,7 +385,6 @@ class TestLexiconJsonlReviewsApi:
         assert data["approved_count"] == 2
         assert data["pending_count"] == 0
         assert data["rejected_count"] == 0
-        assert all(item["review_status"] == "approved" for item in data["items"])
         persisted_rows = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         assert len(persisted_rows) == 2
         assert {row["decision"] for row in persisted_rows} == {"approved"}

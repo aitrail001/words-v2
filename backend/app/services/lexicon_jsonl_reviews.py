@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from fastapi import HTTPException, status
 
@@ -18,6 +19,11 @@ REVIEWED_DIRNAME = "reviewed"
 APPROVED_FILENAME = "approved.jsonl"
 REJECTED_FILENAME = "rejected.jsonl"
 REGENERATE_FILENAME = "regenerate.jsonl"
+_REVIEW_INDEX_CACHE_MAX_ENTRIES = 2
+
+
+ReviewIndexRow = dict[str, Any]
+ReviewIndex = dict[str, Any]
 
 
 def _import_review_prep_module() -> Any:
@@ -34,6 +40,29 @@ def _payload_sha256(payload: Any) -> str:
 
 def _artifact_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+_REVIEW_INDEX_CACHE: OrderedDict[tuple[str, int, int, str, int, int], ReviewIndex] = OrderedDict()
+
+
+def _file_signature(path: Path) -> tuple[int, int]:
+    if not path.exists():
+        return (0, 0)
+    stat_result = path.stat()
+    return (stat_result.st_mtime_ns, stat_result.st_size)
+
+
+def _review_index_cache_key(artifact_path: Path, decisions_path: Path) -> tuple[str, int, int, str, int, int]:
+    artifact_mtime, artifact_size = _file_signature(artifact_path)
+    decisions_mtime, decisions_size = _file_signature(decisions_path)
+    return (
+        str(artifact_path.resolve()),
+        artifact_mtime,
+        artifact_size,
+        str(decisions_path.resolve()),
+        decisions_mtime,
+        decisions_size,
+    )
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -247,6 +276,299 @@ def _display_text(row: dict[str, Any]) -> str:
             return value
     return "unknown"
 
+
+def _iter_jsonl(path: Path) -> Iterator[tuple[int, dict[str, Any]]]:
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid JSONL at {path}:{line_number}: {exc.msg}") from exc
+            if not isinstance(payload, dict):
+                raise HTTPException(status_code=400, detail=f"JSONL row at {path}:{line_number} must be an object")
+            yield line_number, payload
+
+
+def _decision_status_from_review_status(review_status: str) -> str:
+    return "reopened" if review_status == "pending" else review_status
+
+
+def _review_status_from_decision(decision: dict[str, Any] | None) -> str:
+    if not decision:
+        return "pending"
+    if decision["decision"] == "approved":
+        return "approved"
+    if decision["decision"] == "rejected":
+        return "rejected"
+    return "pending"
+
+
+def _load_decisions_index(
+    *,
+    decisions_path: Path,
+    artifact_sha256: str,
+) -> dict[str, dict[str, Any]]:
+    rows = _read_jsonl(decisions_path) if decisions_path.exists() else []
+    decisions_by_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        entry_id = str(row.get("entry_id") or "").strip()
+        entry_type = str(row.get("entry_type") or "").strip().lower()
+        decision = str(row.get("decision") or "").strip().lower()
+        if not entry_id:
+            raise HTTPException(status_code=400, detail="Decision row entry_id is required")
+        if entry_type not in {"word", "phrase", "reference"}:
+            raise HTTPException(status_code=400, detail=f"Decision row entry_type is invalid for {entry_id}")
+        if decision not in ALLOWED_DECISIONS:
+            raise HTTPException(status_code=400, detail=f"Decision row value is invalid for {entry_id}")
+        if entry_id in decisions_by_id:
+            raise HTTPException(status_code=400, detail=f"Duplicate decision row for {entry_id}")
+
+        supplied_artifact_sha = str(row.get("artifact_sha256") or "").strip()
+        if supplied_artifact_sha and supplied_artifact_sha != artifact_sha256:
+            raise HTTPException(status_code=400, detail=f"Decision row artifact_sha256 mismatch for {entry_id}")
+
+        decisions_by_id[entry_id] = {
+            "schema_version": DECISION_SCHEMA_VERSION,
+            "artifact_sha256": artifact_sha256,
+            "entry_id": entry_id,
+            "entry_type": entry_type,
+            "decision": decision,
+            "decision_reason": row.get("decision_reason"),
+            "compiled_payload_sha256": str(row.get("compiled_payload_sha256") or "").strip() or None,
+            "reviewed_by": row.get("reviewed_by"),
+            "reviewed_at": row.get("reviewed_at"),
+        }
+    return decisions_by_id
+
+
+def _prepare_review_index_row(
+    row_number: int,
+    row: dict[str, Any],
+    *,
+    decision: dict[str, Any] | None,
+) -> ReviewIndexRow:
+    review_prep = _import_review_prep_module()
+    prepared = review_prep.build_review_prep_rows([row], origin="realtime")[0]
+    if prepared["reasons"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Compiled row {row_number} failed validation: {'; '.join(prepared['reasons'])}",
+        )
+    entry_id = str(row.get("entry_id") or "").strip()
+    if not entry_id:
+        raise HTTPException(status_code=400, detail=f"Compiled row {row_number} is missing entry_id")
+    payload_sha = _payload_sha256(row)
+    if decision and decision.get("compiled_payload_sha256") and decision["compiled_payload_sha256"] != payload_sha:
+        raise HTTPException(status_code=400, detail=f"Decision row compiled_payload_sha256 mismatch for {entry_id}")
+    return {
+        "row_number": row_number,
+        "entry_id": entry_id,
+        "entry_type": str(row.get("entry_type") or "word"),
+        "normalized_form": row.get("normalized_form"),
+        "display_text": _display_text(row),
+        "entity_category": row.get("entity_category"),
+        "language": row.get("language") or "en",
+        "frequency_rank": row.get("frequency_rank"),
+        "cefr_level": row.get("cefr_level"),
+        "review_priority": "warning" if prepared["warning_labels"] else "normal",
+        "warning_count": prepared["warning_count"],
+        "warning_labels": prepared["warning_labels"],
+        "review_summary": prepared["review_summary"],
+        "review_status": _review_status_from_decision(decision),
+        "decision_reason": decision.get("decision_reason") if decision else None,
+        "reviewed_by": decision.get("reviewed_by") if decision else None,
+        "reviewed_at": decision.get("reviewed_at") if decision else None,
+        "compiled_payload_sha256": payload_sha,
+    }
+
+
+def _build_review_index(
+    *,
+    artifact_path: Path,
+    decisions_path: Path,
+) -> ReviewIndex:
+    artifact_sha256 = _artifact_sha256(artifact_path)
+    decisions_by_id = _load_decisions_index(decisions_path=decisions_path, artifact_sha256=artifact_sha256)
+    rows: list[ReviewIndexRow] = []
+    entry_ids_seen: set[str] = set()
+    approved_count = 0
+    rejected_count = 0
+    for row_number, row in _iter_jsonl(artifact_path):
+        entry_id = str(row.get("entry_id") or "").strip()
+        if not entry_id:
+            raise HTTPException(status_code=400, detail=f"Compiled row {row_number} is missing entry_id")
+        if entry_id in entry_ids_seen:
+            raise HTTPException(status_code=400, detail=f"Duplicate compiled entry_id in artifact: {entry_id}")
+        entry_ids_seen.add(entry_id)
+        decision = decisions_by_id.get(entry_id)
+        index_row = _prepare_review_index_row(row_number, row, decision=decision)
+        if index_row["review_status"] == "approved":
+            approved_count += 1
+        elif index_row["review_status"] == "rejected":
+            rejected_count += 1
+        rows.append(index_row)
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="Compiled artifact is empty")
+
+    unknown_decisions = sorted(set(decisions_by_id.keys()) - entry_ids_seen)
+    if unknown_decisions:
+        preview = ", ".join(unknown_decisions[:10])
+        raise HTTPException(status_code=400, detail=f"Decision row references unknown entry_id {preview}")
+
+    index = {
+        "artifact_filename": artifact_path.name,
+        "artifact_path": str(artifact_path),
+        "artifact_sha256": artifact_sha256,
+        "decisions_path": str(decisions_path),
+        "total_items": len(rows),
+        "pending_count": len(rows) - approved_count - rejected_count,
+        "approved_count": approved_count,
+        "rejected_count": rejected_count,
+        "rows": rows,
+        "rows_by_id": {row["entry_id"]: row for row in rows},
+    }
+    return index
+
+
+def _get_review_index(
+    *,
+    artifact_path: Path,
+    decisions_path: Path,
+) -> ReviewIndex:
+    cache_key = _review_index_cache_key(artifact_path, decisions_path)
+    cached = _REVIEW_INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        _REVIEW_INDEX_CACHE.move_to_end(cache_key)
+        return cached
+    built = _build_review_index(artifact_path=artifact_path, decisions_path=decisions_path)
+    _REVIEW_INDEX_CACHE[cache_key] = built
+    while len(_REVIEW_INDEX_CACHE) > _REVIEW_INDEX_CACHE_MAX_ENTRIES:
+        _REVIEW_INDEX_CACHE.popitem(last=False)
+    return built
+
+
+def _matches_review_filters(
+    row: ReviewIndexRow,
+    *,
+    search: str | None,
+    review_status: str | None,
+) -> bool:
+    if review_status and review_status != "all" and row["review_status"] != review_status:
+        return False
+    normalized_search = (search or "").strip().lower()
+    if not normalized_search:
+        return True
+    haystacks = [
+        row["entry_id"],
+        row["display_text"],
+        row.get("normalized_form") or "",
+        row["review_summary"].get("primary_definition") or "",
+        *(row.get("warning_labels") or []),
+    ]
+    return any(normalized_search in str(value).lower() for value in haystacks)
+
+
+def _review_sort_key(row: ReviewIndexRow) -> tuple[int, int, int, str]:
+    pending_bucket = 0 if row["review_status"] == "pending" else 1
+    frequency_rank = row["frequency_rank"] if isinstance(row["frequency_rank"], int) else 10**9
+    return (-int(row["warning_count"] or 0), pending_bucket, frequency_rank, str(row["display_text"]).lower())
+
+
+def _load_compiled_payloads_for_row_numbers(
+    *,
+    artifact_path: Path,
+    row_numbers: set[int],
+) -> dict[int, dict[str, Any]]:
+    if not row_numbers:
+        return {}
+    payloads: dict[int, dict[str, Any]] = {}
+    for row_number, row in _iter_jsonl(artifact_path):
+        if row_number in row_numbers:
+            payloads[row_number] = row
+        if len(payloads) == len(row_numbers):
+            break
+    return payloads
+
+
+def get_jsonl_review_session_summary(
+    *,
+    artifact_path: Path,
+    decisions_path: Path,
+) -> dict[str, Any]:
+    index = _get_review_index(artifact_path=artifact_path, decisions_path=decisions_path)
+    return {
+        "artifact_filename": index["artifact_filename"],
+        "artifact_path": index["artifact_path"],
+        "artifact_sha256": index["artifact_sha256"],
+        "decisions_path": index["decisions_path"],
+        "total_items": index["total_items"],
+        "pending_count": index["pending_count"],
+        "approved_count": index["approved_count"],
+        "rejected_count": index["rejected_count"],
+    }
+
+
+def browse_jsonl_review_items(
+    *,
+    artifact_path: Path,
+    decisions_path: Path,
+    limit: int,
+    offset: int,
+    search: str | None = None,
+    review_status: str | None = None,
+) -> dict[str, Any]:
+    index = _get_review_index(artifact_path=artifact_path, decisions_path=decisions_path)
+    filtered_rows = [row for row in index["rows"] if _matches_review_filters(row, search=search, review_status=review_status)]
+    filtered_rows.sort(key=_review_sort_key)
+    page_rows = filtered_rows[offset: offset + limit]
+    payloads_by_row_number = _load_compiled_payloads_for_row_numbers(
+        artifact_path=artifact_path,
+        row_numbers={int(row["row_number"]) for row in page_rows},
+    )
+    items = [
+        {
+            **row,
+            "compiled_payload": payloads_by_row_number.get(int(row["row_number"]), {}),
+        }
+        for row in page_rows
+    ]
+    return {
+        **get_jsonl_review_session_summary(artifact_path=artifact_path, decisions_path=decisions_path),
+        "items": items,
+        "limit": limit,
+        "offset": offset,
+        "filtered_total": len(filtered_rows),
+        "has_more": offset + limit < len(filtered_rows),
+        "search": search.strip() if search else None,
+        "review_status": review_status or "all",
+    }
+
+
+def _get_review_item_payload(
+    *,
+    artifact_path: Path,
+    decisions_path: Path,
+    entry_id: str,
+) -> dict[str, Any]:
+    index = _get_review_index(artifact_path=artifact_path, decisions_path=decisions_path)
+    row = index["rows_by_id"].get(entry_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Compiled review item not found")
+    payloads = _load_compiled_payloads_for_row_numbers(
+        artifact_path=artifact_path,
+        row_numbers={int(row["row_number"])},
+    )
+    return {
+        **row,
+        "compiled_payload": payloads.get(int(row["row_number"]), {}),
+    }
+
 def _normalize_decision_rows(
     rows: list[dict[str, Any]],
     *,
@@ -297,85 +619,27 @@ def load_jsonl_review_session(
     artifact_path: Path,
     decisions_path: Path,
 ) -> dict[str, Any]:
-    compiled_rows = _read_jsonl(artifact_path)
-    if not compiled_rows:
-        raise HTTPException(status_code=400, detail="Compiled artifact is empty")
-
-    compiled_by_id: dict[str, dict[str, Any]] = {}
-    payload_sha_by_id: dict[str, str] = {}
-    items: list[dict[str, Any]] = []
-    review_prep = _import_review_prep_module()
-    prepared_rows = review_prep.build_review_prep_rows(compiled_rows, origin="realtime")
-    for index, row in enumerate(compiled_rows, start=1):
-        prepared = prepared_rows[index - 1]
-        if prepared["reasons"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Compiled row {index} failed validation: {'; '.join(prepared['reasons'])}",
-            )
-        entry_id = str(row.get("entry_id") or "").strip()
-        if not entry_id:
-            raise HTTPException(status_code=400, detail=f"Compiled row {index} is missing entry_id")
-        if entry_id in compiled_by_id:
-            raise HTTPException(status_code=400, detail=f"Duplicate compiled entry_id in artifact: {entry_id}")
-        compiled_by_id[entry_id] = row
-        payload_sha_by_id[entry_id] = _payload_sha256(row)
-
-    artifact_sha256 = _artifact_sha256(artifact_path)
-    decision_rows = _read_jsonl(decisions_path) if decisions_path.exists() else []
-    decisions_by_id = _normalize_decision_rows(
-        decision_rows,
-        artifact_sha256=artifact_sha256,
-        compiled_by_id=compiled_by_id,
-        payload_sha_by_id=payload_sha_by_id,
+    index = _get_review_index(artifact_path=artifact_path, decisions_path=decisions_path)
+    payloads_by_row_number = _load_compiled_payloads_for_row_numbers(
+        artifact_path=artifact_path,
+        row_numbers={int(row["row_number"]) for row in index["rows"]},
     )
-
-    approved_count = 0
-    rejected_count = 0
-    for row, prepared in zip(compiled_rows, prepared_rows, strict=False):
-        entry_id = str(row.get("entry_id") or "")
-        decision = decisions_by_id.get(entry_id)
-        review_status = "pending"
-        if decision:
-            if decision["decision"] == "approved":
-                review_status = "approved"
-                approved_count += 1
-            elif decision["decision"] == "rejected":
-                review_status = "rejected"
-                rejected_count += 1
-        items.append(
-            {
-                "entry_id": entry_id,
-                "entry_type": str(row.get("entry_type") or "word"),
-                "normalized_form": row.get("normalized_form"),
-                "display_text": _display_text(row),
-                "entity_category": row.get("entity_category"),
-                "language": row.get("language") or "en",
-                "frequency_rank": row.get("frequency_rank"),
-                "cefr_level": row.get("cefr_level"),
-                "review_priority": "warning" if prepared["warning_labels"] else "normal",
-                "warning_count": prepared["warning_count"],
-                "warning_labels": prepared["warning_labels"],
-                "review_summary": prepared["review_summary"],
-                "review_status": review_status,
-                "decision_reason": decision.get("decision_reason") if decision else None,
-                "reviewed_by": decision.get("reviewed_by") if decision else None,
-                "reviewed_at": decision.get("reviewed_at") if decision else None,
-                "compiled_payload": row,
-                "compiled_payload_sha256": payload_sha_by_id[entry_id],
-            }
-        )
-
-    total_items = len(compiled_rows)
+    items = [
+        {
+            **row,
+            "compiled_payload": payloads_by_row_number.get(int(row["row_number"]), {}),
+        }
+        for row in index["rows"]
+    ]
     return {
-        "artifact_filename": artifact_path.name,
-        "artifact_path": str(artifact_path),
-        "artifact_sha256": artifact_sha256,
-        "decisions_path": str(decisions_path),
-        "total_items": total_items,
-        "pending_count": total_items - approved_count - rejected_count,
-        "approved_count": approved_count,
-        "rejected_count": rejected_count,
+        "artifact_filename": index["artifact_filename"],
+        "artifact_path": index["artifact_path"],
+        "artifact_sha256": index["artifact_sha256"],
+        "decisions_path": index["decisions_path"],
+        "total_items": index["total_items"],
+        "pending_count": index["pending_count"],
+        "approved_count": index["approved_count"],
+        "rejected_count": index["rejected_count"],
         "items": items,
     }
 
@@ -391,39 +655,26 @@ def update_jsonl_review_decision(
 ) -> dict[str, Any]:
     if review_status not in {"pending", "approved", "rejected"}:
         raise HTTPException(status_code=400, detail="Invalid review_status")
-
-    session = load_jsonl_review_session(artifact_path=artifact_path, decisions_path=decisions_path)
-    items_by_id = {item["entry_id"]: item for item in session["items"]}
-    if entry_id not in items_by_id:
+    index = _get_review_index(artifact_path=artifact_path, decisions_path=decisions_path)
+    current_item = index["rows_by_id"].get(entry_id)
+    if current_item is None:
         raise HTTPException(status_code=404, detail="Compiled review item not found")
-
-    raw_rows = _read_jsonl(decisions_path) if decisions_path.exists() else []
-    compiled_by_id = {item["entry_id"]: item["compiled_payload"] for item in session["items"]}
-    payload_sha_by_id = {item["entry_id"]: item["compiled_payload_sha256"] for item in session["items"]}
-    decisions_by_id = _normalize_decision_rows(
-        raw_rows,
-        artifact_sha256=session["artifact_sha256"],
-        compiled_by_id=compiled_by_id,
-        payload_sha_by_id=payload_sha_by_id,
-    )
-
+    decisions_by_id = _load_decisions_index(decisions_path=decisions_path, artifact_sha256=index["artifact_sha256"])
     decisions_by_id[entry_id] = {
         "schema_version": DECISION_SCHEMA_VERSION,
-        "artifact_sha256": session["artifact_sha256"],
+        "artifact_sha256": index["artifact_sha256"],
         "entry_id": entry_id,
-        "entry_type": items_by_id[entry_id]["entry_type"],
-        "decision": "reopened" if review_status == "pending" else review_status,
+        "entry_type": current_item["entry_type"],
+        "decision": _decision_status_from_review_status(review_status),
         "decision_reason": decision_reason,
-        "compiled_payload_sha256": payload_sha_by_id[entry_id],
+        "compiled_payload_sha256": current_item["compiled_payload_sha256"],
         "reviewed_by": reviewed_by,
         "reviewed_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
     ordered_rows = [decisions_by_id[key] for key in sorted(decisions_by_id)]
     decisions_path.parent.mkdir(parents=True, exist_ok=True)
     _write_jsonl(decisions_path, ordered_rows)
-
-    refreshed = load_jsonl_review_session(artifact_path=artifact_path, decisions_path=decisions_path)
-    return next(item for item in refreshed["items"] if item["entry_id"] == entry_id)
+    return _get_review_item_payload(artifact_path=artifact_path, decisions_path=decisions_path, entry_id=entry_id)
 
 
 def bulk_update_jsonl_review_decisions(
@@ -436,18 +687,17 @@ def bulk_update_jsonl_review_decisions(
 ) -> dict[str, Any]:
     if review_status not in {"pending", "approved", "rejected"}:
         raise HTTPException(status_code=400, detail="Invalid review_status")
-
-    session = load_jsonl_review_session(artifact_path=artifact_path, decisions_path=decisions_path)
+    index = _get_review_index(artifact_path=artifact_path, decisions_path=decisions_path)
     reviewed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     ordered_rows: list[dict[str, Any]] = []
-    for item in session["items"]:
+    for item in index["rows"]:
         ordered_rows.append(
             {
                 "schema_version": DECISION_SCHEMA_VERSION,
-                "artifact_sha256": session["artifact_sha256"],
+                "artifact_sha256": index["artifact_sha256"],
                 "entry_id": item["entry_id"],
                 "entry_type": item["entry_type"],
-                "decision": "reopened" if review_status == "pending" else review_status,
+                "decision": _decision_status_from_review_status(review_status),
                 "decision_reason": decision_reason,
                 "compiled_payload_sha256": item["compiled_payload_sha256"],
                 "reviewed_by": reviewed_by,
@@ -457,7 +707,7 @@ def bulk_update_jsonl_review_decisions(
 
     decisions_path.parent.mkdir(parents=True, exist_ok=True)
     _write_jsonl(decisions_path, ordered_rows)
-    return load_jsonl_review_session(artifact_path=artifact_path, decisions_path=decisions_path)
+    return get_jsonl_review_session_summary(artifact_path=artifact_path, decisions_path=decisions_path)
 
 
 def materialize_jsonl_review_outputs(

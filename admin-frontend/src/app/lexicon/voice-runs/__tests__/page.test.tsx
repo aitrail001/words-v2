@@ -22,9 +22,49 @@ describe("LexiconVoiceRunsPage", () => {
   const mockGetLexiconVoiceRuns = getLexiconVoiceRuns as jest.Mock;
   const fetchMock = jest.fn();
   const push = jest.fn();
+  const originalClick = HTMLAnchorElement.prototype.click;
+  const allRuns = [
+    {
+      run_name: "voice-roundtrip",
+      run_path: "/data/lexicon/voice/voice-roundtrip",
+      updated_at: "2026-03-29T10:00:00Z",
+      planned_count: 6,
+      generated_count: 4,
+      existing_count: 1,
+      failed_count: 1,
+    },
+    {
+      run_name: "voice-run-b",
+      run_path: "/data/lexicon/voice/voice-run-b",
+      updated_at: "2026-03-29T09:00:00Z",
+      planned_count: 4,
+      generated_count: 4,
+      existing_count: 0,
+      failed_count: 0,
+    },
+    {
+      run_name: "voice-run-c",
+      run_path: "/data/lexicon/voice/voice-run-c",
+      updated_at: "2026-03-29T08:00:00Z",
+      planned_count: 3,
+      generated_count: 3,
+      existing_count: 0,
+      failed_count: 0,
+    },
+    {
+      run_name: "voice-run-d",
+      run_path: "/data/lexicon/voice/voice-run-d",
+      updated_at: "2026-03-29T07:00:00Z",
+      planned_count: 2,
+      generated_count: 2,
+      existing_count: 0,
+      failed_count: 0,
+    },
+  ];
 
   beforeEach(() => {
     jest.clearAllMocks();
+    HTMLAnchorElement.prototype.click = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
     fetchMock.mockResolvedValue({
       ok: true,
@@ -54,45 +94,24 @@ describe("LexiconVoiceRunsPage", () => {
       latest_manifest_rows: [{ status: "generated", locale: "en-US" }],
       latest_error_rows: [{ status: "failed", generation_error: "boom" }],
     });
-    mockGetLexiconVoiceRuns.mockResolvedValue([
-      {
-        run_name: "voice-roundtrip",
-        run_path: "/data/lexicon/voice/voice-roundtrip",
-        updated_at: "2026-03-29T10:00:00Z",
-        planned_count: 6,
-        generated_count: 4,
-        existing_count: 1,
-        failed_count: 1,
-      },
-      {
-        run_name: "voice-run-b",
-        run_path: "/data/lexicon/voice/voice-run-b",
-        updated_at: "2026-03-29T09:00:00Z",
-        planned_count: 4,
-        generated_count: 4,
-        existing_count: 0,
-        failed_count: 0,
-      },
-      {
-        run_name: "voice-run-c",
-        run_path: "/data/lexicon/voice/voice-run-c",
-        updated_at: "2026-03-29T08:00:00Z",
-        planned_count: 3,
-        generated_count: 3,
-        existing_count: 0,
-        failed_count: 0,
-      },
-      {
-        run_name: "voice-run-d",
-        run_path: "/data/lexicon/voice/voice-run-d",
-        updated_at: "2026-03-29T07:00:00Z",
-        planned_count: 2,
-        generated_count: 2,
-        existing_count: 0,
-        failed_count: 0,
-      },
-    ]);
+    mockGetLexiconVoiceRuns.mockImplementation(async ({ q, limit = 10, offset = 0 } = {}) => {
+      const filtered = q
+        ? allRuns.filter((run) => run.run_name.includes(q))
+        : allRuns;
+      return {
+        items: filtered.slice(offset, offset + limit),
+        total: filtered.length,
+        limit,
+        offset,
+        has_more: offset + limit < filtered.length,
+        q: q ?? null,
+      };
+    });
     window.history.pushState({}, "", "/lexicon/voice-runs");
+  });
+
+  afterAll(() => {
+    HTMLAnchorElement.prototype.click = originalClick;
   });
 
   it("redirects unauthenticated users to login", async () => {
@@ -138,21 +157,58 @@ describe("LexiconVoiceRunsPage", () => {
 
   it("pages recent voice runs horizontally", async () => {
     const user = userEvent.setup();
+    const pagedRuns = Array.from({ length: 12 }, (_, index) => ({
+      ...allRuns[0],
+      run_name: `voice-run-${index + 1}`,
+      run_path: `/data/lexicon/voice/voice-run-${index + 1}`,
+    }));
+    mockGetLexiconVoiceRuns.mockImplementation(async ({ q, limit = 10, offset = 0 } = {}) => {
+      const filtered = q ? pagedRuns.filter((run) => run.run_name.includes(q)) : pagedRuns;
+      return {
+        items: filtered.slice(offset, offset + limit),
+        total: filtered.length,
+        limit,
+        offset,
+        has_more: offset + limit < filtered.length,
+        q: q ?? null,
+      };
+    });
     render(<LexiconVoiceRunsPage />);
 
     await waitFor(() => expect(mockGetLexiconVoiceRuns).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getByTestId("lexicon-voice-runs")).toHaveTextContent("voice-roundtrip"));
+    await waitFor(() => expect(screen.getByTestId("lexicon-voice-runs")).toHaveTextContent("voice-run-1"));
     expect(screen.getByTestId("lexicon-voice-run-pagination")).toHaveTextContent("Page 1 of 2");
-    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-roundtrip");
-    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-b");
-    expect(screen.getByTestId("lexicon-voice-run-page")).not.toHaveTextContent("voice-run-c");
-    expect(screen.getByTestId("lexicon-voice-run-page")).not.toHaveTextContent("voice-run-d");
+    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-1");
+    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-10");
+    expect(screen.getByTestId("lexicon-voice-run-page")).not.toHaveTextContent("voice-run-11");
 
     await user.click(screen.getByRole("button", { name: "Next" }));
 
     expect(screen.getByTestId("lexicon-voice-run-pagination")).toHaveTextContent("Page 2 of 2");
-    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-c");
-    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-d");
+    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-11");
+    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-run-12");
+    expect(screen.getByTestId("lexicon-voice-run-page")).not.toHaveTextContent("voice-run-10");
+  });
+
+  it("applies server-side search before loading runs", async () => {
+    const user = userEvent.setup();
+    render(<LexiconVoiceRunsPage />);
+
+    await waitFor(() => expect(mockGetLexiconVoiceRuns).toHaveBeenCalledWith({
+      q: undefined,
+      limit: 10,
+      offset: 0,
+    }));
+
+    await user.type(screen.getByTestId("lexicon-voice-runs-search"), "roundtrip");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(mockGetLexiconVoiceRuns).toHaveBeenLastCalledWith({
+      q: "roundtrip",
+      limit: 10,
+      offset: 0,
+    }));
+    expect(screen.getByTestId("lexicon-voice-run-page")).toHaveTextContent("voice-roundtrip");
     expect(screen.getByTestId("lexicon-voice-run-page")).not.toHaveTextContent("voice-run-b");
   });
 

@@ -118,7 +118,7 @@ class TestLexiconOpsSnapshotListing:
         )
 
         assert response.status_code == 200
-        assert response.json() == []
+        assert response.json()["items"] == []
 
     @pytest.mark.asyncio
     async def test_list_snapshots_returns_counts_and_flags(self, client, mock_db, snapshot_root_env):
@@ -147,7 +147,7 @@ class TestLexiconOpsSnapshotListing:
         )
 
         assert response.status_code == 200
-        payload = response.json()
+        payload = response.json()["items"]
         by_snapshot = {item["snapshot"]: item for item in payload}
         assert set(by_snapshot.keys()) == {"words-1000", "demo"}
 
@@ -199,7 +199,7 @@ class TestLexiconOpsSnapshotListing:
         )
 
         assert response.status_code == 200
-        by_snapshot = {item["snapshot"]: item for item in response.json()}
+        by_snapshot = {item["snapshot"]: item for item in response.json()["items"]}
 
         base_item = by_snapshot["base-only"]
         assert base_item["workflow_stage"] == "base_artifacts"
@@ -512,6 +512,7 @@ class TestLexiconVoiceStorageRewrite:
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
         _mock_authenticated_user(mock_db, _make_user(user_id))
+        mock_db.add = MagicMock()
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = _make_user(user_id)
 
@@ -540,18 +541,15 @@ class TestLexiconVoiceStorageRewrite:
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload == [
-            {
-                "id": payload[0]["id"],
-                "policy_key": "word_default",
-                "content_scope": "word",
-                "primary_storage_kind": "local",
-                "primary_storage_base": "/tmp/voice-a",
-                "fallback_storage_kind": None,
-                "fallback_storage_base": None,
-                "asset_count": 2,
-            }
+        assert [(row["policy_key"], row["content_scope"], row["asset_count"]) for row in payload] == [
+            ("definition_default", "definition", 0),
+            ("example_default", "example", 0),
+            ("word_default", "word", 2),
         ]
+        assert all(row["primary_storage_kind"] == "local" for row in payload)
+        assert all(row["primary_storage_base"] == "/tmp/voice-a" for row in payload)
+        assert mock_db.add.call_count == 2
+        assert mock_db.commit.await_count == 1
 
 
 class TestLexiconVoiceRuns:
@@ -574,12 +572,40 @@ class TestLexiconVoiceRuns:
 
         assert response.status_code == 200
         payload = response.json()
-        assert len(payload) == 1
-        assert payload[0]["run_name"] == "voice-roundtrip"
-        assert payload[0]["planned_count"] == 3
-        assert payload[0]["generated_count"] == 1
-        assert payload[0]["existing_count"] == 1
-        assert payload[0]["failed_count"] == 1
+        assert payload["total"] == 1
+        assert payload["items"][0]["run_name"] == "voice-roundtrip"
+        assert payload["items"][0]["planned_count"] == 3
+        assert payload["items"][0]["generated_count"] == 1
+        assert payload["items"][0]["existing_count"] == 1
+        assert payload["items"][0]["failed_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_list_voice_runs_supports_search_and_pagination(self, client, mock_db, voice_root_env):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        for name in ("voice-roundtrip", "voice-run-b", "other-run"):
+            run_dir = voice_root_env / name
+            run_dir.mkdir()
+            _write_jsonl(run_dir / "voice_plan.jsonl", [{"unit_id": "1"}])
+            _write_jsonl(run_dir / "voice_manifest.jsonl", [{"status": "generated"}])
+            _write_jsonl(run_dir / "voice_errors.jsonl", [])
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-runs?q=voice&limit=1&offset=1",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 2
+        assert payload["limit"] == 1
+        assert payload["offset"] == 1
+        assert payload["has_more"] is False
+        assert payload["q"] == "voice"
+        assert len(payload["items"]) == 1
+        assert payload["items"][0]["run_name"] in {"voice-roundtrip", "voice-run-b"}
 
     @pytest.mark.asyncio
     async def test_get_voice_run_detail_returns_latest_rows(self, client, mock_db, voice_root_env):
@@ -618,6 +644,57 @@ class TestLexiconVoiceRuns:
         assert payload["artifacts"]["voice_plan_url"].endswith("/api/lexicon-ops/voice-runs/voice-roundtrip/artifacts/voice_plan.jsonl")
         assert len(payload["latest_manifest_rows"]) == 2
         assert len(payload["latest_error_rows"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_voice_run_detail_streams_large_manifest_without_loading_all_rows(
+        self, client, mock_db, voice_root_env
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        run_dir = voice_root_env / "voice-large"
+        run_dir.mkdir()
+        _write_jsonl(run_dir / "voice_plan.jsonl", [{"unit_id": str(index)} for index in range(8)])
+        manifest_rows = [
+            {
+                "status": "generated" if index % 2 == 0 else "existing",
+                "locale": "en-US" if index % 3 else "en-GB",
+                "voice_role": "female" if index % 2 == 0 else "male",
+                "content_scope": "word" if index < 6 else "definition",
+                "source_reference": "voice-large",
+                "sequence": index,
+            }
+            for index in range(8)
+        ]
+        error_rows = [
+            {
+                "status": "failed",
+                "locale": "en-US",
+                "voice_role": "female",
+                "content_scope": "example",
+                "source_reference": "voice-large",
+                "sequence": 99,
+            }
+        ]
+        _write_jsonl(run_dir / "voice_manifest.jsonl", manifest_rows)
+        _write_jsonl(run_dir / "voice_errors.jsonl", error_rows)
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-runs/voice-large",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["generated_count"] == 4
+        assert payload["existing_count"] == 4
+        assert payload["failed_count"] == 1
+        assert payload["locale_counts"] == {"en-GB": 3, "en-US": 6}
+        assert payload["voice_role_counts"] == {"female": 5, "male": 4}
+        assert payload["content_scope_counts"] == {"word": 6, "definition": 2, "example": 1}
+        assert payload["latest_manifest_rows"] == manifest_rows[-5:]
+        assert payload["latest_error_rows"] == error_rows
 
     @pytest.mark.asyncio
     async def test_get_voice_run_artifact_serves_jsonl_file(self, client, mock_db, voice_root_env):
