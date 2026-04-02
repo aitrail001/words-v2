@@ -61,7 +61,7 @@ class LexiconJobImportDbRequest(BaseModel):
     source_type: str
     source_reference: str | None = None
     language: str = "en"
-    conflict_mode: str = "upsert"
+    conflict_mode: str = "fail"
     error_mode: str = "fail_fast"
 
 

@@ -44,7 +44,7 @@ function currentEntryLabel(targetJob: LexiconJob): string {
 export default function LexiconVoiceImportPage() {
   const [inputPath, setInputPath] = useState("");
   const [language, setLanguage] = useState("en");
-  const [conflictMode, setConflictMode] = useState<"fail" | "skip" | "upsert">("upsert");
+  const [conflictMode, setConflictMode] = useState<"fail" | "skip" | "upsert">("fail");
   const [errorMode, setErrorMode] = useState<"fail_fast" | "continue">("continue");
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<LexiconVoiceImportResult | null>(null);

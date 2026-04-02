@@ -150,6 +150,7 @@ class TestLexiconJobsApi:
 
         assert response.status_code == 202
         assert response.json()["request_payload"]["input_path"] == str(manifest_path)
+        assert response.json()["request_payload"]["conflict_mode"] == "fail"
         mock_delay.assert_called_once()
 
     @pytest.mark.asyncio

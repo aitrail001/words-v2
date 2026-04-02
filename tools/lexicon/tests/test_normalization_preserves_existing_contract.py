@@ -67,3 +67,47 @@ class NormalizationPreservesExistingContractTests(unittest.TestCase):
         self.assertEqual(normalized["confusable_words"], [{"word": "ran", "note": "Past tense form."}])
         self.assertEqual(normalized["confidence"], 0.9)
         self.assertEqual(set(normalized["translations"].keys()), set(REQUIRED_TRANSLATION_LOCALES))
+
+    def test_word_payload_normalization_rejects_control_characters(self) -> None:
+        payload = {
+            "definition": "move quickly on foot",
+            "examples": [
+                {"sentence": "I run every morning.", "difficulty": "A1"},
+            ],
+            "cefr_level": "B1",
+            "primary_domain": "general",
+            "secondary_domains": ["transport"],
+            "register": "neutral",
+            "synonyms": ["jog"],
+            "antonyms": ["walk"],
+            "collocations": ["run fast"],
+            "grammar_patterns": ["run + adverb"],
+            "usage_note": "Common everyday verb.",
+            "forms": {
+                "plural_forms": ["runs"],
+                "verb_forms": {
+                    "base": "run",
+                    "third_person_singular": "runs",
+                    "past": "ran",
+                    "past_participle": "run",
+                    "gerund": "running",
+                },
+                "comparative": None,
+                "superlative": None,
+                "derivations": ["runner"],
+            },
+            "confusable_words": [{"word": "ran", "note": "Past tense form."}],
+            "confidence": 0.9,
+            "translations": {
+                locale: {
+                    "definition": f"{locale} definition",
+                    "usage_note": f"{locale} usage note",
+                    "examples": [f"{locale} example"],
+                }
+                for locale in REQUIRED_TRANSLATION_LOCALES
+            },
+        }
+        payload["translations"]["es"]["definition"] = "da\x00nar o impedir"
+
+        with self.assertRaisesRegex(RuntimeError, "control character"):
+            normalize_word_enrichment_payload(payload)

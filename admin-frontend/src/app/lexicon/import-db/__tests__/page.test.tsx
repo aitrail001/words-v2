@@ -45,7 +45,7 @@ describe("LexiconImportDbPage", () => {
         source_type: "lexicon_snapshot",
         source_reference: "lexicon-20260321-wordfreq",
         language: "en",
-        conflict_mode: "upsert",
+        conflict_mode: "fail",
         error_mode: "continue",
         row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
       },
@@ -79,7 +79,7 @@ describe("LexiconImportDbPage", () => {
         source_type: "lexicon_snapshot",
         source_reference: "lexicon-20260321-wordfreq",
         language: "en",
-        conflict_mode: "upsert",
+        conflict_mode: "fail",
         error_mode: "continue",
         row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
       },
@@ -133,6 +133,7 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByTestId("lexicon-db-section-nav")).toHaveTextContent("DB Inspector");
     expect(screen.getByTestId("lexicon-import-db-form-grid")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("data/lexicon/snapshots/.../reviewed/approved.jsonl")).toBeInTheDocument();
+    expect(screen.getByTestId("lexicon-import-db-conflict-mode")).toHaveValue("fail");
     expect(dryRunLexiconImport).not.toHaveBeenCalled();
     await user.type(screen.getByTestId("lexicon-import-db-input-path"), "data/lexicon/snapshots/demo/words.enriched.jsonl");
     await user.click(screen.getByTestId("lexicon-import-db-dry-run-button"));
@@ -145,7 +146,7 @@ describe("LexiconImportDbPage", () => {
       sourceType: "lexicon_snapshot",
       sourceReference: "lexicon-20260321-wordfreq",
       language: "en",
-      conflictMode: "upsert",
+      conflictMode: "fail",
       errorMode: "continue",
     }));
     expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
@@ -167,7 +168,7 @@ describe("LexiconImportDbPage", () => {
         source_type: "lexicon_snapshot",
         source_reference: "lexicon-20260321-wordfreq",
         language: "en",
-        conflict_mode: "upsert",
+        conflict_mode: "fail",
         error_mode: "continue",
         row_summary: { row_count: 1, word_count: 0, phrase_count: 1, reference_count: 0 },
       },
@@ -201,7 +202,7 @@ describe("LexiconImportDbPage", () => {
         source_type: "lexicon_snapshot",
         source_reference: "lexicon-20260321-wordfreq",
         language: "en",
-        conflict_mode: "upsert",
+        conflict_mode: "fail",
         error_mode: "continue",
         row_summary: { row_count: 3, word_count: 0, phrase_count: 3, reference_count: 0 },
       },
@@ -253,7 +254,7 @@ describe("LexiconImportDbPage", () => {
         request_payload: {
           input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
           source_reference: "lexicon-20260321-wordfreq",
-          conflict_mode: "upsert",
+          conflict_mode: "fail",
           error_mode: "continue",
         },
       result_payload: { created_words: 1 },
@@ -339,7 +340,7 @@ describe("LexiconImportDbPage", () => {
         target_key: `import_db:/data/lexicon/snapshots/demo/reviewed/approved-${index + 1}.jsonl`,
         request_payload: {
           input_path: `/data/lexicon/snapshots/demo/reviewed/approved-${index + 1}.jsonl`,
-          conflict_mode: "upsert",
+          conflict_mode: "fail",
           error_mode: "continue",
         },
         result_payload: { created_words: index + 1 },

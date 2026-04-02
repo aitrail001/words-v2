@@ -258,6 +258,7 @@ class TestLexiconImportsApi:
         assert response.status_code == 202
         data = response.json()
         assert data["total_rows"] == 2
+        assert data["conflict_mode"] == "fail"
         assert data["completed_rows"] == 2
         assert data["current_entry"] == "river bank"
 
