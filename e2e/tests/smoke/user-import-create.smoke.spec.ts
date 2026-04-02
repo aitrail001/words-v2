@@ -5,9 +5,9 @@ import { apiUrl, registerViaApi } from "../helpers/auth";
 type ImportItem = {
   id: string;
   user_id: string;
-  filename: string;
+  source_filename: string;
   status: string;
-  file_hash: string;
+  source_hash: string;
 };
 
 test("@smoke import create API returns 201 and appears in list", async ({ request }) => {
@@ -34,9 +34,9 @@ test("@smoke import create API returns 201 and appears in list", async ({ reques
   const created = (await createResponse.json()) as ImportItem;
   expect(created.id).toBeTruthy();
   expect(created.user_id).toBeTruthy();
-  expect(created.filename).toBe(filename);
-  expect(created.status).toBe("pending");
-  expect(created.file_hash).toBe(expectedHash);
+  expect(created.source_filename).toBe(filename);
+  expect(created.status).toBe("queued");
+  expect(created.source_hash).toBe(expectedHash);
 
   const listResponse = await request.get(`${apiUrl}/imports`, {
     headers: {
@@ -48,6 +48,6 @@ test("@smoke import create API returns 201 and appears in list", async ({ reques
   const imports = (await listResponse.json()) as ImportItem[];
   const matches = imports.filter((item) => item.id === created.id);
   expect(matches).toHaveLength(1);
-  expect(matches[0].filename).toBe(filename);
-  expect(matches[0].file_hash).toBe(expectedHash);
+  expect(matches[0].source_filename).toBe(filename);
+  expect(matches[0].source_hash).toBe(expectedHash);
 });
