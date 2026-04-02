@@ -292,10 +292,11 @@ def _parse_compiled_rows(payload_bytes: bytes) -> list[dict[str, Any]]:
             row = json.loads(line)
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=400, detail=f"Compiled review import line {line_number} is not valid JSON: {exc.msg}") from exc
-        errors = _validate_compiled_record(row)
+        sanitized_row = sanitize_control_characters(row)
+        errors = _validate_compiled_record(sanitized_row)
         if errors:
             raise HTTPException(status_code=400, detail=f"Compiled review import validation failed: {'; '.join(errors)}")
-        rows.append(sanitize_control_characters(row))
+        rows.append(sanitized_row)
     if not rows:
         raise HTTPException(status_code=400, detail="Compiled review import file is empty")
     seen_entry_ids: set[str] = set()

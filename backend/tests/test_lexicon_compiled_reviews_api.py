@@ -185,6 +185,46 @@ class TestLexiconCompiledReviewApi:
         assert persisted_payload["senses"][0]["translations"]["ar"]["examples"][0] == "هذا الشكل"
 
     @pytest.mark.asyncio
+    async def test_import_compiled_batch_revalidates_after_sanitizing_control_characters(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        existing_batch_result = MagicMock()
+        existing_batch_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [user_result, existing_batch_result]
+
+        row = {
+            "schema_version": "1.1.0",
+            "entry_id": "phrase:break-a-leg",
+            "entry_type": "phrase",
+            "normalized_form": "\x00",
+            "source_provenance": [{"source": "snapshot"}],
+            "word": "break a leg",
+            "part_of_speech": ["phrase"],
+            "cefr_level": "B1",
+            "frequency_rank": 100,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "senses": [],
+            "confusable_words": [],
+            "generated_at": "2026-03-21T00:00:00Z",
+            "phrase_kind": "idiom",
+            "display_form": "Break a leg",
+        }
+
+        response = await client.post(
+            "/api/lexicon-compiled-reviews/batches/import",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"source_reference": "snapshot-001"},
+            files={"file": ("words.enriched.jsonl", build_jsonl_bytes(row), "application/x-ndjson")},
+        )
+
+        assert response.status_code == 400
+        assert "validation failed" in response.json()["detail"]
+
+    @pytest.mark.asyncio
     async def test_list_items_returns_compiled_metadata(self, client, mock_db):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))

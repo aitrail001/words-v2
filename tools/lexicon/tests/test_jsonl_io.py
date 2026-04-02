@@ -8,6 +8,14 @@ from tools.lexicon.jsonl_io import append_jsonl, write_jsonl
 
 
 class JsonlIoTests(unittest.TestCase):
+    def test_write_jsonl_allows_standard_line_breaks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "rows.jsonl"
+
+            write_jsonl(path, [{"prompt": "line one\nline two\tindented"}])
+
+            self.assertTrue(path.exists())
+
     def test_write_jsonl_rejects_control_characters(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "rows.jsonl"
