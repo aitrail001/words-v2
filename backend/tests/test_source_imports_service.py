@@ -157,6 +157,12 @@ def test_parse_bulk_entry_text_supports_csv_newlines_and_whitespace_modes():
         "make up for",
         "on the other hand",
     ]
+    assert parse_bulk_entry_text('run,"make up for"\nwalk,"on the other hand"') == [
+        "run",
+        "make up for",
+        "walk",
+        "on the other hand",
+    ]
     assert parse_bulk_entry_text("run walk swim") == ["run", "walk", "swim"]
 
 

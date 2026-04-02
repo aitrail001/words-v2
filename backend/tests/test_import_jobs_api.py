@@ -107,3 +107,34 @@ class TestImportJobStatusEndpoints:
 
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
+
+    @pytest.mark.asyncio
+    async def test_create_word_list_from_import_job_returns_400_for_empty_selection(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=uuid.uuid4(),
+            source_filename="book.epub",
+            source_hash="e" * 64,
+            list_name="Book Import",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        job_result = MagicMock()
+        job_result.scalar_one_or_none.return_value = job
+        mock_db.execute.side_effect = [user_result, job_result]
+
+        response = await client.post(
+            f"/api/import-jobs/{job.id}/word-lists",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"name": "Imported", "selected_entries": []},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "At least one entry must be selected"

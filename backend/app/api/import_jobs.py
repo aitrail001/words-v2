@@ -71,17 +71,20 @@ async def create_word_list_from_import_job(
     db: AsyncSession = Depends(get_db),
 ) -> WordListResponse:
     job = await _get_import_job_for_user(db, job_id=job_id, user_id=current_user.id)
-    word_list = await create_word_list_from_entries(
-        db,
-        user_id=current_user.id,
-        job=job,
-        name=request.name.strip(),
-        description=request.description,
-        selected_entries=[
-            EntryRef(entry_type=entry.entry_type, entry_id=entry.entry_id)
-            for entry in request.selected_entries
-        ],
-    )
+    try:
+        word_list = await create_word_list_from_entries(
+            db,
+            user_id=current_user.id,
+            job=job,
+            name=request.name.strip(),
+            description=request.description,
+            selected_entries=[
+                EntryRef(entry_type=entry.entry_type, entry_id=entry.entry_id)
+                for entry in request.selected_entries
+            ],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _to_word_list_response(word_list)
 
 

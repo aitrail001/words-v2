@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -13,7 +13,6 @@ from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.uploads import resolve_upload_dir
 from app.models.import_job import ImportJob
-from app.models.import_source import ImportSource
 from app.models.learner_catalog_entry import LearnerCatalogEntry
 from app.models.user import User
 from app.models.word_list import WordList
@@ -21,10 +20,8 @@ from app.models.word_list_item import WordListItem
 from app.services.source_imports import (
     ENTRY_TYPE_PHRASE,
     ENTRY_TYPE_WORD,
-    EntryRef,
     SOURCE_TYPE_EPUB,
     create_import_job,
-    create_word_list_from_entries,
     fetch_import_matcher,
     get_or_create_import_source,
     hydrate_word_list_items,
@@ -356,7 +353,34 @@ async def get_word_list(
             select(WordListItem).where(WordListItem.word_list_id == word_list.id)
         )
     ).scalars().all()
-    matcher, _, learner_catalog = await fetch_import_matcher(db)
+    learner_catalog: dict[tuple[str, uuid.UUID], dict[str, object]] = {}
+    if item_rows:
+        catalog_rows = (
+            await db.execute(
+                select(LearnerCatalogEntry).where(
+                    or_(
+                        *[
+                            and_(
+                                LearnerCatalogEntry.entry_type == item.entry_type,
+                                LearnerCatalogEntry.entry_id == item.entry_id,
+                            )
+                            for item in item_rows
+                        ]
+                    )
+                )
+            )
+        ).scalars().all()
+        learner_catalog = {
+            (row.entry_type, row.entry_id): {
+                "display_text": row.display_text,
+                "normalized_form": row.normalized_form,
+                "browse_rank": row.browse_rank,
+                "cefr_level": row.cefr_level,
+                "phrase_kind": row.phrase_kind,
+                "primary_part_of_speech": row.primary_part_of_speech,
+            }
+            for row in catalog_rows
+        }
     items = hydrate_word_list_items(item_rows, learner_catalog)
     if q:
         lowered = q.strip().lower()
@@ -388,7 +412,8 @@ async def update_word_list(
     word_list = await _get_word_list_for_user(db, word_list_id=word_list_id, user_id=current_user.id)
     if request.name is not None:
         word_list.name = request.name.strip()
-    word_list.description = request.description
+    if "description" in request.model_fields_set:
+        word_list.description = request.description
     await db.commit()
     await db.refresh(word_list)
     return _to_word_list_response(word_list)

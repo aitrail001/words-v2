@@ -192,6 +192,37 @@ class TestWordListsApi:
         assert response.json()["detail"] == "Word list item not found"
 
     @pytest.mark.asyncio
+    async def test_update_word_list_preserves_description_when_omitted(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        list_id = uuid.uuid4()
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        word_list = WordList(
+            id=list_id,
+            user_id=user_id,
+            name="Original name",
+            description="Keep me",
+            created_at=datetime.now(timezone.utc),
+        )
+        list_result = MagicMock()
+        list_result.scalar_one_or_none.return_value = word_list
+        mock_db.execute.side_effect = [user_result, list_result]
+
+        response = await client.patch(
+            f"/api/word-lists/{list_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"name": "Renamed"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["name"] == "Renamed"
+        assert response.json()["description"] == "Keep me"
+        assert word_list.description == "Keep me"
+
+    @pytest.mark.asyncio
     async def test_bulk_add_entries_returns_word_list_detail_with_explicit_query_defaults(
         self,
         client,

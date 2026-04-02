@@ -11,7 +11,7 @@ from pathlib import Path
 import ebooklib
 from bs4 import BeautifulSoup
 from ebooklib import epub
-from sqlalchemy import Select, and_, case, func, literal_column, or_, select
+from sqlalchemy import Select, and_, func, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,6 @@ from app.models.import_job import ImportJob
 from app.models.import_source import ImportSource
 from app.models.import_source_entry import ImportSourceEntry
 from app.models.learner_catalog_entry import LearnerCatalogEntry
-from app.models.phrase_entry import PhraseEntry
 from app.models.word import Word
 from app.models.word_form import WordForm
 from app.models.word_list import WordList
@@ -144,14 +143,14 @@ def parse_bulk_entry_text(raw_text: str) -> list[str]:
         return [line.strip() for line in stripped.splitlines() if line.strip()][:MAX_BULK_RESOLVE_TERMS]
 
     if any(separator in stripped for separator in ("\n", ",", ";", '"')):
-        rows = next(csv.reader(io.StringIO(stripped), skipinitialspace=True))
         items: list[str] = []
-        for row in rows:
-            for part in row.splitlines():
-                for subpart in part.split(";"):
-                    value = subpart.strip()
-                    if value:
-                        items.append(value)
+        for row in csv.reader(io.StringIO(stripped), skipinitialspace=True):
+            for cell in row:
+                for part in cell.splitlines():
+                    for subpart in part.split(";"):
+                        value = subpart.strip()
+                        if value:
+                            items.append(value)
         return items[:MAX_BULK_RESOLVE_TERMS]
 
     return [term for term in stripped.split() if term][:MAX_BULK_RESOLVE_TERMS]

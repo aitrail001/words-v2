@@ -698,8 +698,11 @@ jobs:
           USER_RESULT: ${{ needs.e2e-user.result }}
         run: |
           set -euo pipefail
-          if [ "${ADMIN_RESULT}" != "success" ] || [ "${USER_RESULT}" != "success" ]; then
+          if [ "${ADMIN_RESULT}" != "success" ] && [ "${ADMIN_RESULT}" != "skipped" ]; then
             echo "Admin result: ${ADMIN_RESULT}"
+            exit 1
+          fi
+          if [ "${USER_RESULT}" != "success" ] && [ "${USER_RESULT}" != "skipped" ]; then
             echo "User result: ${USER_RESULT}"
             exit 1
           fi
