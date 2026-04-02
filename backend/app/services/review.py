@@ -4,6 +4,7 @@ import json
 import uuid
 import re
 import random
+from time import monotonic
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -102,6 +103,8 @@ class ReviewService:
         PROMPT_TYPE_COLLOCATION_CHECK: "collocation",
         PROMPT_TYPE_SITUATION_MATCHING: "situation",
     }
+    SAME_DAY_DISTRACTOR_POOL_LIMIT = 256
+    QUEUE_STATS_CACHE_TTL_SECONDS = 5.0
 
     def __init__(
         self,
@@ -115,6 +118,7 @@ class ReviewService:
             history_model if history_model is not None else self._resolve_history_model()
         )
         self.uses_legacy_queue = self.queue_model is ReviewCard
+        self._queue_stats_cache: dict[uuid.UUID, tuple[float, dict[str, Any]]] = {}
 
     @staticmethod
     def _normalize_prompt_text(value: str | None) -> str | None:
@@ -324,6 +328,38 @@ class ReviewService:
         )
 
     @classmethod
+    def _resolve_submit_review_mode_from_prompt_token(
+        cls,
+        *,
+        prompt_token_payload: dict[str, Any],
+    ) -> str:
+        return cls._normalize_review_mode(prompt_token_payload.get("review_mode"))
+
+    def _resolve_submit_outcome_from_prompt_token(
+        self,
+        *,
+        prompt_token_payload: dict[str, Any],
+        outcome: str | None,
+        selected_option_id: str | None,
+        typed_answer: str | None,
+    ) -> str:
+        issued_review_mode = self._resolve_submit_review_mode_from_prompt_token(
+            prompt_token_payload=prompt_token_payload
+        )
+        explicit_outcome = (
+            outcome
+            if issued_review_mode != self.REVIEW_MODE_MCQ and outcome in {"remember", "lookup"}
+            else None
+        )
+        if explicit_outcome is not None:
+            return explicit_outcome
+        return self._derive_objective_outcome_from_prompt_token(
+            prompt_token_payload=prompt_token_payload,
+            selected_option_id=selected_option_id,
+            typed_answer=typed_answer,
+        )
+
+    @classmethod
     async def _build_prompt_audio_payload(
         cls,
         assets: list[LexiconVoiceAsset] | None,
@@ -391,6 +427,25 @@ class ReviewService:
             prefs = UserPreference(user_id=user_id)
         self._review_preferences_cache[user_id] = prefs
         return prefs
+
+    def _get_cached_queue_stats(self, user_id: uuid.UUID) -> dict[str, Any] | None:
+        cached = self._queue_stats_cache.get(user_id)
+        if cached is None:
+            return None
+        expires_at, payload = cached
+        if expires_at <= monotonic():
+            self._queue_stats_cache.pop(user_id, None)
+            return None
+        return dict(payload)
+
+    def _store_cached_queue_stats(self, user_id: uuid.UUID, stats: dict[str, Any]) -> None:
+        self._queue_stats_cache[user_id] = (
+            monotonic() + self.QUEUE_STATS_CACHE_TTL_SECONDS,
+            dict(stats),
+        )
+
+    def _invalidate_queue_stats_cache(self, user_id: uuid.UUID) -> None:
+        self._queue_stats_cache.pop(user_id, None)
 
     @staticmethod
     def _normalize_review_depth_preset(value: str | None) -> str:
@@ -687,62 +742,70 @@ class ReviewService:
     ) -> list[str]:
         day_start, day_end = self._start_of_utc_day()
         entry_type = self._normalize_entry_type(target_entry_type)
+        cache_key = (user_id, entry_type)
+        if not hasattr(self, "_same_day_definition_distractor_pool_cache"):
+            self._same_day_definition_distractor_pool_cache: dict[
+                tuple[uuid.UUID, str], list[tuple[uuid.UUID, str]]
+            ] = {}
+        cached_pool = self._same_day_definition_distractor_pool_cache.get(cache_key)
 
-        if entry_type == "phrase":
-            result = await self.db.execute(
-                select(PhraseSense.definition)
-                .join(PhraseEntry, PhraseSense.phrase_entry_id == PhraseEntry.id)
-                .join(
-                    EntryReviewState,
-                    and_(
-                        EntryReviewState.entry_type == literal("phrase"),
-                        EntryReviewState.entry_id == PhraseEntry.id,
-                    ),
+        if cached_pool is None:
+            if entry_type == "phrase":
+                result = await self.db.execute(
+                    select(PhraseSense.id, PhraseSense.definition)
+                    .join(PhraseEntry, PhraseSense.phrase_entry_id == PhraseEntry.id)
+                    .join(
+                        EntryReviewState,
+                        and_(
+                            EntryReviewState.entry_type == literal("phrase"),
+                            EntryReviewState.entry_id == PhraseEntry.id,
+                        ),
+                    )
+                    .where(EntryReviewState.user_id == user_id)
+                    .where(EntryReviewState.is_suspended.is_(False))
+                    .where(self._same_day_due_condition(day_start, day_end))
+                    .order_by(
+                        EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                        EntryReviewState.next_due_at.asc().nullsfirst(),
+                        PhraseEntry.phrase_text.asc(),
+                        PhraseSense.order_index.asc(),
+                    )
+                    .limit(self.SAME_DAY_DISTRACTOR_POOL_LIMIT)
                 )
-                .where(EntryReviewState.user_id == user_id)
-                .where(EntryReviewState.is_suspended.is_(False))
-                .where(self._same_day_due_condition(day_start, day_end))
-                .where(PhraseSense.id != target_meaning_id)
-                .order_by(
-                    EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                    EntryReviewState.next_due_at.asc().nullsfirst(),
-                    PhraseEntry.phrase_text.asc(),
-                    PhraseSense.order_index.asc(),
+            else:
+                result = await self.db.execute(
+                    select(Meaning.id, Meaning.definition)
+                    .join(Word, Meaning.word_id == Word.id)
+                    .join(
+                        EntryReviewState,
+                        and_(
+                            EntryReviewState.entry_type == literal("word"),
+                            EntryReviewState.entry_id == Word.id,
+                        ),
+                    )
+                    .where(EntryReviewState.user_id == user_id)
+                    .where(EntryReviewState.is_suspended.is_(False))
+                    .where(self._same_day_due_condition(day_start, day_end))
+                    .order_by(
+                        EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                        EntryReviewState.next_due_at.asc().nullsfirst(),
+                        Word.frequency_rank.asc().nullslast(),
+                        Meaning.order_index.asc(),
+                    )
+                    .limit(self.SAME_DAY_DISTRACTOR_POOL_LIMIT)
                 )
-                .limit(limit + 5)
-            )
-            return [
-                definition
-                for definition in result.scalars().all()
+
+            cached_pool = [
+                (meaning_id, definition)
+                for meaning_id, definition in result.all()
                 if self._normalize_prompt_text(definition)
-            ][:limit]
+            ]
+            self._same_day_definition_distractor_pool_cache[cache_key] = cached_pool
 
-        result = await self.db.execute(
-            select(Meaning.definition)
-            .join(Word, Meaning.word_id == Word.id)
-            .join(
-                EntryReviewState,
-                and_(
-                    EntryReviewState.entry_type == literal("word"),
-                    EntryReviewState.entry_id == Word.id,
-                ),
-            )
-            .where(EntryReviewState.user_id == user_id)
-            .where(EntryReviewState.is_suspended.is_(False))
-            .where(self._same_day_due_condition(day_start, day_end))
-            .where(Meaning.id != target_meaning_id)
-            .order_by(
-                EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                EntryReviewState.next_due_at.asc().nullsfirst(),
-                Word.frequency_rank.asc().nullslast(),
-                Meaning.order_index.asc(),
-            )
-            .limit(limit + 5)
-        )
         return [
             definition
-            for definition in result.scalars().all()
-            if self._normalize_prompt_text(definition)
+            for meaning_id, definition in cached_pool
+            if meaning_id != target_meaning_id
         ][:limit]
 
     async def _fetch_adjacent_definition_distractors(
@@ -823,58 +886,66 @@ class ReviewService:
     ) -> list[str]:
         day_start, day_end = self._start_of_utc_day()
         entry_type = self._normalize_entry_type(target_entry_type)
+        cache_key = (user_id, entry_type)
+        if not hasattr(self, "_same_day_entry_distractor_pool_cache"):
+            self._same_day_entry_distractor_pool_cache: dict[
+                tuple[uuid.UUID, str], list[tuple[uuid.UUID, str]]
+            ] = {}
+        cached_pool = self._same_day_entry_distractor_pool_cache.get(cache_key)
 
-        if entry_type == "phrase":
-            result = await self.db.execute(
-                select(PhraseEntry.phrase_text)
-                .join(
-                    EntryReviewState,
-                    and_(
-                        EntryReviewState.entry_type == literal("phrase"),
-                        EntryReviewState.entry_id == PhraseEntry.id,
-                    ),
+        if cached_pool is None:
+            if entry_type == "phrase":
+                result = await self.db.execute(
+                    select(PhraseEntry.id, PhraseEntry.phrase_text)
+                    .join(
+                        EntryReviewState,
+                        and_(
+                            EntryReviewState.entry_type == literal("phrase"),
+                            EntryReviewState.entry_id == PhraseEntry.id,
+                        ),
+                    )
+                    .where(EntryReviewState.user_id == user_id)
+                    .where(EntryReviewState.is_suspended.is_(False))
+                    .where(self._same_day_due_condition(day_start, day_end))
+                    .order_by(
+                        EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                        EntryReviewState.next_due_at.asc().nullsfirst(),
+                        PhraseEntry.phrase_text.asc(),
+                    )
+                    .limit(self.SAME_DAY_DISTRACTOR_POOL_LIMIT)
                 )
-                .where(EntryReviewState.user_id == user_id)
-                .where(EntryReviewState.is_suspended.is_(False))
-                .where(self._same_day_due_condition(day_start, day_end))
-                .where(PhraseEntry.id != target_entry_id)
-                .order_by(
-                    EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                    EntryReviewState.next_due_at.asc().nullsfirst(),
-                    PhraseEntry.phrase_text.asc(),
+            else:
+                result = await self.db.execute(
+                    select(Word.id, Word.word)
+                    .join(
+                        EntryReviewState,
+                        and_(
+                            EntryReviewState.entry_type == literal("word"),
+                            EntryReviewState.entry_id == Word.id,
+                        ),
+                    )
+                    .where(EntryReviewState.user_id == user_id)
+                    .where(EntryReviewState.is_suspended.is_(False))
+                    .where(self._same_day_due_condition(day_start, day_end))
+                    .order_by(
+                        EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                        EntryReviewState.next_due_at.asc().nullsfirst(),
+                        Word.frequency_rank.asc().nullslast(),
+                    )
+                    .limit(self.SAME_DAY_DISTRACTOR_POOL_LIMIT)
                 )
-                .limit(limit + 5)
-            )
-            return [
-                phrase
-                for phrase in result.scalars().all()
-                if self._normalize_prompt_text(phrase)
-            ][:limit]
 
-        result = await self.db.execute(
-            select(Word.word)
-            .join(
-                EntryReviewState,
-                and_(
-                    EntryReviewState.entry_type == literal("word"),
-                    EntryReviewState.entry_id == Word.id,
-                ),
-            )
-            .where(EntryReviewState.user_id == user_id)
-            .where(EntryReviewState.is_suspended.is_(False))
-            .where(self._same_day_due_condition(day_start, day_end))
-            .where(Word.id != target_entry_id)
-            .order_by(
-                EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                EntryReviewState.next_due_at.asc().nullsfirst(),
-                Word.frequency_rank.asc().nullslast(),
-            )
-            .limit(limit + 5)
-        )
+            cached_pool = [
+                (entry_id, entry_text)
+                for entry_id, entry_text in result.all()
+                if self._normalize_prompt_text(entry_text)
+            ]
+            self._same_day_entry_distractor_pool_cache[cache_key] = cached_pool
+
         return [
-            word
-            for word in result.scalars().all()
-            if self._normalize_prompt_text(word)
+            entry_text
+            for entry_id, entry_text in cached_pool
+            if entry_id != target_entry_id
         ][:limit]
 
     async def _fetch_adjacent_entry_distractors(
@@ -2090,6 +2161,7 @@ class ReviewService:
 
         self.db.add(new_item)
         await self.db.commit()
+        self._invalidate_queue_stats_cache(user_id)
 
         logger.info(
             "Queue item created",
@@ -2137,6 +2209,7 @@ class ReviewService:
         )
         self.db.add(card)
         await self.db.commit()
+        self._invalidate_queue_stats_cache(user_id)
 
         logger.info(
             "Legacy queue item created",
@@ -2172,20 +2245,30 @@ class ReviewService:
         return latest_history_subquery, latest_history, next_review_expr, due_condition
 
     async def get_due_queue_items(
-        self, user_id: uuid.UUID, limit: int = 20
+        self,
+        user_id: uuid.UUID,
+        limit: int = 20,
+        hydrate_limit: int | None = 1,
+        item_id: uuid.UUID | None = None,
     ) -> list[dict[str, Any]]:
         """Get due queue items scoped to a user including prompt metadata."""
         now = datetime.now(timezone.utc)
-        fetch_limit = max(limit * 4, limit + 8)
-        state_result = await self.db.execute(
+        fetch_limit = 1 if item_id is not None else min(max(limit * 8, limit + 32), 200)
+        state_query = (
             select(EntryReviewState)
             .where(EntryReviewState.user_id == user_id)
             .where(EntryReviewState.is_suspended.is_(False))
-            .where(
+        )
+        if item_id is not None:
+            state_query = state_query.where(EntryReviewState.id == item_id)
+        else:
+            state_query = state_query.where(
                 (EntryReviewState.recheck_due_at.is_not(None) & (EntryReviewState.recheck_due_at <= now))
                 | (EntryReviewState.next_due_at.is_(None))
                 | (EntryReviewState.next_due_at <= now)
             )
+        state_result = await self.db.execute(
+            state_query
             .order_by(
                 EntryReviewState.recheck_due_at.asc().nullsfirst(),
                 EntryReviewState.next_due_at.asc().nullsfirst(),
@@ -2256,6 +2339,7 @@ class ReviewService:
 
             due_items: list[dict[str, Any]] = []
             for index, state in enumerate(review_states):
+                should_hydrate = hydrate_limit is None or index < hydrate_limit
                 if state.entry_type == "word":
                     word = words_by_id.get(state.entry_id)
                     if word is None:
@@ -2285,41 +2369,45 @@ class ReviewService:
                     if meaning is None:
                         continue
                     sentence = meaning_sentence_map.get(meaning.id)
-                    review_mode = self._select_review_mode(
-                        item=state,
-                        word=word.word,
-                        index=index,
-                        sentence=sentence,
-                        allow_confidence=bool(getattr(prefs, "enable_confidence_check", True)),
-                    )
-                    prompt = await self._build_card_prompt(
-                        review_mode=review_mode,
-                        source_text=self._normalize_prompt_text(word.word) or "Unavailable",
-                        definition=self._normalize_prompt_text(meaning.definition) or "No definition available.",
-                        sentence=sentence,
-                        is_phrase_entry=False,
-                        distractor_seed=str(meaning.id),
-                        meaning_id=meaning.id,
-                        index=index,
-                        alternative_definitions=[
-                            self._normalize_prompt_text(item.definition) or "No definition available."
-                            for item in active_meanings
-                            if item.id != meaning.id
-                        ],
-                        user_id=user_id,
-                        source_entry_id=word.id,
-                        source_entry_type="word",
-                        queue_item_id=state.id,
-                        previous_prompt_type=state.last_prompt_type,
-                    )
-                    detail = await self._build_word_detail_payload(
-                        user_id=user_id,
-                        word=word,
-                        meanings=meanings,
-                        example_by_meaning_id=meaning_sentence_map,
-                        remembered_count=word_history_count_map.get(word.id, 0),
-                        accent=accent,
-                    )
+                    review_mode = None
+                    prompt = None
+                    detail = None
+                    if should_hydrate:
+                        review_mode = self._select_review_mode(
+                            item=state,
+                            word=word.word,
+                            index=index,
+                            sentence=sentence,
+                            allow_confidence=bool(getattr(prefs, "enable_confidence_check", True)),
+                        )
+                        prompt = await self._build_card_prompt(
+                            review_mode=review_mode,
+                            source_text=self._normalize_prompt_text(word.word) or "Unavailable",
+                            definition=self._normalize_prompt_text(meaning.definition) or "No definition available.",
+                            sentence=sentence,
+                            is_phrase_entry=False,
+                            distractor_seed=str(meaning.id),
+                            meaning_id=meaning.id,
+                            index=index,
+                            alternative_definitions=[
+                                self._normalize_prompt_text(item.definition) or "No definition available."
+                                for item in active_meanings
+                                if item.id != meaning.id
+                            ],
+                            user_id=user_id,
+                            source_entry_id=word.id,
+                            source_entry_type="word",
+                            queue_item_id=state.id,
+                            previous_prompt_type=state.last_prompt_type,
+                        )
+                        detail = await self._build_word_detail_payload(
+                            user_id=user_id,
+                            word=word,
+                            meanings=meanings,
+                            example_by_meaning_id=meaning_sentence_map,
+                            remembered_count=word_history_count_map.get(word.id, 0),
+                            accent=accent,
+                        )
                     state.meaning_id = meaning.id
                     due_items.append(
                         {
@@ -2369,39 +2457,43 @@ class ReviewService:
                 if sense is None:
                     continue
                 sentence = sense_sentence_map.get(sense.id)
-                review_mode = self._select_review_mode(
-                    item=state,
-                    word=phrase.phrase_text,
-                    index=index,
-                    sentence=sentence,
-                    allow_confidence=bool(getattr(prefs, "enable_confidence_check", True)),
-                )
-                prompt = await self._build_card_prompt(
-                    review_mode=review_mode,
-                    source_text=self._normalize_prompt_text(phrase.phrase_text) or "Unavailable",
-                    definition=self._normalize_prompt_text(sense.definition) or "No definition available.",
-                    sentence=sentence,
-                    is_phrase_entry=True,
-                    distractor_seed=str(sense.id),
-                    meaning_id=sense.id,
-                    index=index,
-                    alternative_definitions=[
-                        self._normalize_prompt_text(item.definition) or "No definition available."
-                        for item in active_senses
-                        if item.id != sense.id
-                    ],
-                    user_id=user_id,
-                    source_entry_id=phrase.id,
-                    source_entry_type="phrase",
-                    queue_item_id=state.id,
-                    previous_prompt_type=state.last_prompt_type,
-                )
-                detail = await self._build_phrase_detail_payload(
-                    user_id=user_id,
-                    phrase=phrase,
-                    senses=senses,
-                    example_by_sense_id=sense_sentence_map,
-                )
+                review_mode = None
+                prompt = None
+                detail = None
+                if should_hydrate:
+                    review_mode = self._select_review_mode(
+                        item=state,
+                        word=phrase.phrase_text,
+                        index=index,
+                        sentence=sentence,
+                        allow_confidence=bool(getattr(prefs, "enable_confidence_check", True)),
+                    )
+                    prompt = await self._build_card_prompt(
+                        review_mode=review_mode,
+                        source_text=self._normalize_prompt_text(phrase.phrase_text) or "Unavailable",
+                        definition=self._normalize_prompt_text(sense.definition) or "No definition available.",
+                        sentence=sentence,
+                        is_phrase_entry=True,
+                        distractor_seed=str(sense.id),
+                        meaning_id=sense.id,
+                        index=index,
+                        alternative_definitions=[
+                            self._normalize_prompt_text(item.definition) or "No definition available."
+                            for item in active_senses
+                            if item.id != sense.id
+                        ],
+                        user_id=user_id,
+                        source_entry_id=phrase.id,
+                        source_entry_type="phrase",
+                        queue_item_id=state.id,
+                        previous_prompt_type=state.last_prompt_type,
+                    )
+                    detail = await self._build_phrase_detail_payload(
+                        user_id=user_id,
+                        phrase=phrase,
+                        senses=senses,
+                        example_by_sense_id=sense_sentence_map,
+                    )
                 state.meaning_id = sense.id
                 due_items.append(
                     {
@@ -2433,7 +2525,11 @@ class ReviewService:
                 .join(Meaning, ReviewCard.meaning_id == Meaning.id)
                 .join(Word, Meaning.word_id == Word.id)
                 .where(ReviewSession.user_id == user_id)
-                .where((ReviewCard.next_review.is_(None)) | (ReviewCard.next_review <= now))
+                .where(
+                    ReviewCard.id == item_id
+                    if item_id is not None
+                    else ((ReviewCard.next_review.is_(None)) | (ReviewCard.next_review <= now))
+                )
                 .order_by(ReviewCard.next_review.asc().nullsfirst())
                 .limit(limit)
             )
@@ -2446,8 +2542,12 @@ class ReviewService:
                 .join(Word, Meaning.word_id == Word.id)
                 .where(self.queue_model.user_id == user_id)
                 .where(
-                    (self.queue_model.next_review.is_(None))
-                    | (self.queue_model.next_review <= now)
+                    self.queue_model.id == item_id
+                    if item_id is not None
+                    else (
+                        (self.queue_model.next_review.is_(None))
+                        | (self.queue_model.next_review <= now)
+                    )
                 )
                 .order_by(self.queue_model.next_review.asc().nullsfirst())
                 .limit(limit)
@@ -2480,7 +2580,7 @@ class ReviewService:
                     ),
                 )
                 .where(self.queue_model.user_id == user_id)
-                .where(due_condition)
+                .where(self.queue_model.id == item_id if item_id is not None else due_condition)
                 .order_by(next_review_expr.asc().nullsfirst(), self.queue_model.created_at.asc())
                 .limit(limit)
             )
@@ -2492,6 +2592,7 @@ class ReviewService:
                 .join(Meaning, self.queue_model.meaning_id == Meaning.id)
                 .join(Word, Meaning.word_id == Word.id)
                 .where(self.queue_model.user_id == user_id)
+                .where(self.queue_model.id == item_id if item_id is not None else literal(True))
                 .limit(limit)
             )
             result = await self.db.execute(query)
@@ -2501,6 +2602,7 @@ class ReviewService:
         prefs = await self._get_user_review_preferences(user_id)
         allow_confidence = bool(getattr(prefs, "enable_confidence_check", True))
         for row in rows:
+            should_hydrate = hydrate_limit is None or len(due_items) < hydrate_limit
             if len(row) == 4:
                 item, word, definition, next_review = row
             else:
@@ -2513,37 +2615,40 @@ class ReviewService:
             meaning_id = getattr(item, "meaning_id", None)
             source_word_id = getattr(item, "word_id", None)
             source_sentence = None
-            if meaning_id is not None:
-                source_sentence = await self._fetch_first_meaning_sentence(meaning_id)
-            review_mode = self._select_review_mode(
-                item=item,
-                word=self._normalize_prompt_text(word),
-                index=len(due_items),
-                sentence=source_sentence,
-                allow_confidence=allow_confidence,
-            )
-
-            prompt = await self._build_card_prompt(
-                review_mode=review_mode,
-                source_text=self._normalize_prompt_text(word) or "Unavailable",
-                definition=self._normalize_prompt_text(definition) or "No definition available.",
-                sentence=source_sentence,
-                is_phrase_entry=False,
-                distractor_seed=str(getattr(item, "meaning_id", "")),
-                meaning_id=meaning_id or uuid.uuid4(),
-                index=len(due_items),
-                user_id=user_id,
-                source_entry_id=source_word_id,
-                source_entry_type="word",
-                queue_item_id=getattr(item, "id", None),
-                previous_prompt_type=getattr(item, "last_prompt_type", None),
-            )
+            review_mode = None
+            prompt = None
             detail = None
-            if source_word_id is not None:
-                detail = await self._build_detail_payload_for_word_id(
-                    user_id=user_id,
-                    word_id=source_word_id,
+            if should_hydrate:
+                if meaning_id is not None:
+                    source_sentence = await self._fetch_first_meaning_sentence(meaning_id)
+                review_mode = self._select_review_mode(
+                    item=item,
+                    word=self._normalize_prompt_text(word),
+                    index=len(due_items),
+                    sentence=source_sentence,
+                    allow_confidence=allow_confidence,
                 )
+
+                prompt = await self._build_card_prompt(
+                    review_mode=review_mode,
+                    source_text=self._normalize_prompt_text(word) or "Unavailable",
+                    definition=self._normalize_prompt_text(definition) or "No definition available.",
+                    sentence=source_sentence,
+                    is_phrase_entry=False,
+                    distractor_seed=str(getattr(item, "meaning_id", "")),
+                    meaning_id=meaning_id or uuid.uuid4(),
+                    index=len(due_items),
+                    user_id=user_id,
+                    source_entry_id=source_word_id,
+                    source_entry_type="word",
+                    queue_item_id=getattr(item, "id", None),
+                    previous_prompt_type=getattr(item, "last_prompt_type", None),
+                )
+                if source_word_id is not None:
+                    detail = await self._build_detail_payload_for_word_id(
+                        user_id=user_id,
+                        word_id=source_word_id,
+                    )
 
             due_items.append(
                 {
@@ -2568,6 +2673,17 @@ class ReviewService:
             )
 
         return due_items
+
+    async def get_queue_item(self, user_id: uuid.UUID, item_id: uuid.UUID) -> dict[str, Any]:
+        due_items = await self.get_due_queue_items(
+            user_id=user_id,
+            limit=1,
+            hydrate_limit=1,
+            item_id=item_id,
+        )
+        if not due_items:
+            raise ValueError(f"Queue item {item_id} not found")
+        return due_items[0]
 
     async def _get_latest_history_for_meaning(
         self, user_id: uuid.UUID, meaning_id: uuid.UUID
@@ -2858,7 +2974,7 @@ class ReviewService:
         prompt: dict[str, Any] | None = None,
         schedule_override: str | None = None,
     ) -> Any:
-        return await submit_queue_review_impl(
+        result = await submit_queue_review_impl(
             self,
             item_id=item_id,
             quality=quality,
@@ -2874,6 +2990,8 @@ class ReviewService:
             prompt=prompt,
             schedule_override=schedule_override,
         )
+        self._invalidate_queue_stats_cache(user_id)
+        return result
 
     async def _submit_entry_state_review(
         self,
@@ -3008,6 +3126,9 @@ class ReviewService:
 
     async def get_queue_stats(self, user_id: uuid.UUID) -> dict[str, Any]:
         """Get queue totals, due counts, and aggregate performance stats."""
+        cached = self._get_cached_queue_stats(user_id)
+        if cached is not None:
+            return cached
         now = datetime.now(timezone.utc)
 
         if self.uses_legacy_queue:
@@ -3131,13 +3252,15 @@ class ReviewService:
         correct_count = int(correct_count or 0)
         accuracy = (correct_count / review_count) if review_count > 0 else 0.0
 
-        return {
+        stats = {
             "total_items": total_items,
             "due_items": due_items,
             "review_count": review_count,
             "correct_count": correct_count,
             "accuracy": accuracy,
         }
+        self._store_cached_queue_stats(user_id, stats)
+        return stats
 
     async def get_review_analytics_summary(
         self,
@@ -3298,6 +3421,7 @@ class ReviewService:
         card.next_review = datetime.now(timezone.utc) + timedelta(days=next_interval)
 
         await self.db.commit()
+        self._invalidate_queue_stats_cache(user_id)
 
         logger.info(
             "Review submitted",

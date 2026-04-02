@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   startLearningEntry,
@@ -158,6 +158,7 @@ export default function ReviewPage() {
   const [reviewPreferences, setReviewPreferences] = useState<UserPreferences | null>(null);
   const [audioReplayCount, setAudioReplayCount] = useState(0);
   const [challengeStartedAtMs, setChallengeStartedAtMs] = useState<number | null>(null);
+  const hydratingQueueItemIdRef = useRef<string | null>(null);
   const { play, loadingUrl } = useLearnerAudio();
 
   useEffect(() => {
@@ -232,6 +233,52 @@ export default function ReviewPage() {
     </div>
   );
 
+  useEffect(() => {
+    if (!started || completed || !currentCard?.queue_item_id) {
+      return;
+    }
+    if (currentCard.prompt) {
+      return;
+    }
+    if (hydratingQueueItemIdRef.current === currentCard.queue_item_id) {
+      return;
+    }
+
+    let cancelled = false;
+    hydratingQueueItemIdRef.current = currentCard.queue_item_id;
+    void apiClient
+      .get<ReviewQueueCard>(`/reviews/queue/${currentCard.queue_item_id}`)
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        setCards((existing) =>
+          existing.map((card, index) =>
+            index === currentIndex
+              ? {
+                  ...card,
+                  ...payload,
+                  queue_item_id: payload.queue_item_id ?? payload.id ?? card.queue_item_id,
+                  detail: payload.detail ?? card.detail ?? null,
+                  schedule_options: payload.schedule_options ?? card.schedule_options ?? [],
+                }
+              : card,
+          ),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          if (hydratingQueueItemIdRef.current === currentCard.queue_item_id) {
+            hydratingQueueItemIdRef.current = null;
+          }
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cards, completed, currentCard, currentIndex, started]);
+
   const buildQueueSubmitPayload = (
     card: ReviewQueueCard,
     extras: Record<string, unknown>,
@@ -256,6 +303,7 @@ export default function ReviewPage() {
   const startQueueReview = async () => {
     clearStoredReviewSession();
     setAudioReplayCount(0);
+    hydratingQueueItemIdRef.current = null;
     setLoading(true);
     try {
       const dueCards = await apiClient.get<ReviewQueueCard[]>("/reviews/queue/due");
@@ -275,6 +323,7 @@ export default function ReviewPage() {
   const startLearningMode = async (entryType: "word" | "phrase", entryId: string) => {
     clearStoredReviewSession();
     setAudioReplayCount(0);
+    hydratingQueueItemIdRef.current = null;
     setLoading(true);
     try {
       const payload = await startLearningEntry(entryType, entryId);
@@ -307,6 +356,7 @@ export default function ReviewPage() {
       setRevealState(null);
       setTypedAnswer("");
       setAudioReplayCount(0);
+      hydratingQueueItemIdRef.current = null;
       setChallengeStartedAtMs(Date.now());
       return;
     }
@@ -685,6 +735,13 @@ export default function ReviewPage() {
       </div>
       {reviewDepthBanner}
 
+      {!prompt ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+          Loading review item...
+        </div>
+      ) : null}
+
+      {prompt ? (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         {prompt?.stem ? <p className="mb-2 text-sm text-slate-500">{prompt.stem}</p> : null}
         {prompt?.prompt_type === "audio_to_definition" && promptAudioUrl ? (
@@ -723,7 +780,9 @@ export default function ReviewPage() {
           <p className="text-xl font-semibold text-slate-900">{promptText}</p>
         )}
       </div>
+      ) : null}
 
+      {prompt ? (
       <div className="space-y-2">
         {prompt?.options?.map((option) => (
           <button
@@ -772,18 +831,19 @@ export default function ReviewPage() {
           </div>
         ) : null}
       </div>
+      ) : null}
 
       <div className="space-y-2 pt-2">
         <button
           onClick={() => void onRemember()}
-          disabled={loading}
+          disabled={loading || !prompt}
           className="w-full rounded-md bg-emerald-600 px-4 py-2 text-white disabled:opacity-50"
         >
           I remember it
         </button>
         <button
           onClick={() => void onLookup()}
-          disabled={loading}
+          disabled={loading || !prompt}
           className="w-full rounded-md bg-amber-500 px-4 py-2 text-white disabled:opacity-50"
         >
           Show meaning

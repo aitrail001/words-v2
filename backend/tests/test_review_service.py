@@ -5,8 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+import app.services.review as review_module
 from app.services.review import ReviewService
-from app.models.review import ReviewSession, ReviewCard
+from app.models.review import ReviewSession, ReviewCard, ReviewHistory
 from app.models.entry_review import EntryReviewState
 from app.models.word import Word
 from app.models.meaning import Meaning
@@ -281,7 +282,11 @@ class TestQueueDue:
             (meaning_id, "They jumped the gun and announced it early.")
         ]
         distractor_result = MagicMock()
-        distractor_result.scalars.return_value.all.return_value = ["cut corners", "miss the boat", "take over"]
+        distractor_result.all.return_value = [
+            (uuid.uuid4(), "cut corners"),
+            (uuid.uuid4(), "miss the boat"),
+            (uuid.uuid4(), "take over"),
+        ]
         history_count_result = MagicMock()
         history_count_result.all.return_value = [(meaning_id, 3)]
         mock_db.execute.side_effect = [
@@ -1301,6 +1306,62 @@ class TestQueueStats:
         assert stats["correct_count"] == 7
         assert stats["accuracy"] == 0.7
 
+    @pytest.mark.asyncio
+    async def test_get_queue_stats_uses_short_lived_cache(self, review_service, mock_db):
+        user_id = uuid.uuid4()
+
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 5
+        due_result = MagicMock()
+        due_result.scalar_one.return_value = 2
+        aggregate_result = MagicMock()
+        aggregate_result.one.return_value = (10, 7)
+        mock_db.execute.side_effect = [total_result, due_result, aggregate_result]
+
+        first = await review_service.get_queue_stats(user_id=user_id)
+        second = await review_service.get_queue_stats(user_id=user_id)
+
+        assert first == second
+        assert mock_db.execute.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_invalidates_queue_stats_cache(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        review_service._store_cached_queue_stats(
+            user_id,
+            {
+                "total_items": 5,
+                "due_items": 2,
+                "review_count": 10,
+                "correct_count": 7,
+                "accuracy": 0.7,
+            },
+        )
+
+        queue_item = MagicMock()
+        queue_item.id = uuid.uuid4()
+
+        async def fake_submit_queue_review_impl(*args, **kwargs):
+            return queue_item
+
+        monkeypatch.setattr(
+            review_module,
+            "submit_queue_review_impl",
+            fake_submit_queue_review_impl,
+        )
+
+        result = await review_service.submit_queue_review(
+            item_id=queue_item.id,
+            quality=3,
+            time_spent_ms=1200,
+            user_id=user_id,
+        )
+
+        assert result is queue_item
+        assert review_service._get_cached_queue_stats(user_id) is None
+
 
 class TestLearningStart:
     @pytest.mark.asyncio
@@ -1733,7 +1794,53 @@ class TestReviewRedesignGaps:
 
         executed_query = mock_db.execute.await_args_list[0].args[0]
         compiled = executed_query.compile(compile_kwargs={"literal_binds": True})
-        assert "LIMIT 20" in str(compiled)
+        assert "LIMIT 40" in str(compiled)
+
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_uses_wide_overfetch_window_for_small_limits(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = state_result
+
+        await review_service.get_due_queue_items(user_id=user_id, limit=1)
+
+        executed_query = mock_db.execute.await_args_list[0].args[0]
+        compiled = executed_query.compile(compile_kwargs={"literal_binds": True})
+        assert "LIMIT 33" in str(compiled)
+
+    @pytest.mark.asyncio
+    async def test_fetch_same_day_entry_distractors_reuses_request_local_pool(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        result = MagicMock()
+        result.all.return_value = [
+            (uuid.uuid4(), "alpha"),
+            (uuid.uuid4(), "beta"),
+            (uuid.uuid4(), "gamma"),
+            (uuid.uuid4(), "delta"),
+        ]
+        mock_db.execute.return_value = result
+
+        first = await review_service._fetch_same_day_entry_distractors(
+            user_id=user_id,
+            target_entry_id=uuid.uuid4(),
+            target_entry_type="word",
+            limit=3,
+        )
+        second = await review_service._fetch_same_day_entry_distractors(
+            user_id=user_id,
+            target_entry_id=uuid.uuid4(),
+            target_entry_type="word",
+            limit=3,
+        )
+
+        assert first == ["alpha", "beta", "gamma"]
+        assert second == ["alpha", "beta", "gamma"]
+        assert mock_db.execute.await_count == 1
 
 
 class TestCompleteSession:
@@ -1856,6 +1963,138 @@ class TestEntryReviewStateConcurrency:
         assert updated is entry_state
         mock_db.add.assert_not_called()
         mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_ignores_client_outcome_for_objective_prompts(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        state_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        entry_state = EntryReviewState(
+            id=state_id,
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.4,
+        )
+
+        locked_result = MagicMock()
+        locked_result.scalar_one_or_none.return_value = entry_state
+        detail_result = MagicMock()
+        detail_result.scalar_one_or_none.return_value = Word(id=entry_id, word="drum", language="en")
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [
+            Meaning(
+                id=meaning_id,
+                word_id=entry_id,
+                definition="A percussion instrument.",
+                part_of_speech="noun",
+                order_index=0,
+            )
+        ]
+        history_result = MagicMock()
+        history_result.scalar_one.return_value = 0
+        mock_db.execute.side_effect = [locked_result]
+        review_service._build_detail_payload_for_word_id = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(entry_id), "display_text": "drum"}
+        )
+
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": str(uuid.uuid4()),
+                "user_id": str(user_id),
+                "queue_item_id": str(state_id),
+                "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(entry_id),
+                "source_meaning_id": str(meaning_id),
+                "correct_option_id": "A",
+            }
+        )
+
+        updated = await review_service.submit_queue_review(
+            item_id=state_id,
+            quality=4,
+            time_spent_ms=5000,
+            user_id=user_id,
+            selected_option_id="B",
+            outcome="remember",
+            prompt_token=prompt_token,
+        )
+
+        assert updated.outcome == "wrong"
+        assert updated.needs_relearn is True
+
+
+class TestLegacyQueueSubmitHardening:
+    @pytest.mark.asyncio
+    async def test_legacy_submit_ignores_client_outcome_for_objective_prompts(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        item_id = uuid.uuid4()
+        session_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+
+        review_service.queue_model = ReviewCard
+        review_service.history_model = ReviewHistory
+        review_service.uses_legacy_queue = True
+
+        missing_state_result = MagicMock()
+        missing_state_result.scalar_one_or_none.return_value = None
+        legacy_item = ReviewCard(
+            id=item_id,
+            session_id=session_id,
+            word_id=word_id,
+            meaning_id=meaning_id,
+            card_type="flashcard",
+            ease_factor=2.5,
+            interval_days=3,
+            repetitions=1,
+        )
+        legacy_result = MagicMock()
+        legacy_result.scalar_one_or_none.return_value = legacy_item
+        mock_db.execute.side_effect = [
+            missing_state_result,
+            legacy_result,
+        ]
+        review_service._build_detail_payload_for_word_id = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "drum"}
+        )
+
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": str(uuid.uuid4()),
+                "user_id": str(user_id),
+                "queue_item_id": str(item_id),
+                "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(word_id),
+                "source_meaning_id": str(meaning_id),
+                "correct_option_id": "A",
+            }
+        )
+
+        updated = await review_service.submit_queue_review(
+            item_id=item_id,
+            quality=4,
+            time_spent_ms=5000,
+            user_id=user_id,
+            selected_option_id="B",
+            outcome="remember",
+            prompt_token=prompt_token,
+        )
+
+        assert updated.outcome == "wrong"
+        assert updated.needs_relearn is True
 
 
 class TestPromptTokenHardening:

@@ -370,7 +370,7 @@ async def get_due_queue_items(
     """Get due items from the review queue with prompt metadata."""
     request_start = perf_counter()
     service = ReviewService(db)
-    due_items = await service.get_due_queue_items(current_user.id, limit=limit)
+    due_items = await service.get_due_queue_items(current_user.id, limit=limit, hydrate_limit=1)
 
     items = [
         _to_queue_item_response(
@@ -499,6 +499,42 @@ async def get_queue_stats(
     )
     logger.info("reviews_request", route_name="queue_stats", **metrics)
     return QueueStatsResponse(**stats)
+
+
+@router.get("/queue/{item_id}", response_model=QueueItemResponse)
+async def get_queue_item(
+    item_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QueueItemResponse:
+    """Get a fully hydrated queue item for the current user."""
+    request_start = perf_counter()
+    service = ReviewService(db)
+    try:
+        due_entry = await service.get_queue_item(current_user.id, item_id=item_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_item", **metrics)
+    return _to_queue_item_response(
+        due_entry["item"],
+        word=due_entry["word"],
+        definition=due_entry["definition"],
+        review_mode=due_entry.get("review_mode"),
+        prompt=due_entry.get("prompt"),
+        source_entry_type=due_entry.get("source_entry_type"),
+        source_entry_id=due_entry.get("source_entry_id"),
+        detail=due_entry.get("detail"),
+        schedule_options=due_entry.get("schedule_options"),
+    )
 
 
 @router.get("/analytics/summary", response_model=ReviewAnalyticsSummaryResponse)

@@ -1,0 +1,68 @@
+
+          /\      |‾‾| /‾‾/   /‾‾/   
+     /\  /  \     |  |/  /   /  /    
+    /  \/    \    |     (   /   ‾‾\  
+   /          \   |  |\  \ |  (‾)  | 
+  / __________ \  |__| \__\ \_____/ .io
+
+     execution: local
+        script: benchmarks/k6/review-dev.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 35 max VUs, 45s max duration (incl. graceful stop):
+              * default: 35 looping VUs for 15s (gracefulStop: 30s)
+
+
+running (01.0s), 35/35 VUs, 0 complete and 0 interrupted iterations
+default   [   5% ] 35 VUs  00.7s/15s
+
+running (02.0s), 35/35 VUs, 0 complete and 0 interrupted iterations
+default   [  12% ] 35 VUs  01.7s/15s
+
+running (03.0s), 35/35 VUs, 6 complete and 0 interrupted iterations
+default   [  18% ] 35 VUs  02.7s/15s
+
+running (04.0s), 35/35 VUs, 14 complete and 0 interrupted iterations
+default   [  25% ] 35 VUs  03.7s/15s
+
+running (05.0s), 35/35 VUs, 18 complete and 0 interrupted iterations
+default   [  32% ] 35 VUs  04.7s/15s
+
+running (06.0s), 35/35 VUs, 31 complete and 0 interrupted iterations
+default   [  38% ] 35 VUs  05.7s/15s
+
+running (07.0s), 35/35 VUs, 38 complete and 0 interrupted iterations
+default   [  45% ] 35 VUs  06.7s/15s
+
+running (08.0s), 35/35 VUs, 45 complete and 0 interrupted iterations
+default   [  52% ] 35 VUs  07.7s/15s
+
+running (09.0s), 35/35 VUs, 51 complete and 0 interrupted iterations
+default   [  58% ] 35 VUs  08.7s/15s
+
+running (10.0s), 35/35 VUs, 56 complete and 0 interrupted iterations
+default   [  65% ] 35 VUs  09.7s/15s
+
+running (11.0s), 35/35 VUs, 70 complete and 0 interrupted iterations
+default   [  72% ] 35 VUs  10.7s/15s
+
+running (12.0s), 35/35 VUs, 87 complete and 0 interrupted iterations
+default   [  78% ] 35 VUs  11.7s/15s
+
+running (13.0s), 35/35 VUs, 103 complete and 0 interrupted iterations
+default   [  85% ] 35 VUs  12.7s/15s
+
+running (14.0s), 35/35 VUs, 120 complete and 0 interrupted iterations
+default   [  92% ] 35 VUs  13.7s/15s
+
+running (15.0s), 35/35 VUs, 135 complete and 0 interrupted iterations
+default   [  98% ] 35 VUs  14.7s/15s
+
+running (16.0s), 25/35 VUs, 151 complete and 0 interrupted iterations
+default ↓ [ 100% ] 35 VUs  15s
+
+running (17.0s), 12/35 VUs, 164 complete and 0 interrupted iterations
+default ↓ [ 100% ] 35 VUs  15s
+
+running (17.2s), 00/35 VUs, 176 complete and 0 interrupted iterations
+default ✓ [ 100% ] 35 VUs  15s

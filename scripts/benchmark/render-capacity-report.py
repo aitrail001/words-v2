@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import statistics
 import sys
 from pathlib import Path
@@ -55,6 +56,22 @@ def load_sql_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def select_container_summary(
+    stats_summary: dict[str, dict[str, float]],
+    *,
+    preferred_names: list[str],
+    suffixes: list[str],
+) -> dict[str, float]:
+    for name in preferred_names:
+        if name in stats_summary:
+            return stats_summary[name]
+    for suffix in suffixes:
+        for name, values in stats_summary.items():
+            if name.endswith(suffix):
+                return values
+    return {}
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print("usage: render-capacity-report.py <results-dir> <report-path> <host-budget>", file=sys.stderr)
@@ -63,6 +80,11 @@ def main() -> int:
     results_dir = Path(sys.argv[1])
     report_path = Path(sys.argv[2])
     host_budget = sys.argv[3]
+    report_title = os.environ.get("CAPACITY_REPORT_TITLE", "Single-Host Capacity Report")
+    workload_target = os.environ.get(
+        "CAPACITY_WORKLOAD_TARGET",
+        "p95 < 500ms and error rate < 5% on the mixed API workload",
+    )
 
     stage_dirs = sorted(
         (path for path in results_dir.iterdir() if path.is_dir()),
@@ -81,8 +103,16 @@ def main() -> int:
         p99 = metric_value(summary, "http_req_duration", "p(99)")
         error_rate = metric_value(summary, "http_req_failed", "rate")
         rps = metric_value(summary, "http_reqs", "rate")
-        backend_cpu = stats.get("words-prod-backend", {})
-        postgres_cpu = stats.get("words-prod-postgres", {})
+        backend_cpu = select_container_summary(
+            stats,
+            preferred_names=["words-prod-backend", "words-srs-review-backend"],
+            suffixes=["-backend"],
+        )
+        postgres_cpu = select_container_summary(
+            stats,
+            preferred_names=["words-prod-postgres", "words-srs-review-postgres"],
+            suffixes=["-postgres"],
+        )
         rows.append(
             {
                 "vus": vus,
@@ -103,7 +133,7 @@ def main() -> int:
             safe_vus = vus
 
     lines = [
-        "# Single-Host Capacity Report",
+        f"# {report_title}",
         "",
         f"**Host budget under test:** {host_budget}",
         f"**Results directory:** `{results_dir}`",
@@ -111,7 +141,7 @@ def main() -> int:
         "## Summary",
         "",
         f"- Highest tested stage meeting the initial p95/error bar: `{safe_vus if safe_vus is not None else 'none'}` VUs",
-        "- User-experience target used for the first pass: `p95 < 500ms` and `error rate < 5%` on the mixed API workload",
+        f"- User-experience target used for the first pass: `{workload_target}`",
         "",
         "## Stage Results",
         "",

@@ -114,18 +114,14 @@ async def submit_entry_state_review(
         )
         return entry_state
 
-    normalized_review_mode = service._normalize_review_mode(
-        review_mode or prompt_token_payload.get("review_mode")
+    normalized_review_mode = service._resolve_submit_review_mode_from_prompt_token(
+        prompt_token_payload=prompt_token_payload
     )
-    explicit_outcome = outcome if outcome in {"remember", "lookup"} else None
-    resolved_outcome = (
-        explicit_outcome
-        if explicit_outcome is not None
-        else service._derive_objective_outcome_from_prompt_token(
-            prompt_token_payload=prompt_token_payload,
-            selected_option_id=selected_option_id,
-            typed_answer=typed_answer,
-        )
+    resolved_outcome = service._resolve_submit_outcome_from_prompt_token(
+        prompt_token_payload=prompt_token_payload,
+        outcome=outcome,
+        selected_option_id=selected_option_id,
+        typed_answer=typed_answer,
     )
     review_result = calculate_next_review(
         outcome=resolved_outcome,
@@ -244,18 +240,14 @@ async def submit_legacy_queue_review(
     if prompt_token_payload.get("user_id") not in {None, str(user_id)}:
         raise ValueError("Prompt token does not match user")
 
-    normalized_review_mode = service._normalize_review_mode(
-        review_mode or prompt_token_payload.get("review_mode")
+    normalized_review_mode = service._resolve_submit_review_mode_from_prompt_token(
+        prompt_token_payload=prompt_token_payload
     )
-    explicit_outcome = outcome if outcome in {"remember", "lookup"} else None
-    resolved_outcome = (
-        explicit_outcome
-        if explicit_outcome is not None
-        else service._derive_objective_outcome_from_prompt_token(
-            prompt_token_payload=prompt_token_payload,
-            selected_option_id=selected_option_id,
-            typed_answer=typed_answer,
-        )
+    resolved_outcome = service._resolve_submit_outcome_from_prompt_token(
+        prompt_token_payload=prompt_token_payload,
+        outcome=outcome,
+        selected_option_id=selected_option_id,
+        typed_answer=typed_answer,
     )
     resolved_quality = service._derive_quality(
         review_mode=normalized_review_mode,

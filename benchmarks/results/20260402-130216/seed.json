@@ -1,0 +1,6 @@
+{
+  "host_base_url": "http://127.0.0.1:4200/api",
+  "k6_base_url": "http://host.docker.internal:4200/api",
+  "bench_user_email": "review-bench@example.com",
+  "seed_count": 2000
+}

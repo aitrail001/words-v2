@@ -41,7 +41,10 @@ describe("ReviewPage", () => {
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockGet.mockReset();
+    mockPost.mockReset();
+    mockPlay.mockReset();
+    mockGetUserPreferences.mockReset();
     window.sessionStorage.clear();
     window.history.pushState({}, "", "/review");
     consoleErrorSpy = jest.spyOn(console, "error").mockImplementation((message?: unknown) => {
@@ -167,6 +170,124 @@ describe("ReviewPage", () => {
         schedule_override: "7d",
       }),
     );
+  });
+
+  it("hydrates the next due card on demand after advancing", async () => {
+    mockGet
+      .mockResolvedValueOnce([
+        {
+          id: "state-1",
+          queue_item_id: "state-1",
+          word: "barely",
+          definition: "Only just, by a very small margin.",
+          review_mode: "mcq",
+          prompt: {
+            mode: "mcq",
+            prompt_type: "definition_to_entry",
+            prompt_token: "prompt-state-1",
+            stem: "Choose the word or phrase that matches this definition.",
+            question: "Only just, by a very small margin.",
+            options: [
+              { option_id: "A", label: "Barely" },
+              { option_id: "B", label: "Bravely" },
+            ],
+            audio_state: "not_available",
+          },
+          detail: {
+            entry_type: "word",
+            entry_id: "word-1",
+            display_text: "barely",
+            primary_definition: "Only just, by a very small margin.",
+            primary_example: "He barely made it through the door.",
+            meaning_count: 1,
+            remembered_count: 4,
+            compare_with: [],
+            meanings: [],
+            audio_state: "not_available",
+            coverage_summary: "deep_coverage",
+          },
+          schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
+        },
+        {
+          id: "state-2",
+          queue_item_id: "state-2",
+          word: "resilient",
+          definition: "Able to recover quickly from difficulty.",
+          review_mode: null,
+          prompt: null,
+          detail: null,
+          schedule_options: [{ value: "3d", label: "In 3 days", is_default: true }],
+        },
+      ] as never)
+      .mockResolvedValueOnce({
+        id: "state-2",
+        queue_item_id: "state-2",
+        word: "resilient",
+        definition: "Able to recover quickly from difficulty.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "definition_to_entry",
+          prompt_token: "prompt-state-2",
+          stem: "Choose the word or phrase that matches this definition.",
+          question: "Able to recover quickly from difficulty.",
+          options: [
+            { option_id: "A", label: "resilient" },
+            { option_id: "B", label: "fragile" },
+          ],
+          audio_state: "not_available",
+        },
+        detail: {
+          entry_type: "word",
+          entry_id: "word-2",
+          display_text: "resilient",
+          primary_definition: "Able to recover quickly from difficulty.",
+          primary_example: "Resilient teams adapt quickly.",
+          meaning_count: 1,
+          remembered_count: 1,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+          coverage_summary: "familiar_with_1_meaning",
+        },
+        schedule_options: [{ value: "3d", label: "In 3 days", is_default: true }],
+      } as never);
+    mockPost
+      .mockResolvedValueOnce({
+        outcome: "correct_tested",
+        detail: {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "barely",
+          primary_definition: "Only just, by a very small margin.",
+          primary_example: "He barely made it through the door.",
+          meaning_count: 1,
+          remembered_count: 4,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+          coverage_summary: "deep_coverage",
+        },
+        schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
+      } as never)
+      .mockResolvedValueOnce({} as never);
+
+    await renderPage();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /a barely/i }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /continue/i }));
+    });
+
+    expect(mockGet).toHaveBeenNthCalledWith(2, "/reviews/queue/state-2");
+    expect(
+      await screen.findByText("Able to recover quickly from difficulty."),
+    ).toBeInTheDocument();
   });
 
   it("shows the relearn step after a wrong answer", async () => {

@@ -238,7 +238,7 @@ class TestQueueDue:
         user_result.scalar_one_or_none.return_value = user
         mock_db.execute.side_effect = [user_result]
 
-        async def fake_get_due_queue_items(self, user_id, limit=20):
+        async def fake_get_due_queue_items(self, user_id, limit=20, **kwargs):
             return [
                 {
                     "item": due_item,
@@ -291,7 +291,7 @@ class TestQueueDue:
         user_result.scalar_one_or_none.return_value = user
         mock_db.execute.side_effect = [user_result]
 
-        async def fake_get_due_queue_items(self, user_id, limit=20):
+        async def fake_get_due_queue_items(self, user_id, limit=20, **kwargs):
             return [
                 {
                     "item": due_item,
@@ -377,6 +377,72 @@ class TestQueueDue:
     async def test_get_due_queue_items_requires_auth(self, client):
         response = await client.get("/api/reviews/queue/due")
         assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_get_queue_item_success(self, client, mock_db, auth_token, monkeypatch):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        item_id = uuid.uuid4()
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_queue_item(self, user_id, item_id):
+            item = ReviewCard(
+                id=item_id,
+                session_id=uuid.uuid4(),
+                word_id=uuid.uuid4(),
+                meaning_id=uuid.uuid4(),
+                card_type="flashcard",
+                next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+            )
+            return {
+                "item": item,
+                "word": "ephemeral",
+                "definition": "lasting a short time",
+                "review_mode": "mcq",
+                "prompt": {
+                    "mode": "mcq",
+                    "prompt_type": "definition_to_entry",
+                    "prompt_token": "opaque-prompt-token",
+                    "question": "lasting a short time",
+                    "options": [
+                        {"option_id": "A", "label": "ephemeral"},
+                        {"option_id": "B", "label": "permanent"},
+                    ],
+                    "audio_state": "not_available",
+                },
+                "source_entry_type": "word",
+                "source_entry_id": str(item.word_id),
+                "detail": {
+                    "entry_type": "word",
+                    "entry_id": str(item.word_id),
+                    "display_text": "ephemeral",
+                    "meaning_count": 1,
+                    "remembered_count": 0,
+                    "compare_with": [],
+                    "meanings": [],
+                    "audio_state": "not_available",
+                },
+                "schedule_options": [],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_queue_item",
+            fake_get_queue_item,
+        )
+
+        response = await client.get(
+            f"/api/reviews/queue/{item_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(item_id)
+        assert data["prompt"]["prompt_token"] == "opaque-prompt-token"
+        assert data["detail"]["display_text"] == "ephemeral"
 
 
 class TestQueueSubmit:
