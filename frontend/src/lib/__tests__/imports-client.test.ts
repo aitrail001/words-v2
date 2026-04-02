@@ -10,6 +10,7 @@ import {
   getImportProgressPercent,
   getWordList,
   isImportJobTerminal,
+  listImportJobs,
   listWordLists,
   updateWordList,
 } from "@/lib/imports-client";
@@ -53,6 +54,13 @@ describe("imports-client", () => {
     const result = await getImportJob("job-2");
     expect(result.id).toBe("job-2");
     expect(mockApiClient.get).toHaveBeenCalledWith("/import-jobs/job-2");
+  });
+
+  it("lists recent import jobs", async () => {
+    mockApiClient.get.mockResolvedValueOnce([{ id: "job-3", status: "completed" }] as any);
+    const result = await listImportJobs();
+    expect(result).toEqual([{ id: "job-3", status: "completed" }]);
+    expect(mockApiClient.get).toHaveBeenCalledWith("/import-jobs?limit=20");
   });
 
   it("loads import review entries", async () => {

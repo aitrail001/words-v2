@@ -216,6 +216,7 @@ class TestCreateImport:
         data = response.json()
         assert data["status"] == "completed"
         assert data["import_source_id"] == str(source_id)
+        assert data["completed_at"] is not None
         mock_delay.assert_not_called()
 
     @pytest.mark.asyncio

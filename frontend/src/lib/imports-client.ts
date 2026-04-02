@@ -100,6 +100,9 @@ export const createWordListImport = async (
 export const getImportJob = async (jobId: string): Promise<ImportJob> =>
   apiClient.get<ImportJob>(`/import-jobs/${jobId}`);
 
+export const listImportJobs = async (limit = 20): Promise<ImportJob[]> =>
+  apiClient.get<ImportJob[]>(`/import-jobs?limit=${limit}`);
+
 export const getImportEntries = async (
   jobId: string,
   params: Record<string, string | number | undefined>,

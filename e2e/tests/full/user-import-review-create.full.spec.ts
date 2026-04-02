@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { registerViaApi } from "../helpers/auth";
+import { prepareImportFixture } from "../helpers/import-fixture";
 import { waitForImportJobTerminal } from "../helpers/import-jobs";
 
 const EPUB_FIXTURE = path.resolve(process.cwd(), "tests/fixtures/epub/valid-minimal.epub");
@@ -21,6 +22,8 @@ test("import review flow creates a generic word list from selected entries", asy
   request,
 }) => {
   test.slow();
+
+  await prepareImportFixture(EPUB_FIXTURE);
 
   const user = await registerViaApi(request, "import-review-create");
   await page.goto("/login");
@@ -53,6 +56,7 @@ test("import review flow creates a generic word list from selected entries", asy
     pollIntervalMs: 1_500,
   });
   expect(terminal.status, terminal.error_message ?? "import failed").toBe("completed");
+  expect(terminal.matched_entry_count).toBeGreaterThan(0);
 
   await expect(page.getByTestId("imports-review-panel")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("imports-review-list")).toContainText("learning words");
@@ -74,6 +78,9 @@ test("import review flow creates a generic word list from selected entries", asy
   expect(createdList.id).toBeTruthy();
   expect(createdList.name).toBe(listName);
 
+  await expect(page.getByTestId("imports-created-list-panel")).toContainText(listName);
+  await page.getByTestId("imports-open-created-list-link").click();
+  await expect(page.getByTestId("word-lists-page-title")).toBeVisible();
   await expect(page.getByTestId("word-lists-list")).toContainText(listName);
   await page.getByTestId(`word-list-open-${createdList.id}`).click();
   await expect(page.getByTestId("word-list-detail-title")).toHaveText(listName);
@@ -88,8 +95,12 @@ test("import review flow creates a generic word list from selected entries", asy
   await page.getByTestId("word-list-manual-search-input").fill("learning");
   await page.getByTestId("word-list-manual-search-button").click();
   await expect(page.getByTestId("word-list-manual-results")).toContainText("learning words");
-  await page.getByTestId("word-list-manual-add-00000000-0000-0000-0000-0000000000b1").click();
-  await expect(page.getByTestId("word-list-manual-search-message")).toContainText(
+  await page
+    .getByTestId("word-list-manual-results")
+    .getByRole("button", { name: "Add" })
+    .first()
+    .click();
+  await expect(page.getByTestId("word-list-manual-message")).toContainText(
     "Added learning words",
   );
 
@@ -131,4 +142,7 @@ test("import review flow creates a generic word list from selected entries", asy
   expect(listDetail.items[0].entry_type).toBe("phrase");
   expect(listDetail.items[0].display_text).toBe("learning words");
   expect(listDetail.items[0].frequency_count).toBeGreaterThan(0);
+
+  await page.getByTestId("word-lists-home-link").click();
+  await expect(page).toHaveURL(/\/$/);
 });

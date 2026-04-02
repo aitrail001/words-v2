@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -17,10 +18,28 @@ from app.api.word_lists import (
     _to_word_list_response,
 )
 from app.core.database import get_db
+from app.models.import_job import ImportJob
 from app.models.user import User
 from app.services.source_imports import EntryRef, create_word_list_from_entries, fetch_review_entries
 
 router = APIRouter()
+
+
+@router.get("", response_model=list[ImportJobResponse])
+async def list_import_jobs(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ImportJobResponse]:
+    jobs = (
+        await db.execute(
+            select(ImportJob)
+            .where(ImportJob.user_id == current_user.id)
+            .order_by(ImportJob.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [_to_import_job_response(job) for job in jobs]
 
 
 @router.get("/{job_id}", response_model=ImportJobResponse)

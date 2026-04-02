@@ -51,7 +51,7 @@ services:
     volumes:
       - ./backend:/app
       - ./tools:/app/tools:ro
-      - ./data:/app/data
+      - ${WORDS_DATA_DIR:-./data}:/app/data
       - ./tests:/app/tests
       - backend_uploads:/app/uploads
     depends_on:
@@ -80,7 +80,7 @@ services:
     volumes:
       - ./backend:/app
       - ./tools:/app/tools:ro
-      - ./data:/app/data
+      - ${WORDS_DATA_DIR:-./data}:/app/data
       - ./tests:/app/tests
       - backend_uploads:/app/uploads
     ports:
@@ -111,7 +111,7 @@ services:
     volumes:
       - ./backend:/app
       - ./tools:/app/tools:ro
-      - ./data:/app/data
+      - ${WORDS_DATA_DIR:-./data}:/app/data
       - ./tests:/app/tests:ro
       - backend_uploads:/app/uploads
     depends_on:

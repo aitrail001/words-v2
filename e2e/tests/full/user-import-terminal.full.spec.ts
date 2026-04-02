@@ -1,6 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { injectToken, registerViaApi } from "../helpers/auth";
+import { prepareImportFixture } from "../helpers/import-fixture";
 import { ImportJobSnapshot, waitForImportJobTerminal } from "../helpers/import-jobs";
 
 const EPUB_FIXTURE = path.resolve(process.cwd(), "tests/fixtures/epub/valid-minimal.epub");
@@ -10,6 +11,8 @@ test("word-list import reaches completed terminal status with valid epub", async
   request,
 }) => {
   test.slow();
+
+  await prepareImportFixture(EPUB_FIXTURE);
 
   const user = await registerViaApi(request, "import-terminal");
   await injectToken(page, user.token);
@@ -41,14 +44,17 @@ test("word-list import reaches completed terminal status with valid epub", async
     terminal.status,
     `import job failed: ${terminal.error_message ?? "missing error_message"}`,
   ).toBe("completed");
-  expect(terminal.started_at).toBeTruthy();
+  expect(terminal.import_source_id).toBeTruthy();
   expect(terminal.completed_at).toBeTruthy();
-  expect(terminal.book_id).toBeTruthy();
-  expect(terminal.word_list_id).toBeTruthy();
+  expect(terminal.source_filename).toBe("valid-minimal.epub");
+  expect(terminal.list_name).toBe(listName);
+  expect(terminal.word_list_id).toBeNull();
+  expect(terminal.matched_entry_count).toBeGreaterThan(0);
   expect(terminal.total_items).toBeGreaterThan(0);
   expect(terminal.processed_items).toBe(terminal.total_items);
   expect(terminal.error_count).toBe(0);
 
   await page.reload();
-  await expect(page.getByTestId("word-lists-list")).toContainText(listName);
+  await expect(page.getByTestId(`imports-row-${created.id}`)).toContainText(listName);
+  await expect(page.getByTestId(`imports-row-${created.id}`)).toContainText("completed");
 });

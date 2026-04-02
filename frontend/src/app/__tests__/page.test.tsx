@@ -63,7 +63,10 @@ describe("HomePage (Knowledge Map)", () => {
     expect(await screen.findByRole("link", { name: "To Learn 4,293" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /discover/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /learn next: drum/i })).toBeInTheDocument();
-    expect(screen.getByText(/practice with lexi/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /import epub/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /manage word lists/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Open" })[0]).toHaveAttribute("href", "/imports");
+    expect(screen.getAllByRole("link", { name: "Open" })[1]).toHaveAttribute("href", "/word-lists");
   });
 
   it("loads dashboard data and shows the current discovery and next learn words", async () => {
@@ -107,6 +110,8 @@ describe("RootLayout learner shell", () => {
 
       expect(learnerShellNav.getByRole("link", { name: /home/i })).toHaveAttribute("href", "/");
       expect(learnerShellNav.getByRole("link", { name: /knowledge/i })).toHaveAttribute("href", "/knowledge-map");
+      expect(learnerShellNav.getByRole("link", { name: /imports/i })).toHaveAttribute("href", "/imports");
+      expect(learnerShellNav.getByRole("link", { name: /imports/i })).toHaveAttribute("href", "/imports");
       expect(learnerShellNav.getByRole("link", { name: /search/i })).toHaveAttribute("href", "/search");
       expect(learnerShellNav.getByRole("link", { name: /settings/i })).toHaveAttribute("href", "/settings");
     } finally {
@@ -139,6 +144,26 @@ describe("RootLayout learner shell", () => {
     }
     },
   );
+
+  it("keeps learner nav visible on /imports so users can return home", () => {
+    const RootLayout = require("@/app/layout").default as typeof import("@/app/layout").default;
+    const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    mockUsePathname.mockReturnValue("/imports");
+
+    try {
+      render(
+        <RootLayout>
+          <div>Child content</div>
+        </RootLayout>,
+      );
+
+      const learnerShellNav = within(screen.getByTestId("learner-shell-nav"));
+      expect(learnerShellNav.getByRole("link", { name: /home/i })).toHaveAttribute("href", "/");
+      expect(learnerShellNav.getByRole("link", { name: /imports/i })).toHaveAttribute("href", "/imports");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
 });
 
 describe("Auth middleware for /", () => {
@@ -153,6 +178,12 @@ describe("Auth middleware for /", () => {
   it("redirects unauthenticated /imports requests", () => {
     expect(getAuthRedirectPath("/imports", false)).toBe(
       "/login?next=%2Fimports",
+    );
+  });
+
+  it("redirects unauthenticated /word-lists requests", () => {
+    expect(getAuthRedirectPath("/word-lists", false)).toBe(
+      "/login?next=%2Fword-lists",
     );
   });
 
@@ -173,5 +204,9 @@ describe("Auth middleware for /", () => {
 
   it("allows authenticated /imports requests", () => {
     expect(getAuthRedirectPath("/imports", true)).toBeNull();
+  });
+
+  it("allows authenticated /word-lists requests", () => {
+    expect(getAuthRedirectPath("/word-lists", true)).toBeNull();
   });
 });

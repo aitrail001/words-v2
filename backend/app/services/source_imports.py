@@ -6,6 +6,7 @@ import uuid
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import ebooklib
@@ -635,6 +636,7 @@ async def create_import_job(
     list_name: str,
     list_description: str | None,
 ) -> ImportJob:
+    completed_at = datetime.now(timezone.utc) if import_source.status == "completed" else None
     job = ImportJob(
         user_id=user_id,
         import_source_id=import_source.id,
@@ -646,6 +648,7 @@ async def create_import_job(
         total_items=import_source.matched_entry_count,
         processed_items=import_source.matched_entry_count if import_source.status == "completed" else 0,
         matched_entry_count=import_source.matched_entry_count,
+        completed_at=completed_at,
     )
     db.add(job)
     await db.commit()

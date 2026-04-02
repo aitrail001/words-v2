@@ -1,88 +1,68 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  addWordListItem,
-  bulkAddWordListEntries,
   createListFromImport,
   createWordListImport,
-  deleteWordList,
-  deleteWordListItem,
   getImportEntries,
   getImportJob,
   getImportProgressPercent,
-  getWordList,
+  listImportJobs,
   type ImportJob,
   type ReviewEntry,
-  resolveEntries,
   isImportJobTerminal,
-  listWordLists,
-  type WordList,
-  type WordListDetail,
-  updateWordList,
 } from "@/lib/imports-client";
-import { searchKnowledgeMap, type KnowledgeMapEntrySummary } from "@/lib/knowledge-map-client";
 
 const POLL_INTERVAL_MS = 2000;
 const REVIEW_PAGE_SIZE = 100;
 
 type SortMode = "book_frequency" | "general_rank" | "alpha";
-type WordListSortMode = "alpha" | "rank" | "rank_desc";
-type WordListViewMode = "cards" | "tags" | "list";
 
 export default function ImportsPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [listName, setListName] = useState("");
   const [jobs, setJobs] = useState<ImportJob[]>([]);
-  const [wordLists, setWordLists] = useState<WordList[]>([]);
-  const [activeWordListId, setActiveWordListId] = useState<string | null>(null);
-  const [activeWordList, setActiveWordList] = useState<WordListDetail | null>(null);
-  const [wordListNameDraft, setWordListNameDraft] = useState("");
-  const [wordListDescriptionDraft, setWordListDescriptionDraft] = useState("");
-  const [wordListSearchQuery, setWordListSearchQuery] = useState("");
-  const [wordListSort, setWordListSort] = useState<WordListSortMode>("alpha");
-  const [wordListViewMode, setWordListViewMode] = useState<WordListViewMode>("cards");
-  const [manualAddQuery, setManualAddQuery] = useState("");
-  const [manualAddResults, setManualAddResults] = useState<KnowledgeMapEntrySummary[]>([]);
-  const [manualAddMessage, setManualAddMessage] = useState<string | null>(null);
   const [reviewEntries, setReviewEntries] = useState<ReviewEntry[]>([]);
   const [selectedEntryKeys, setSelectedEntryKeys] = useState<Set<string>>(new Set());
   const [reviewQuery, setReviewQuery] = useState("");
   const [reviewType, setReviewType] = useState<"all" | "word" | "phrase">("all");
   const [reviewSort, setReviewSort] = useState<SortMode>("book_frequency");
-  const [listEditorText, setListEditorText] = useState("");
-  const [listEditorMessage, setListEditorMessage] = useState<string | null>(null);
   const [activeReviewJobId, setActiveReviewJobId] = useState<string | null>(null);
+  const [recentCreatedList, setRecentCreatedList] = useState<{ id: string; name: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [creatingList, setCreatingList] = useState(false);
-  const [editingList, setEditingList] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-
-    (async () => {
-      try {
-        const lists = await listWordLists();
-        if (active) {
-          setWordLists(lists);
-        }
-      } catch {
-        if (active) {
-          setError("Failed to load word lists");
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, []);
+  const activeReviewJob = useMemo(
+    () => jobs.find((job) => job.id === activeReviewJobId) ?? null,
+    [activeReviewJobId, jobs],
+  );
 
   const activeJobIds = useMemo(
     () => jobs.filter((job) => !isImportJobTerminal(job.status)).map((job) => job.id),
     [jobs],
   );
+
+  useEffect(() => {
+    let active = true;
+
+    listImportJobs()
+      .then((loadedJobs) => {
+        if (active) {
+          setJobs(loadedJobs);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setError("Failed to load import jobs");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (activeJobIds.length === 0) {
@@ -125,6 +105,10 @@ export default function ImportsPage() {
       setReviewEntries([]);
       return;
     }
+    if (activeReviewJob && activeReviewJob.status !== "completed") {
+      setReviewEntries([]);
+      return;
+    }
 
     let active = true;
     setError(null);
@@ -153,38 +137,7 @@ export default function ImportsPage() {
     return () => {
       active = false;
     };
-  }, [activeReviewJobId, reviewQuery, reviewSort, reviewType]);
-
-  useEffect(() => {
-    if (!activeWordListId) {
-      setActiveWordList(null);
-      return;
-    }
-
-    let active = true;
-    setListEditorMessage(null);
-    setManualAddMessage(null);
-    getWordList(activeWordListId, {
-      q: wordListSearchQuery.trim() || undefined,
-      sort: wordListSort,
-    })
-      .then((detail) => {
-        if (active) {
-          setActiveWordList(detail);
-          setWordListNameDraft(detail.name);
-          setWordListDescriptionDraft(detail.description ?? "");
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setError("Failed to load word list");
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [activeWordListId, wordListSearchQuery, wordListSort]);
+  }, [activeReviewJob, activeReviewJobId, reviewQuery, reviewSort, reviewType]);
 
   const selectedEntries = useMemo(
     () =>
@@ -205,7 +158,7 @@ export default function ImportsPage() {
     try {
       const job = await createWordListImport(selectedFile, listName);
       setJobs((prev) => [job, ...prev.filter((existing) => existing.id !== job.id)]);
-      setActiveReviewJobId(job.status === "completed" ? job.id : null);
+      setActiveReviewJobId(job.id);
       setSelectedFile(null);
       setListName("");
       const input = document.getElementById("imports-upload-input") as HTMLInputElement | null;
@@ -258,8 +211,7 @@ export default function ImportsPage() {
           entry_id: entry.entry_id,
         })),
       });
-      setWordLists((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
-      setActiveWordListId(created.id);
+      setRecentCreatedList({ id: created.id, name: created.name });
       setJobs((prev) =>
         prev.map((job) => (job.id === activeReviewJobId ? { ...job, word_list_id: created.id } : job)),
       );
@@ -270,178 +222,34 @@ export default function ImportsPage() {
     }
   };
 
-  const handleRemoveListItem = async (itemId: string) => {
-    if (!activeWordListId) {
-      return;
-    }
-
-    setEditingList(true);
-    setListEditorMessage(null);
-    try {
-      await deleteWordListItem(activeWordListId, itemId);
-      setActiveWordList((current) =>
-        current
-          ? { ...current, items: current.items.filter((item) => item.id !== itemId) }
-          : current,
-      );
-    } catch {
-      setListEditorMessage("Failed to remove list item");
-    } finally {
-      setEditingList(false);
-    }
-  };
-
-  const handleBulkAddToList = async () => {
-    if (!activeWordListId || !listEditorText.trim()) {
-      setListEditorMessage("Enter at least one term to add");
-      return;
-    }
-
-    setEditingList(true);
-    setListEditorMessage(null);
-    try {
-      const resolved = await resolveEntries(listEditorText);
-      if (resolved.found_entries.length === 0) {
-        setListEditorMessage("No entries matched that text");
-        return;
-      }
-
-      const updated = await bulkAddWordListEntries(activeWordListId, {
-        selected_entries: resolved.found_entries.map((entry) => ({
-          entry_type: entry.entry_type,
-          entry_id: entry.entry_id,
-        })),
-      });
-      setActiveWordList(updated);
-      setListEditorText("");
-      const notes: string[] = [`Added ${resolved.found_entries.length} entr${resolved.found_entries.length === 1 ? "y" : "ies"}`];
-      if (resolved.ambiguous_entries.length > 0) {
-        notes.push(`${resolved.ambiguous_entries.length} ambiguous`);
-      }
-      if (resolved.not_found_count > 0) {
-        notes.push(`${resolved.not_found_count} not found`);
-      }
-      setListEditorMessage(notes.join(" · "));
-    } catch {
-      setListEditorMessage("Failed to add entries");
-    } finally {
-      setEditingList(false);
-    }
-  };
-
-  const handleRenameWordList = async () => {
-    if (!activeWordListId) {
-      return;
-    }
-
-    const trimmedName = wordListNameDraft.trim();
-    if (!trimmedName) {
-      setListEditorMessage("List name is required");
-      return;
-    }
-
-    setEditingList(true);
-    setListEditorMessage(null);
-    try {
-      const updated = await updateWordList(activeWordListId, {
-        name: trimmedName,
-        description: wordListDescriptionDraft.trim() || null,
-      });
-      setWordLists((prev) =>
-        prev.map((item) => (item.id === activeWordListId ? { ...item, ...updated } : item)),
-      );
-      setActiveWordList((current) =>
-        current
-          ? { ...current, name: updated.name, description: updated.description }
-          : current,
-      );
-      setListEditorMessage("List updated");
-    } catch {
-      setListEditorMessage("Failed to update list");
-    } finally {
-      setEditingList(false);
-    }
-  };
-
-  const handleDeleteWordList = async () => {
-    if (!activeWordListId) {
-      return;
-    }
-
-    setEditingList(true);
-    setListEditorMessage(null);
-    try {
-      await deleteWordList(activeWordListId);
-      setWordLists((prev) => prev.filter((item) => item.id !== activeWordListId));
-      setActiveWordListId(null);
-      setActiveWordList(null);
-      setManualAddResults([]);
-      setManualAddQuery("");
-    } catch {
-      setListEditorMessage("Failed to delete list");
-    } finally {
-      setEditingList(false);
-    }
-  };
-
-  const handleManualSearch = async () => {
-    const trimmed = manualAddQuery.trim();
-    if (!trimmed) {
-      setManualAddMessage("Enter a term to search");
-      return;
-    }
-
-    setEditingList(true);
-    setManualAddMessage(null);
-    try {
-      const response = await searchKnowledgeMap(trimmed);
-      setManualAddResults(response.items);
-      if (response.items.length === 0) {
-        setManualAddMessage("No matching entries found");
-      }
-    } catch {
-      setManualAddMessage("Failed to search catalog");
-    } finally {
-      setEditingList(false);
-    }
-  };
-
-  const handleManualAddItem = async (entry: KnowledgeMapEntrySummary) => {
-    if (!activeWordListId) {
-      return;
-    }
-
-    setEditingList(true);
-    setManualAddMessage(null);
-    try {
-      const created = await addWordListItem(activeWordListId, {
-        entry_type: entry.entry_type,
-        entry_id: entry.entry_id,
-        frequency_count: 1,
-      });
-      setActiveWordList((current) =>
-        current
-          ? {
-              ...current,
-              items: [...current.items.filter((item) => item.id !== created.id), created].sort((a, b) =>
-                (a.display_text ?? "").localeCompare(b.display_text ?? ""),
-              ),
-            }
-          : current,
-      );
-      setManualAddMessage(`Added ${entry.display_text}`);
-    } catch {
-      setManualAddMessage("Failed to add entry");
-    } finally {
-      setEditingList(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold" data-testid="imports-page-title">
-        Import Word Lists
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium uppercase tracking-[0.14em] text-[#7b6795]">
+            Learner tools
+          </p>
+          <h2 className="text-2xl font-bold" data-testid="imports-page-title">
+            Import Word Lists
+          </h2>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/word-lists"
+            data-testid="imports-word-lists-link"
+            className="rounded-full border border-[#d7c8ec] bg-[#f5efff] px-4 py-2 text-sm font-medium text-[#5b2590]"
+          >
+            Word List Manager
+          </Link>
+          <Link
+            href="/"
+            data-testid="imports-home-link"
+            className="rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700"
+          >
+            Back to Home
+          </Link>
+        </div>
+      </div>
 
       <form className="space-y-4 rounded-lg border border-gray-200 bg-white p-4" onSubmit={handleSubmit}>
         <div className="space-y-2">
@@ -480,6 +288,29 @@ export default function ImportsPage() {
           {loading ? "Importing..." : "Start Import"}
         </button>
       </form>
+
+      {recentCreatedList && (
+        <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-4" data-testid="imports-created-list-panel">
+          <p className="text-sm font-medium text-emerald-800">
+            Created <span className="font-semibold">{recentCreatedList.name}</span>.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <Link
+              href={`/word-lists?list=${recentCreatedList.id}`}
+              data-testid="imports-open-created-list-link"
+              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white"
+            >
+              Open In Word List Manager
+            </Link>
+            <Link
+              href="/word-lists"
+              className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-800"
+            >
+              View All Word Lists
+            </Link>
+          </div>
+        </section>
+      )}
 
       {error && (
         <p className="text-sm text-red-600" data-testid="imports-error">
@@ -612,281 +443,6 @@ export default function ImportsPage() {
               {creatingList ? "Creating..." : "Create list from selection"}
             </button>
           </div>
-        </section>
-      )}
-
-      <section className="space-y-2">
-        <h3 className="text-lg font-semibold">Your Word Lists</h3>
-        {wordLists.length === 0 ? (
-          <p className="text-sm text-gray-500" data-testid="word-lists-empty-state">
-            No word lists yet.
-          </p>
-        ) : (
-          <ul className="space-y-2" data-testid="word-lists-list">
-            {wordLists.map((wordList) => (
-              <li key={wordList.id} className="rounded-md border border-gray-200 bg-white p-3">
-                <button
-                  type="button"
-                  className="w-full text-left"
-                  data-testid={`word-list-open-${wordList.id}`}
-                  onClick={() => setActiveWordListId(wordList.id)}
-                >
-                  <p className="font-medium">{wordList.name}</p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {activeWordList && (
-        <section
-          className="space-y-3 rounded-lg border border-gray-200 bg-white p-4"
-          data-testid="word-list-detail-panel"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold" data-testid="word-list-detail-title">
-                {activeWordList.name}
-              </h3>
-              <p className="text-sm text-gray-500" data-testid="word-list-detail-count">
-                {activeWordList.items.length} items
-              </p>
-            </div>
-            <button
-              type="button"
-              data-testid="word-list-delete-button"
-              onClick={handleDeleteWordList}
-              disabled={editingList}
-              className="rounded border border-red-300 px-3 py-1 text-sm text-red-700 disabled:opacity-50"
-            >
-              Delete list
-            </button>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <input
-              data-testid="word-list-rename-input"
-              value={wordListNameDraft}
-              onChange={(event) => setWordListNameDraft(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2"
-              placeholder="List name"
-            />
-            <input
-              data-testid="word-list-description-input"
-              value={wordListDescriptionDraft}
-              onChange={(event) => setWordListDescriptionDraft(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2"
-              placeholder="Optional description"
-            />
-            <button
-              type="button"
-              data-testid="word-list-rename-button"
-              disabled={editingList}
-              onClick={handleRenameWordList}
-              className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
-            >
-              Save list
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              data-testid="word-list-search-input"
-              value={wordListSearchQuery}
-              onChange={(event) => setWordListSearchQuery(event.target.value)}
-              className="min-w-[14rem] flex-1 rounded-md border border-gray-300 px-3 py-2"
-              placeholder="Search within list"
-            />
-            <select
-              data-testid="word-list-sort-select"
-              value={wordListSort}
-              onChange={(event) => setWordListSort(event.target.value as WordListSortMode)}
-              className="rounded-md border border-gray-300 px-3 py-2"
-            >
-              <option value="alpha">Alphabetic</option>
-              <option value="rank">General rank</option>
-              <option value="rank_desc">General rank desc</option>
-            </select>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                data-testid="word-list-view-cards"
-                onClick={() => setWordListViewMode("cards")}
-                className="rounded border px-3 py-1 text-sm"
-              >
-                Cards
-              </button>
-              <button
-                type="button"
-                data-testid="word-list-view-tags"
-                onClick={() => setWordListViewMode("tags")}
-                className="rounded border px-3 py-1 text-sm"
-              >
-                Tags
-              </button>
-              <button
-                type="button"
-                data-testid="word-list-view-list"
-                onClick={() => setWordListViewMode("list")}
-                className="rounded border px-3 py-1 text-sm"
-              >
-                List
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="word-list-manual-search-input" className="text-sm font-medium text-gray-700">
-              Add one entry from the catalog
-            </label>
-            <div className="flex flex-wrap items-center gap-3">
-              <input
-                id="word-list-manual-search-input"
-                data-testid="word-list-manual-search-input"
-                value={manualAddQuery}
-                onChange={(event) => setManualAddQuery(event.target.value)}
-                className="min-w-[14rem] flex-1 rounded-md border border-gray-300 px-3 py-2"
-                placeholder="Search for a word or phrase"
-              />
-              <button
-                type="button"
-                data-testid="word-list-manual-search-button"
-                disabled={editingList}
-                onClick={handleManualSearch}
-                className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
-              >
-                Search catalog
-              </button>
-            </div>
-            {manualAddMessage && (
-              <p className="text-sm text-gray-600" data-testid="word-list-manual-search-message">
-                {manualAddMessage}
-              </p>
-            )}
-            {manualAddResults.length > 0 && (
-              <ul className="space-y-2" data-testid="word-list-manual-results">
-                {manualAddResults.map((entry) => (
-                  <li key={`${entry.entry_type}:${entry.entry_id}`} className="flex items-center justify-between gap-3 rounded border border-gray-200 px-3 py-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium">{entry.display_text}</p>
-                      <p className="text-xs text-gray-500">
-                        {entry.entry_type}
-                        {entry.phrase_kind ? ` · ${entry.phrase_kind}` : ""}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      data-testid={`word-list-manual-add-${entry.entry_id}`}
-                      disabled={editingList}
-                      onClick={() => handleManualAddItem(entry)}
-                      className="rounded border px-3 py-1 text-sm disabled:opacity-50"
-                    >
-                      Add
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="word-list-editor-text" className="text-sm font-medium text-gray-700">
-              Add entries from text
-            </label>
-            <p className="text-xs text-gray-500" data-testid="word-list-editor-help">
-              Enter one word per space, or quote multi-word phrases. You can also put one phrase per
-              line.
-            </p>
-            <textarea
-              id="word-list-editor-text"
-              data-testid="word-list-editor-text"
-              value={listEditorText}
-              onChange={(event) => setListEditorText(event.target.value)}
-              placeholder='Type words, or quote phrases like "on the other hand"'
-              className="min-h-24 w-full rounded-md border border-gray-300 px-3 py-2"
-            />
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                data-testid="word-list-add-button"
-                disabled={editingList}
-                onClick={handleBulkAddToList}
-                className="rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
-              >
-                {editingList ? "Saving..." : "Add to list"}
-              </button>
-              {listEditorMessage && (
-                <p className="text-sm text-gray-600" data-testid="word-list-editor-message">
-                  {listEditorMessage}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {activeWordList.items.length === 0 ? (
-            <p className="text-sm text-gray-500" data-testid="word-list-detail-empty">
-              No items in this list yet.
-            </p>
-          ) : wordListViewMode === "tags" ? (
-            <div className="flex flex-wrap gap-2" data-testid="word-list-tags-view">
-              {activeWordList.items.map((item) => (
-                <span
-                  key={item.id}
-                  className="rounded-full border border-gray-300 px-3 py-1 text-sm"
-                >
-                  {item.display_text ?? item.normalized_form ?? item.entry_id}
-                </span>
-              ))}
-            </div>
-          ) : wordListViewMode === "list" ? (
-            <table className="min-w-full text-left text-sm" data-testid="word-list-list-view">
-              <thead>
-                <tr className="border-b">
-                  <th className="py-2 pr-3">Entry</th>
-                  <th className="py-2 pr-3">Type</th>
-                  <th className="py-2 pr-3">Rank</th>
-                  <th className="py-2">Freq</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activeWordList.items.map((item) => (
-                  <tr key={item.id} className="border-b last:border-b-0">
-                    <td className="py-2 pr-3">{item.display_text ?? item.normalized_form ?? item.entry_id}</td>
-                    <td className="py-2 pr-3">{item.entry_type}</td>
-                    <td className="py-2 pr-3">{item.browse_rank ?? "—"}</td>
-                    <td className="py-2">{item.frequency_count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <ul className="space-y-2" data-testid="word-list-detail-items">
-              {activeWordList.items.map((item) => (
-                <li
-                  key={item.id}
-                  className="flex items-center justify-between gap-3 rounded border border-gray-200 px-3 py-2"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium">{item.display_text ?? item.normalized_form ?? item.entry_id}</p>
-                    <p className="text-xs text-gray-500">
-                      {item.entry_type} · freq {item.frequency_count}
-                      {item.phrase_kind ? ` · ${item.phrase_kind}` : ""}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    data-testid={`word-list-remove-${item.id}`}
-                    disabled={editingList}
-                    onClick={() => handleRemoveListItem(item.id)}
-                    className="rounded border px-3 py-1 text-sm"
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
         </section>
       )}
     </div>

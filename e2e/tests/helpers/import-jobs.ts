@@ -3,12 +3,16 @@ import { apiUrl } from "./auth";
 
 export type ImportJobSnapshot = {
   id: string;
+  import_source_id: string | null;
   status: "queued" | "processing" | "completed" | "failed";
+  source_filename: string;
+  source_hash: string;
+  list_name: string;
   error_message: string | null;
   started_at: string | null;
   completed_at: string | null;
-  book_id: string | null;
   word_list_id: string | null;
+  matched_entry_count: number;
   total_items: number;
   processed_items: number;
   error_count: number;

@@ -7,7 +7,8 @@ export const isProtectedPath = (pathname: string): boolean =>
   pathname === "/search" ||
   pathname === "/settings" ||
   pathname.startsWith("/review") ||
-  pathname.startsWith("/imports");
+  pathname.startsWith("/imports") ||
+  pathname.startsWith("/word-lists");
 
 export const getAuthRedirectPath = (
   pathname: string,

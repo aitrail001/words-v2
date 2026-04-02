@@ -55,6 +55,46 @@ def make_user(user_id: uuid.UUID) -> User:
 
 class TestImportJobStatusEndpoints:
     @pytest.mark.asyncio
+    async def test_list_import_jobs_returns_most_recent_first(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        older_job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=uuid.uuid4(),
+            source_filename="older.epub",
+            source_hash="a" * 64,
+            list_name="Older Import",
+            status="completed",
+            created_at=datetime(2026, 4, 2, tzinfo=timezone.utc),
+        )
+        newer_job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=uuid.uuid4(),
+            source_filename="newer.epub",
+            source_hash="b" * 64,
+            list_name="Newer Import",
+            status="processing",
+            created_at=datetime(2026, 4, 3, tzinfo=timezone.utc),
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        jobs_result = MagicMock()
+        jobs_result.scalars.return_value.all.return_value = [newer_job, older_job]
+        mock_db.execute.side_effect = [user_result, jobs_result]
+
+        response = await client.get(
+            "/api/import-jobs",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert [row["id"] for row in response.json()] == [str(newer_job.id), str(older_job.id)]
+
+    @pytest.mark.asyncio
     async def test_get_import_job_not_found(self, client, mock_db):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
