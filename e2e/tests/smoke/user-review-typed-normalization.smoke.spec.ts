@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { injectToken, registerViaApi } from "../helpers/auth";
 
-test("@smoke typed review normalization submits once and accepts punctuation/case variants", async ({
+test("@smoke typed review normalization uses reveal follow-up submit and accepts punctuation/case variants", async ({
   page,
   request,
 }) => {
@@ -91,9 +91,15 @@ test("@smoke typed review normalization submits once and accepts punctuation/cas
   await page.getByRole("button", { name: /continue/i }).click();
   await expect(page.getByTestId("review-complete-state")).toBeVisible();
 
-  expect(submitPayloads).toHaveLength(1);
+  expect(submitPayloads).toHaveLength(2);
   expect(submitPayloads[0]).toMatchObject({
     typed_answer: "  Look, up!! ",
     prompt_token: "prompt-state-typed",
   });
+  expect(submitPayloads[1]).toMatchObject({
+    outcome: "correct_tested",
+    typed_answer: "  Look, up!! ",
+    prompt_token: "prompt-state-typed",
+  });
+  expect(submitPayloads[1]).not.toHaveProperty("schedule_override");
 });
