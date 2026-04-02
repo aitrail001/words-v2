@@ -19,7 +19,7 @@ from app.core.database import get_db
 from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
 from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.user import User
-from tools.lexicon.text_safety import sanitize_control_characters
+from app.services.text_safety import sanitize_control_characters
 from app.services.lexicon_compiled_review_decisions import (
     DEFAULT_COMPILED_REVIEW_PAGE_SIZE,
     add_review_item_event,
