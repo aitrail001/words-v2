@@ -99,8 +99,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: words-worker
-    command: celery -A app.celery_app:celery_app worker --loglevel=info
+    command: celery -A app.celery_app:celery_app worker --loglevel=info -Q default,imports
+    scale: 2
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
       - DATABASE_URL_SYNC=postgresql://${POSTGRES_USER:-vocabapp}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-vocabapp_dev}
