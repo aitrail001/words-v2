@@ -1965,6 +1965,71 @@ class TestEntryReviewStateConcurrency:
         mock_db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_submit_queue_review_applies_schedule_override_on_idempotent_resubmit(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        state_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        prompt_id = str(uuid.uuid4())
+        original_due_at = datetime.now(timezone.utc) + timedelta(days=1)
+        entry_state = EntryReviewState(
+            id=state_id,
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.4,
+        )
+        entry_state.interval_days = 1
+        entry_state.next_due_at = original_due_at
+        entry_state.last_submission_prompt_id = prompt_id
+        entry_state.detail = {"entry_type": "word", "entry_id": str(entry_id), "display_text": "bank"}
+        entry_state.schedule_options = [{"value": "1d", "label": "Tomorrow", "is_default": True}]
+
+        locked_result = MagicMock()
+        locked_result.scalar_one_or_none.return_value = entry_state
+        mock_db.execute.return_value = locked_result
+
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": prompt_id,
+                "user_id": str(user_id),
+                "queue_item_id": str(state_id),
+                "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(entry_id),
+                "source_meaning_id": str(meaning_id),
+                "correct_option_id": "A",
+            }
+        )
+
+        updated = await review_service.submit_queue_review(
+            item_id=state_id,
+            quality=4,
+            time_spent_ms=5000,
+            user_id=user_id,
+            selected_option_id="A",
+            prompt_token=prompt_token,
+            schedule_override="7d",
+        )
+
+        assert updated is entry_state
+        assert updated.interval_days == 7
+        assert updated.next_due_at is not None
+        assert updated.next_due_at > original_due_at
+        assert any(
+            option["value"] == "7d" and option["is_default"]
+            for option in updated.schedule_options or []
+        )
+        mock_db.add.assert_not_called()
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_submit_queue_review_ignores_client_outcome_for_objective_prompts(
         self, review_service, mock_db
     ):

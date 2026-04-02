@@ -459,7 +459,14 @@ describe("ReviewPage", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     });
-    expect(mockPost.mock.calls).toHaveLength(callsBeforeContinue);
+    expect(mockPost.mock.calls).toHaveLength(callsBeforeContinue + 1);
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
+      "/reviews/queue/state-3/submit",
+      expect.not.objectContaining({
+        schedule_override: "3d",
+      }),
+    );
   });
 
   it("shows the relearn step after a wrong typed recall answer", async () => {
@@ -621,6 +628,104 @@ describe("ReviewPage", () => {
       "/reviews/queue/state-default/submit",
       expect.not.objectContaining({
         schedule_override: "1d",
+      }),
+    );
+  });
+
+  it("submits the chosen schedule after a typed correct answer reveal", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-typed-correct",
+        queue_item_id: "state-typed-correct",
+        word: "barely",
+        definition: "Only just, by a very small margin.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "spelling_contrast",
+          prompt_token: "prompt-state-typed-correct",
+          stem: "Type the exact word or phrase.",
+          question: "Only just, by a very small margin.",
+          options: null,
+          input_mode: "typed",
+          expected_input: "barely",
+          audio_state: "not_available",
+        },
+        detail: {
+          entry_type: "word",
+          entry_id: "word-typed-correct",
+          display_text: "barely",
+          primary_definition: "Only just, by a very small margin.",
+          primary_example: "He barely made it through the door.",
+          meaning_count: 1,
+          remembered_count: 1,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+          coverage_summary: "familiar_with_1_meaning",
+        },
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+    ] as never);
+    mockPost
+      .mockResolvedValueOnce({
+        outcome: "correct_tested",
+        detail: {
+          entry_type: "word",
+          entry_id: "word-typed-correct",
+          display_text: "barely",
+          primary_definition: "Only just, by a very small margin.",
+          primary_example: "He barely made it through the door.",
+          meaning_count: 1,
+          remembered_count: 1,
+          compare_with: [],
+          meanings: [],
+          audio_state: "not_available",
+          coverage_summary: "familiar_with_1_meaning",
+        },
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      } as never)
+      .mockResolvedValueOnce({} as never);
+
+    await renderPage();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /start review/i }));
+    });
+    fireEvent.change(await screen.findByPlaceholderText(/type the word or phrase/i), {
+      target: { value: "barely" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /check answer/i }));
+    });
+
+    expect(await screen.findByTestId("review-reveal-state")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "7d" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    });
+
+    expect(mockPost).toHaveBeenNthCalledWith(
+      1,
+      "/reviews/queue/state-typed-correct/submit",
+      expect.objectContaining({
+        typed_answer: "barely",
+        prompt_token: "prompt-state-typed-correct",
+      }),
+    );
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
+      "/reviews/queue/state-typed-correct/submit",
+      expect.objectContaining({
+        outcome: "correct_tested",
+        typed_answer: "barely",
+        schedule_override: "7d",
       }),
     );
   });

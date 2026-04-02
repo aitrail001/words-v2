@@ -104,6 +104,27 @@ async def submit_entry_state_review(
 
     prompt_id = str(prompt_token_payload.get("prompt_id") or "")
     if prompt_id and getattr(entry_state, "last_submission_prompt_id", None) == prompt_id:
+        if schedule_override:
+            current_interval_days = int(getattr(entry_state, "interval_days", 0) or 0)
+            current_next_due_at = getattr(entry_state, "next_due_at", None)
+            resolved_interval_days, resolved_next_review, _ = service._derive_interval_from_override(
+                original_interval_days=current_interval_days,
+                override_value=schedule_override,
+                base_next_review=current_next_due_at,
+            )
+            if (
+                resolved_interval_days != current_interval_days
+                or (
+                    current_next_due_at is not None
+                    and resolved_next_review != current_next_due_at
+                )
+            ):
+                entry_state.interval_days = resolved_interval_days
+                entry_state.next_due_at = resolved_next_review
+                entry_state.schedule_options = service._build_schedule_options(
+                    resolved_interval_days
+                )
+                await service.db.commit()
         entry_state.detail = entry_state.detail or await build_entry_state_detail(
             service,
             user_id=user_id,

@@ -438,7 +438,7 @@ export default function ReviewPage() {
       setRevealState(
         buildRevealState(currentCard, outcome, detail, options, {
           typedResponseValue: rawTypedAnswer,
-          persisted: true,
+          persisted: outcome !== "correct_tested",
         }),
       );
       setPhase(outcome === "correct_tested" ? "reveal" : "relearn");
