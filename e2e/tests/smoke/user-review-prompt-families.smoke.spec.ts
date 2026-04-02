@@ -432,15 +432,28 @@ test("@smoke review prompt families render, replay audio, and submit mixed flows
         typed_answer: "resilience",
         prompt_token: "prompt-state-speak",
       }),
+      expect.objectContaining({
+        outcome: "correct_tested",
+        typed_answer: "resilience",
+        prompt_token: "prompt-state-speak",
+      }),
     ]),
   );
 
-  expect(submitPayloads).toHaveLength(6);
+  expect(submitPayloads).toHaveLength(7);
   expect(submitPayloads[0]).not.toHaveProperty("schedule_override");
   expect(submitPayloads[2]).not.toHaveProperty("schedule_override");
   expect(submitPayloads[4]).not.toHaveProperty("outcome");
   expect(submitPayloads[5]).not.toHaveProperty("outcome");
   expect(submitPayloads[5]).not.toHaveProperty("schedule_override");
+  expect(submitPayloads[6]).toEqual(
+    expect.objectContaining({
+      outcome: "correct_tested",
+      typed_answer: "resilience",
+      prompt_token: "prompt-state-speak",
+    }),
+  );
+  expect(submitPayloads[6]).not.toHaveProperty("schedule_override");
 });
 
 test("@smoke review relearn opens the full detail page with learner audio controls", async ({
