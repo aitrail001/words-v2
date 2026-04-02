@@ -2,6 +2,8 @@ from app.models.book import Book
 from app.models.entry_review import EntryReviewEvent, EntryReviewState
 from app.models.epub_import import EpubImport
 from app.models.import_job import ImportJob
+from app.models.import_source import ImportSource
+from app.models.import_source_entry import ImportSourceEntry
 from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
 from app.models.lexicon_artifact_review_item import LexiconArtifactReviewItem
 from app.models.lexicon_artifact_review_item_event import LexiconArtifactReviewItemEvent
@@ -57,6 +59,8 @@ __all__ = [
     "WordList",
     "WordListItem",
     "ImportJob",
+    "ImportSource",
+    "ImportSourceEntry",
     "LexiconArtifactReviewBatch",
     "LexiconArtifactReviewItem",
     "LexiconArtifactReviewItemEvent",

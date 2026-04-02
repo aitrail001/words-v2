@@ -14,6 +14,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", label: "Home", icon: "⌂" },
   { href: "/knowledge-map", label: "Knowledge", icon: "◫" },
   { href: "/review", label: "Review", icon: "↻", testId: "nav-review-link" },
+  { href: "/imports", label: "Imports", icon: "⇪", testId: "nav-imports-link" },
   { href: "/search", label: "Search", icon: "⌕" },
   { href: "/settings", label: "Settings", icon: "✓" },
 ] as const;
@@ -52,8 +53,7 @@ function shouldHideNav(pathname: string | null): boolean {
   return (
     pathname === "/login" ||
     pathname === "/register" ||
-    pathname.startsWith("/review") ||
-    pathname.startsWith("/imports")
+    pathname.startsWith("/review")
   );
 }
 
@@ -70,7 +70,7 @@ export function LearnerShellNav() {
       data-testid="learner-shell-nav"
       className="fixed inset-x-0 bottom-0 z-40 bg-[rgba(240,241,248,0.96)] px-2 pb-[calc(env(safe-area-inset-bottom,0px)+0.55rem)] pt-2 shadow-[0_-10px_22px_rgba(88,44,145,0.08)] backdrop-blur"
     >
-      <div className="mx-auto grid max-w-[46rem] grid-cols-5 gap-2">
+      <div className="mx-auto grid max-w-[46rem] grid-cols-6 gap-2">
         {NAV_ITEMS.map((item) => {
           const active = isActiveNavItem(pathname, item.href);
 

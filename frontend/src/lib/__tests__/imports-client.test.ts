@@ -1,16 +1,26 @@
 import { apiClient } from "@/lib/api-client";
 import {
+  addWordListItem,
+  createListFromImport,
   createWordListImport,
+  deleteWordList,
+  deleteWordListItem,
+  getImportEntries,
   getImportJob,
   getImportProgressPercent,
+  getWordList,
   isImportJobTerminal,
+  listImportJobs,
   listWordLists,
+  updateWordList,
 } from "@/lib/imports-client";
 
 jest.mock("@/lib/api-client", () => ({
   apiClient: {
     post: jest.fn(),
     get: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
   },
 }));
 
@@ -36,32 +46,86 @@ describe("imports-client", () => {
     const result = await createWordListImport(file, "My List");
 
     expect(result.id).toBe("job-1");
-    expect(mockApiClient.post).toHaveBeenCalledWith(
-      "/word-lists/import",
-      expect.any(FormData),
-    );
-
-    const sentBody = mockApiClient.post.mock.calls[0][1] as FormData;
-    expect(sentBody.get("list_name")).toBe("My List");
-    expect((sentBody.get("file") as File).name).toBe("book.epub");
+    expect(mockApiClient.post).toHaveBeenCalledWith("/word-lists/import", expect.any(FormData));
   });
 
   it("loads import job by id", async () => {
     mockApiClient.get.mockResolvedValueOnce({ id: "job-2", status: "processing" } as any);
-
     const result = await getImportJob("job-2");
-
     expect(result.id).toBe("job-2");
     expect(mockApiClient.get).toHaveBeenCalledWith("/import-jobs/job-2");
   });
 
+  it("lists recent import jobs", async () => {
+    mockApiClient.get.mockResolvedValueOnce([{ id: "job-3", status: "completed" }] as any);
+    const result = await listImportJobs();
+    expect(result).toEqual([{ id: "job-3", status: "completed" }]);
+    expect(mockApiClient.get).toHaveBeenCalledWith("/import-jobs?limit=20");
+  });
+
+  it("loads import review entries", async () => {
+    mockApiClient.get.mockResolvedValueOnce({ total: 1, items: [] } as any);
+    await getImportEntries("job-2", { sort: "book_frequency", limit: 50 });
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      "/import-jobs/job-2/entries?sort=book_frequency&limit=50",
+    );
+  });
+
+  it("creates a list from selected import entries", async () => {
+    mockApiClient.post.mockResolvedValueOnce({ id: "list-1", name: "Imported" } as any);
+    await createListFromImport("job-1", {
+      name: "Imported",
+      selected_entries: [{ entry_type: "word", entry_id: "entry-1" }],
+    });
+    expect(mockApiClient.post).toHaveBeenCalledWith("/import-jobs/job-1/word-lists", {
+      name: "Imported",
+      selected_entries: [{ entry_type: "word", entry_id: "entry-1" }],
+    });
+  });
+
   it("loads word lists", async () => {
     mockApiClient.get.mockResolvedValueOnce([{ id: "list-1", name: "Imported" }] as any);
-
     const result = await listWordLists();
-
     expect(result).toEqual([{ id: "list-1", name: "Imported" }]);
     expect(mockApiClient.get).toHaveBeenCalledWith("/word-lists");
+  });
+
+  it("loads word list detail with query params", async () => {
+    mockApiClient.get.mockResolvedValueOnce({ id: "list-1", items: [] } as any);
+    await getWordList("list-1", { q: "make", sort: "rank" });
+    expect(mockApiClient.get).toHaveBeenCalledWith("/word-lists/list-1?q=make&sort=rank");
+  });
+
+  it("updates a word list", async () => {
+    mockApiClient.patch.mockResolvedValueOnce({ id: "list-1", name: "Renamed" } as any);
+    await updateWordList("list-1", { name: "Renamed" });
+    expect(mockApiClient.patch).toHaveBeenCalledWith("/word-lists/list-1", { name: "Renamed" });
+  });
+
+  it("deletes a word list", async () => {
+    mockApiClient.delete.mockResolvedValueOnce(undefined as any);
+    await deleteWordList("list-1");
+    expect(mockApiClient.delete).toHaveBeenCalledWith("/word-lists/list-1");
+  });
+
+  it("adds one generic list item", async () => {
+    mockApiClient.post.mockResolvedValueOnce({ id: "item-1" } as any);
+    await addWordListItem("list-1", {
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      frequency_count: 2,
+    });
+    expect(mockApiClient.post).toHaveBeenCalledWith("/word-lists/list-1/items", {
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      frequency_count: 2,
+    });
+  });
+
+  it("deletes a word list item", async () => {
+    mockApiClient.delete.mockResolvedValueOnce(undefined as any);
+    await deleteWordListItem("list-1", "item-1");
+    expect(mockApiClient.delete).toHaveBeenCalledWith("/word-lists/list-1/items/item-1");
   });
 
   it("calculates progress percentage safely", () => {

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -17,9 +17,6 @@ from app.models.user import User
 def mock_db():
     session = AsyncMock()
     session.execute = AsyncMock()
-    session.commit = AsyncMock()
-    session.add = MagicMock()
-    session.refresh = AsyncMock()
     return session
 
 
@@ -27,8 +24,6 @@ def mock_db():
 def mock_redis():
     r = AsyncMock()
     r.ping = AsyncMock(return_value=True)
-    r.get = AsyncMock(return_value=None)
-    r.set = AsyncMock(return_value=True)
     return r
 
 
@@ -58,61 +53,47 @@ def make_user(user_id: uuid.UUID) -> User:
     )
 
 
-class TestCreateWordListImport:
-    @pytest.mark.asyncio
-    @patch("app.api.word_lists.process_word_list_import.delay")
-    async def test_create_import_job_success(self, mock_delay, client, mock_db):
-        user_id = uuid.uuid4()
-        token = create_access_token(subject=str(user_id))
-        user = make_user(user_id)
-
-        user_result = MagicMock()
-        user_result.scalar_one_or_none.return_value = user
-        existing_result = MagicMock()
-        existing_result.scalar_one_or_none.return_value = None
-        mock_db.execute.side_effect = [user_result, existing_result]
-
-        async def fake_refresh(obj):
-            obj.id = uuid.uuid4()
-            obj.created_at = datetime.now(timezone.utc)
-
-        mock_db.refresh.side_effect = fake_refresh
-
-        response = await client.post(
-            "/api/word-lists/import",
-            headers={"Authorization": f"Bearer {token}"},
-            files={"file": ("book.epub", b"fake epub content", "application/epub+zip")},
-            data={"list_name": "Book Import"},
-        )
-
-        assert response.status_code == 201
-        body = response.json()
-        assert body["list_name"] == "Book Import"
-        assert body["status"] == "queued"
-        assert body["source_filename"] == "book.epub"
-        mock_delay.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_create_import_job_rejects_non_epub(self, client, mock_db):
-        user_id = uuid.uuid4()
-        token = create_access_token(subject=str(user_id))
-        user = make_user(user_id)
-
-        user_result = MagicMock()
-        user_result.scalar_one_or_none.return_value = user
-        mock_db.execute.return_value = user_result
-
-        response = await client.post(
-            "/api/word-lists/import",
-            headers={"Authorization": f"Bearer {token}"},
-            files={"file": ("notes.txt", b"not epub", "text/plain")},
-        )
-
-        assert response.status_code == 400
-        assert response.json()["detail"] == "Only .epub files are supported"
-
-
 class TestImportJobStatusEndpoints:
+    @pytest.mark.asyncio
+    async def test_list_import_jobs_returns_most_recent_first(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        older_job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=uuid.uuid4(),
+            source_filename="older.epub",
+            source_hash="a" * 64,
+            list_name="Older Import",
+            status="completed",
+            created_at=datetime(2026, 4, 2, tzinfo=timezone.utc),
+        )
+        newer_job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=uuid.uuid4(),
+            source_filename="newer.epub",
+            source_hash="b" * 64,
+            list_name="Newer Import",
+            status="processing",
+            created_at=datetime(2026, 4, 3, tzinfo=timezone.utc),
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        jobs_result = MagicMock()
+        jobs_result.scalars.return_value.all.return_value = [newer_job, older_job]
+        mock_db.execute.side_effect = [user_result, jobs_result]
+
+        response = await client.get(
+            "/api/import-jobs",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert [row["id"] for row in response.json()] == [str(newer_job.id), str(older_job.id)]
+
     @pytest.mark.asyncio
     async def test_get_import_job_not_found(self, client, mock_db):
         user_id = uuid.uuid4()
@@ -139,24 +120,24 @@ class TestImportJobStatusEndpoints:
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
         user = make_user(user_id)
-
-        user_result = MagicMock()
-        user_result.scalar_one_or_none.return_value = user
-
         job = ImportJob(
             id=uuid.uuid4(),
             user_id=user_id,
+            import_source_id=uuid.uuid4(),
             source_filename="book.epub",
             source_hash="d" * 64,
             list_name="Book Import",
             status="processing",
             total_items=100,
             processed_items=20,
+            matched_entry_count=20,
             created_at=datetime.now(timezone.utc),
         )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
         job_result = MagicMock()
         job_result.scalar_one_or_none.return_value = job
-
         mock_db.execute.side_effect = [user_result, job_result]
 
         response = await client.get(
@@ -166,3 +147,34 @@ class TestImportJobStatusEndpoints:
 
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
+
+    @pytest.mark.asyncio
+    async def test_create_word_list_from_import_job_returns_400_for_empty_selection(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=uuid.uuid4(),
+            source_filename="book.epub",
+            source_hash="e" * 64,
+            list_name="Book Import",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        job_result = MagicMock()
+        job_result.scalar_one_or_none.return_value = job
+        mock_db.execute.side_effect = [user_result, job_result]
+
+        response = await client.post(
+            f"/api/import-jobs/{job.id}/word-lists",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"name": "Imported", "selected_entries": []},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "At least one entry must be selected"

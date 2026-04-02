@@ -219,59 +219,45 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="rounded-[0.85rem] bg-[#eef0f7] px-2 py-2">
-        <h2 className="text-center text-[1.5rem] font-semibold tracking-tight text-[#5b2590]">
-          Practice with Lexi
-        </h2>
-        <p className="mt-1 text-center text-[0.86rem] leading-5 text-[#7b6795]">
-          Your AI tutor for reading, writing and speaking.
-        </p>
-
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {["Vocabulary", "Writing", "Speaking"].map((label, index) => (
-            <div
-              key={label}
-              className="overflow-hidden rounded-[0.25rem] border border-[#dadceb] bg-white shadow-[0_6px_14px_rgba(86,54,145,0.06)]"
-            >
-              <div
-                className={`h-22 ${
-                  index === 1
-                    ? "bg-[linear-gradient(145deg,#74dff1,#2bb7d5)]"
-                    : "bg-[linear-gradient(145deg,#cd7cff,#9141df)]"
-                }`}
-              />
-              <p className="px-2 py-2 text-center text-sm font-semibold text-[#5b2a85]">{label}</p>
+      <div className="grid gap-3 md:grid-cols-2">
+        <section className="rounded-[0.85rem] bg-white px-3 py-3 shadow-[0_8px_18px_rgba(190,112,44,0.08)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-[1.25rem] font-semibold tracking-tight text-[#9a4f12]">
+                Import EPUB
+              </h2>
+              <p className="mt-1 text-[0.86rem] leading-5 text-[#8d6d58]">
+                Upload a book, extract matched entries, and review them before creating a list.
+              </p>
             </div>
-          ))}
-        </div>
-
-        <h2 className="mt-4 text-center text-[1.45rem] font-semibold tracking-tight text-[#5b2590]">
-          Fantasy Chat
-        </h2>
-        <p className="mt-1 text-center text-[0.8rem] leading-5 text-[#7b6795]">
-          Practice with your favourite people with AI roleplay.
-        </p>
-        <div className="mt-3 grid grid-cols-4 gap-1.5">
-          {["Ronaldo", "Trump", "Chaplin", "Obama"].map((name, index) => (
-            <div
-              key={name}
-              className="overflow-hidden rounded-[0.2rem] border border-[#dadceb] bg-white shadow-[0_4px_10px_rgba(86,54,145,0.05)]"
+            <Link
+              href="/imports"
+              className="rounded-full bg-[#c76827] px-4 py-2 text-sm font-semibold text-white"
             >
-              <div
-                className={`h-24 ${
-                  index === 0
-                    ? "bg-[linear-gradient(145deg,#c58b75,#81564e)]"
-                    : index === 1
-                      ? "bg-[linear-gradient(145deg,#f0c596,#b77a40)]"
-                      : index === 2
-                        ? "bg-[linear-gradient(145deg,#d7d2c7,#7b7364)]"
-                        : "bg-[linear-gradient(145deg,#8ea0c8,#536781)]"
-                }`}
-              />
+              Open
+            </Link>
+          </div>
+        </section>
+
+        <section className="rounded-[0.85rem] bg-white px-3 py-3 shadow-[0_8px_18px_rgba(52,118,191,0.08)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-[1.25rem] font-semibold tracking-tight text-[#235b92]">
+                Manage Word Lists
+              </h2>
+              <p className="mt-1 text-[0.86rem] leading-5 text-[#61768f]">
+                Rename, search, sort, and edit the entries already saved in your lists.
+              </p>
             </div>
-          ))}
-        </div>
-      </section>
+            <Link
+              href="/word-lists"
+              className="rounded-full bg-[#2f73b3] px-4 py-2 text-sm font-semibold text-white"
+            >
+              Open
+            </Link>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

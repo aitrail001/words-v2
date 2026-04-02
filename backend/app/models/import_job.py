@@ -10,6 +10,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.book import Book
+    from app.models.import_source import ImportSource
     from app.models.word_list import WordList
 
 
@@ -25,6 +26,12 @@ class ImportJob(Base):
     book_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("books.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    import_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("import_sources.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     word_list_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("word_lists.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -35,6 +42,7 @@ class ImportJob(Base):
     list_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_items: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     processed_items: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
+    matched_entry_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     created_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     not_found_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
@@ -48,12 +56,14 @@ class ImportJob(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     book: Mapped["Book"] = relationship("Book", back_populates="import_jobs")
+    import_source: Mapped["ImportSource | None"] = relationship("ImportSource", back_populates="import_jobs")
     word_list: Mapped["WordList"] = relationship("WordList", back_populates="import_jobs")
 
     def __init__(self, **kwargs):
         kwargs.setdefault("status", "queued")
         kwargs.setdefault("total_items", 0)
         kwargs.setdefault("processed_items", 0)
+        kwargs.setdefault("matched_entry_count", 0)
         kwargs.setdefault("created_count", 0)
         kwargs.setdefault("skipped_count", 0)
         kwargs.setdefault("not_found_count", 0)

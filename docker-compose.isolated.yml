@@ -1,0 +1,36 @@
+services:
+  postgres:
+    container_name: words-epub-postgres
+    ports:
+      - "55432:5432"
+
+  redis:
+    container_name: words-epub-redis
+    ports:
+      - "56379:6379"
+
+  migrate:
+    container_name: words-epub-migrate
+
+  backend:
+    container_name: words-epub-backend
+    ports:
+      - "18000:8000"
+    environment:
+      - ALLOWED_ORIGINS=http://localhost:13000,http://localhost:13001,http://frontend:3000,http://admin-frontend:3001
+
+  worker:
+    container_name: words-epub-worker
+
+  frontend:
+    container_name: words-epub-frontend
+    ports:
+      - "13000:3000"
+
+  admin-frontend:
+    container_name: words-epub-admin-frontend
+    ports:
+      - "13001:3001"
+
+  playwright:
+    container_name: words-epub-playwright
