@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 
 from app.models.entry_review import EntryReviewState
 from app.models.phrase_entry import PhraseEntry

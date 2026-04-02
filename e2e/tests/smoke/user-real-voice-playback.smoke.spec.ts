@@ -6,7 +6,7 @@ import {
   REAL_WORD_TEXT,
 } from "../helpers/real-voice-fixture";
 
-test("@smoke real local voice assets play through authenticated detail and review flows", async ({
+test("@voice real local voice assets play through authenticated detail and review flows", async ({
   page,
   request,
 }) => {

@@ -27,7 +27,6 @@ from app.models.phrase_sense import PhraseSense
 from app.models.phrase_sense_example import PhraseSenseExample
 from app.models.user_preference import UserPreference
 from app.models.word import Word
-from app.spaced_repetition import calculate_next_review
 from app.services.knowledge_map import extract_pronunciations, select_pronunciation
 from app.services.review_prompt_builder import (
     build_available_prompt_types as build_available_prompt_types_impl,
