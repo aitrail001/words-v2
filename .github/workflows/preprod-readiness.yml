@@ -98,6 +98,16 @@ jobs:
           docker compose -f docker-compose.yml exec -T backend sh -lc "alembic downgrade -1"
           docker compose -f docker-compose.yml exec -T backend sh -lc "alembic upgrade head"
 
+      - name: Run Playwright review smoke tests
+        id: review_smoke
+        run: |
+          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+            -e E2E_BASE_URL="${E2E_BASE_URL}" \
+            -e E2E_API_URL="${E2E_API_URL}" \
+            -e E2E_ADMIN_URL="${E2E_ADMIN_URL}" \
+            -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}" \
+            playwright sh -lc "cd /workspace/e2e && npm run test:review:ci"
+
       - name: Run Playwright smoke tests
         id: smoke
         run: |
@@ -166,6 +176,7 @@ jobs:
           START_OUTCOME: ${{ steps.start_stack.outcome }}
           READY_OUTCOME: ${{ steps.readiness.outcome }}
           ROLLBACK_OUTCOME: ${{ steps.rollback_drill.outcome }}
+          REVIEW_SMOKE_OUTCOME: ${{ steps.review_smoke.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
           OBS_OUTCOME: ${{ steps.observability.outcome }}
           ARTIFACT_OUTCOME: ${{ steps.artifacts.outcome }}
@@ -188,6 +199,7 @@ jobs:
             echo "- $(checkbox "${START_OUTCOME}") Start disposable docker compose rehearsal stack (postgres/redis/backend/worker/frontend/admin-frontend)"
             echo "- $(checkbox "${READY_OUTCOME}") Backend/frontend/admin-frontend readiness checks"
             echo "- $(checkbox "${ROLLBACK_OUTCOME}") Rollback drill (alembic upgrade -> downgrade -1 -> upgrade)"
+            echo "- $(checkbox "${REVIEW_SMOKE_OUTCOME}") Learner review/SRS Playwright smoke run in container"
             echo "- $(checkbox "${SMOKE_OUTCOME}") Playwright smoke run in container (learner + admin)"
             echo "- $(checkbox "${OBS_OUTCOME}") Observability signal check (X-Request-ID + access log)"
             echo "- $(checkbox "${ARTIFACT_OUTCOME}") Smoke artifacts uploaded"
