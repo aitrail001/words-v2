@@ -45,6 +45,11 @@ class TestUserPreferenceModel:
         assert model.accent_preference == "us"
         assert model.translation_locale == "zh-Hans"
         assert model.knowledge_view_preference == "cards"
+        assert model.review_depth_preset == "balanced"
+        assert model.enable_confidence_check is True
+        assert model.enable_word_spelling is True
+        assert model.enable_audio_spelling is False
+        assert model.show_pictures_in_questions is False
 
     def test_unique_constraint_fields(self):
         constraint = next(

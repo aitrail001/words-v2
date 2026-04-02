@@ -238,7 +238,7 @@ class TestQueueDue:
         user_result.scalar_one_or_none.return_value = user
         mock_db.execute.side_effect = [user_result]
 
-        async def fake_get_due_queue_items(self, user_id, limit=20):
+        async def fake_get_due_queue_items(self, user_id, limit=20, **kwargs):
             return [
                 {
                     "item": due_item,
@@ -291,7 +291,7 @@ class TestQueueDue:
         user_result.scalar_one_or_none.return_value = user
         mock_db.execute.side_effect = [user_result]
 
-        async def fake_get_due_queue_items(self, user_id, limit=20):
+        async def fake_get_due_queue_items(self, user_id, limit=20, **kwargs):
             return [
                 {
                     "item": due_item,
@@ -301,13 +301,14 @@ class TestQueueDue:
                     "prompt": {
                         "mode": "mcq",
                         "prompt_type": "audio_to_definition",
+                        "prompt_token": "opaque-prompt-token",
                         "stem": "Listen, then choose the best matching definition.",
                         "question": "bank",
                         "options": [
-                            {"option_id": "A", "label": "The land alongside a river.", "is_correct": True},
-                            {"option_id": "B", "label": "A financial institution.", "is_correct": False},
-                            {"option_id": "C", "label": "A mass of cloud.", "is_correct": False},
-                            {"option_id": "D", "label": "A pile of snow.", "is_correct": False},
+                            {"option_id": "A", "label": "The land alongside a river."},
+                            {"option_id": "B", "label": "A financial institution."},
+                            {"option_id": "C", "label": "A mass of cloud."},
+                            {"option_id": "D", "label": "A pile of snow."},
                         ],
                         "audio_state": "ready",
                         "audio": {
@@ -345,6 +346,8 @@ class TestQueueDue:
             data[0]["prompt"]["audio"]["preferred_playback_url"]
             == "/api/words/voice-assets/test-asset/content"
         )
+        assert data[0]["prompt"]["prompt_token"] == "opaque-prompt-token"
+        assert "is_correct" not in data[0]["prompt"]["options"][0]
 
     @pytest.mark.asyncio
     async def test_get_queue_stats_emits_query_metrics_headers(self, client, mock_db, auth_token):
@@ -375,6 +378,72 @@ class TestQueueDue:
         response = await client.get("/api/reviews/queue/due")
         assert response.status_code == 401
 
+    @pytest.mark.asyncio
+    async def test_get_queue_item_success(self, client, mock_db, auth_token, monkeypatch):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        item_id = uuid.uuid4()
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_queue_item(self, user_id, item_id):
+            item = ReviewCard(
+                id=item_id,
+                session_id=uuid.uuid4(),
+                word_id=uuid.uuid4(),
+                meaning_id=uuid.uuid4(),
+                card_type="flashcard",
+                next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+            )
+            return {
+                "item": item,
+                "word": "ephemeral",
+                "definition": "lasting a short time",
+                "review_mode": "mcq",
+                "prompt": {
+                    "mode": "mcq",
+                    "prompt_type": "definition_to_entry",
+                    "prompt_token": "opaque-prompt-token",
+                    "question": "lasting a short time",
+                    "options": [
+                        {"option_id": "A", "label": "ephemeral"},
+                        {"option_id": "B", "label": "permanent"},
+                    ],
+                    "audio_state": "not_available",
+                },
+                "source_entry_type": "word",
+                "source_entry_id": str(item.word_id),
+                "detail": {
+                    "entry_type": "word",
+                    "entry_id": str(item.word_id),
+                    "display_text": "ephemeral",
+                    "meaning_count": 1,
+                    "remembered_count": 0,
+                    "compare_with": [],
+                    "meanings": [],
+                    "audio_state": "not_available",
+                },
+                "schedule_options": [],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_queue_item",
+            fake_get_queue_item,
+        )
+
+        response = await client.get(
+            f"/api/reviews/queue/{item_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(item_id)
+        assert data["prompt"]["prompt_token"] == "opaque-prompt-token"
+        assert data["detail"]["display_text"] == "ephemeral"
+
 
 class TestQueueSubmit:
     @pytest.mark.asyncio
@@ -399,6 +468,8 @@ class TestQueueSubmit:
         mock_db.execute.side_effect = [user_result]
 
         async def fake_submit_queue_review(self, **kwargs):
+            assert kwargs["audio_replay_count"] == 2
+            assert kwargs["prompt_token"] == "opaque-prompt-token"
             item.quality_rating = 4
             item.time_spent_ms = 1234
             item.card_type = "listening"
@@ -411,7 +482,13 @@ class TestQueueSubmit:
 
         response = await client.post(
             f"/api/reviews/queue/{item.id}/submit",
-            json={"quality": 4, "time_spent_ms": 1234, "card_type": "listening"},
+            json={
+                "quality": 4,
+                "time_spent_ms": 1234,
+                "audio_replay_count": 2,
+                "card_type": "listening",
+                "prompt_token": "opaque-prompt-token",
+            },
             headers={"Authorization": f"Bearer {token}"},
         )
 
@@ -565,6 +642,8 @@ class TestReviewAnalyticsSummary:
                 "days": days,
                 "total_events": 4,
                 "audio_placeholder_events": 1,
+                "total_audio_replays": 2,
+                "audio_replay_counts": [{"value": "0", "count": 3}],
                 "prompt_families": [{"value": "typed_recall", "count": 2}],
                 "outcomes": [{"value": "correct_tested", "count": 3}],
                 "response_input_modes": [{"value": "typed", "count": 2}],
@@ -585,6 +664,7 @@ class TestReviewAnalyticsSummary:
         assert data["days"] == 14
         assert data["total_events"] == 4
         assert data["audio_placeholder_events"] == 1
+        assert data["total_audio_replays"] == 2
         assert data["prompt_families"][0]["value"] == "typed_recall"
         assert int(response.headers["X-Reviews-Query-Count"]) >= 1
         assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0

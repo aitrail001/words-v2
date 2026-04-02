@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,19 @@ class UserPreference(Base):
         insert_default=True,
         server_default=text("true"),
     )
+    review_depth_preset: Mapped[str] = mapped_column(String(16), nullable=False, insert_default="balanced")
+    enable_confidence_check: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, insert_default=True, server_default=text("true")
+    )
+    enable_word_spelling: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, insert_default=True, server_default=text("true")
+    )
+    enable_audio_spelling: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, insert_default=False, server_default=text("false")
+    )
+    show_pictures_in_questions: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, insert_default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -37,6 +50,10 @@ class UserPreference(Base):
         UniqueConstraint("user_id", name="uq_user_preferences_user"),
         CheckConstraint("accent_preference IN ('us', 'uk', 'au')", name="ck_user_preferences_accent"),
         CheckConstraint("knowledge_view_preference IN ('cards', 'tags', 'list')", name="ck_user_preferences_view"),
+        CheckConstraint(
+            "review_depth_preset IN ('gentle', 'balanced', 'deep')",
+            name="ck_user_preferences_review_depth",
+        ),
     )
 
     def __init__(self, **kwargs):
@@ -44,6 +61,11 @@ class UserPreference(Base):
         kwargs.setdefault("translation_locale", "zh-Hans")
         kwargs.setdefault("knowledge_view_preference", "cards")
         kwargs.setdefault("show_translations_by_default", True)
+        kwargs.setdefault("review_depth_preset", "balanced")
+        kwargs.setdefault("enable_confidence_check", True)
+        kwargs.setdefault("enable_word_spelling", True)
+        kwargs.setdefault("enable_audio_spelling", False)
+        kwargs.setdefault("show_pictures_in_questions", False)
         kwargs.setdefault("created_at", datetime.now(timezone.utc))
         kwargs.setdefault("updated_at", datetime.now(timezone.utc))
         super().__init__(**kwargs)

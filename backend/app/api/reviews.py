@@ -52,7 +52,9 @@ class QueueAddRequest(BaseModel):
 class QueueSubmitRequest(BaseModel):
     quality: int = Field(..., ge=0, le=5)
     time_spent_ms: int = Field(..., ge=0)
+    audio_replay_count: int = Field(default=0, ge=0)
     card_type: str | None = Field(default=None, min_length=1, max_length=32)
+    prompt_token: str | None = Field(default=None, min_length=1, max_length=4096)
     review_mode: str | None = None
     outcome: str | None = Field(default=None, max_length=32)
     selected_option_id: str | None = Field(default=None, min_length=1, max_length=1)
@@ -73,7 +75,6 @@ class QueueSubmitRequest(BaseModel):
 class ReviewOption(BaseModel):
     option_id: str
     label: str
-    is_correct: bool = False
 
 
 class ReviewPromptAudioVariant(BaseModel):
@@ -91,6 +92,7 @@ class ReviewPromptAudioPayload(BaseModel):
 class ReviewPrompt(BaseModel):
     mode: str
     prompt_type: str
+    prompt_token: str | None = None
     stem: str | None = None
     question: str
     options: list[ReviewOption] | None = None
@@ -98,6 +100,7 @@ class ReviewPrompt(BaseModel):
     input_mode: str | None = None
     voice_placeholder_text: str | None = None
     sentence_masked: str | None = None
+    source_entry_type: str | None = None
     source_word_id: str | None = None
     source_meaning_id: str | None = None
     audio_state: str = "not_available"
@@ -126,6 +129,7 @@ class ReviewDetailResponse(BaseModel):
     compare_with: list[str] = []
     meanings: list[ReviewDetailMeaning] = []
     audio_state: str = "not_available"
+    coverage_summary: str | None = None
 
 
 class ScheduleOptionResponse(BaseModel):
@@ -160,6 +164,8 @@ class QueueItemResponse(BaseModel):
     session_id: str | None = None
     word_id: str | None = None
     meaning_id: str
+    target_type: str | None = None
+    target_id: str | None = None
     card_type: str | None = None
     quality_rating: int | None = None
     time_spent_ms: int | None = None
@@ -201,6 +207,8 @@ class ReviewAnalyticsSummaryResponse(BaseModel):
     days: int
     total_events: int
     audio_placeholder_events: int
+    total_audio_replays: int = 0
+    audio_replay_counts: list[ReviewAnalyticsBucketResponse] = []
     prompt_families: list[ReviewAnalyticsBucketResponse] = []
     outcomes: list[ReviewAnalyticsBucketResponse] = []
     response_input_modes: list[ReviewAnalyticsBucketResponse] = []
@@ -243,6 +251,8 @@ def _to_queue_item_response(
         else None,
         word_id=str(getattr(item, "word_id", "")) if getattr(item, "word_id", None) else None,
         meaning_id=str(item_meaning_id) if item_meaning_id else "",
+        target_type=getattr(item, "target_type", None),
+        target_id=str(getattr(item, "target_id", "")) if getattr(item, "target_id", None) else None,
         card_type=getattr(item, "card_type", None),
         quality_rating=getattr(item, "quality_rating", None),
         time_spent_ms=getattr(item, "time_spent_ms", None),
@@ -360,7 +370,7 @@ async def get_due_queue_items(
     """Get due items from the review queue with prompt metadata."""
     request_start = perf_counter()
     service = ReviewService(db)
-    due_items = await service.get_due_queue_items(current_user.id, limit=limit)
+    due_items = await service.get_due_queue_items(current_user.id, limit=limit, hydrate_limit=1)
 
     items = [
         _to_queue_item_response(
@@ -404,7 +414,9 @@ async def submit_queue_review(
             item_id=item_id,
             quality=request.quality,
             time_spent_ms=request.time_spent_ms,
+            audio_replay_count=request.audio_replay_count,
             card_type=request.card_type,
+            prompt_token=request.prompt_token,
             review_mode=request.review_mode,
             outcome=request.outcome,
             prompt=request.prompt,
@@ -487,6 +499,42 @@ async def get_queue_stats(
     )
     logger.info("reviews_request", route_name="queue_stats", **metrics)
     return QueueStatsResponse(**stats)
+
+
+@router.get("/queue/{item_id}", response_model=QueueItemResponse)
+async def get_queue_item(
+    item_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QueueItemResponse:
+    """Get a fully hydrated queue item for the current user."""
+    request_start = perf_counter()
+    service = ReviewService(db)
+    try:
+        due_entry = await service.get_queue_item(current_user.id, item_id=item_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_item", **metrics)
+    return _to_queue_item_response(
+        due_entry["item"],
+        word=due_entry["word"],
+        definition=due_entry["definition"],
+        review_mode=due_entry.get("review_mode"),
+        prompt=due_entry.get("prompt"),
+        source_entry_type=due_entry.get("source_entry_type"),
+        source_entry_id=due_entry.get("source_entry_id"),
+        detail=due_entry.get("detail"),
+        schedule_options=due_entry.get("schedule_options"),
+    )
 
 
 @router.get("/analytics/summary", response_model=ReviewAnalyticsSummaryResponse)

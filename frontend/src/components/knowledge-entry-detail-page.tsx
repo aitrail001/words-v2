@@ -12,6 +12,7 @@ import {
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
 import {
+  DEFAULT_USER_PREFERENCES,
   getUserPreferences,
   TRANSLATION_LANGUAGE_LABELS,
   updateUserPreferences,
@@ -215,12 +216,7 @@ export function KnowledgeEntryDetailPage({
 }) {
   const router = useRouter();
   const [detail, setDetail] = useState<KnowledgeMapEntryDetail | null>(null);
-  const [preferences, setPreferences] = useState<UserPreferences>({
-    accent_preference: "us",
-    translation_locale: "zh-Hans",
-    knowledge_view_preference: "cards",
-    show_translations_by_default: true,
-  });
+  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_USER_PREFERENCES);
   const [showTranslations, setShowTranslations] = useState(true);
   const [meaningIndex, setMeaningIndex] = useState(0);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");

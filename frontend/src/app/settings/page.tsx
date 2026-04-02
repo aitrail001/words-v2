@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
+  DEFAULT_USER_PREFERENCES,
   getUserPreferences,
   SUPPORTED_TRANSLATION_LOCALES,
   TRANSLATION_LANGUAGE_LABELS,
@@ -27,12 +28,7 @@ function viewButtonClass(active: boolean): string {
 }
 
 export default function SettingsPage() {
-  const [preferences, setPreferences] = useState<UserPreferences>({
-    accent_preference: "us",
-    translation_locale: "zh-Hans",
-    knowledge_view_preference: "cards",
-    show_translations_by_default: true,
-  });
+  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_USER_PREFERENCES);
 
   useEffect(() => {
     let active = true;
@@ -69,10 +65,27 @@ export default function SettingsPage() {
   const updateView = (view: ViewPreference) =>
     void persistPreferences({ ...preferences, knowledge_view_preference: view });
 
+  const updateReviewDepthPreset = (reviewDepthPreset: UserPreferences["review_depth_preset"]) =>
+    void persistPreferences({ ...preferences, review_depth_preset: reviewDepthPreset });
+
   const updateShowTranslations = (showTranslationsByDefault: boolean) =>
     void persistPreferences({
       ...preferences,
       show_translations_by_default: showTranslationsByDefault,
+    });
+
+  const updateReviewToggle = <K extends keyof Pick<
+    UserPreferences,
+    | "enable_confidence_check"
+    | "enable_word_spelling"
+    | "enable_audio_spelling"
+    | "show_pictures_in_questions"
+  >>(
+    key: K,
+  ) =>
+    void persistPreferences({
+      ...preferences,
+      [key]: !preferences[key],
     });
 
   return (
@@ -179,13 +192,89 @@ export default function SettingsPage() {
       <section className="space-y-5 rounded-[0.9rem] bg-white/94 px-4 py-4 shadow-[0_8px_18px_rgba(84,46,135,0.06)]">
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Review Cards</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
-          <div className="flex items-center justify-between">
-            <span>Sound Effects</span>
-            <div className="rounded-[0.7rem] bg-[#38c7dd] px-4 py-2 text-white">On</div>
+          <div className="flex items-center justify-between gap-2">
+            <span>Review Depth</span>
+            <div className="flex items-center gap-2">
+              {([
+                ["gentle", "Gentle"],
+                ["balanced", "Balanced"],
+                ["deep", "Deep"],
+              ] as const).map(([preset, label]) => (
+                <button
+                  key={preset}
+                  type="button"
+                  aria-label={`${label} review depth`}
+                  onClick={() => updateReviewDepthPreset(preset)}
+                  className={`rounded-[0.7rem] px-3 py-2 text-sm font-semibold ${
+                    preferences.review_depth_preset === preset
+                      ? "bg-[#38c7dd] text-white"
+                      : "bg-[#efedf7] text-[#7a6794]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex items-center justify-between">
-            <span>Hard Word Alert</span>
-            <div className="rounded-[0.7rem] bg-[#38c7dd] px-4 py-2 text-white">On</div>
+            <span>Confidence Check</span>
+            <button
+              type="button"
+              aria-label="Confidence check"
+              onClick={() => updateReviewToggle("enable_confidence_check")}
+              className={`rounded-[0.7rem] px-4 py-2 ${
+                preferences.enable_confidence_check
+                  ? "bg-[#38c7dd] text-white"
+                  : "bg-[#efedf7] text-[#7a6794]"
+              }`}
+            >
+              {preferences.enable_confidence_check ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Word Spelling</span>
+            <button
+              type="button"
+              aria-label="Word spelling"
+              onClick={() => updateReviewToggle("enable_word_spelling")}
+              className={`rounded-[0.7rem] px-4 py-2 ${
+                preferences.enable_word_spelling
+                  ? "bg-[#38c7dd] text-white"
+                  : "bg-[#efedf7] text-[#7a6794]"
+              }`}
+            >
+              {preferences.enable_word_spelling ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Audio Spelling</span>
+            <button
+              type="button"
+              aria-label="Audio spelling"
+              onClick={() => updateReviewToggle("enable_audio_spelling")}
+              className={`rounded-[0.7rem] px-4 py-2 ${
+                preferences.enable_audio_spelling
+                  ? "bg-[#38c7dd] text-white"
+                  : "bg-[#efedf7] text-[#7a6794]"
+              }`}
+            >
+              {preferences.enable_audio_spelling ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Pictures In Questions</span>
+            <button
+              type="button"
+              aria-label="Pictures in questions"
+              onClick={() => updateReviewToggle("show_pictures_in_questions")}
+              className={`rounded-[0.7rem] px-4 py-2 ${
+                preferences.show_pictures_in_questions
+                  ? "bg-[#38c7dd] text-white"
+                  : "bg-[#efedf7] text-[#7a6794]"
+              }`}
+            >
+              {preferences.show_pictures_in_questions ? "On" : "Off"}
+            </button>
           </div>
           <div className="flex items-center justify-between gap-2">
             <span>Knowledge View</span>

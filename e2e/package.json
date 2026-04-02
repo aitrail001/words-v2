@@ -6,6 +6,7 @@
     "test": "playwright test",
     "test:smoke": "playwright test --grep @smoke",
     "test:smoke:ci": "playwright test --grep @smoke --max-failures=1",
+    "test:review:ci": "playwright test tests/smoke/user-review-submit.smoke.spec.ts tests/smoke/user-review-prompt-families.smoke.spec.ts tests/smoke/user-review-typed-normalization.smoke.spec.ts tests/smoke/user-learner-audio.smoke.spec.ts --max-failures=1",
     "smoke:local": "bash ./scripts/run-local-smoke.sh",
     "test:full": "playwright test",
     "test:admin": "playwright test \"tests/full/admin-.*\\.full\\.spec\\.ts\"",

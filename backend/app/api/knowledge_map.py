@@ -2,7 +2,7 @@ import uuid
 from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
@@ -219,13 +219,15 @@ class WordFormsResponse(BaseModel):
 
 
 class KnowledgeMeaningResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     definition: str
     localized_definition: str | None = None
     part_of_speech: str | None
     usage_note: str | None = None
     localized_usage_note: str | None = None
-    register: str | None = None
+    register_label: str | None = Field(default=None, alias="register")
     primary_domain: str | None = None
     secondary_domains: list[str] = []
     grammar_patterns: list[str] = []
@@ -238,13 +240,15 @@ class KnowledgeMeaningResponse(BaseModel):
 
 
 class PhraseSenseResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     sense_id: str | None
     definition: str
     localized_definition: str | None = None
     part_of_speech: str | None
     usage_note: str | None = None
     localized_usage_note: str | None = None
-    register: str | None = None
+    register_label: str | None = Field(default=None, alias="register")
     primary_domain: str | None = None
     secondary_domains: list[str] = []
     grammar_patterns: list[str] = []
@@ -775,7 +779,7 @@ async def get_knowledge_map_entry_detail(
                             ),
                             None,
                         ),
-                        register=meaning.register_label,
+                        register_label=meaning.register_label,
                         primary_domain=meaning.primary_domain,
                         secondary_domains=normalize_meaning_metadata(meaning)["secondary_domains"],
                         grammar_patterns=normalize_meaning_metadata(meaning)["grammar_patterns"],
@@ -923,7 +927,7 @@ async def get_knowledge_map_entry_detail(
                 part_of_speech=sense.part_of_speech,
                 usage_note=sense.usage_note,
                 localized_usage_note=localized_sense.localized_usage_note if localized_sense is not None else None,
-                register=sense.register,
+                register_label=sense.register,
                 primary_domain=sense.primary_domain,
                 secondary_domains=list(sense.secondary_domains or []),
                 grammar_patterns=list(sense.grammar_patterns or []),

@@ -971,13 +971,29 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
 
     await client.query(
       `
-      INSERT INTO user_preferences (id, user_id, accent_preference, translation_locale, knowledge_view_preference)
-      VALUES ($1::uuid, $2::uuid, 'uk', 'es', 'cards')
+      INSERT INTO user_preferences (
+        id,
+        user_id,
+        accent_preference,
+        translation_locale,
+        knowledge_view_preference,
+        review_depth_preset,
+        enable_confidence_check,
+        enable_word_spelling,
+        enable_audio_spelling,
+        show_pictures_in_questions
+      )
+      VALUES ($1::uuid, $2::uuid, 'uk', 'es', 'cards', 'balanced', true, true, false, false)
       ON CONFLICT (user_id)
       DO UPDATE SET
         accent_preference = EXCLUDED.accent_preference,
         translation_locale = EXCLUDED.translation_locale,
         knowledge_view_preference = EXCLUDED.knowledge_view_preference,
+        review_depth_preset = EXCLUDED.review_depth_preset,
+        enable_confidence_check = EXCLUDED.enable_confidence_check,
+        enable_word_spelling = EXCLUDED.enable_word_spelling,
+        enable_audio_spelling = EXCLUDED.enable_audio_spelling,
+        show_pictures_in_questions = EXCLUDED.show_pictures_in_questions,
         updated_at = now()
       `,
       [randomUUID(), userId],
