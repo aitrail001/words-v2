@@ -309,6 +309,15 @@ export default function LexiconOpsPage() {
   }, [loadSnapshots]);
 
   useEffect(() => {
+    if (snapshotsLoading) {
+      return;
+    }
+    if (snapshotTotal > 0 && snapshots.length === 0 && snapshotsPage > totalSnapshotPages) {
+      setSnapshotsPage(totalSnapshotPages);
+    }
+  }, [snapshotTotal, snapshots.length, snapshotsLoading, snapshotsPage, totalSnapshotPages]);
+
+  useEffect(() => {
     if (!selectedSnapshotName) {
       setDetail(null);
       return;

@@ -199,6 +199,7 @@ describe("LexiconOpsPage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    window.history.pushState({}, "", "/lexicon/ops");
     mockReadAccessToken.mockReturnValue("active-token");
     mockListLexiconOpsSnapshots.mockResolvedValue(snapshotPageResponse(snapshots));
     mockGetLexiconOpsSnapshot.mockResolvedValue(detail);
@@ -238,6 +239,49 @@ describe("LexiconOpsPage", () => {
     expect(screen.getByTestId("lexicon-ops-detail-panel")).toHaveTextContent(
       "Word",
     );
+  });
+
+  it("clamps an out-of-range snapshot page back to the last available page", async () => {
+    window.history.pushState({}, "", "/lexicon/ops?page=99");
+    mockListLexiconOpsSnapshots
+      .mockResolvedValueOnce(
+        snapshotPageResponse([], {
+          total: 3,
+          limit: 10,
+          offset: 980,
+          has_more: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        snapshotPageResponse(snapshots, {
+          total: 3,
+          limit: 10,
+          offset: 0,
+          has_more: false,
+        }),
+      );
+
+    render(<LexiconOpsPage />);
+
+    await waitFor(() =>
+      expect(mockListLexiconOpsSnapshots.mock.calls).toContainEqual([
+        {
+          q: undefined,
+          limit: 10,
+          offset: 980,
+        },
+      ]),
+    );
+    await waitFor(() =>
+      expect(mockListLexiconOpsSnapshots.mock.calls).toContainEqual([
+        {
+          q: undefined,
+          limit: 10,
+          offset: 0,
+        },
+      ]),
+    );
+    await waitFor(() => expect(screen.getByTestId("lexicon-ops-snapshot-words-100-20260312")).toBeVisible());
   });
 
   it("refreshes snapshots from the refresh action", async () => {

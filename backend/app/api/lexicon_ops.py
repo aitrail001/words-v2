@@ -1063,10 +1063,13 @@ async def get_voice_run_detail(
     voice_role_counts = dict(plan_stats.voice_role_counts)
     content_scope_counts = dict(plan_stats.content_scope_counts)
     source_references = sorted(plan_stats.source_references)
-    if not locale_counts and not voice_role_counts and not content_scope_counts and not source_references:
+    if not locale_counts:
         locale_counts = _merge_count_maps(dict(manifest_stats.locale_counts), dict(error_stats.locale_counts))
+    if not voice_role_counts:
         voice_role_counts = _merge_count_maps(dict(manifest_stats.voice_role_counts), dict(error_stats.voice_role_counts))
+    if not content_scope_counts:
         content_scope_counts = _merge_count_maps(dict(manifest_stats.content_scope_counts), dict(error_stats.content_scope_counts))
+    if not source_references:
         source_references = sorted(set(manifest_stats.source_references) | set(error_stats.source_references))
     return LexiconVoiceRunDetailResponse(
         **summary.model_dump(),

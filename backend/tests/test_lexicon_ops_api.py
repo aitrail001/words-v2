@@ -697,6 +697,49 @@ class TestLexiconVoiceRuns:
         assert payload["latest_error_rows"] == error_rows
 
     @pytest.mark.asyncio
+    async def test_get_voice_run_detail_falls_back_per_missing_field(
+        self, client, mock_db, voice_root_env
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        run_dir = voice_root_env / "voice-partial-plan"
+        run_dir.mkdir()
+        _write_jsonl(
+            run_dir / "voice_plan.jsonl",
+            [
+                {"locale": "en-US", "source_reference": "voice-partial-plan"},
+                {"locale": "en-GB", "source_reference": "voice-partial-plan"},
+            ],
+        )
+        _write_jsonl(
+            run_dir / "voice_manifest.jsonl",
+            [
+                {"status": "generated", "locale": "en-US", "voice_role": "female", "content_scope": "word", "source_reference": "voice-partial-plan"},
+                {"status": "existing", "locale": "en-GB", "voice_role": "male", "content_scope": "definition", "source_reference": "voice-partial-plan"},
+            ],
+        )
+        _write_jsonl(
+            run_dir / "voice_errors.jsonl",
+            [
+                {"status": "failed", "locale": "en-US", "voice_role": "female", "content_scope": "example", "source_reference": "voice-partial-plan"},
+            ],
+        )
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-runs/voice-partial-plan",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["locale_counts"] == {"en-US": 1, "en-GB": 1}
+        assert payload["voice_role_counts"] == {"female": 2, "male": 1}
+        assert payload["content_scope_counts"] == {"word": 1, "definition": 1, "example": 1}
+        assert payload["source_references"] == ["voice-partial-plan"]
+
+    @pytest.mark.asyncio
     async def test_get_voice_run_artifact_serves_jsonl_file(self, client, mock_db, voice_root_env):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
