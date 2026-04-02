@@ -15,6 +15,23 @@ export type UserPreferences = {
   translation_locale: TranslationLocale;
   knowledge_view_preference: "cards" | "tags" | "list";
   show_translations_by_default: boolean;
+  review_depth_preset: "gentle" | "balanced" | "deep";
+  enable_confidence_check: boolean;
+  enable_word_spelling: boolean;
+  enable_audio_spelling: boolean;
+  show_pictures_in_questions: boolean;
+};
+
+export const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  accent_preference: "us",
+  translation_locale: "zh-Hans",
+  knowledge_view_preference: "cards",
+  show_translations_by_default: true,
+  review_depth_preset: "balanced",
+  enable_confidence_check: true,
+  enable_word_spelling: true,
+  enable_audio_spelling: false,
+  show_pictures_in_questions: false,
 };
 
 export const getUserPreferences = (): Promise<UserPreferences> =>

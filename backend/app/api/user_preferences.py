@@ -23,6 +23,11 @@ class UserPreferencesResponse(BaseModel):
     translation_locale: str
     knowledge_view_preference: str
     show_translations_by_default: bool
+    review_depth_preset: str
+    enable_confidence_check: bool
+    enable_word_spelling: bool
+    enable_audio_spelling: bool
+    show_pictures_in_questions: bool
 
 
 class UserPreferencesUpdateRequest(BaseModel):
@@ -30,6 +35,11 @@ class UserPreferencesUpdateRequest(BaseModel):
     translation_locale: str
     knowledge_view_preference: str
     show_translations_by_default: bool
+    review_depth_preset: str
+    enable_confidence_check: bool
+    enable_word_spelling: bool
+    enable_audio_spelling: bool
+    show_pictures_in_questions: bool
 
     @field_validator("accent_preference")
     @classmethod
@@ -52,6 +62,13 @@ class UserPreferencesUpdateRequest(BaseModel):
             raise ValueError("Unsupported knowledge view preference")
         return value
 
+    @field_validator("review_depth_preset")
+    @classmethod
+    def validate_review_depth_preset(cls, value: str) -> str:
+        if value not in {"gentle", "balanced", "deep"}:
+            raise ValueError("Unsupported review depth preset")
+        return value
+
 
 def _response(row: UserPreference | None) -> UserPreferencesResponse:
     if row is None:
@@ -60,12 +77,22 @@ def _response(row: UserPreference | None) -> UserPreferencesResponse:
             translation_locale=DEFAULT_TRANSLATION_LOCALE,
             knowledge_view_preference=DEFAULT_VIEW,
             show_translations_by_default=DEFAULT_SHOW_TRANSLATIONS,
+            review_depth_preset="balanced",
+            enable_confidence_check=True,
+            enable_word_spelling=True,
+            enable_audio_spelling=False,
+            show_pictures_in_questions=False,
         )
     return UserPreferencesResponse(
         accent_preference=row.accent_preference,
         translation_locale=row.translation_locale,
         knowledge_view_preference=row.knowledge_view_preference,
         show_translations_by_default=row.show_translations_by_default,
+        review_depth_preset=row.review_depth_preset,
+        enable_confidence_check=row.enable_confidence_check,
+        enable_word_spelling=row.enable_word_spelling,
+        enable_audio_spelling=row.enable_audio_spelling,
+        show_pictures_in_questions=row.show_pictures_in_questions,
     )
 
 
@@ -93,6 +120,11 @@ async def put_user_preferences(
             translation_locale=payload.translation_locale,
             knowledge_view_preference=payload.knowledge_view_preference,
             show_translations_by_default=payload.show_translations_by_default,
+            review_depth_preset=payload.review_depth_preset,
+            enable_confidence_check=payload.enable_confidence_check,
+            enable_word_spelling=payload.enable_word_spelling,
+            enable_audio_spelling=payload.enable_audio_spelling,
+            show_pictures_in_questions=payload.show_pictures_in_questions,
         )
         db.add(row)
     else:
@@ -100,5 +132,10 @@ async def put_user_preferences(
         row.translation_locale = payload.translation_locale
         row.knowledge_view_preference = payload.knowledge_view_preference
         row.show_translations_by_default = payload.show_translations_by_default
+        row.review_depth_preset = payload.review_depth_preset
+        row.enable_confidence_check = payload.enable_confidence_check
+        row.enable_word_spelling = payload.enable_word_spelling
+        row.enable_audio_spelling = payload.enable_audio_spelling
+        row.show_pictures_in_questions = payload.show_pictures_in_questions
     await db.commit()
     return _response(row)

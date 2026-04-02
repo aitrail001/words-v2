@@ -11,6 +11,13 @@ OUTCOME_FACTORS = {
     "wrong": 0.35,
 }
 
+GRADE_FACTORS = {
+    "fail": 0.35,
+    "hard_pass": 0.55,
+    "good_pass": 1.0,
+    "easy_pass": 1.45,
+}
+
 CONTEXT_FACTORS = {
     "sentence_gap": 1.10,
     "definition_to_entry": 1.05,
@@ -39,17 +46,19 @@ def calculate_next_review(
     prompt_type: str,
     stability: float = 0.3,
     difficulty: float = 0.5,
+    grade: str | None = None,
 ) -> EntryReviewResult:
     normalized_outcome = outcome if outcome in OUTCOME_FACTORS else "wrong"
     normalized_prompt_type = (
         prompt_type if prompt_type in CONTEXT_FACTORS else "definition_to_entry"
     )
+    normalized_grade = grade if grade in GRADE_FACTORS else None
 
     clamped_stability = max(0.15, float(stability or 0.3))
     clamped_difficulty = min(0.95, max(0.15, float(difficulty or 0.5)))
     difficulty_factor = 1.3 - clamped_difficulty
 
-    if normalized_outcome in {"lookup", "wrong"}:
+    if normalized_grade == "fail" or normalized_outcome in {"lookup", "wrong"}:
         next_stability = max(
             0.2 if normalized_outcome == "lookup" else 0.15,
             clamped_stability * OUTCOME_FACTORS[normalized_outcome],
@@ -59,9 +68,13 @@ def calculate_next_review(
             clamped_difficulty + (0.08 if normalized_outcome == "lookup" else 0.12),
         )
     else:
+        grade_factor = GRADE_FACTORS.get(
+            normalized_grade or ("good_pass" if normalized_outcome == "correct_tested" else "hard_pass"),
+            1.0,
+        )
         candidate_interval = (
             clamped_stability
-            * OUTCOME_FACTORS[normalized_outcome]
+            * (OUTCOME_FACTORS[normalized_outcome] if normalized_grade is None else grade_factor)
             * difficulty_factor
             * CONTEXT_FACTORS[normalized_prompt_type]
         )

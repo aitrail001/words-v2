@@ -1,0 +1,21 @@
+timestamp,container,cpu_perc,mem_usage,mem_perc,net_io,block_io,pids
+2026-04-02T02:05:20Z,words-srs-review-postgres,3.61%,67.59MiB / 50.98GiB,0.13%,24.2MB / 112MB,10.7MB / 228MB,20
+2026-04-02T02:05:20Z,words-srs-review-redis,1.29%,8.906MiB / 50.98GiB,0.02%,1.05MB / 385kB,446kB / 520kB,6
+2026-04-02T02:05:20Z,words-srs-review-backend,41.32%,144MiB / 50.98GiB,0.28%,119MB / 125MB,131kB / 1.51MB,21
+2026-04-02T02:05:20Z,words-srs-review-frontend,0.00%,880.2MiB / 50.98GiB,1.69%,6.11MB / 225MB,90.1kB / 285MB,52
+2026-04-02T02:05:24Z,words-srs-review-postgres,57.22%,92.38MiB / 50.98GiB,0.18%,24.8MB / 116MB,10.7MB / 228MB,21
+2026-04-02T02:05:24Z,words-srs-review-redis,0.90%,8.922MiB / 50.98GiB,0.02%,1.07MB / 392kB,451kB / 524kB,6
+2026-04-02T02:05:24Z,words-srs-review-backend,108.40%,144MiB / 50.98GiB,0.28%,122MB / 128MB,131kB / 1.51MB,21
+2026-04-02T02:05:24Z,words-srs-review-frontend,0.00%,880.2MiB / 50.98GiB,1.69%,6.11MB / 225MB,90.1kB / 285MB,52
+2026-04-02T02:05:28Z,words-srs-review-postgres,38.46%,93.18MiB / 50.98GiB,0.18%,25.3MB / 118MB,10.7MB / 229MB,21
+2026-04-02T02:05:28Z,words-srs-review-redis,0.74%,8.926MiB / 50.98GiB,0.02%,1.1MB / 403kB,451kB / 524kB,6
+2026-04-02T02:05:28Z,words-srs-review-backend,109.10%,144.8MiB / 50.98GiB,0.28%,125MB / 130MB,131kB / 1.51MB,21
+2026-04-02T02:05:28Z,words-srs-review-frontend,0.00%,880.2MiB / 50.98GiB,1.69%,6.11MB / 225MB,90.1kB / 285MB,52
+2026-04-02T02:05:32Z,words-srs-review-postgres,49.21%,90.46MiB / 50.98GiB,0.17%,25.9MB / 121MB,10.7MB / 229MB,21
+2026-04-02T02:05:32Z,words-srs-review-redis,0.88%,8.93MiB / 50.98GiB,0.02%,1.12MB / 413kB,451kB / 524kB,6
+2026-04-02T02:05:32Z,words-srs-review-backend,103.17%,144.5MiB / 50.98GiB,0.28%,127MB / 132MB,131kB / 1.51MB,14
+2026-04-02T02:05:32Z,words-srs-review-frontend,0.00%,880.2MiB / 50.98GiB,1.69%,6.11MB / 225MB,90.1kB / 285MB,52
+2026-04-02T02:05:36Z,words-srs-review-postgres,1.82%,62.99MiB / 50.98GiB,0.12%,26.4MB / 124MB,10.7MB / 230MB,11
+2026-04-02T02:05:36Z,words-srs-review-redis,0.48%,8.922MiB / 50.98GiB,0.02%,1.14MB / 418kB,451kB / 524kB,6
+2026-04-02T02:05:36Z,words-srs-review-backend,2.42%,144.3MiB / 50.98GiB,0.28%,130MB / 134MB,131kB / 1.51MB,14
+2026-04-02T02:05:36Z,words-srs-review-frontend,0.00%,880.2MiB / 50.98GiB,1.69%,6.11MB / 225MB,90.1kB / 285MB,52

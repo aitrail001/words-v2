@@ -108,12 +108,12 @@ export type KnowledgeMapRange = {
 export type ReviewPromptOption = {
   option_id: string;
   label: string;
-  is_correct?: boolean;
 };
 
 export type ReviewPromptPayload = {
   mode: string;
   prompt_type: string;
+  prompt_token?: string | null;
   stem?: string | null;
   question: string;
   options?: ReviewPromptOption[];
@@ -121,6 +121,7 @@ export type ReviewPromptPayload = {
   input_mode?: string | null;
   voice_placeholder_text?: string | null;
   sentence_masked?: string | null;
+  source_entry_type?: KnowledgeEntryType | null;
   source_word_id?: string | null;
   source_meaning_id?: string | null;
   audio_state?: string;
@@ -150,6 +151,7 @@ export type ReviewDetailPayload = {
   meanings: ReviewDetailMeaning[];
   audio_state?: string;
   audio?: LearnerVoicePlaybackPayload | null;
+  coverage_summary?: string | null;
 };
 
 export type ReviewScheduleOption = {

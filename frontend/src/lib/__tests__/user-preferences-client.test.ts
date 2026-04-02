@@ -33,6 +33,12 @@ describe("user-preferences-client", () => {
       accent_preference: "au",
       translation_locale: "es",
       knowledge_view_preference: "list",
+      show_translations_by_default: false,
+      review_depth_preset: "deep",
+      enable_confidence_check: false,
+      enable_word_spelling: false,
+      enable_audio_spelling: true,
+      show_pictures_in_questions: true,
     });
 
     expect(result).toEqual({ accent_preference: "au" });
@@ -40,6 +46,12 @@ describe("user-preferences-client", () => {
       accent_preference: "au",
       translation_locale: "es",
       knowledge_view_preference: "list",
+      show_translations_by_default: false,
+      review_depth_preset: "deep",
+      enable_confidence_check: false,
+      enable_word_spelling: false,
+      enable_audio_spelling: true,
+      show_pictures_in_questions: true,
     });
   });
 });

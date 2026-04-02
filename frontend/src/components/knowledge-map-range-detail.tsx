@@ -20,7 +20,12 @@ import {
   playLearnerEntryAudio,
   resolveDisplayedPronunciation,
 } from "@/lib/learner-audio";
-import { getUserPreferences, updateUserPreferences, type UserPreferences } from "@/lib/user-preferences-client";
+import {
+  DEFAULT_USER_PREFERENCES,
+  getUserPreferences,
+  updateUserPreferences,
+  type UserPreferences,
+} from "@/lib/user-preferences-client";
 
 type ViewMode = "cards" | "tags" | "list";
 
@@ -472,6 +477,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
     }
     setAccentPreference(accent);
     void updateUserPreferences({
+      ...DEFAULT_USER_PREFERENCES,
       accent_preference: accent,
       translation_locale: translationLocale,
       knowledge_view_preference: viewMode,
