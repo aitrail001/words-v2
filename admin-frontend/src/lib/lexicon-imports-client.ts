@@ -69,7 +69,7 @@ export const dryRunLexiconImport = (input: LexiconImportRequest): Promise<Lexico
     source_type: input.sourceType,
     source_reference: input.sourceReference,
     language: input.language ?? "en",
-    conflict_mode: input.conflictMode ?? "upsert",
+    conflict_mode: input.conflictMode ?? "fail",
     error_mode: input.errorMode ?? "fail_fast",
   });
 
@@ -79,7 +79,7 @@ export const runLexiconImport = (input: LexiconImportRequest): Promise<LexiconIm
     source_type: input.sourceType,
     source_reference: input.sourceReference,
     language: input.language ?? "en",
-    conflict_mode: input.conflictMode ?? "upsert",
+    conflict_mode: input.conflictMode ?? "fail",
     error_mode: input.errorMode ?? "fail_fast",
   });
 
@@ -92,6 +92,6 @@ export const dryRunVoiceImport = (input: LexiconImportRequest): Promise<LexiconV
     source_type: input.sourceType,
     source_reference: input.sourceReference,
     language: input.language ?? "en",
-    conflict_mode: input.conflictMode ?? "upsert",
+    conflict_mode: input.conflictMode ?? "fail",
     error_mode: input.errorMode ?? "fail_fast",
   });

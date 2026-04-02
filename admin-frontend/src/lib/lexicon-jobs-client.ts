@@ -64,7 +64,7 @@ export const createImportDbLexiconJob = (
     source_type: input.sourceType,
     source_reference: input.sourceReference,
     language: input.language ?? "en",
-    conflict_mode: input.conflictMode ?? "upsert",
+    conflict_mode: input.conflictMode ?? "fail",
     error_mode: input.errorMode ?? "fail_fast",
   });
 
@@ -76,7 +76,7 @@ export const createVoiceImportDbLexiconJob = (
     source_type: input.sourceType,
     source_reference: input.sourceReference,
     language: input.language ?? "en",
-    conflict_mode: input.conflictMode ?? "upsert",
+    conflict_mode: input.conflictMode ?? "fail",
     error_mode: input.errorMode ?? "fail_fast",
   });
 

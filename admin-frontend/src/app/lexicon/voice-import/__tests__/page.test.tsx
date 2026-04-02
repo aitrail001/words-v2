@@ -129,6 +129,7 @@ describe("LexiconVoiceImportPage", () => {
     render(<LexiconVoiceImportPage />);
 
     expect(await screen.findByTestId("lexicon-voice-import-input-path")).toHaveValue("/data/lexicon/voice/voice-roundtrip/voice_manifest.jsonl");
+    expect(screen.getByTestId("lexicon-voice-import-conflict-mode")).toHaveValue("fail");
     expect(screen.getByTestId("lexicon-voice-import-section-nav")).toHaveTextContent("Storage");
     expect(screen.getByTestId("lexicon-voice-import-section-nav")).toHaveTextContent("Voice Runs");
     expect(screen.getByTestId("lexicon-voice-import-section-nav")).toHaveTextContent("Voice DB Import");
