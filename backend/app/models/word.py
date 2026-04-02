@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from app.models.word_confusable import WordConfusable
     from app.models.word_form import WordForm
     from app.models.word_part_of_speech import WordPartOfSpeech
-    from app.models.word_list_item import WordListItem
     from app.models.word_relation import WordRelation
 
 
@@ -50,9 +49,6 @@ class Word(Base):
 
     meanings: Mapped[list["Meaning"]] = relationship(
         "Meaning", back_populates="word", cascade="all, delete-orphan"
-    )
-    word_list_items: Mapped[list["WordListItem"]] = relationship(
-        "WordListItem", back_populates="word", cascade="all, delete-orphan"
     )
     confusable_entries: Mapped[list["WordConfusable"]] = relationship(
         "WordConfusable",
