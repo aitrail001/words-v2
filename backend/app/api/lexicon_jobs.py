@@ -17,7 +17,14 @@ from app.models.lexicon_artifact_review_batch import LexiconArtifactReviewBatch
 from app.models.lexicon_job import LexiconJob
 from app.models.user import User
 from app.services.lexicon_compiled_reviews import default_compiled_review_output_dir
-from app.services.lexicon_jobs import apply_lexicon_job_failed, create_or_reuse_lexicon_job, get_lexicon_job
+from app.services.lexicon_jobs import (
+    ActiveLexiconJobConflictError,
+    apply_lexicon_job_cancel_requested,
+    apply_lexicon_job_cancelled,
+    apply_lexicon_job_failed,
+    create_or_reuse_lexicon_job,
+    get_lexicon_job,
+)
 from app.services.lexicon_compiled_review_decisions import BULK_REVIEW_CHUNK_SIZE, validate_review_status
 from app.services.lexicon_jsonl_reviews import (
     resolve_compiled_artifact_path,
@@ -63,6 +70,10 @@ class LexiconJobImportDbRequest(BaseModel):
     language: str = "en"
     conflict_mode: str = "fail"
     error_mode: str = "fail_fast"
+    import_execution_mode: str | None = "continuation"
+    import_row_chunk_size: int | None = None
+    import_row_commit_size: int | None = None
+    voice_group_chunk_size: int | None = None
 
 
 class LexiconJobJsonlMaterializeRequest(BaseModel):
@@ -172,25 +183,30 @@ async def create_import_db_job(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> LexiconJobResponse:
-    input_path = _resolve_voice_manifest_input_path(request.input_path, settings=settings)
+    input_path = _resolve_import_input_path(request.input_path, settings=settings)
     import_db = _import_db_module()
-    rows = import_db.load_compiled_rows(input_path)
-    row_summary = import_db.summarize_compiled_rows(rows)
-    job, created = await create_or_reuse_lexicon_job(
-        db,
-        created_by=current_user.id,
-        job_type="import_db",
-        target_key=f"import_db:{input_path}",
-        request_payload={
-            "input_path": str(input_path),
-            "source_type": request.source_type,
-            "source_reference": request.source_reference,
-            "language": request.language,
-            "conflict_mode": request.conflict_mode,
-            "error_mode": request.error_mode,
-            "row_summary": row_summary,
-        },
-    )
+    row_summary = import_db.summarize_compiled_rows_from_path(input_path)
+    try:
+        job, created = await create_or_reuse_lexicon_job(
+            db,
+            created_by=current_user.id,
+            job_type="import_db",
+            target_key=f"import_db:{input_path}",
+            request_payload={
+                "input_path": str(input_path),
+                "source_type": request.source_type,
+                "source_reference": request.source_reference,
+                "language": request.language,
+                "conflict_mode": request.conflict_mode,
+                "error_mode": request.error_mode,
+                "import_execution_mode": request.import_execution_mode,
+                "import_row_chunk_size": request.import_row_chunk_size,
+                "import_row_commit_size": request.import_row_commit_size,
+                "row_summary": row_summary,
+            },
+        )
+    except ActiveLexiconJobConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
     if created:
         await db.refresh(job)
         await db.commit()
@@ -207,23 +223,26 @@ async def create_voice_import_db_job(
 ) -> LexiconJobResponse:
     input_path = _resolve_voice_manifest_input_path(request.input_path, settings=settings)
     voice_import_db = _voice_import_db_module()
-    rows = voice_import_db.load_voice_manifest_rows(input_path)
-    row_summary = voice_import_db.summarize_voice_manifest_rows(rows)
-    job, created = await create_or_reuse_lexicon_job(
-        db,
-        created_by=current_user.id,
-        job_type="voice_import_db",
-        target_key=f"voice_import_db:{input_path}",
-        request_payload={
-            "input_path": str(input_path),
-            "source_type": request.source_type,
-            "source_reference": request.source_reference,
-            "language": request.language,
-            "conflict_mode": request.conflict_mode,
-            "error_mode": request.error_mode,
-            "row_summary": row_summary,
-        },
-    )
+    row_summary = voice_import_db.summarize_voice_manifest_rows_from_path(input_path)
+    try:
+        job, created = await create_or_reuse_lexicon_job(
+            db,
+            created_by=current_user.id,
+            job_type="voice_import_db",
+            target_key=f"voice_import_db:{input_path}",
+            request_payload={
+                "input_path": str(input_path),
+                "source_type": request.source_type,
+                "source_reference": request.source_reference,
+                "language": request.language,
+                "conflict_mode": request.conflict_mode,
+                "error_mode": request.error_mode,
+                "voice_group_chunk_size": request.voice_group_chunk_size,
+                "row_summary": row_summary,
+            },
+        )
+    except ActiveLexiconJobConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
     if created:
         await db.refresh(job)
         await db.commit()
@@ -346,4 +365,46 @@ async def get_lexicon_job_status(
     job = await get_lexicon_job(db, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lexicon job not found")
+    return _serialize_job(job)
+
+
+@router.post("/{job_id}/cancel", response_model=LexiconJobResponse)
+async def cancel_lexicon_job(
+    job_id: uuid.UUID,
+    _: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> LexiconJobResponse:
+    job = await get_lexicon_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lexicon job not found")
+    if job.status in {"completed", "failed", "cancelled"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot cancel job {job.id} because it is already {job.status}.",
+        )
+    apply_lexicon_job_cancel_requested(job)
+    await db.commit()
+    await db.refresh(job)
+    return _serialize_job(job)
+
+
+@router.post("/{job_id}/reconcile-cancel", response_model=LexiconJobResponse)
+async def reconcile_cancelled_lexicon_job(
+    job_id: uuid.UUID,
+    _: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> LexiconJobResponse:
+    job = await get_lexicon_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lexicon job not found")
+    if job.status != "cancel_requested":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot reconcile cancel for job {job.id} because status is {job.status}.",
+        )
+    apply_lexicon_job_cancelled(job)
+    if not job.progress_current_label:
+        job.progress_current_label = "Cancelled"
+    await db.commit()
+    await db.refresh(job)
     return _serialize_job(job)

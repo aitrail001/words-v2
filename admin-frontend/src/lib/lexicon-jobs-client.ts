@@ -1,6 +1,15 @@
-import { apiClient } from "@/lib/api-client";
+import { ApiError, apiClient } from "@/lib/api-client";
 
-export type LexiconJobStatus = "queued" | "running" | "completed" | "failed";
+export type LexiconJobStatus = "queued" | "running" | "cancel_requested" | "completed" | "failed" | "cancelled";
+
+export type LexiconJobProgressTiming = {
+  queue_wait_ms?: number | null;
+  elapsed_ms?: number | null;
+  validation_elapsed_ms?: number | null;
+  import_elapsed_ms?: number | null;
+  finalization_elapsed_ms?: number | null;
+  orchestration_elapsed_ms?: number | null;
+};
 
 export type LexiconJob = {
   id: string;
@@ -15,6 +24,7 @@ export type LexiconJob = {
   progress_current_label: string | null;
   progress_summary: {
     phase: string;
+    phase_started_at_ms?: number;
     total: number;
     validated: number;
     imported: number;
@@ -23,6 +33,7 @@ export type LexiconJob = {
     to_validate: number;
     to_import: number;
   } | null;
+  progress_timing?: LexiconJobProgressTiming | null;
   error_message: string | null;
   created_at: string;
   started_at: string | null;
@@ -36,6 +47,10 @@ export type CreateImportDbLexiconJobInput = {
   language?: string;
   conflictMode?: "fail" | "skip" | "upsert";
   errorMode?: "fail_fast" | "continue";
+  importExecutionMode?: "continuation" | "single_task";
+  importRowChunkSize?: number;
+  importRowCommitSize?: number;
+  voiceGroupChunkSize?: number;
 };
 
 export type CreateJsonlMaterializeLexiconJobInput = {
@@ -56,6 +71,106 @@ export type CreateCompiledReviewBulkUpdateLexiconJobInput = {
   scope?: "all_pending";
 };
 
+const normalizeLexiconJobIds = (jobIds: string[]): string[] =>
+  Array.from(new Set(jobIds.map((jobId) => jobId.trim()).filter(Boolean)));
+
+const parseStoredLexiconJobIds = (value: string | null): string[] => {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return normalizeLexiconJobIds(parsed.filter((item): item is string => typeof item === "string"));
+  } catch {
+    return [];
+  }
+};
+
+export const readLexiconActiveJobIds = (storageKey: string): string[] => {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  return parseStoredLexiconJobIds(window.localStorage.getItem(storageKey));
+};
+
+export const writeLexiconActiveJobIds = (storageKey: string, jobIds: string[]): string[] => {
+  if (typeof window === "undefined") {
+    return normalizeLexiconJobIds(jobIds);
+  }
+  const normalizedJobIds = normalizeLexiconJobIds(jobIds);
+  if (normalizedJobIds.length > 0) {
+    window.localStorage.setItem(storageKey, JSON.stringify(normalizedJobIds));
+  } else {
+    window.localStorage.removeItem(storageKey);
+  }
+  return normalizedJobIds;
+};
+
+export const addLexiconActiveJobId = (storageKey: string, jobId: string): string[] =>
+  writeLexiconActiveJobIds(storageKey, [...readLexiconActiveJobIds(storageKey), jobId]);
+
+export const removeLexiconActiveJobId = (storageKey: string, jobId: string): string[] =>
+  writeLexiconActiveJobIds(
+    storageKey,
+    readLexiconActiveJobIds(storageKey).filter((existingJobId) => existingJobId !== jobId),
+  );
+
+export const isLexiconJobActive = (job: Pick<LexiconJob, "status">): boolean =>
+  job.status === "queued" || job.status === "running" || job.status === "cancel_requested";
+
+export const upsertLexiconJob = (jobs: LexiconJob[], nextJob: LexiconJob): LexiconJob[] => {
+  const remainingJobs = jobs.filter((job) => job.id !== nextJob.id);
+  return [nextJob, ...remainingJobs];
+};
+
+const isProgressTimingRecord = (value: unknown): value is LexiconJobProgressTiming =>
+  typeof value === "object" && value !== null;
+
+export const getLexiconJobProgressTiming = (
+  job: Pick<LexiconJob, "progress_timing" | "request_payload">,
+): LexiconJobProgressTiming | null => {
+  if (isProgressTimingRecord(job.progress_timing)) {
+    return job.progress_timing;
+  }
+  const nestedTiming = job.request_payload.progress_timing;
+  return isProgressTimingRecord(nestedTiming) ? nestedTiming : null;
+};
+
+export const formatLexiconJobDuration = (milliseconds: number | null | undefined): string | null => {
+  if (milliseconds === null || milliseconds === undefined || !Number.isFinite(milliseconds) || milliseconds < 0) {
+    return null;
+  }
+  if (milliseconds < 1000) {
+    return `${Math.round(milliseconds)}ms`;
+  }
+  const totalSeconds = milliseconds / 1000;
+  if (totalSeconds < 60) {
+    return `${totalSeconds < 10 ? totalSeconds.toFixed(1) : Math.round(totalSeconds)}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  if (seconds === 0) {
+    return `${minutes}m`;
+  }
+  return `${minutes}m ${seconds}s`;
+};
+
+export const getLexiconJobConflictMessage = (jobLabel: string, error: unknown): string | null => {
+  if (!(error instanceof ApiError) || error.status !== 409) {
+    return null;
+  }
+  const detail = (error.message && error.message !== "Request failed: 409")
+    ? error.message.trim()
+    : "";
+  if (detail) {
+    return detail;
+  }
+  return `Another ${jobLabel} job already holds this source reference lock. Wait for the queued or running job to finish before retrying.`;
+};
+
 export const createImportDbLexiconJob = (
   input: CreateImportDbLexiconJobInput,
 ): Promise<LexiconJob> =>
@@ -66,6 +181,9 @@ export const createImportDbLexiconJob = (
     language: input.language ?? "en",
     conflict_mode: input.conflictMode ?? "fail",
     error_mode: input.errorMode ?? "fail_fast",
+    import_execution_mode: input.importExecutionMode ?? "continuation",
+    import_row_chunk_size: input.importRowChunkSize,
+    import_row_commit_size: input.importRowCommitSize,
   });
 
 export const createVoiceImportDbLexiconJob = (
@@ -78,6 +196,7 @@ export const createVoiceImportDbLexiconJob = (
     language: input.language ?? "en",
     conflict_mode: input.conflictMode ?? "fail",
     error_mode: input.errorMode ?? "fail_fast",
+    voice_group_chunk_size: input.voiceGroupChunkSize,
   });
 
 export const createJsonlMaterializeLexiconJob = (
@@ -109,6 +228,9 @@ export const createCompiledReviewBulkUpdateLexiconJob = (
 
 export const getLexiconJob = (jobId: string): Promise<LexiconJob> =>
   apiClient.get<LexiconJob>(`/lexicon-jobs/${jobId}`);
+
+export const cancelLexiconJob = (jobId: string): Promise<LexiconJob> =>
+  apiClient.post<LexiconJob>(`/lexicon-jobs/${jobId}/cancel`, {});
 
 export const listLexiconJobs = (input?: {
   jobType?: LexiconJob["job_type"];

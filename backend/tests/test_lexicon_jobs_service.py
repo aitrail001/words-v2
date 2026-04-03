@@ -115,4 +115,4 @@ class TestLexiconJobsService:
         assert failed.completed_at is not None
 
     def test_active_statuses_are_only_queue_and_running(self):
-        assert ACTIVE_JOB_STATUSES == {"queued", "running"}
+        assert ACTIVE_JOB_STATUSES == {"queued", "running", "cancel_requested"}

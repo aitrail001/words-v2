@@ -304,6 +304,13 @@ export default function LexiconDbInspectorPage() {
             data-testid="lexicon-db-inspector-search-input"
             value={searchDraft}
             onChange={(event) => setSearchDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                setSearchQuery(searchDraft.trim());
+                setOffset(0);
+              }
+            }}
             className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
             placeholder="Search imported entries"
           />

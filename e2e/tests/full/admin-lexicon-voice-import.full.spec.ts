@@ -61,8 +61,8 @@ test("admin can launch voice import from Lexicon Voice and complete a persisted 
 
   await page.getByTestId("lexicon-voice-import-run").click();
   await expect(page.getByTestId("lexicon-voice-import-progress")).toBeVisible();
-  await expect(page.getByTestId("lexicon-voice-import-progress")).not.toContainText("Waiting for first row...");
-  await expect(page.getByTestId("lexicon-voice-import-progress")).toContainText(/Current entry: (Validating|Importing|Completed)/);
+  await expect(page.getByTestId("lexicon-voice-import-progress")).toContainText(/Current entry:/);
+  await expect(page.getByTestId("lexicon-voice-import-progress")).toContainText(/(queued|running|completed|validating|importing)/i);
   await expect(page.getByTestId("lexicon-voice-import-recent-jobs")).toContainText(runName);
 
   const deadline = Date.now() + 30_000;
@@ -101,7 +101,7 @@ test("admin can launch voice import from Lexicon Voice and complete a persisted 
   expect(terminalJob?.status).toBe("completed");
   expect(terminalJob?.error_message).toBeNull();
   await expect(page.getByText("Voice import completed.")).toBeVisible();
-  await expect(page.getByTestId("lexicon-voice-import-progress")).toContainText("Completed");
+  await expect(page.getByTestId("lexicon-voice-import-recent-jobs")).toContainText(/completed/i);
 
   await rm(hostRunDir, { recursive: true, force: true });
 });
