@@ -42,6 +42,16 @@ WORD_RE = re.compile(r"[A-Za-z]+(?:['’-][A-Za-z]+)*")
 WHITESPACE_RE = re.compile(r"\s+")
 DASH_RE = re.compile(r"[\u2010-\u2015]")
 PUNCT_TRIM_RE = re.compile(r"(^[^\w]+|[^\w]+$)")
+SOFT_HYPHEN_RE = re.compile("\u00ad")
+INTRA_WORD_BREAK_RE = re.compile(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])")
+FRAGMENTED_CAPS_RE = re.compile(r"\b(?:[A-Z]{1,8}\s+){2,}[A-Z]{1,8}\b")
+LIGATURE_TRANSLATION = str.maketrans({
+    "ﬁ": "fi",
+    "ﬂ": "fl",
+    "ﬀ": "ff",
+    "ﬃ": "ffi",
+    "ﬄ": "ffl",
+})
 
 
 @dataclass(frozen=True)
@@ -188,6 +198,16 @@ def normalize_matching_text(value: str) -> str:
     return normalized
 
 
+def normalize_extraction_text(value: str) -> str:
+    normalized = str(value or "")
+    normalized = normalized.translate(LIGATURE_TRANSLATION)
+    normalized = SOFT_HYPHEN_RE.sub("", normalized)
+    normalized = DASH_RE.sub("-", normalized)
+    normalized = INTRA_WORD_BREAK_RE.sub("", normalized)
+    normalized = _repair_fragmented_caps_text(normalized)
+    return normalized
+
+
 def normalize_word_surface(value: str) -> str:
     normalized = normalize_matching_text(value)
     normalized = PUNCT_TRIM_RE.sub("", normalized)
@@ -195,7 +215,8 @@ def normalize_word_surface(value: str) -> str:
 
 
 def iter_normalized_words(text: str) -> list[str]:
-    return [normalize_word_surface(match.group(0)) for match in WORD_RE.finditer(text)]
+    normalized_text = normalize_extraction_text(text)
+    return [normalize_word_surface(match.group(0)) for match in WORD_RE.finditer(normalized_text)]
 
 
 def deterministic_lemmatize(surface: str) -> str | None:
@@ -208,9 +229,21 @@ def deterministic_lemmatize(surface: str) -> str | None:
         "children": "child",
         "mice": "mouse",
         "geese": "goose",
+        "went": "go",
+        "gone": "go",
+        "better": "good",
+        "best": "good",
+        "worse": "bad",
+        "worst": "bad",
+        "did": "do",
+        "done": "do",
+        "was": "be",
+        "were": "be",
     }
     if value in irregular:
         return irregular[value]
+    if len(value) > 4 and value.endswith("ied"):
+        return f"{value[:-3]}y"
     if len(value) > 4 and value.endswith("ies"):
         return f"{value[:-3]}y"
     if len(value) > 4 and value.endswith("ves"):
@@ -219,11 +252,21 @@ def deterministic_lemmatize(surface: str) -> str | None:
         base = value[:-3]
         if len(base) >= 2 and base[-1] == base[-2]:
             base = base[:-1]
+        elif base.endswith("at") or base.endswith("it") or base.endswith("iz"):
+            base = f"{base}e"
         return base
     if len(value) > 3 and value.endswith("ed"):
+        if value.endswith("ied"):
+            return f"{value[:-3]}y"
         base = value[:-2]
         if len(base) >= 2 and base[-1] == base[-2]:
             base = base[:-1]
+        elif not base.endswith("e") and (
+            base.endswith("at")
+            or base.endswith("it")
+            or base.endswith("iz")
+        ):
+            base = f"{base}e"
         return base
     if len(value) > 3 and value.endswith("es"):
         if value.endswith(("ses", "xes", "zes", "ches", "shes")):
@@ -232,6 +275,56 @@ def deterministic_lemmatize(surface: str) -> str | None:
     if len(value) > 2 and value.endswith("s"):
         return value[:-1]
     return value
+
+
+def _repair_fragmented_caps_text(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        tokens = match.group(0).split()
+        repaired = _repair_fragmented_caps_tokens(tokens)
+        return " ".join(repaired)
+
+    return FRAGMENTED_CAPS_RE.sub(replace, text)
+
+
+def _repair_fragmented_caps_tokens(tokens: Sequence[str]) -> list[str]:
+    suffixes = {"LLC", "INC", "LTD", "USA", "UK"}
+    repaired: list[str] = []
+    current = ""
+
+    def flush() -> None:
+        nonlocal current
+        if not current:
+            return
+        if current in suffixes:
+            repaired.append(current)
+        elif len(current) > 1:
+            repaired.append(current.title())
+        else:
+            repaired.append(current)
+        current = ""
+
+    for token in tokens:
+        if token in suffixes:
+            flush()
+            repaired.append(token)
+            continue
+        if not current:
+            current = token
+            continue
+        if len(current) == 1:
+            current = f"{current}{token}"
+            continue
+        if len(token) == 1:
+            flush()
+            current = token
+            continue
+        if len(token) <= 2 and len(current) <= 4:
+            current = f"{current}{token}"
+            continue
+        flush()
+        current = token
+    flush()
+    return repaired
 
 
 def parse_bulk_entry_text(raw_text: str) -> list[str]:

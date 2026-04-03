@@ -21,6 +21,7 @@ from app.services.source_imports import (
     get_or_create_import_source,
     get_or_create_import_source_sync,
     normalize_matching_text,
+    normalize_extraction_text,
     parse_bulk_entry_text,
     sha256_digest_from_bytes,
     _normalize_source_title,
@@ -218,6 +219,56 @@ def test_parse_bulk_entry_text_supports_csv_newlines_and_whitespace_modes():
 def test_normalization_and_deterministic_lemmatizer_are_stable():
     assert normalize_matching_text(" On\u2014The   Other\u2019Hand ") == "on-the other'hand"
     assert deterministic_lemmatize("apples") == "apple"
+
+
+def test_normalize_extraction_text_repairs_soft_hyphens_dashes_and_fragmented_caps():
+    raw = "An imprint of P ENGUIN R AND OM H OUSE LLC with co-\noperate and re\u00adentered plus ﬁnal touch."
+
+    normalized = normalize_extraction_text(raw)
+
+    assert "imprintof" not in normalized.casefold()
+    assert "Penguin Random House LLC" in normalized
+    assert "cooperate" in normalized
+    assert "reentered" in normalized
+    assert "final" in normalized
+
+
+def test_deterministic_lemmatize_handles_common_inflections_and_irregulars():
+    assert deterministic_lemmatize("studied") == "study"
+    assert deterministic_lemmatize("running") == "run"
+    assert deterministic_lemmatize("carried") == "carry"
+    assert deterministic_lemmatize("went") == "go"
+    assert deterministic_lemmatize("better") == "good"
+
+
+def test_match_chunks_repairs_split_words_before_word_matching():
+    cooperate_id = uuid.uuid4()
+    matcher = ImportMatcher.from_rows(
+        exact_words=[Word(id=cooperate_id, word="cooperate", language="en")],
+        word_forms=[],
+        phrase_rows=[],
+    )
+
+    matched = matcher.match_chunks(["We need to co-\noperate to finish the project."])
+
+    assert [item.entry_id for item in matched] == [cooperate_id]
+
+
+def test_match_chunks_repairs_ligatures_and_fragmented_hyphenated_words():
+    final_id = uuid.uuid4()
+    reenter_id = uuid.uuid4()
+    matcher = ImportMatcher.from_rows(
+        exact_words=[
+            Word(id=final_id, word="final", language="en"),
+            Word(id=reenter_id, word="reenter", language="en"),
+        ],
+        word_forms=[],
+        phrase_rows=[],
+    )
+
+    matched = matcher.match_chunks(["The ﬁnal draft was re\u00adentered into the archive."])
+
+    assert {item.entry_id for item in matched} == {final_id, reenter_id}
 
 
 def test_normalize_source_title_strips_vendor_noise_and_extensions():
