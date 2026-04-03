@@ -5,7 +5,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
-from app.api.word_lists import ImportJobResponse, _create_import_job_from_upload, _to_import_job_response
+from app.api.word_lists import (
+    ImportJobResponse,
+    _create_import_job_from_upload,
+    _get_import_job_for_user,
+    _hydrate_import_jobs_with_source_details,
+    _to_import_job_response,
+)
 from app.core.database import get_db
 from app.models.import_job import ImportJob
 from app.models.user import User
@@ -43,6 +49,7 @@ async def list_imports(
             .limit(50)
         )
     ).scalars().all()
+    rows = await _hydrate_import_jobs_with_source_details(db, list(rows))
     return [_to_import_job_response(row) for row in rows]
 
 
@@ -52,16 +59,6 @@ async def get_import(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ImportJobResponse:
-    row = (
-        await db.execute(
-            select(ImportJob).where(
-                ImportJob.id == import_id,
-                ImportJob.user_id == current_user.id,
-            )
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=404, detail="Import not found")
+    row = await _get_import_job_for_user(db, job_id=import_id, user_id=current_user.id)
+    await _hydrate_import_jobs_with_source_details(db, [row])
     return _to_import_job_response(row)

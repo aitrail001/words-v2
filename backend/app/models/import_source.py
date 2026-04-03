@@ -27,6 +27,8 @@ class ImportSource(Base):
     author: Mapped[str | None] = mapped_column(String(500), nullable=True)
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     source_identifier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    published_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    isbn: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, insert_default="pending", index=True)
     matched_entry_count: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

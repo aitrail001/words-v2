@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +14,9 @@ from app.api.word_lists import (
     ImportJobResponse,
     ReviewEntriesResponse,
     WordListResponse,
+    _assert_unique_word_list_name,
     _get_import_job_for_user,
+    _hydrate_import_jobs_with_source_details,
     _to_import_job_response,
     _to_word_list_response,
 )
@@ -25,20 +28,32 @@ from app.services.source_imports import EntryRef, create_word_list_from_entries,
 router = APIRouter()
 
 
+class BulkDeleteImportJobsRequest(BaseModel):
+    job_ids: list[uuid.UUID]
+
+
 @router.get("", response_model=list[ImportJobResponse])
 async def list_import_jobs(
     limit: int = Query(default=20, ge=1, le=100),
+    status_view: str = Query(default="all"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ImportJobResponse]:
+    query = select(ImportJob).where(ImportJob.user_id == current_user.id)
+    if status_view == "active":
+        query = query.where(ImportJob.status.in_(("queued", "processing")))
+    elif status_view == "history":
+        query = query.where(ImportJob.status.in_(("completed", "failed")))
+    elif status_view != "all":
+        raise HTTPException(status_code=400, detail="Unsupported status view")
     jobs = (
         await db.execute(
-            select(ImportJob)
-            .where(ImportJob.user_id == current_user.id)
+            query
             .order_by(ImportJob.created_at.desc())
             .limit(limit)
         )
     ).scalars().all()
+    jobs = await _hydrate_import_jobs_with_source_details(db, list(jobs))
     return [_to_import_job_response(job) for job in jobs]
 
 
@@ -49,7 +64,45 @@ async def get_import_job(
     db: AsyncSession = Depends(get_db),
 ) -> ImportJobResponse:
     job = await _get_import_job_for_user(db, job_id=job_id, user_id=current_user.id)
+    await _hydrate_import_jobs_with_source_details(db, [job])
     return _to_import_job_response(job)
+
+
+@router.delete("/{job_id}", status_code=204)
+async def delete_import_job(
+    job_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await _get_import_job_for_user(db, job_id=job_id, user_id=current_user.id)
+    if job.status not in {"completed", "failed"}:
+        raise HTTPException(status_code=409, detail="Only completed or failed import jobs can be deleted")
+    await db.delete(job)
+    await db.commit()
+
+
+@router.delete("", status_code=204)
+async def bulk_delete_import_jobs(
+    request: BulkDeleteImportJobsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.job_ids:
+        return
+    jobs = (
+        await db.execute(
+            select(ImportJob).where(
+                ImportJob.user_id == current_user.id,
+                ImportJob.id.in_(request.job_ids),
+            )
+        )
+    ).scalars().all()
+    active_job = next((job for job in jobs if job.status not in {"completed", "failed"}), None)
+    if active_job is not None:
+        raise HTTPException(status_code=409, detail="Only completed or failed import jobs can be deleted")
+    for job in jobs:
+        await db.delete(job)
+    await db.commit()
 
 
 @router.get("/{job_id}/entries", response_model=ReviewEntriesResponse)
@@ -90,6 +143,7 @@ async def create_word_list_from_import_job(
     db: AsyncSession = Depends(get_db),
 ) -> WordListResponse:
     job = await _get_import_job_for_user(db, job_id=job_id, user_id=current_user.id)
+    await _assert_unique_word_list_name(db, user_id=current_user.id, name=request.name)
     try:
         word_list = await create_word_list_from_entries(
             db,

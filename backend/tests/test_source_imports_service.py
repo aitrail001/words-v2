@@ -21,6 +21,7 @@ from app.services.source_imports import (
     normalize_matching_text,
     parse_bulk_entry_text,
     sha256_digest_from_bytes,
+    _normalize_source_title,
 )
 
 
@@ -169,6 +170,13 @@ def test_parse_bulk_entry_text_supports_csv_newlines_and_whitespace_modes():
 def test_normalization_and_deterministic_lemmatizer_are_stable():
     assert normalize_matching_text(" On\u2014The   Other\u2019Hand ") == "on-the other'hand"
     assert deterministic_lemmatize("apples") == "apple"
+
+
+def test_normalize_source_title_strips_vendor_noise_and_extensions():
+    assert _normalize_source_title("Pygmalion by George Bernard Shaw ( PDFDrive.com ).epub") == (
+        "Pygmalion by George Bernard Shaw"
+    )
+    assert _normalize_source_title("Pygmalion.epub") == "Pygmalion"
 
 
 @pytest.mark.asyncio

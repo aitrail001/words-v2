@@ -294,7 +294,8 @@ export type KnowledgeMapSearchHistoryList = {
 };
 
 export type KnowledgeMapListStatus = "new" | "to_learn" | "learning" | "known";
-export type KnowledgeMapListSort = "rank" | "rank_desc" | "alpha";
+export type KnowledgeMapListSort = "rank" | "alpha";
+export type KnowledgeMapListOrder = "asc" | "desc";
 
 export function normalizeLearnerTranslation(value: string | null | undefined): string | null {
   if (!value) {
@@ -367,6 +368,7 @@ export const getKnowledgeMapList = (params: {
   status: KnowledgeMapListStatus;
   q?: string;
   sort?: KnowledgeMapListSort;
+  order?: KnowledgeMapListOrder;
   limit?: number;
 }): Promise<{ items: KnowledgeMapEntrySummary[] }> => {
   const searchParams = new URLSearchParams();
@@ -376,6 +378,9 @@ export const getKnowledgeMapList = (params: {
   }
   if (params.sort) {
     searchParams.set("sort", params.sort);
+  }
+  if (params.order) {
+    searchParams.set("order", params.order);
   }
   if (params.limit) {
     searchParams.set("limit", String(params.limit));

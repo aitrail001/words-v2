@@ -65,6 +65,15 @@ class ExtractedSourceMetadata:
     author: str | None
     language: str | None
     source_identifier: str | None
+    published_year: int | None
+    isbn: str | None
+
+
+YEAR_RE = re.compile(r"(19|20)\d{2}")
+ISBN_CLEAN_RE = re.compile(r"[^0-9Xx]")
+TITLE_FILE_EXT_RE = re.compile(r"\.(epub|pdf|mobi|azw3)\s*$", re.IGNORECASE)
+TITLE_VENDOR_TAG_RE = re.compile(r"\(\s*pdfdrive(?:\.com)?\s*\)", re.IGNORECASE)
+TITLE_MULTI_SPACE_RE = re.compile(r"\s{2,}")
 
 
 def sha256_digest_from_bytes(content: bytes) -> str:
@@ -174,13 +183,21 @@ class EpubTextExtractor(SourceTextExtractor):
         title_entries = book.get_metadata("DC", "title")
         author_entries = book.get_metadata("DC", "creator")
         language_entries = book.get_metadata("DC", "language")
+        date_entries = book.get_metadata("DC", "date")
         identifier_entries = book.get_metadata("DC", "identifier")
 
+        authors = [entry[0].strip() for entry in author_entries if entry and entry[0].strip()]
+        identifiers = [entry[0].strip() for entry in identifier_entries if entry and entry[0].strip()]
+        published_year = _extract_published_year(date_entries)
+        isbn = _extract_isbn(identifiers)
+
         metadata = ExtractedSourceMetadata(
-            title=title_entries[0][0] if title_entries else None,
-            author=author_entries[0][0] if author_entries else None,
+            title=_normalize_source_title(title_entries[0][0] if title_entries else None),
+            author=", ".join(authors) if authors else None,
             language=language_entries[0][0] if language_entries else None,
-            source_identifier=identifier_entries[0][0] if identifier_entries else None,
+            source_identifier=identifiers[0] if identifiers else None,
+            published_year=published_year,
+            isbn=isbn,
         )
 
         def iter_chunks() -> Iterable[str]:
@@ -196,6 +213,44 @@ class EpubTextExtractor(SourceTextExtractor):
                     yield text
 
         return metadata, iter_chunks()
+
+
+def _extract_published_year(date_entries: Sequence[tuple[str, object]]) -> int | None:
+    for entry in date_entries:
+        raw_value = str(entry[0] or "").strip()
+        if not raw_value:
+            continue
+        match = YEAR_RE.search(raw_value)
+        if match:
+            return int(match.group(0))
+    return None
+
+
+def _normalize_source_title(raw_title: str | None) -> str | None:
+    if not raw_title:
+        return None
+    title = str(raw_title).strip()
+    if not title:
+        return None
+    title = TITLE_VENDOR_TAG_RE.sub("", title)
+    title = TITLE_FILE_EXT_RE.sub("", title)
+    title = TITLE_MULTI_SPACE_RE.sub(" ", title).strip(" -_\t")
+    return title or None
+
+
+def _extract_isbn(identifier_entries: Sequence[str]) -> str | None:
+    for raw_identifier in identifier_entries:
+        if not raw_identifier:
+            continue
+        cleaned = ISBN_CLEAN_RE.sub("", raw_identifier)
+        if len(cleaned) in {10, 13}:
+            return cleaned.upper()
+        lowered = raw_identifier.lower()
+        if "isbn" in lowered:
+            trailing = ISBN_CLEAN_RE.sub("", raw_identifier.split(":")[-1])
+            if len(trailing) in {10, 13}:
+                return trailing.upper()
+    return None
 
 
 class ImportMatcher:

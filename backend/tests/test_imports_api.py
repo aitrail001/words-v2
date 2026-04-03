@@ -299,3 +299,63 @@ class TestCreateImport:
         assert response.status_code == 503
         assert response.json()["detail"] == "Import queue is unavailable"
         assert list(tmp_path.iterdir()) == []
+
+
+class TestListImports:
+    @pytest.mark.asyncio
+    async def test_list_imports_hydrates_source_details_before_serialization(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        user = make_user(user_id)
+        import_source_id = uuid.uuid4()
+        created_at = datetime.now(timezone.utc)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        jobs_result = MagicMock()
+        jobs_result.scalars.return_value.all.return_value = [
+            ImportJob(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                import_source_id=import_source_id,
+                source_filename="book.epub",
+                source_hash="a" * 64,
+                list_name="Imported list",
+                status="completed",
+                total_items=10,
+                processed_items=10,
+                matched_entry_count=10,
+                created_at=created_at,
+                completed_at=created_at,
+            )
+        ]
+        sources_result = MagicMock()
+        sources_result.scalars.return_value.all.return_value = [
+            ImportSource(
+                id=import_source_id,
+                source_type="epub",
+                source_hash_sha256="a" * 64,
+                title="Book Title",
+                author="Alice",
+                published_year=2024,
+                isbn="9781234567890",
+                pipeline_version="v1",
+                lexicon_version="v1",
+                status="completed",
+                matched_entry_count=10,
+            )
+        ]
+        counts_result = MagicMock()
+        counts_result.all.return_value = []
+        mock_db.execute.side_effect = [user_result, jobs_result, sources_result, counts_result]
+
+        response = await client.get(
+            "/api/imports",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["source_title"] == "Book Title"
+        assert data[0]["source_hash"] == "a" * 64

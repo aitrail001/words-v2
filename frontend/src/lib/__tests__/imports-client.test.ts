@@ -1,8 +1,13 @@
 import { apiClient } from "@/lib/api-client";
 import {
   addWordListItem,
+  bulkDeleteImportJobs,
+  bulkDeleteWordListItems,
+  bulkDeleteWordLists,
   createListFromImport,
+  createEmptyWordList,
   createWordListImport,
+  deleteImportJob,
   deleteWordList,
   deleteWordListItem,
   getImportEntries,
@@ -43,7 +48,7 @@ describe("imports-client", () => {
       type: "application/epub+zip",
     });
 
-    const result = await createWordListImport(file, "My List");
+    const result = await createWordListImport(file);
 
     expect(result.id).toBe("job-1");
     expect(mockApiClient.post).toHaveBeenCalledWith("/word-lists/import", expect.any(FormData));
@@ -60,7 +65,13 @@ describe("imports-client", () => {
     mockApiClient.get.mockResolvedValueOnce([{ id: "job-3", status: "completed" }] as any);
     const result = await listImportJobs();
     expect(result).toEqual([{ id: "job-3", status: "completed" }]);
-    expect(mockApiClient.get).toHaveBeenCalledWith("/import-jobs?limit=20");
+    expect(mockApiClient.get).toHaveBeenCalledWith("/import-jobs?limit=20&status_view=all");
+  });
+
+  it("lists active import jobs", async () => {
+    mockApiClient.get.mockResolvedValueOnce([{ id: "job-4", status: "processing" }] as any);
+    await listImportJobs(10, "active");
+    expect(mockApiClient.get).toHaveBeenCalledWith("/import-jobs?limit=10&status_view=active");
   });
 
   it("loads import review entries", async () => {
@@ -69,6 +80,20 @@ describe("imports-client", () => {
     expect(mockApiClient.get).toHaveBeenCalledWith(
       "/import-jobs/job-2/entries?sort=book_frequency&limit=50",
     );
+  });
+
+  it("deletes one import job", async () => {
+    mockApiClient.delete.mockResolvedValueOnce(undefined as any);
+    await deleteImportJob("job-2");
+    expect(mockApiClient.delete).toHaveBeenCalledWith("/import-jobs/job-2");
+  });
+
+  it("bulk deletes import jobs", async () => {
+    mockApiClient.delete.mockResolvedValueOnce(undefined as any);
+    await bulkDeleteImportJobs(["job-1", "job-2"]);
+    expect(mockApiClient.delete).toHaveBeenCalledWith("/import-jobs", {
+      job_ids: ["job-1", "job-2"],
+    });
   });
 
   it("creates a list from selected import entries", async () => {
@@ -90,10 +115,19 @@ describe("imports-client", () => {
     expect(mockApiClient.get).toHaveBeenCalledWith("/word-lists");
   });
 
+  it("creates an empty word list", async () => {
+    mockApiClient.post.mockResolvedValueOnce({ id: "list-2", name: "Fresh" } as any);
+    await createEmptyWordList({ name: "Fresh", description: "Notes" });
+    expect(mockApiClient.post).toHaveBeenCalledWith("/word-lists", {
+      name: "Fresh",
+      description: "Notes",
+    });
+  });
+
   it("loads word list detail with query params", async () => {
     mockApiClient.get.mockResolvedValueOnce({ id: "list-1", items: [] } as any);
-    await getWordList("list-1", { q: "make", sort: "rank" });
-    expect(mockApiClient.get).toHaveBeenCalledWith("/word-lists/list-1?q=make&sort=rank");
+    await getWordList("list-1", { q: "make", sort: "rank", order: "desc" });
+    expect(mockApiClient.get).toHaveBeenCalledWith("/word-lists/list-1?q=make&sort=rank&order=desc");
   });
 
   it("updates a word list", async () => {
@@ -106,6 +140,14 @@ describe("imports-client", () => {
     mockApiClient.delete.mockResolvedValueOnce(undefined as any);
     await deleteWordList("list-1");
     expect(mockApiClient.delete).toHaveBeenCalledWith("/word-lists/list-1");
+  });
+
+  it("bulk deletes word lists", async () => {
+    mockApiClient.delete.mockResolvedValueOnce(undefined as any);
+    await bulkDeleteWordLists(["list-1", "list-2"]);
+    expect(mockApiClient.delete).toHaveBeenCalledWith("/word-lists", {
+      word_list_ids: ["list-1", "list-2"],
+    });
   });
 
   it("adds one generic list item", async () => {
@@ -126,6 +168,14 @@ describe("imports-client", () => {
     mockApiClient.delete.mockResolvedValueOnce(undefined as any);
     await deleteWordListItem("list-1", "item-1");
     expect(mockApiClient.delete).toHaveBeenCalledWith("/word-lists/list-1/items/item-1");
+  });
+
+  it("bulk deletes word list items", async () => {
+    mockApiClient.delete.mockResolvedValueOnce(undefined as any);
+    await bulkDeleteWordListItems("list-1", ["item-1", "item-2"]);
+    expect(mockApiClient.delete).toHaveBeenCalledWith("/word-lists/list-1/items", {
+      item_ids: ["item-1", "item-2"],
+    });
   });
 
   it("calculates progress percentage safely", () => {

@@ -121,6 +121,8 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
             import_source.author = metadata.author
             import_source.language = metadata.language
             import_source.source_identifier = metadata.source_identifier
+            import_source.published_year = metadata.published_year
+            import_source.isbn = metadata.isbn
             import_source.matched_entry_count = len(matched_entries)
             import_source.status = "completed"
             import_source.processed_at = datetime.now(timezone.utc)

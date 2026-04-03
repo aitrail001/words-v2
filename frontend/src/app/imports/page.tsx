@@ -1,56 +1,85 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  createListFromImport,
+  bulkDeleteImportJobs,
   createWordListImport,
-  getImportEntries,
+  deleteImportJob,
   getImportJob,
   getImportProgressPercent,
   listImportJobs,
   type ImportJob,
-  type ReviewEntry,
   isImportJobTerminal,
 } from "@/lib/imports-client";
+import { getImportDisplayTitle } from "@/lib/import-display";
 
 const POLL_INTERVAL_MS = 2000;
-const REVIEW_PAGE_SIZE = 100;
 
-type SortMode = "book_frequency" | "general_rank" | "alpha";
+function formatImportDuration(seconds: number | null): string {
+  if (seconds == null) {
+    return "In progress";
+  }
+  if (seconds < 1) {
+    return "<1s";
+  }
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.round(seconds % 60);
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function getAuthorLabel(job: ImportJob): string {
+  return job.source_author?.trim() || "Unknown";
+}
+
+function getPublishedLabel(job: ImportJob): string {
+  return job.source_published_year != null ? String(job.source_published_year) : "Unknown";
+}
+
+function getIsbnLabel(job: ImportJob): string {
+  return job.source_isbn?.trim() || "Unknown";
+}
+
+function compactMetricPairs(job: ImportJob): Array<[string, string]> {
+  return [
+    ["File", job.source_filename],
+    ["Status", job.status],
+    ["Source", job.from_cache ? "Cached" : "Fresh import"],
+    ["Duration", formatImportDuration(job.processing_duration_seconds)],
+    ["Extracted", String(job.total_entries_extracted)],
+    ["Words", String(job.word_entry_count)],
+    ["Phrases", String(job.phrase_entry_count)],
+    ["Matched", String(job.matched_entry_count)],
+  ];
+}
 
 export default function ImportsPage() {
+  const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [listName, setListName] = useState("");
-  const [jobs, setJobs] = useState<ImportJob[]>([]);
-  const [reviewEntries, setReviewEntries] = useState<ReviewEntry[]>([]);
-  const [selectedEntryKeys, setSelectedEntryKeys] = useState<Set<string>>(new Set());
-  const [reviewQuery, setReviewQuery] = useState("");
-  const [reviewType, setReviewType] = useState<"all" | "word" | "phrase">("all");
-  const [reviewSort, setReviewSort] = useState<SortMode>("book_frequency");
-  const [activeReviewJobId, setActiveReviewJobId] = useState<string | null>(null);
-  const [recentCreatedList, setRecentCreatedList] = useState<{ id: string; name: string } | null>(null);
+  const [activeJobs, setActiveJobs] = useState<ImportJob[]>([]);
+  const [historyJobs, setHistoryJobs] = useState<ImportJob[]>([]);
+  const [selectedHistoryJobIds, setSelectedHistoryJobIds] = useState<Set<string>>(new Set());
+  const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [creatingList, setCreatingList] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const activeReviewJob = useMemo(
-    () => jobs.find((job) => job.id === activeReviewJobId) ?? null,
-    [activeReviewJobId, jobs],
-  );
-
   const activeJobIds = useMemo(
-    () => jobs.filter((job) => !isImportJobTerminal(job.status)).map((job) => job.id),
-    [jobs],
+    () => activeJobs.filter((job) => !isImportJobTerminal(job.status)).map((job) => job.id),
+    [activeJobs],
   );
+  const primaryActiveJob = activeJobs[0] ?? null;
 
   useEffect(() => {
     let active = true;
 
-    listImportJobs()
-      .then((loadedJobs) => {
+    Promise.all([listImportJobs(20, "active"), listImportJobs(20, "history")])
+      .then(([loadedActiveJobs, loadedHistoryJobs]) => {
         if (active) {
-          setJobs(loadedJobs);
+          setActiveJobs(loadedActiveJobs);
+          setHistoryJobs(loadedHistoryJobs);
         }
       })
       .catch(() => {
@@ -72,13 +101,19 @@ export default function ImportsPage() {
     const intervalId = window.setInterval(async () => {
       try {
         const updatedJobs = await Promise.all(activeJobIds.map((id) => getImportJob(id)));
-        setJobs((prev) => {
-          const byId = new Map(prev.map((job) => [job.id, job]));
-          for (const updatedJob of updatedJobs) {
-            byId.set(updatedJob.id, updatedJob);
-          }
-          return Array.from(byId.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
-        });
+        const finishedJobs = updatedJobs.filter((job) => isImportJobTerminal(job.status));
+        setActiveJobs((current) =>
+          current
+            .map((job) => updatedJobs.find((updatedJob) => updatedJob.id === job.id) ?? job)
+            .filter((job) => !isImportJobTerminal(job.status))
+            .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+        );
+        if (finishedJobs.length > 0) {
+          setHistoryJobs((current) =>
+            [...finishedJobs, ...current.filter((job) => !finishedJobs.some((finished) => finished.id === job.id))]
+              .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+          );
+        }
       } catch {
         setError("Failed to refresh import status");
       }
@@ -88,62 +123,6 @@ export default function ImportsPage() {
       window.clearInterval(intervalId);
     };
   }, [activeJobIds]);
-
-  useEffect(() => {
-    const candidateJob =
-      jobs.find((job) => job.id === activeReviewJobId) ??
-      jobs.find((job) => job.status === "completed" && !job.word_list_id) ??
-      null;
-    if (!candidateJob) {
-      return;
-    }
-    setActiveReviewJobId(candidateJob.id);
-  }, [activeReviewJobId, jobs]);
-
-  useEffect(() => {
-    if (!activeReviewJobId) {
-      setReviewEntries([]);
-      return;
-    }
-    if (activeReviewJob && activeReviewJob.status !== "completed") {
-      setReviewEntries([]);
-      return;
-    }
-
-    let active = true;
-    setError(null);
-    getImportEntries(activeReviewJobId, {
-      q: reviewQuery.trim() || undefined,
-      entry_type: reviewType === "all" ? undefined : reviewType,
-      sort: reviewSort,
-      order: reviewSort === "alpha" ? "asc" : "desc",
-      limit: REVIEW_PAGE_SIZE,
-      offset: 0,
-    })
-      .then((response) => {
-        if (active) {
-          setReviewEntries(response.items);
-          setSelectedEntryKeys(
-            new Set(response.items.map((entry) => `${entry.entry_type}:${entry.entry_id}`)),
-          );
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setError("Failed to load review entries");
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [activeReviewJob, activeReviewJobId, reviewQuery, reviewSort, reviewType]);
-
-  const selectedEntries = useMemo(
-    () =>
-      reviewEntries.filter((entry) => selectedEntryKeys.has(`${entry.entry_type}:${entry.entry_id}`)),
-    [reviewEntries, selectedEntryKeys],
-  );
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -156,15 +135,18 @@ export default function ImportsPage() {
     setError(null);
 
     try {
-      const job = await createWordListImport(selectedFile, listName);
-      setJobs((prev) => [job, ...prev.filter((existing) => existing.id !== job.id)]);
-      setActiveReviewJobId(job.id);
+      const job = await createWordListImport(selectedFile);
+      if (isImportJobTerminal(job.status)) {
+        setHistoryJobs((current) => [job, ...current.filter((existing) => existing.id !== job.id)]);
+      } else {
+        setActiveJobs((current) => [job, ...current.filter((existing) => existing.id !== job.id)]);
+      }
       setSelectedFile(null);
-      setListName("");
       const input = document.getElementById("imports-upload-input") as HTMLInputElement | null;
       if (input) {
         input.value = "";
       }
+      router.push(`/imports/${job.id}`);
     } catch {
       setError("Import failed. Please try again.");
     } finally {
@@ -172,54 +154,148 @@ export default function ImportsPage() {
     }
   };
 
-  const toggleEntry = (entry: ReviewEntry) => {
-    const key = `${entry.entry_type}:${entry.entry_id}`;
-    setSelectedEntryKeys((current) => {
+  const toggleHistorySelection = (jobId: string) => {
+    setSelectedHistoryJobIds((current) => {
       const next = new Set(current);
-      if (next.has(key)) {
-        next.delete(key);
+      if (next.has(jobId)) {
+        next.delete(jobId);
       } else {
-        next.add(key);
+        next.add(jobId);
       }
       return next;
     });
   };
 
-  const selectAllFiltered = () => {
-    setSelectedEntryKeys(new Set(reviewEntries.map((entry) => `${entry.entry_type}:${entry.entry_id}`)));
+  const selectAllHistory = () => {
+    setSelectedHistoryJobIds(new Set(historyJobs.map((job) => job.id)));
   };
 
-  const deselectAllFiltered = () => {
-    setSelectedEntryKeys(new Set());
+  const clearHistorySelection = () => {
+    setSelectedHistoryJobIds(new Set());
   };
 
-  const handleCreateList = async () => {
-    if (!activeReviewJobId || selectedEntries.length === 0) {
-      setError("Select at least one entry");
+  const handleDeleteHistoryJob = async (jobId: string) => {
+    if (!window.confirm("Delete this import job from your history?")) {
       return;
     }
-
-    const activeJob = jobs.find((job) => job.id === activeReviewJobId) ?? null;
-
-    setCreatingList(true);
-    setError(null);
     try {
-      const created = await createListFromImport(activeReviewJobId, {
-        name: listName.trim() || activeJob?.list_name?.trim() || "Imported list",
-        selected_entries: selectedEntries.map((entry) => ({
-          entry_type: entry.entry_type,
-          entry_id: entry.entry_id,
-        })),
+      await deleteImportJob(jobId);
+      setHistoryJobs((current) => current.filter((job) => job.id !== jobId));
+      setSelectedHistoryJobIds((current) => {
+        const next = new Set(current);
+        next.delete(jobId);
+        return next;
       });
-      setRecentCreatedList({ id: created.id, name: created.name });
-      setJobs((prev) =>
-        prev.map((job) => (job.id === activeReviewJobId ? { ...job, word_list_id: created.id } : job)),
-      );
     } catch {
-      setError("Failed to create list");
-    } finally {
-      setCreatingList(false);
+      setError("Failed to delete import history");
     }
+  };
+
+  const handleBulkDeleteHistory = async () => {
+    const ids = Array.from(selectedHistoryJobIds);
+    if (ids.length === 0) {
+      return;
+    }
+    if (!window.confirm(`Delete ${ids.length} import histor${ids.length === 1 ? "y entry" : "y entries"}?`)) {
+      return;
+    }
+    try {
+      await bulkDeleteImportJobs(ids);
+      setHistoryJobs((current) => current.filter((job) => !selectedHistoryJobIds.has(job.id)));
+      setSelectedHistoryJobIds(new Set());
+    } catch {
+      setError("Failed to delete import history");
+    }
+  };
+
+  const renderJobList = (
+    jobsToRender: ImportJob[],
+    testId: string,
+    options?: { selectable?: boolean },
+  ) => {
+    if (jobsToRender.length === 0) {
+      return (
+        <p className="text-sm text-gray-500" data-testid={`${testId}-empty`}>
+          No jobs in this section.
+        </p>
+      );
+    }
+
+    return (
+      <ul className="space-y-2" data-testid={testId}>
+        {jobsToRender.map((job) => (
+          <li
+            key={job.id}
+            data-testid={`imports-row-${job.id}`}
+            className="rounded-md border border-gray-200 bg-white p-3"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                {options?.selectable ? (
+                  <input
+                    type="checkbox"
+                    checked={selectedHistoryJobIds.has(job.id)}
+                    onChange={() => toggleHistorySelection(job.id)}
+                    data-testid={`imports-select-${job.id}`}
+                    className="mt-1"
+                  />
+                ) : null}
+                <div className="space-y-2 text-sm text-gray-700">
+                <p className="break-words font-medium" data-testid={`imports-title-${job.id}`}>
+                  <span className="font-semibold">Title:</span> {getImportDisplayTitle(job)}
+                </p>
+                <p className="text-xs text-gray-600">
+                  <span className="font-semibold">Author:</span> {getAuthorLabel(job)}
+                  {" · "}
+                  <span className="font-semibold">Published:</span> {getPublishedLabel(job)}
+                  {" · "}
+                  <span className="font-semibold">ISBN:</span> {getIsbnLabel(job)}
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500">
+                  {compactMetricPairs(job).map(([label, value]) => (
+                    <p key={`${job.id}-${label}`}>
+                      <span className="font-semibold text-gray-600">{label}:</span> {value}
+                    </p>
+                  ))}
+                </div>
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <Link
+                  href={`/imports/${job.id}`}
+                  data-testid={`imports-open-${job.id}`}
+                  className="inline-flex min-w-24 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+                >
+                  Open
+                </Link>
+                {options?.selectable ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteHistoryJob(job.id)}
+                    data-testid={`imports-delete-${job.id}`}
+                    className="inline-flex min-w-24 items-center justify-center rounded-md border border-[#f0c1c1] bg-[#fff5f5] px-3 py-2 text-sm text-[#b13a3a]"
+                  >
+                    Delete
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
+                <div
+                  data-testid={`imports-progress-${job.id}`}
+                  className="h-full bg-blue-600"
+                  style={{ width: `${getImportProgressPercent(job)}%` }}
+                />
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                {job.processed_items}/{job.total_items || 0} processed
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
   };
 
   return (
@@ -239,7 +315,7 @@ export default function ImportsPage() {
             data-testid="imports-word-lists-link"
             className="rounded-full border border-[#d7c8ec] bg-[#f5efff] px-4 py-2 text-sm font-medium text-[#5b2590]"
           >
-            Word List Manager
+            Word Lists
           </Link>
           <Link
             href="/"
@@ -266,19 +342,6 @@ export default function ImportsPage() {
           />
         </div>
 
-        <div className="space-y-2">
-          <label htmlFor="imports-list-name" className="text-sm font-medium text-gray-700">
-            List Name
-          </label>
-          <input
-            id="imports-list-name"
-            value={listName}
-            onChange={(event) => setListName(event.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2"
-            placeholder="Imported from book"
-          />
-        </div>
-
         <button
           data-testid="imports-submit-button"
           type="submit"
@@ -289,162 +352,69 @@ export default function ImportsPage() {
         </button>
       </form>
 
-      {recentCreatedList && (
-        <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-4" data-testid="imports-created-list-panel">
-          <p className="text-sm font-medium text-emerald-800">
-            Created <span className="font-semibold">{recentCreatedList.name}</span>.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <Link
-              href={`/word-lists?list=${recentCreatedList.id}`}
-              data-testid="imports-open-created-list-link"
-              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white"
-            >
-              Open In Word List Manager
-            </Link>
-            <Link
-              href="/word-lists"
-              className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-800"
-            >
-              View All Word Lists
-            </Link>
-          </div>
-        </section>
-      )}
-
-      {error && (
+      {error ? (
         <p className="text-sm text-red-600" data-testid="imports-error">
           {error}
         </p>
-      )}
+      ) : null}
 
-      <section className="space-y-2">
-        <h3 className="text-lg font-semibold">Import Jobs</h3>
-        {jobs.length === 0 ? (
-          <p className="text-sm text-gray-500" data-testid="imports-empty-state">
-            No import jobs yet.
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold">Active Import</h3>
+          <button
+            type="button"
+            data-testid="imports-history-toggle"
+            onClick={() => setShowHistory((current) => !current)}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700"
+          >
+            {showHistory ? "Hide History" : "Show History"}
+          </button>
+        </div>
+        {primaryActiveJob ? renderJobList([primaryActiveJob], "imports-active-jobs-list") : (
+          <p className="text-sm text-gray-500" data-testid="imports-active-jobs-list-empty">
+            No active import right now.
           </p>
-        ) : (
-          <ul className="space-y-2" data-testid="imports-jobs-list">
-            {jobs.map((job) => (
-              <li
-                key={job.id}
-                data-testid={`imports-row-${job.id}`}
-                className="rounded-md border border-gray-200 bg-white p-3"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium">{job.list_name}</p>
-                    <p className="text-xs text-gray-500">{job.source_filename}</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-sm text-gray-700"
-                    onClick={() => setActiveReviewJobId(job.id)}
-                  >
-                    {job.status}
-                  </button>
-                </div>
-                <div className="mt-2">
-                  <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
-                    <div
-                      data-testid={`imports-progress-${job.id}`}
-                      className="h-full bg-blue-600"
-                      style={{ width: `${getImportProgressPercent(job)}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {job.processed_items}/{job.total_items || 0} processed
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ul>
         )}
+        {activeJobs.length > 1 ? (
+          <p className="text-xs text-gray-500" data-testid="imports-active-jobs-extra">
+            {activeJobs.length - 1} additional active import{activeJobs.length - 1 === 1 ? "" : "s"} running.
+          </p>
+        ) : null}
       </section>
 
-      {activeReviewJobId && (
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4" data-testid="imports-review-panel">
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              value={reviewQuery}
-              onChange={(event) => setReviewQuery(event.target.value)}
-              placeholder="Search matched entries"
-              className="min-w-[14rem] flex-1 rounded-md border border-gray-300 px-3 py-2"
-            />
-            <select
-              value={reviewType}
-              onChange={(event) => setReviewType(event.target.value as "all" | "word" | "phrase")}
-              className="rounded-md border border-gray-300 px-3 py-2"
-            >
-              <option value="all">All</option>
-              <option value="word">Words</option>
-              <option value="phrase">Phrases</option>
-            </select>
-            <select
-              value={reviewSort}
-              onChange={(event) => setReviewSort(event.target.value as SortMode)}
-              className="rounded-md border border-gray-300 px-3 py-2"
-            >
-              <option value="book_frequency">Book frequency</option>
-              <option value="general_rank">General rank</option>
-              <option value="alpha">Alphabetic</option>
-            </select>
-          </div>
-
-          <div className="flex items-center gap-3 text-sm">
-            <button type="button" onClick={selectAllFiltered} className="rounded border px-3 py-1">
-              Select all filtered
-            </button>
-            <button type="button" onClick={deselectAllFiltered} className="rounded border px-3 py-1">
-              Deselect all filtered
-            </button>
-            <span data-testid="imports-selected-count">{selectedEntries.length} selected</span>
-          </div>
-
-          {reviewEntries.length === 0 ? (
-            <p className="text-sm text-gray-500" data-testid="imports-review-empty">
-              No matched entries for this filter.
-            </p>
-          ) : (
-            <ul className="space-y-2" data-testid="imports-review-list">
-              {reviewEntries.map((entry) => {
-                const key = `${entry.entry_type}:${entry.entry_id}`;
-                const checked = selectedEntryKeys.has(key);
-                return (
-                  <li key={key} className="flex items-center gap-3 rounded border border-gray-200 px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleEntry(entry)}
-                      aria-label={`select-${key}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium">{entry.display_text}</p>
-                      <p className="text-xs text-gray-500">
-                        {entry.entry_type} · freq {entry.frequency_count}
-                        {entry.phrase_kind ? ` · ${entry.phrase_kind}` : ""}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          <div className="flex items-center gap-3">
+      {showHistory ? (
+        <section className="space-y-3">
+          <h3 className="text-lg font-semibold">Import History</h3>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={creatingList}
-              onClick={handleCreateList}
-              className="rounded-md bg-emerald-600 px-4 py-2 text-white disabled:opacity-50"
-              data-testid="imports-create-list-button"
+              onClick={selectAllHistory}
+              data-testid="imports-history-select-all"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700"
             >
-              {creatingList ? "Creating..." : "Create list from selection"}
+              Select All
+            </button>
+            <button
+              type="button"
+              onClick={clearHistorySelection}
+              data-testid="imports-history-clear-selection"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700"
+            >
+              Unselect All
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleBulkDeleteHistory()}
+              disabled={selectedHistoryJobIds.size === 0}
+              data-testid="imports-history-delete-selected"
+              className="rounded-md border border-[#f0c1c1] bg-[#fff5f5] px-3 py-2 text-sm font-medium text-[#b13a3a] disabled:opacity-50"
+            >
+              Delete Selected
             </button>
           </div>
+          {renderJobList(historyJobs, "imports-history-jobs-list", { selectable: true })}
         </section>
-      )}
+      ) : null}
     </div>
   );
 }
