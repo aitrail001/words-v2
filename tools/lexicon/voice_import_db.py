@@ -540,7 +540,7 @@ def _preload_voice_import_maps(
     dict[tuple[Any, int], Any],
     dict[tuple[Any, ...], Any],
 ]:
-    from sqlalchemy import func, or_, select
+    from sqlalchemy import select
 
     word_pairs = {
         (_row_word_key(row), _row_language_key(row, default_language=default_language))
@@ -561,8 +561,8 @@ def _preload_voice_import_maps(
         languages = sorted({language for _word, language in word_pairs})
         word_rows = session.execute(
             select(word_model).where(
-                func.lower(word_model.word).in_(word_texts),
-                func.lower(word_model.language).in_(languages),
+                word_model.word.in_(word_texts),
+                word_model.language.in_(languages),
             )
         ).scalars().all()
         for word in word_rows:
@@ -573,8 +573,8 @@ def _preload_voice_import_maps(
         languages = sorted({language for _phrase, language in phrase_pairs})
         phrase_rows = session.execute(
             select(phrase_entry_model).where(
-                func.lower(phrase_entry_model.phrase_text).in_(phrase_texts),
-                func.lower(phrase_entry_model.language).in_(languages),
+                phrase_entry_model.phrase_text.in_(phrase_texts),
+                phrase_entry_model.language.in_(languages),
             )
         ).scalars().all()
         for phrase in phrase_rows:
@@ -651,11 +651,12 @@ def _preload_voice_import_maps(
             word_clauses.append(voice_asset_model.word_id.in_(word_ids))
         if phrase_entry_ids:
             word_clauses.append(voice_asset_model.phrase_entry_id.in_(phrase_entry_ids))
-        voice_asset_rows.extend(
-            session.execute(
-                select(voice_asset_model).where(voice_asset_model.content_scope == "word", or_(*word_clauses))
-            ).scalars().all()
-        )
+        for clause in word_clauses:
+            voice_asset_rows.extend(
+                session.execute(
+                    select(voice_asset_model).where(voice_asset_model.content_scope == "word", clause)
+                ).scalars().all()
+            )
 
     if meaning_ids or phrase_sense_ids:
         definition_clauses = []
@@ -663,11 +664,12 @@ def _preload_voice_import_maps(
             definition_clauses.append(voice_asset_model.meaning_id.in_(meaning_ids))
         if phrase_sense_ids:
             definition_clauses.append(voice_asset_model.phrase_sense_id.in_(phrase_sense_ids))
-        voice_asset_rows.extend(
-            session.execute(
-                select(voice_asset_model).where(voice_asset_model.content_scope == "definition", or_(*definition_clauses))
-            ).scalars().all()
-        )
+        for clause in definition_clauses:
+            voice_asset_rows.extend(
+                session.execute(
+                    select(voice_asset_model).where(voice_asset_model.content_scope == "definition", clause)
+                ).scalars().all()
+            )
 
     example_ids = sorted({getattr(example, "id") for example in examples_by_sentence.values()} | {getattr(example, "id") for example in examples_by_order.values()})
     phrase_example_ids = sorted({getattr(example, "id") for example in phrase_examples_by_sentence.values()} | {getattr(example, "id") for example in phrase_examples_by_order.values()})
@@ -677,11 +679,12 @@ def _preload_voice_import_maps(
             example_clauses.append(voice_asset_model.meaning_example_id.in_(example_ids))
         if phrase_example_ids:
             example_clauses.append(voice_asset_model.phrase_sense_example_id.in_(phrase_example_ids))
-        voice_asset_rows.extend(
-            session.execute(
-                select(voice_asset_model).where(voice_asset_model.content_scope == "example", or_(*example_clauses))
-            ).scalars().all()
-        )
+        for clause in example_clauses:
+            voice_asset_rows.extend(
+                session.execute(
+                    select(voice_asset_model).where(voice_asset_model.content_scope == "example", clause)
+                ).scalars().all()
+            )
 
     for voice_asset in voice_asset_rows:
         voice_assets_by_key[_voice_asset_lookup_key(
@@ -772,6 +775,34 @@ def import_voice_manifest_group(
     error_samples_sink: list[dict[str, str]] | None = None,
 ) -> VoiceImportSummary:
     total = total_rows if total_rows is not None else completed_rows + len(rows)
+    if error_mode == "continue" and len(rows) <= 1:
+        summary = VoiceImportSummary()
+        if not rows:
+            return summary
+        row = rows[0]
+        try:
+            return import_voice_manifest_rows(
+                session,
+                [row],
+                default_language=default_language,
+                conflict_mode=conflict_mode,
+                progress_callback=progress_callback,
+                completed_rows=completed_rows,
+                total_rows=total,
+            )
+        except RuntimeError as exc:
+            summary = _increment(summary, failed_rows=1)
+            if error_samples_sink is not None:
+                error_samples_sink.append({"entry": _row_label(row), "error": str(exc)})
+            _emit_progress(
+                progress_callback,
+                row=row,
+                completed_rows=completed_rows + 1,
+                total_rows=total,
+                label=f"Failed {completed_rows + 1}/{total}: {_row_label(row)}",
+            )
+            return summary
+
     try:
         return import_voice_manifest_rows(
             session,
@@ -824,6 +855,11 @@ def import_voice_manifest_rows(
     completed_rows: int = 0,
     total_rows: int | None = None,
 ) -> VoiceImportSummary:
+    try:
+        from sqlalchemy import select
+    except ImportError:
+        from sqlalchemy.sql import select  # type: ignore
+
     _ensure_backend_path()
     from app.models.lexicon_voice_asset import LexiconVoiceAsset
     from app.models.lexicon_voice_storage_policy import LexiconVoiceStoragePolicy
@@ -899,12 +935,12 @@ def import_voice_manifest_rows(
         if entry_type == "phrase":
             phrase_entry = phrase_entries_by_key.get((word_key, language_key))
             if phrase_entry is None:
-                phrase_entry = session.execute(
-                    select(PhraseEntry).where(
-                        PhraseEntry.phrase_text == word_value,
-                        PhraseEntry.language == language,
-                    )
-                ).scalar_one_or_none()
+                phrase_entry = _find_phrase_entry(
+                    session,
+                    PhraseEntry,
+                    phrase_text=word_value,
+                    language=language,
+                )
                 if phrase_entry is not None:
                     phrase_entries_by_key[(word_key, language_key)] = phrase_entry
             if phrase_entry is None:
@@ -919,6 +955,19 @@ def import_voice_manifest_rows(
                 if phrase_sense is None and resolved_phrase_order_index is not None:
                     phrase_sense = phrase_senses_by_order.get((phrase_entry.id, resolved_phrase_order_index))
                 if phrase_sense is None:
+                    phrase_sense = _find_phrase_sense(
+                        session,
+                        PhraseSense,
+                        phrase_entry_id=phrase_entry.id,
+                        definition=source_text if content_scope == "definition" else "",
+                        order_index=resolved_phrase_order_index,
+                    )
+                    if phrase_sense is not None:
+                        if source_text:
+                            phrase_senses_by_definition[(phrase_entry.id, source_text)] = phrase_sense
+                        if resolved_phrase_order_index is not None:
+                            phrase_senses_by_order[(phrase_entry.id, resolved_phrase_order_index)] = phrase_sense
+                if phrase_sense is None:
                     summary = _increment(summary, missing_meanings=1)
                     continue
             if content_scope == "example":
@@ -927,17 +976,30 @@ def import_voice_manifest_rows(
                 if phrase_example is None and resolved_example_order_index is not None:
                     phrase_example = phrase_examples_by_order.get((phrase_sense.id, resolved_example_order_index))
                 if phrase_example is None:
+                    phrase_example = _find_phrase_example(
+                        session,
+                        PhraseSenseExample,
+                        phrase_sense_id=phrase_sense.id,
+                        sentence=source_text,
+                        order_index=resolved_example_order_index,
+                    )
+                    if phrase_example is not None:
+                        if source_text:
+                            phrase_examples_by_sentence[(phrase_sense.id, source_text)] = phrase_example
+                        if resolved_example_order_index is not None:
+                            phrase_examples_by_order[(phrase_sense.id, resolved_example_order_index)] = phrase_example
+                if phrase_example is None:
                     summary = _increment(summary, missing_examples=1)
                     continue
         else:
             word = words_by_key.get((word_key, language_key))
             if word is None:
-                word = session.execute(
-                    select(Word).where(
-                        Word.word == word_value,
-                        Word.language == language,
-                    )
-                ).scalar_one_or_none()
+                word = _find_word(
+                    session,
+                    Word,
+                    word=word_value,
+                    language=language,
+                )
                 if word is not None:
                     words_by_key[(word_key, language_key)] = word
             if word is None:
@@ -951,6 +1013,19 @@ def import_voice_manifest_rows(
                 if meaning is None and resolved_meaning_order_index is not None:
                     meaning = meanings_by_order.get((word.id, resolved_meaning_order_index))
                 if meaning is None:
+                    meaning = _find_meaning(
+                        session,
+                        Meaning,
+                        word_id=word.id,
+                        source_reference=meaning_source_reference,
+                        order_index=resolved_meaning_order_index,
+                    )
+                    if meaning is not None:
+                        if meaning_source_reference:
+                            meanings_by_source[(word.id, meaning_source_reference)] = meaning
+                        if resolved_meaning_order_index is not None:
+                            meanings_by_order[(word.id, resolved_meaning_order_index)] = meaning
+                if meaning is None:
                     summary = _increment(summary, missing_meanings=1)
                     continue
 
@@ -959,6 +1034,19 @@ def import_voice_manifest_rows(
                 example = examples_by_sentence.get((meaning.id, source_text)) if source_text else None
                 if example is None and resolved_example_order_index is not None:
                     example = examples_by_order.get((meaning.id, resolved_example_order_index))
+                if example is None:
+                    example = _find_example(
+                        session,
+                        MeaningExample,
+                        meaning_id=meaning.id,
+                        sentence=source_text,
+                        order_index=resolved_example_order_index,
+                    )
+                    if example is not None:
+                        if source_text:
+                            examples_by_sentence[(meaning.id, source_text)] = example
+                        if resolved_example_order_index is not None:
+                            examples_by_order[(meaning.id, resolved_example_order_index)] = example
                 if example is None:
                     summary = _increment(summary, missing_examples=1)
                     continue
@@ -980,6 +1068,27 @@ def import_voice_manifest_rows(
             audio_format=str(row.get("audio_format") or "").strip(),
         )
         existing = voice_assets_by_key.get(voice_asset_key)
+        if existing is None:
+            existing = _find_voice_asset(
+                session,
+                LexiconVoiceAsset,
+                content_scope=content_scope,
+                word_id=word.id if content_scope == "word" and word is not None else None,
+                meaning_id=meaning.id if content_scope == "definition" and meaning is not None else None,
+                meaning_example_id=example.id if content_scope == "example" and example is not None else None,
+                phrase_entry_id=phrase_entry.id if content_scope == "word" and phrase_entry is not None else None,
+                phrase_sense_id=phrase_sense.id if content_scope == "definition" and phrase_sense is not None else None,
+                phrase_sense_example_id=phrase_example.id if content_scope == "example" and phrase_example is not None else None,
+                locale=str(row.get("locale") or "").strip(),
+                voice_role=str(row.get("voice_role") or "").strip(),
+                provider=str(row.get("provider") or "").strip(),
+                family=str(row.get("family") or "").strip(),
+                voice_id=str(row.get("voice_id") or "").strip(),
+                profile_key=str(row.get("profile_key") or "").strip(),
+                audio_format=str(row.get("audio_format") or "").strip(),
+            )
+            if existing is not None:
+                voice_assets_by_key[voice_asset_key] = existing
         storage_policy = None
         if existing is None or getattr(existing, "storage_policy_id", None) is None:
             storage_policy = storage_policy_by_scope.get(content_scope)

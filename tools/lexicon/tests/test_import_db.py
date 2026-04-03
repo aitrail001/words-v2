@@ -3061,6 +3061,79 @@ class ImportCompiledRowsTests(unittest.TestCase):
         self.assertEqual([call.kwargs["source_reference"] for call in mocked_import.call_args_list], ["fake-fixture", "fake-fixture"])
         self.assertEqual(progress_calls, [])
 
+    def test_run_import_file_accepts_directory_input_without_row_indexing(self) -> None:
+        fake_session = MagicMock()
+        fake_engine = MagicMock()
+
+        class _FakeSessionContext:
+            def __init__(self, _engine):
+                self._engine = _engine
+
+            def __enter__(self):
+                return fake_session
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "words.enriched.jsonl").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_type": "word",
+                        "word": "alpha",
+                        "language": "en",
+                        "normalized_form": "alpha",
+                        "source_provenance": [{"source": "snapshot"}],
+                        "forms": {},
+                        "senses": [],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "tools.lexicon.import_db.import_compiled_rows",
+                return_value=ImportSummary(created_words=1),
+            ) as mocked_import, \
+                 patch("tools.lexicon.import_db._rebuild_learner_catalog_projection"), \
+                 patch(
+                     "tools.lexicon.import_db._default_models",
+                     return_value=(
+                         FakeWord,
+                         FakeMeaning,
+                         FakeMeaningMetadata,
+                         FakeMeaningExample,
+                         FakeWordRelation,
+                         FakeLexiconEnrichmentJob,
+                         FakeLexiconEnrichmentRun,
+                         FakeTranslation,
+                         FakeTranslationExample,
+                         FakeWordConfusable,
+                         FakeWordForm,
+                         FakeWordPartOfSpeech,
+                         FakeLearnerCatalogEntry,
+                     ),
+                 ), \
+                 patch(
+                     "tools.lexicon.import_db._default_phrase_models",
+                     return_value=(FakePhraseEntry, FakePhraseSense, FakePhraseSenseLocalization, FakePhraseSenseExample, FakePhraseSenseExampleLocalization),
+                 ), \
+                 patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
+                 patch("sqlalchemy.orm.Session", _FakeSessionContext), \
+                 patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
+                 patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+                summary = run_import_file(
+                    str(root),
+                    source_type="repo_fixture",
+                    source_reference="dir-fixture",
+                )
+
+        self.assertEqual(summary["created_words"], 1)
+        self.assertEqual(mocked_import.call_count, 1)
+
     def test_run_import_file_rebuilds_learner_catalog_once_after_all_batches(self) -> None:
         fake_session = MagicMock()
         fake_engine = MagicMock()

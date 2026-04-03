@@ -688,6 +688,8 @@ def _phrase_row_matches_existing_payload(
     existing_phrase: Any,
     row: dict[str, Any],
 ) -> bool:
+    if not _is_real_mapped_model(type(existing_phrase)):
+        return False
     existing_payload = getattr(existing_phrase, "compiled_payload", None)
     if not isinstance(existing_payload, dict):
         return False
@@ -762,7 +764,18 @@ def _load_existing_examples(session: Any, example_model: Type[Any], meaning_id: 
         return list(result.scalars().all())
 
     result = session.execute(object())
-    return list(result.scalars().all())
+    scalars = getattr(result, "scalars", None)
+    if callable(scalars):
+        return list(scalars().all())
+    scalar_one_or_none = getattr(result, "scalar_one_or_none", None)
+    if callable(scalar_one_or_none):
+        value = scalar_one_or_none()
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return list(value)
+        return [value]
+    return []
 
 
 def _load_existing_translations(session: Any, translation_model: Type[Any], meaning_id: Any) -> list[Any]:
@@ -777,7 +790,18 @@ def _load_existing_translations(session: Any, translation_model: Type[Any], mean
         return list(result.scalars().all())
 
     result = session.execute(object())
-    return list(result.scalars().all())
+    scalars = getattr(result, "scalars", None)
+    if callable(scalars):
+        return list(scalars().all())
+    scalar_one_or_none = getattr(result, "scalar_one_or_none", None)
+    if callable(scalar_one_or_none):
+        value = scalar_one_or_none()
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return list(value)
+        return [value]
+    return []
 
 
 def _load_existing_relations(session: Any, relation_model: Type[Any], meaning_id: Any, source: str) -> list[Any]:
@@ -796,7 +820,18 @@ def _load_existing_relations(session: Any, relation_model: Type[Any], meaning_id
         return list(result.scalars().all())
 
     result = session.execute(object())
-    return list(result.scalars().all())
+    scalars = getattr(result, "scalars", None)
+    if callable(scalars):
+        return list(scalars().all())
+    scalar_one_or_none = getattr(result, "scalar_one_or_none", None)
+    if callable(scalar_one_or_none):
+        value = scalar_one_or_none()
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return list(value)
+        return [value]
+    return []
 
 
 def _load_existing_reference_localizations(session: Any, localization_model: Type[Any], reference_entry_id: Any) -> list[Any]:
@@ -811,7 +846,18 @@ def _load_existing_reference_localizations(session: Any, localization_model: Typ
         return list(result.scalars().all())
 
     result = session.execute(object())
-    return list(result.scalars().all())
+    scalars = getattr(result, "scalars", None)
+    if callable(scalars):
+        return list(scalars().all())
+    scalar_one_or_none = getattr(result, "scalar_one_or_none", None)
+    if callable(scalar_one_or_none):
+        value = scalar_one_or_none()
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return list(value)
+        return [value]
+    return []
 
 
 def _make_word_prompt_hash(
@@ -1740,6 +1786,9 @@ def import_compiled_rows(
             _sync_word_part_of_speech_rows(session, word, row, word_part_of_speech_model)
 
             existing_meanings = [] if is_new_word else list(preloaded_meanings_by_word_id.get(word.id, []))
+            if not is_new_word and word.id not in preloaded_meanings_by_word_id:
+                existing_meanings = _load_existing_meanings(session, meaning_model, word.id)
+                preloaded_meanings_by_word_id[word.id] = list(existing_meanings)
             matched_meaning_ids: set[Any] = set()
             enrichment_job = None
             phonetic_enrichment_run = None
@@ -1749,6 +1798,15 @@ def import_compiled_rows(
 
             if lexicon_enrichment_job_model is not None and lexicon_enrichment_run_model is not None:
                 enrichment_job = None if is_new_word else preloaded_enrichment_jobs_by_word_phase.get((word.id, "phase1"))
+                if enrichment_job is None and not is_new_word:
+                    enrichment_job = _find_existing_enrichment_job(
+                        session,
+                        lexicon_enrichment_job_model,
+                        word.id,
+                        "phase1",
+                    )
+                    if enrichment_job is not None:
+                        preloaded_enrichment_jobs_by_word_phase[(word.id, "phase1")] = enrichment_job
                 if enrichment_job is None:
                     enrichment_job = lexicon_enrichment_job_model(
                         word_id=word.id,
@@ -1789,6 +1847,16 @@ def import_compiled_rows(
                     enrichment_run = None if is_new_enrichment_job else preloaded_enrichment_runs_by_job_prompt.get(
                         (enrichment_job.id, prompt_version, prompt_hash)
                     )
+                    if enrichment_run is None and not is_new_enrichment_job:
+                        enrichment_run = _find_existing_enrichment_run(
+                            session,
+                            lexicon_enrichment_run_model,
+                            enrichment_job.id,
+                            prompt_version,
+                            prompt_hash,
+                        )
+                        if enrichment_run is not None:
+                            preloaded_enrichment_runs_by_job_prompt[(enrichment_job.id, prompt_version, prompt_hash)] = enrichment_run
                     if enrichment_run is None:
                         enrichment_run = lexicon_enrichment_run_model(
                             enrichment_job_id=enrichment_job.id,
@@ -1880,6 +1948,16 @@ def import_compiled_rows(
 
             if meaning_example_model is not None:
                 existing_examples = [] if is_new_meaning else list(preloaded_examples_by_meaning_id.get(meaning.id, []))
+                if not is_new_meaning and meaning.id not in preloaded_examples_by_meaning_id:
+                    existing_examples = list(getattr(meaning, "examples", []) or [])
+                    if not existing_examples:
+                        existing_examples = _load_existing_examples(
+                            session,
+                            meaning_example_model,
+                            meaning.id,
+                            row_source_type,
+                        )
+                    preloaded_examples_by_meaning_id[meaning.id] = list(existing_examples)
                 if existing_examples:
                     summary = _increment(summary, deleted_examples=len(existing_examples))
                 preloaded_examples_by_meaning_id[meaning.id] = []
@@ -1932,6 +2010,16 @@ def import_compiled_rows(
                 existing_translations = {} if is_new_meaning else dict(
                     preloaded_translations_by_meaning_id.get(meaning.id, {})
                 )
+                if not is_new_meaning and meaning.id not in preloaded_translations_by_meaning_id:
+                    existing_translation_rows = list(getattr(meaning, "translations", []) or [])
+                    if not existing_translation_rows:
+                        existing_translation_rows = _load_existing_translations(session, translation_model, meaning.id)
+                    existing_translations = {
+                        str(getattr(item, "language", "") or ""): item
+                        for item in existing_translation_rows
+                        if str(getattr(item, "language", "") or "")
+                    }
+                    preloaded_translations_by_meaning_id[meaning.id] = dict(existing_translations)
                 for locale, locale_payload in (sense.get('translations') or {}).items():
                     translated_definition = str((locale_payload or {}).get('definition') or '').strip()
                     if not translated_definition:
@@ -1977,6 +2065,20 @@ def import_compiled_rows(
 
             if word_relation_model is not None:
                 existing_relations = [] if is_new_meaning else list(preloaded_relations_by_meaning_id.get(meaning.id, []))
+                if not is_new_meaning and meaning.id not in preloaded_relations_by_meaning_id:
+                    existing_relations = [
+                        relation
+                        for relation in list(getattr(word, "relations", []) or [])
+                        if getattr(relation, "meaning_id", None) == meaning.id
+                    ]
+                    if not existing_relations:
+                        existing_relations = _load_existing_relations(
+                            session,
+                            word_relation_model,
+                            meaning.id,
+                            row_source_type,
+                        )
+                    preloaded_relations_by_meaning_id[meaning.id] = list(existing_relations)
                 if existing_relations:
                     summary = _increment(summary, deleted_relations=len(existing_relations))
                 preloaded_relations_by_meaning_id[meaning.id] = []
@@ -2335,21 +2437,38 @@ def run_import_file(
         )
 
     if rows is None:
-        index_payload = _load_or_build_row_offset_index(path)
-        row_offsets = [int(offset) for offset in list(index_payload.get("row_offsets") or [])]
-        total_available_rows = int(index_payload.get("row_count") or len(row_offsets))
+        resolved_path = Path(path)
+        if resolved_path.is_dir():
+            resolved_rows = list(load_compiled_rows(resolved_path))
+            row_offsets = []
+            total_available_rows = len(resolved_rows)
+        else:
+            try:
+                index_payload = _load_or_build_row_offset_index(resolved_path)
+                row_offsets = [int(offset) for offset in list(index_payload.get("row_offsets") or [])]
+                total_available_rows = int(index_payload.get("row_count") or len(row_offsets))
+                resolved_rows = None
+            except FileNotFoundError:
+                resolved_rows = list(load_compiled_rows(resolved_path))
+                row_offsets = []
+                total_available_rows = len(resolved_rows)
     else:
         resolved_rows = list(rows)
         row_offsets = []
         total_available_rows = len(resolved_rows)
     resolved_start_row_index = max(start_row_index, 0)
     if rows is None:
-        selected_rows = _load_rows_by_index_window(
-            path,
-            row_offsets,
-            resolved_start_row_index,
-            max_row_count,
-        )
+        if row_offsets:
+            selected_rows = _load_rows_by_index_window(
+                path,
+                row_offsets,
+                resolved_start_row_index,
+                max_row_count,
+            )
+        else:
+            selected_rows = (resolved_rows or [])[resolved_start_row_index:]
+            if max_row_count is not None and max_row_count > 0:
+                selected_rows = selected_rows[:max_row_count]
     else:
         selected_rows = resolved_rows[resolved_start_row_index:]
         if max_row_count is not None and max_row_count > 0:
