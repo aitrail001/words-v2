@@ -3,11 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
+import { LearnerListRows } from "@/components/learner-list-rows";
 import {
   getKnowledgeMapList,
   type KnowledgeMapEntrySummary,
-  type KnowledgeMapListSort,
   type KnowledgeMapListStatus,
   type KnowledgeStatus,
   updateKnowledgeEntryStatus,
@@ -21,29 +20,8 @@ const STATUS_PAGE_META: Record<string, { title: string; listStatus: KnowledgeMap
   "to-learn": { title: "To Learn", listStatus: "to_learn" },
 };
 
-const ROW_STATUS_LABELS: Record<KnowledgeStatus, string> = {
-  undecided: "New",
-  to_learn: "To Learn",
-  learning: "Learning",
-  known: "Already knew",
-};
-
-const SORT_OPTIONS: Array<{ value: KnowledgeMapListSort; label: string }> = [
-  { value: "alpha", label: "Alphabetic" },
-  { value: "rank_desc", label: "Hardest First" },
-  { value: "rank", label: "Easiest First" },
-];
-
-function rowImageStyle(seed: string): string {
-  const styles = [
-    "bg-[linear-gradient(145deg,#3f3b4e,#809fcc)]",
-    "bg-[linear-gradient(145deg,#85745d,#f0dcc4)]",
-    "bg-[linear-gradient(145deg,#405767,#59c8de)]",
-    "bg-[linear-gradient(145deg,#5e3654,#d58bc8)]",
-  ];
-  const hash = Array.from(seed).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return styles[hash % styles.length];
-}
+type KnowledgeListSortMode = "alpha" | "rank";
+type KnowledgeListSortOrder = "asc" | "desc";
 
 export default function KnowledgeListPage() {
   const params = useParams<{ status: string }>();
@@ -52,7 +30,8 @@ export default function KnowledgeListPage() {
 
   const [items, setItems] = useState<KnowledgeMapEntrySummary[]>([]);
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<KnowledgeMapListSort>("alpha");
+  const [sort, setSort] = useState<KnowledgeListSortMode>("alpha");
+  const [order, setOrder] = useState<KnowledgeListSortOrder>("asc");
   const [showTranslations, setShowTranslations] = useState(true);
 
   useEffect(() => {
@@ -78,6 +57,7 @@ export default function KnowledgeListPage() {
       status: config.listStatus,
       q: query.trim() || undefined,
       sort,
+      order,
       limit: 100,
     })
       .then((response) => {
@@ -94,12 +74,12 @@ export default function KnowledgeListPage() {
     return () => {
       active = false;
     };
-  }, [config.listStatus, query, sort]);
+  }, [config.listStatus, order, query, sort]);
 
   const cycleSort = () => {
-    const currentIndex = SORT_OPTIONS.findIndex((option) => option.value === sort);
-    const nextOption = SORT_OPTIONS[(currentIndex + 1) % SORT_OPTIONS.length];
-    setSort(nextOption.value);
+    const options: KnowledgeListSortMode[] = ["alpha", "rank"];
+    const nextIndex = (options.indexOf(sort) + 1) % options.length;
+    setSort(options[nextIndex]);
   };
 
   const handleStatusChange = async (
@@ -127,9 +107,26 @@ export default function KnowledgeListPage() {
           <button
             type="button"
             onClick={cycleSort}
+            data-testid="knowledge-list-sort-button"
             className="rounded-[0.45rem] border border-[#d9dcec] bg-white px-3 py-2 text-xs font-semibold text-[#5c3d84]"
           >
-            ↕ {SORT_OPTIONS.find((option) => option.value === sort)?.label}
+            ↕ {sort === "alpha" ? "Alphabetic" : "Difficulty"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrder((current) => (current === "asc" ? "desc" : "asc"))}
+            data-testid="knowledge-list-order-button"
+            className="rounded-[0.45rem] border border-[#d9dcec] bg-white px-3 py-2 text-xs font-semibold text-[#5c3d84]"
+          >
+            {order === "asc" ? "↑ Asc" : "↓ Desc"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowTranslations((current) => !current)}
+            data-testid="knowledge-list-translation-toggle"
+            className="rounded-[0.45rem] border border-[#d9dcec] bg-white px-3 py-2 text-xs font-semibold text-[#5c3d84]"
+          >
+            {showTranslations ? "Hide Translation" : "Show Translation"}
           </button>
         </div>
 
@@ -142,51 +139,14 @@ export default function KnowledgeListPage() {
         />
       </section>
 
-      <section className="space-y-1.5">
-        {items.map((item) => (
-          <div
-            key={`${item.entry_type}-${item.entry_id}`}
-            className="grid grid-cols-[4.5rem_1fr] gap-2 overflow-hidden rounded-[0.25rem] border border-[#dce0ee] bg-white px-2 py-2"
-          >
-            <Link
-              href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
-              className={`min-h-[4.75rem] rounded-[0.15rem] ${rowImageStyle(item.display_text)}`}
-            />
-            <div className="space-y-1 py-0.5">
-              <Link href={getKnowledgeEntryHref(item.entry_type, item.entry_id)} className="block">
-                <div className="flex items-start justify-between gap-3">
-                  <p className="text-[1.1rem] font-semibold leading-none text-[#35204e]">{item.display_text}</p>
-                </div>
-                {showTranslations && (
-                  <p className="mt-1 text-[0.82rem] font-semibold leading-5 text-[#6b5b86]">
-                    {item.translation ?? item.primary_definition ?? "No translation yet"}
-                  </p>
-                )}
-              </Link>
-
-              <div className="flex items-center justify-between gap-2 pt-1">
-                <p className="text-[0.72rem] font-semibold text-[#48bfd7]">
-                  {ROW_STATUS_LABELS[item.status]} ▼
-                </p>
-                <label className="sr-only" htmlFor={`status-${item.entry_id}`}>
-                  Update status
-                </label>
-                <select
-                  id={`status-${item.entry_id}`}
-                  value={item.status}
-                  onChange={(event) => void handleStatusChange(item, event.target.value as KnowledgeStatus)}
-                  className="max-w-[8.2rem] rounded-[0.35rem] border border-[#dce0ee] bg-[#f8fbff] px-2 py-1.5 text-[0.72rem] font-semibold text-[#4bc5db] outline-none"
-                >
-                  <option value="undecided">New</option>
-                  <option value="to_learn">To Learn</option>
-                  <option value="learning">Learning</option>
-                  <option value="known">Already knew</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        ))}
-      </section>
+      <LearnerListRows
+        items={items}
+        showTranslations={showTranslations}
+        emptyMessage="No entries match this filter yet."
+        listTestId="knowledge-list-view"
+        emptyTestId="knowledge-list-empty"
+        onStatusChange={handleStatusChange}
+      />
     </div>
   );
 }

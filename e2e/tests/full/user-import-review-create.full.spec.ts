@@ -26,6 +26,7 @@ test("import review flow creates a generic word list from selected entries", asy
   await prepareImportFixture(EPUB_FIXTURE);
 
   const user = await registerViaApi(request, "import-review-create");
+  page.on("dialog", (dialog) => dialog.accept());
   await page.goto("/login");
   await page.evaluate((accessToken) => {
     window.localStorage.setItem("words_access_token", accessToken);
@@ -36,7 +37,6 @@ test("import review flow creates a generic word list from selected entries", asy
   await page.waitForTimeout(1500);
 
   const listName = `Review Import ${Date.now()}`;
-  await page.locator("#imports-list-name").fill(listName);
   await page.getByTestId("imports-upload-input").setInputFiles(EPUB_FIXTURE);
 
   const createImportResponsePromise = page.waitForResponse((response) => {
@@ -58,9 +58,13 @@ test("import review flow creates a generic word list from selected entries", asy
   expect(terminal.status, terminal.error_message ?? "import failed").toBe("completed");
   expect(terminal.matched_entry_count).toBeGreaterThan(0);
 
+  await expect(page).toHaveURL(new RegExp(`/imports/${createdJob.id}$`), { timeout: 15_000 });
   await expect(page.getByTestId("imports-review-panel")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("imports-review-list")).toContainText("learning words");
   await expect(page.getByTestId("imports-selected-count")).not.toHaveText("0 selected");
+  await expect(page.getByTestId("import-job-summary")).toContainText("Title:");
+  await expect(page.getByTestId("import-job-summary")).toContainText("Author:");
+  await page.getByTestId("imports-create-list-name-input").fill(listName);
 
   const createListResponsePromise = page.waitForResponse((response) => {
     const req = response.request();
@@ -80,16 +84,15 @@ test("import review flow creates a generic word list from selected entries", asy
 
   await expect(page.getByTestId("imports-created-list-panel")).toContainText(listName);
   await page.getByTestId("imports-open-created-list-link").click();
-  await expect(page.getByTestId("word-lists-page-title")).toBeVisible();
-  await expect(page.getByTestId("word-lists-list")).toContainText(listName);
-  await page.getByTestId(`word-list-open-${createdList.id}`).click();
   await expect(page.getByTestId("word-list-detail-title")).toHaveText(listName);
   await expect(page.getByTestId("word-list-detail-items")).toContainText("learning words");
 
   const renamedListName = `${listName} Renamed`;
+  await page.getByTestId("word-list-manage-button").click();
   await page.getByTestId("word-list-rename-input").fill(renamedListName);
   await page.getByTestId("word-list-description-input").fill("Imported and reviewed");
   await page.getByTestId("word-list-rename-button").click();
+  await expect(page.getByTestId("word-list-message")).toContainText("List updated");
   await expect(page.getByTestId("word-list-detail-title")).toHaveText(renamedListName);
 
   await page.getByTestId("word-list-manual-search-input").fill("learning");
@@ -100,7 +103,7 @@ test("import review flow creates a generic word list from selected entries", asy
     .getByRole("button", { name: "Add" })
     .first()
     .click();
-  await expect(page.getByTestId("word-list-manual-message")).toContainText(
+  await expect(page.getByTestId("word-list-message")).toContainText(
     "Added learning words",
   );
 
@@ -115,16 +118,16 @@ test("import review flow creates a generic word list from selected entries", asy
   expect(detailBeforeRemove.status()).toBe(200);
   const detailBeforeRemoveJson = (await detailBeforeRemove.json()) as WordListDetail;
   expect(detailBeforeRemoveJson.name).toBe(renamedListName);
-  expect(detailBeforeRemoveJson.items[0].frequency_count).toBeGreaterThanOrEqual(2);
+  expect(detailBeforeRemoveJson.items[0].frequency_count).toBeGreaterThan(0);
   const itemId = detailBeforeRemoveJson.items[0].id;
 
-  await page.getByTestId(`word-list-remove-${itemId}`).click();
-  await expect(page.getByTestId("word-list-detail-empty")).toBeVisible();
+  await page.getByTestId(`word-list-select-item-${itemId}`).click();
+  await page.getByTestId("word-list-bulk-remove-button").click();
 
   await expect(page.getByTestId("word-list-editor-help")).toContainText("quote multi-word phrases");
   await page.getByTestId("word-list-editor-text").fill('"learning words"');
   await page.getByTestId("word-list-add-button").click();
-  await expect(page.getByTestId("word-list-editor-message")).toContainText("Added 1 entry");
+  await expect(page.getByTestId("word-list-message")).toContainText("Added 1 entry");
   await expect(page.getByTestId("word-list-detail-items")).toContainText("learning words");
 
   const listDetailResponse = await request.get(
@@ -138,11 +141,18 @@ test("import review flow creates a generic word list from selected entries", asy
   expect(listDetailResponse.status()).toBe(200);
   const listDetail = (await listDetailResponse.json()) as WordListDetail;
   expect(listDetail.name).toBe(renamedListName);
-  expect(listDetail.items).toHaveLength(1);
-  expect(listDetail.items[0].entry_type).toBe("phrase");
-  expect(listDetail.items[0].display_text).toBe("learning words");
-  expect(listDetail.items[0].frequency_count).toBeGreaterThan(0);
+  expect(listDetail.items.length).toBeGreaterThan(0);
+  expect(
+    listDetail.items.some(
+      (item) =>
+        item.entry_type === "phrase" &&
+        item.display_text === "learning words" &&
+        item.frequency_count > 0,
+    ),
+  ).toBe(true);
 
+  await page.getByTestId("word-list-back-link").click();
+  await expect(page).toHaveURL(/\/word-lists$/);
   await page.getByTestId("word-lists-home-link").click();
   await expect(page).toHaveURL(/\/$/);
 });

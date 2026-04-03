@@ -35,7 +35,7 @@ ENTRY_TYPES = ("word", "phrase")
 BUCKET_SIZE = 100
 UNRANKED_BASE = 1_000_000
 LIST_STATUS_VALUES = ("new", "to_learn", "learning", "known")
-LIST_SORT_VALUES = ("rank", "rank_desc", "alpha")
+LIST_SORT_VALUES = ("rank", "rank_desc", "alpha", "alpha_desc")
 
 
 def _mapping_value(row: object, key: str) -> object:
@@ -1043,6 +1043,8 @@ async def build_catalog(
         query = query.order_by(LearnerCatalogEntry.browse_rank.desc(), func.lower(LearnerCatalogEntry.display_text).asc())
     elif sort == "alpha":
         query = query.order_by(func.lower(LearnerCatalogEntry.display_text).asc(), LearnerCatalogEntry.browse_rank.asc())
+    elif sort == "alpha_desc":
+        query = query.order_by(func.lower(LearnerCatalogEntry.display_text).desc(), LearnerCatalogEntry.browse_rank.asc())
     else:
         query = query.order_by(LearnerCatalogEntry.browse_rank.asc(), func.lower(LearnerCatalogEntry.display_text).asc())
 
@@ -1475,6 +1477,8 @@ def sort_catalog_items(items: Sequence[dict], sort: str) -> list[dict]:
         return sorted(items, key=lambda item: (-item["browse_rank"], item["display_text"].lower()))
     if sort == "alpha":
         return sorted(items, key=lambda item: (item["display_text"].lower(), item["browse_rank"]))
+    if sort == "alpha_desc":
+        return sorted(items, key=lambda item: (item["display_text"].lower(), item["browse_rank"]), reverse=True)
     return sorted(items, key=lambda item: (item["browse_rank"], item["display_text"].lower()))
 
 

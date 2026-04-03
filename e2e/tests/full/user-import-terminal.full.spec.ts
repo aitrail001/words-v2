@@ -18,9 +18,6 @@ test("word-list import reaches completed terminal status with valid epub", async
   await injectToken(page, user.token);
   await page.goto("/imports");
   await expect(page.getByTestId("imports-page-title")).toBeVisible();
-
-  const listName = `Terminal Import ${Date.now()}`;
-  await page.locator("#imports-list-name").fill(listName);
   await page.getByTestId("imports-upload-input").setInputFiles(EPUB_FIXTURE);
 
   const createResponsePromise = page.waitForResponse((response) => {
@@ -47,14 +44,16 @@ test("word-list import reaches completed terminal status with valid epub", async
   expect(terminal.import_source_id).toBeTruthy();
   expect(terminal.completed_at).toBeTruthy();
   expect(terminal.source_filename).toBe("valid-minimal.epub");
-  expect(terminal.list_name).toBe(listName);
+  expect(terminal.list_name).toBe("valid-minimal");
   expect(terminal.word_list_id).toBeNull();
   expect(terminal.matched_entry_count).toBeGreaterThan(0);
   expect(terminal.total_items).toBeGreaterThan(0);
   expect(terminal.processed_items).toBe(terminal.total_items);
   expect(terminal.error_count).toBe(0);
 
-  await page.reload();
-  await expect(page.getByTestId(`imports-row-${created.id}`)).toContainText(listName);
+  await expect(page).toHaveURL(new RegExp(`/imports/${created.id}$`), { timeout: 15_000 });
+  await page.goto("/imports");
+  await page.getByTestId("imports-history-toggle").click();
+  await expect(page.getByTestId(`imports-row-${created.id}`)).toContainText("Valid Minimal EPUB");
   await expect(page.getByTestId(`imports-row-${created.id}`)).toContainText("completed");
 });

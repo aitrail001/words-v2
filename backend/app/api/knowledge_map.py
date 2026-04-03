@@ -60,6 +60,8 @@ from app.services.voice_assets import (
 router = APIRouter()
 logger = get_logger(__name__)
 
+LIST_ORDER_VALUES = ("asc", "desc")
+
 
 class RangeCountsResponse(BaseModel):
     undecided: int
@@ -590,6 +592,7 @@ async def get_knowledge_map_list(
     status_filter: str = Query(..., alias="status"),
     q: str | None = Query(default=None),
     sort: str = Query(default="rank"),
+    order: str = Query(default="asc"),
     limit: int = Query(default=100, ge=1, le=500),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -598,6 +601,14 @@ async def get_knowledge_map_list(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported knowledge list status")
     if sort not in LIST_SORT_VALUES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported knowledge list sort")
+    if order not in LIST_ORDER_VALUES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported knowledge list order")
+
+    effective_sort = sort
+    if sort == "rank" and order == "desc":
+        effective_sort = "rank_desc"
+    elif sort == "alpha" and order == "desc":
+        effective_sort = "alpha_desc"
 
     request_start = perf_counter()
     items = await build_catalog(
@@ -605,7 +616,7 @@ async def get_knowledge_map_list(
         current_user.id,
         q=q,
         status=status_filter,
-        sort=sort,
+        sort=effective_sort,
         limit=limit,
     )
     items = await _hydrate_summary_items(db, current_user.id, items)

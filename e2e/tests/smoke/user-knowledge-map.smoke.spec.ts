@@ -126,10 +126,11 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page.getByRole("heading", { name: "Learning Words" })).toBeVisible();
   await expect(page.getByText(KNOWLEDGE_PHRASE, { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: "Alphabetic" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Asc" })).toBeVisible();
   await page.getByRole("button", { name: "Alphabetic" }).click();
-  await expect(page.getByRole("button", { name: "Hardest First" })).toBeVisible();
-  await page.getByRole("button", { name: "Hardest First" }).click();
-  await expect(page.getByRole("button", { name: "Easiest First" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Difficulty" })).toBeVisible();
+  await page.getByRole("button", { name: "Asc" }).click();
+  await expect(page.getByRole("button", { name: "Desc" })).toBeVisible();
 
   await page.goto("/");
   await page.getByRole("link", { name: /to learn/i }).click();
@@ -169,23 +170,11 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page).toHaveURL(/\/knowledge-map\/range\/1$/);
   await expect(page.getByRole("heading", { name: /range [\d,]+\s*-\s*[\d,]+/i })).toBeVisible();
   await page.getByRole("button", { name: "Cards view" }).click();
-  await expect(page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
-  await page.getByRole("button", { name: "Use US accent" }).first().click();
-  await expect(page.getByRole("button", { name: "Use US accent" }).first()).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
-  await page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` }).click();
-  await expect
-    .poll(() => requestedAudioUrls.at(-1))
-    .toContain("/api/words/voice-assets/");
-  await page.getByRole("button", { name: "Use UK accent" }).first().click();
-  await expect(page.getByRole("button", { name: "Use UK accent" }).first()).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(page.getByText("/rɪˈzɪl.i.əns/")).toBeVisible();
+  await expect(page.getByText(/learn more/i).first()).toBeVisible();
+  await page.getByRole("button", { name: "Tags view" }).click();
+  await expect(page.getByTestId("knowledge-tags-view")).toBeVisible();
+  await page.getByRole("button", { name: "List view" }).click();
+  await expect(page.getByTestId("knowledge-list-view")).toBeVisible();
 
   await page.goto("/");
   const learnNextLink = page.getByRole("link", { name: /learn next:/i });

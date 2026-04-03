@@ -52,26 +52,45 @@ describe("KnowledgeListPage", () => {
 
     expect(await screen.findByText(/knew words/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/search/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /alphabetic/i })).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-list-sort-button")).toHaveTextContent("Alphabetic");
+    expect(screen.getByTestId("knowledge-list-order-button")).toHaveTextContent("Asc");
+    expect(screen.getByTestId("knowledge-list-translation-toggle")).toHaveTextContent("Hide Translation");
     expect(await screen.findByText("The")).toBeInTheDocument();
+    expect(screen.getByText("Used before nouns.")).toBeInTheDocument();
+    expect(screen.getByText("这")).toBeInTheDocument();
     expect((await screen.findAllByText("Already knew")).length).toBeGreaterThan(0);
   });
 
-  it("cycles through alphabetic, hardest first, and easiest first sort options", async () => {
+  it("cycles sort basis and toggles ascending or descending order", async () => {
     const user = userEvent.setup();
     mockUseParams.mockReturnValue({ status: "learning" } as any);
 
     render(<KnowledgeListPage />);
 
-    const sortButton = await screen.findByRole("button", { name: /alphabetic/i });
+    const sortButton = await screen.findByTestId("knowledge-list-sort-button");
+    const orderButton = screen.getByTestId("knowledge-list-order-button");
     await user.click(sortButton);
-    expect(screen.getByRole("button", { name: /hardest first/i })).toBeInTheDocument();
+    expect(screen.getByTestId("knowledge-list-sort-button")).toHaveTextContent("Difficulty");
 
-    await user.click(screen.getByRole("button", { name: /hardest first/i }));
-    expect(screen.getByRole("button", { name: /easiest first/i })).toBeInTheDocument();
+    await user.click(orderButton);
+    expect(screen.getByTestId("knowledge-list-order-button")).toHaveTextContent("Desc");
 
-    await user.click(screen.getByRole("button", { name: /easiest first/i }));
-    expect(screen.getByRole("button", { name: /alphabetic/i })).toBeInTheDocument();
+    await user.click(sortButton);
+    expect(screen.getByTestId("knowledge-list-sort-button")).toHaveTextContent("Alphabetic");
+  });
+
+  it("toggles translation visibility while keeping the definition visible", async () => {
+    const user = userEvent.setup();
+    mockUseParams.mockReturnValue({ status: "known" } as any);
+
+    render(<KnowledgeListPage />);
+
+    expect(await screen.findByText("Used before nouns.")).toBeInTheDocument();
+    expect(screen.getByText("这")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("knowledge-list-translation-toggle"));
+    expect(screen.getByText("Used before nouns.")).toBeInTheDocument();
+    expect(screen.queryByText("这")).not.toBeInTheDocument();
   });
 
   it("maps the new route to the undecided learner list", async () => {

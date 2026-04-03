@@ -497,12 +497,19 @@ export function KnowledgeEntryDetailPage({
           <div className="h-[18rem]" style={buildHeroStyle(detail.display_text)} />
 
           <div className="absolute inset-x-0 top-0 flex items-center justify-between px-4 py-4">
-            <Link
-              href="/knowledge-map"
+            <button
+              type="button"
+              onClick={() => {
+                if (window.history.length > 1) {
+                  router.back();
+                  return;
+                }
+                router.push("/knowledge-map");
+              }}
               className="flex h-8 w-8 items-center justify-center rounded-full bg-white/75 text-sm font-semibold text-[#62368f] backdrop-blur"
             >
               ←
-            </Link>
+            </button>
             <button
               type="button"
               aria-label="Detail options"

@@ -197,6 +197,22 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
 
   await page.getByRole("button", { name: "Materialize Reviewed Outputs" }).click();
   await expect(page.getByText(`/app/data/lexicon/snapshots/${snapshotName}/reviewed/approved.jsonl`)).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        try {
+          await readFile(approvedHostPath, "utf-8");
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      {
+        timeout: 15_000,
+        intervals: [250, 500, 1_000],
+      },
+    )
+    .toBe(true);
   const approvedMaterialized = (await readFile(approvedHostPath, "utf-8"))
     .split("\n")
     .filter(Boolean)
