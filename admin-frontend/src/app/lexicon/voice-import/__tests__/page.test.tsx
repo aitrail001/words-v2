@@ -192,7 +192,6 @@ describe("LexiconVoiceImportPage", () => {
 
     await user.click(await screen.findByTestId("lexicon-voice-import-run"));
 
-    await waitFor(() => expect(screen.getByText(/another voice import job already holds this source reference lock/i)).toBeInTheDocument());
-    expect(screen.getByText(/locked by job job-4/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/source_reference voice-roundtrip is already locked by job job-4/i)).toBeInTheDocument());
   });
 });
