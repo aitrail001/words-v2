@@ -662,7 +662,7 @@ GET /api/admin/import-sources/{source_id}/entries
 Reuse the same params and output semantics as the user import review entries endpoint.
 
 ```http
-DELETE /api/admin/import-sources/{source_id}?delete_mode=cache_only|cache_and_orphan_jobs
+DELETE /api/admin/import-sources/{source_id}?delete_mode=cache_only|cache_only_and_delete_orphan_jobs
 ```
 
 ```http
@@ -969,10 +969,10 @@ Test that admin source listing:
 
 ### C. admin source delete service
 Test that:
-- `cache_only` deletes `ImportSource` + `ImportSourceEntry`
+- `cache_only` soft-deletes `ImportSource` (retains metadata row) and deletes `ImportSourceEntry`
 - keeps `ImportJob`
 - never deletes `WordList` / `WordListItem`
-- `cache_and_orphan_jobs` deletes only jobs with `word_list_id IS NULL`
+- `cache_only_and_delete_orphan_jobs` deletes only jobs with `word_list_id IS NULL`
 - leaves jobs backing created word lists
 
 ### D. batch creation service
