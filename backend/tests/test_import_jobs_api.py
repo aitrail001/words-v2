@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import app.api.import_jobs as import_jobs_api
 from app.core.database import get_db
 from app.core.redis import get_redis
 from app.core.security import create_access_token, hash_password
@@ -12,6 +13,7 @@ from app.main import app
 from app.models.import_job import ImportJob
 from app.models.import_source import ImportSource
 from app.models.user import User
+from app.models.word_list import WordList
 
 
 @pytest.fixture
@@ -292,9 +294,21 @@ class TestImportJobStatusEndpoints:
         user_result.scalar_one_or_none.return_value = user
         job_result = MagicMock()
         job_result.scalar_one_or_none.return_value = job
+        sources_result = MagicMock()
+        sources_result.scalars.return_value.all.return_value = [
+            ImportSource(
+                id=job.import_source_id,
+                source_type="epub",
+                source_hash_sha256="e" * 64,
+                pipeline_version="v1",
+                lexicon_version="v1",
+            ),
+        ]
+        counts_result = MagicMock()
+        counts_result.all.return_value = []
         duplicate_result = MagicMock()
         duplicate_result.scalar_one_or_none.return_value = None
-        mock_db.execute.side_effect = [user_result, job_result, duplicate_result]
+        mock_db.execute.side_effect = [user_result, job_result, sources_result, counts_result, duplicate_result]
 
         response = await client.get(
             f"/api/import-jobs/{job.id}/events",
@@ -324,9 +338,21 @@ class TestImportJobStatusEndpoints:
         user_result.scalar_one_or_none.return_value = user
         job_result = MagicMock()
         job_result.scalar_one_or_none.return_value = job
+        sources_result = MagicMock()
+        sources_result.scalars.return_value.all.return_value = [
+            ImportSource(
+                id=job.import_source_id,
+                source_type="epub",
+                source_hash_sha256="e" * 64,
+                pipeline_version="v1",
+                lexicon_version="v1",
+            ),
+        ]
+        counts_result = MagicMock()
+        counts_result.all.return_value = []
         duplicate_result = MagicMock()
         duplicate_result.scalar_one_or_none.return_value = None
-        mock_db.execute.side_effect = [user_result, job_result, duplicate_result]
+        mock_db.execute.side_effect = [user_result, job_result, sources_result, counts_result, duplicate_result]
 
         response = await client.post(
             f"/api/import-jobs/{job.id}/word-lists",
@@ -336,3 +362,88 @@ class TestImportJobStatusEndpoints:
 
         assert response.status_code == 400
         assert response.json()["detail"] == "At least one entry must be selected"
+
+    @pytest.mark.asyncio
+    async def test_create_word_list_from_import_job_defaults_name_and_description_from_book_metadata(
+        self,
+        client,
+        mock_db,
+        monkeypatch,
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        source_id = uuid.uuid4()
+        job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=source_id,
+            source_filename="Atomic Habits.epub",
+            source_hash="f" * 64,
+            list_name="Atomic Habits",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        )
+        source = ImportSource(
+            id=source_id,
+            source_type="epub",
+            source_hash_sha256="f" * 64,
+            pipeline_version="v1",
+            lexicon_version="v1",
+            title="Atomic Habits",
+            author="James Clear",
+        )
+        setattr(job, "import_source", source)
+
+        user = make_user(user_id)
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        job_result = MagicMock()
+        job_result.scalar_one_or_none.return_value = job
+        mock_db.execute.side_effect = [user_result, job_result]
+
+        async def fake_hydrate(_db, _jobs):
+            return _jobs
+
+        async def fake_unique_name(db, *, user_id, name):
+            del db, user_id, name
+
+        captured: dict[str, str | None] = {}
+
+        async def fake_create_word_list_from_entries(
+            db,
+            *,
+            user_id: uuid.UUID,
+            job: ImportJob,
+            name,
+            description,
+            selected_entries,
+        ):
+            del db, selected_entries
+            captured["name"] = name
+            captured["description"] = description
+            return WordList(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                name=name,
+                description=description,
+                source_type="epub",
+                source_reference=str(job.id),
+                created_at=datetime.now(timezone.utc),
+            )
+
+        monkeypatch.setattr(import_jobs_api, "_hydrate_import_jobs_with_source_details", fake_hydrate)
+        monkeypatch.setattr(import_jobs_api, "_assert_unique_word_list_name", fake_unique_name)
+        monkeypatch.setattr(import_jobs_api, "create_word_list_from_entries", fake_create_word_list_from_entries)
+
+        response = await client.post(
+            f"/api/import-jobs/{job.id}/word-lists",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "name": "",
+                "selected_entries": [{"entry_type": "word", "entry_id": str(uuid.uuid4())}],
+            },
+        )
+
+        assert response.status_code == 201
+        assert captured["name"] == "Atomic Habits"
+        assert captured["description"] == "bookname: Atomic Habits\nfilename: Atomic Habits.epub\nauthor: James Clear"

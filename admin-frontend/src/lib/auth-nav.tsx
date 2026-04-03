@@ -51,7 +51,7 @@ export function AuthNavigation() {
         Enrichment Review
       </Link>
       <Link
-        href="/lexicon/epub-cache"
+        href="/lexicon/epub-cache/sources"
         className="hover:text-gray-900"
         data-testid="nav-lexicon-epub-cache-link"
       >

@@ -1,6 +1,7 @@
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -35,6 +36,33 @@ router = APIRouter()
 
 class BulkDeleteImportJobsRequest(BaseModel):
     job_ids: list[uuid.UUID]
+
+
+def _default_word_list_name_for_import_job(job: ImportJob) -> str:
+    import_source = getattr(job, "import_source", None)
+    title_candidate = (
+        (import_source.title if import_source is not None else None)
+        or job.source_title_snapshot
+        or ""
+    ).strip()
+    if title_candidate:
+        return title_candidate
+    filename_stem = Path(job.source_filename or "").stem.strip()
+    if filename_stem:
+        return filename_stem
+    return "Imported list"
+
+
+def _default_word_list_description_for_import_job(job: ImportJob) -> str:
+    import_source = getattr(job, "import_source", None)
+    book_name = _default_word_list_name_for_import_job(job)
+    author = (
+        (import_source.author if import_source is not None else None)
+        or job.source_author_snapshot
+        or "Unknown"
+    ).strip() or "Unknown"
+    filename = (job.source_filename or "Unknown").strip() or "Unknown"
+    return f"bookname: {book_name}\nfilename: {filename}\nauthor: {author}"
 
 
 @router.get("", response_model=list[ImportJobResponse])
@@ -158,14 +186,20 @@ async def create_word_list_from_import_job(
     db: AsyncSession = Depends(get_db),
 ) -> WordListResponse:
     job = await _get_import_job_for_user(db, job_id=job_id, user_id=current_user.id)
-    await _assert_unique_word_list_name(db, user_id=current_user.id, name=request.name)
+    await _hydrate_import_jobs_with_source_details(db, [job])
+    requested_name = (request.name or "").strip()
+    resolved_name = requested_name or _default_word_list_name_for_import_job(job)
+    resolved_description = (
+        request.description if request.description is not None else _default_word_list_description_for_import_job(job)
+    )
+    await _assert_unique_word_list_name(db, user_id=current_user.id, name=resolved_name)
     try:
         word_list = await create_word_list_from_entries(
             db,
             user_id=current_user.id,
             job=job,
-            name=request.name.strip(),
-            description=request.description,
+            name=resolved_name,
+            description=resolved_description,
             selected_entries=[
                 EntryRef(entry_type=entry.entry_type, entry_id=entry.entry_id)
                 for entry in request.selected_entries

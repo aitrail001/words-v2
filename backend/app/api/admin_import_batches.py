@@ -40,34 +40,43 @@ async def create_epub_import_batch(
     await db.refresh(batch)
 
     jobs: list[dict[str, object]] = []
+    failures: list[dict[str, str]] = []
     for file in files:
-        job, _, completed_from_cache = await enqueue_epub_import_upload(
-            db=db,
-            actor_user=current_user,
-            file=file,
-            list_name=None,
-            list_description=None,
-            job_origin="admin_preimport",
-            import_batch_id=batch.id,
-            enforce_active_import_limit=False,
-        )
-        jobs.append(
-            {
-                "id": str(job.id),
-                "status": job.status,
-                "source_filename": job.source_filename,
-                "import_source_id": str(job.import_source_id) if job.import_source_id else None,
-                "from_cache": completed_from_cache,
-                "created_at": job.created_at,
-                "started_at": job.started_at,
-                "completed_at": job.completed_at,
-            }
-        )
+        source_filename = (file.filename or "").strip() or "unknown.epub"
+        try:
+            job, _, completed_from_cache = await enqueue_epub_import_upload(
+                db=db,
+                actor_user=current_user,
+                file=file,
+                list_name=None,
+                list_description=None,
+                job_origin="admin_preimport",
+                import_batch_id=batch.id,
+                enforce_active_import_limit=False,
+            )
+            jobs.append(
+                {
+                    "id": str(job.id),
+                    "status": job.status,
+                    "source_filename": job.source_filename,
+                    "import_source_id": str(job.import_source_id) if job.import_source_id else None,
+                    "from_cache": completed_from_cache,
+                    "created_at": job.created_at,
+                    "started_at": job.started_at,
+                    "completed_at": job.completed_at,
+                }
+            )
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            failures.append({"source_filename": source_filename, "error": detail})
+        except Exception:
+            failures.append({"source_filename": source_filename, "error": "Failed to enqueue import"})
 
     summary = await get_import_batch_summary(db, batch_id=batch.id)
     return {
         "batch": summary,
         "jobs": jobs,
+        "failures": failures,
     }
 
 

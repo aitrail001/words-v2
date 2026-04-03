@@ -144,7 +144,7 @@ export const getImportEntries = async (
 export const createListFromImport = async (
   jobId: string,
   payload: {
-    name: string;
+    name?: string;
     description?: string;
     selected_entries: Array<{ entry_type: KnowledgeEntryType; entry_id: string }>;
   },

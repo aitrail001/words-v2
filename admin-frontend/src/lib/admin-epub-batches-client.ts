@@ -29,7 +29,7 @@ export type AdminImportBatchJob = {
 export const createAdminEpubImportBatch = async (input: {
   files: File[];
   batchName?: string;
-}): Promise<{ batch: AdminImportBatchSummary; jobs: AdminImportBatchJob[] }> => {
+}): Promise<{ batch: AdminImportBatchSummary; jobs: AdminImportBatchJob[]; failures?: Array<{ source_filename: string; error: string }> }> => {
   const formData = new FormData();
   for (const file of input.files) {
     formData.append("files", file);
