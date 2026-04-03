@@ -69,6 +69,9 @@ jobs:
           JWT_SECRET: test-secret
         run: >
           pytest -q
+          tests/test_imports_api.py
+          tests/test_import_jobs_api.py
+          tests/test_source_imports_service.py
           tests/test_review_models.py
           tests/test_review_service.py
           tests/test_review_api.py
