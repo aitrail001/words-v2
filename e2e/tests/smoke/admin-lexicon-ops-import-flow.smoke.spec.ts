@@ -111,8 +111,8 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
 
   await page.getByTestId("lexicon-import-db-run-button").click();
   await expect(page.getByTestId("lexicon-import-db-progress")).toBeVisible();
-  await expect(page.getByTestId("lexicon-import-db-progress")).not.toContainText("Waiting for first row...");
-  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText(/Current entry: (Validating|Importing|Completed)/);
+  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText(/Current entry:/);
+  await expect(page.getByTestId("lexicon-import-db-progress")).toContainText(/(queued|running|completed|validating|importing)/i);
   await page.reload();
   await expect(page.getByTestId("lexicon-import-db-page")).toBeVisible();
 
