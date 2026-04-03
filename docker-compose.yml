@@ -52,7 +52,7 @@ services:
       - ./backend:/app
       - ./tools:/app/tools:ro
       - ${WORDS_DATA_DIR:-./data}:/app/data
-      - ./tests:/app/tests
+      - ./backend/tests:/app/tests
       - backend_uploads:/app/uploads
     depends_on:
       postgres:
@@ -81,7 +81,7 @@ services:
       - ./backend:/app
       - ./tools:/app/tools:ro
       - ${WORDS_DATA_DIR:-./data}:/app/data
-      - ./tests:/app/tests
+      - ./backend/tests:/app/tests
       - backend_uploads:/app/uploads
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -112,7 +112,7 @@ services:
       - ./backend:/app
       - ./tools:/app/tools:ro
       - ${WORDS_DATA_DIR:-./data}:/app/data
-      - ./tests:/app/tests:ro
+      - ./backend/tests:/app/tests:ro
       - backend_uploads:/app/uploads
     depends_on:
       migrate:

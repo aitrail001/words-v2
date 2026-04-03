@@ -2692,7 +2692,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
             )
 
     def test_load_compiled_rows_reads_family_directory_and_dry_run_counts(self) -> None:
-        from tools.lexicon.import_db import load_compiled_rows, summarize_compiled_rows
+        from tools.lexicon.import_db import load_compiled_rows, summarize_compiled_rows, summarize_compiled_rows_from_path
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -2758,11 +2758,13 @@ class ImportCompiledRowsTests(unittest.TestCase):
 
             rows = load_compiled_rows(root)
             counts = summarize_compiled_rows(rows)
+            streaming_counts = summarize_compiled_rows_from_path(root)
 
             self.assertEqual(counts["row_count"], 3)
             self.assertEqual(counts["word_count"], 1)
             self.assertEqual(counts["phrase_count"], 1)
             self.assertEqual(counts["reference_count"], 1)
+            self.assertEqual(streaming_counts, counts)
 
     def test_import_skips_existing_child_loaders_for_brand_new_rows(self) -> None:
         session = MagicMock()

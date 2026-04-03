@@ -29,7 +29,7 @@ class TestLexiconJobsApi:
     async def test_create_import_db_job(self, mock_delay, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
-        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(None)]
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(None), _result_with(None)]
         mock_db.flush = pytest.importorskip("unittest.mock").AsyncMock()
 
         async def fake_refresh(job):
@@ -41,8 +41,7 @@ class TestLexiconJobsApi:
         compiled_path = tmp_path / "approved.jsonl"
         compiled_path.write_text('{"entry_id":"word:bank","entry_type":"word","word":"bank"}\n', encoding="utf-8")
         monkeypatch.setattr("app.api.lexicon_jobs._import_db_module", lambda: SimpleNamespace(
-            load_compiled_rows=lambda path: [{"entry_id": "word:bank", "entry_type": "word", "word": "bank"}],
-            summarize_compiled_rows=lambda rows: {"row_count": 1, "word_count": 1, "phrase_count": 0, "reference_count": 0},
+            summarize_compiled_rows_from_path=lambda path: {"row_count": 1, "word_count": 1, "phrase_count": 0, "reference_count": 0},
         ))
 
         response = await client.post(
@@ -69,7 +68,7 @@ class TestLexiconJobsApi:
     async def test_create_voice_import_db_job(self, mock_delay, client, mock_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
-        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(None)]
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(None), _result_with(None)]
         mock_db.flush = pytest.importorskip("unittest.mock").AsyncMock()
 
         async def fake_refresh(job):
@@ -81,8 +80,7 @@ class TestLexiconJobsApi:
         manifest_path = tmp_path / "voice_manifest.jsonl"
         manifest_path.write_text('{"status":"generated","entry_type":"word","entry_id":"word:bank","word":"bank"}\n', encoding="utf-8")
         monkeypatch.setattr("app.api.lexicon_jobs._voice_import_db_module", lambda: SimpleNamespace(
-            load_voice_manifest_rows=lambda path: [{"status": "generated", "entry_type": "word", "entry_id": "word:bank", "word": "bank"}],
-            summarize_voice_manifest_rows=lambda rows: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
+            summarize_voice_manifest_rows_from_path=lambda path: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
         ))
 
         response = await client.post(
@@ -115,7 +113,7 @@ class TestLexiconJobsApi:
     ):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
-        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(None)]
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(None), _result_with(None)]
         mock_db.flush = pytest.importorskip("unittest.mock").AsyncMock()
 
         async def fake_refresh(job):
@@ -134,8 +132,7 @@ class TestLexiconJobsApi:
         manifest_path.parent.mkdir(parents=True)
         manifest_path.write_text('{"status":"generated","entry_type":"word","entry_id":"word:bank","word":"bank"}\n', encoding="utf-8")
         monkeypatch.setattr("app.api.lexicon_jobs._voice_import_db_module", lambda: SimpleNamespace(
-            load_voice_manifest_rows=lambda path: [{"status": "generated", "entry_type": "word", "entry_id": "word:bank", "word": "bank"}],
-            summarize_voice_manifest_rows=lambda rows: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
+            summarize_voice_manifest_rows_from_path=lambda path: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
         ))
 
         response = await client.post(
@@ -152,6 +149,94 @@ class TestLexiconJobsApi:
         assert response.json()["request_payload"]["input_path"] == str(manifest_path)
         assert response.json()["request_payload"]["conflict_mode"] == "fail"
         mock_delay.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("app.api.lexicon_jobs.run_lexicon_import_db.delay")
+    async def test_create_import_db_job_returns_409_for_active_source_reference(
+        self,
+        mock_delay,
+        client,
+        mock_db,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        existing = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=user_id,
+            job_type="import_db",
+            status="running",
+            target_key="import_db:/existing/path/approved.jsonl",
+            request_payload={"source_reference": "demo"},
+        )
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(existing)]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        compiled_path = tmp_path / "approved.jsonl"
+        compiled_path.write_text('{"entry_id":"word:bank","entry_type":"word","word":"bank"}\n', encoding="utf-8")
+        monkeypatch.setattr("app.api.lexicon_jobs._import_db_module", lambda: SimpleNamespace(
+            summarize_compiled_rows_from_path=lambda path: {"row_count": 1, "word_count": 1, "phrase_count": 0, "reference_count": 0},
+        ))
+
+        response = await client.post(
+            "/api/lexicon-jobs/import-db",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "input_path": str(compiled_path),
+                "source_type": "lexicon_snapshot",
+                "source_reference": "demo",
+                "language": "en",
+            },
+        )
+
+        assert response.status_code == 409
+        assert "already exists for source" in response.json()["detail"]
+        mock_delay.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("app.api.lexicon_jobs.run_lexicon_voice_import_db.delay")
+    async def test_create_voice_import_db_job_returns_409_for_active_source_reference(
+        self,
+        mock_delay,
+        client,
+        mock_db,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        existing = LexiconJob(
+            id=uuid.uuid4(),
+            created_by=user_id,
+            job_type="voice_import_db",
+            status="queued",
+            target_key="voice_import_db:/existing/path/voice_manifest.jsonl",
+            request_payload={"source_reference": "voice-demo"},
+        )
+        mock_db.execute.side_effect = [_result_with(make_user(user_id)), _result_with(existing)]
+        app.dependency_overrides[get_settings] = lambda: Settings(environment="test", lexicon_snapshot_root=str(tmp_path))
+
+        manifest_path = tmp_path / "voice_manifest.jsonl"
+        manifest_path.write_text('{"status":"generated","entry_type":"word","entry_id":"word:bank","word":"bank"}\n', encoding="utf-8")
+        monkeypatch.setattr("app.api.lexicon_jobs._voice_import_db_module", lambda: SimpleNamespace(
+            summarize_voice_manifest_rows_from_path=lambda path: {"row_count": 1, "generated_count": 1, "existing_count": 0, "failed_count": 0},
+        ))
+
+        response = await client.post(
+            "/api/lexicon-jobs/voice-import-db",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "input_path": str(manifest_path),
+                "source_type": "voice_manifest",
+                "source_reference": "voice-demo",
+                "language": "en",
+            },
+        )
+
+        assert response.status_code == 409
+        assert "already exists for source" in response.json()["detail"]
+        mock_delay.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_voice_import_db_job_rejects_directory_input(self, client, mock_db, tmp_path: Path):

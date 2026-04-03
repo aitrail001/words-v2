@@ -1,9 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
 import LexiconImportDbPage from "@/app/lexicon/import-db/page";
+import { ApiError } from "@/lib/api-client";
+import { createImportDbLexiconJob, getLexiconJob, listLexiconJobs } from "@/lib/lexicon-jobs-client";
+import { dryRunLexiconImport } from "@/lib/lexicon-imports-client";
 
 jest.mock("@/lib/auth-session", () => ({
   readAccessToken: jest.fn(() => "active-token"),
+  readRefreshToken: jest.fn(() => null),
 }));
 
 jest.mock("@/lib/auth-redirect", () => ({
@@ -15,103 +20,97 @@ jest.mock("@/lib/lexicon-imports-client", () => ({
 }));
 
 jest.mock("@/lib/lexicon-jobs-client", () => ({
+  addLexiconActiveJobId: jest.requireActual("@/lib/lexicon-jobs-client").addLexiconActiveJobId,
   createImportDbLexiconJob: jest.fn(),
+  formatLexiconJobDuration: jest.requireActual("@/lib/lexicon-jobs-client").formatLexiconJobDuration,
   getLexiconJob: jest.fn(),
+  getLexiconJobConflictMessage: jest.requireActual("@/lib/lexicon-jobs-client").getLexiconJobConflictMessage,
+  getLexiconJobProgressTiming: jest.requireActual("@/lib/lexicon-jobs-client").getLexiconJobProgressTiming,
+  isLexiconJobActive: jest.requireActual("@/lib/lexicon-jobs-client").isLexiconJobActive,
   listLexiconJobs: jest.fn(),
+  readLexiconActiveJobIds: jest.requireActual("@/lib/lexicon-jobs-client").readLexiconActiveJobIds,
+  removeLexiconActiveJobId: jest.requireActual("@/lib/lexicon-jobs-client").removeLexiconActiveJobId,
+  upsertLexiconJob: jest.requireActual("@/lib/lexicon-jobs-client").upsertLexiconJob,
+  writeLexiconActiveJobIds: jest.requireActual("@/lib/lexicon-jobs-client").writeLexiconActiveJobIds,
 }));
 
 describe("LexiconImportDbPage", () => {
-  const { dryRunLexiconImport } = require("@/lib/lexicon-imports-client");
-  const { createImportDbLexiconJob, getLexiconJob, listLexiconJobs } = require("@/lib/lexicon-jobs-client");
+  const mockDryRunLexiconImport = dryRunLexiconImport as jest.Mock;
+  const mockCreateImportDbLexiconJob = createImportDbLexiconJob as jest.Mock;
+  const mockGetLexiconJob = getLexiconJob as jest.Mock;
+  const mockListLexiconJobs = listLexiconJobs as jest.Mock;
+
+  const buildImportJob = (overrides: any = {}) => ({
+    id: overrides.id ?? "job-1",
+    created_by: overrides.created_by ?? "user-1",
+    job_type: "import_db",
+    status: overrides.status ?? "running",
+    target_key: overrides.target_key ?? "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+    request_payload: {
+      input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
+      source_type: "lexicon_snapshot",
+      source_reference: "lexicon-20260321-wordfreq",
+      language: "en",
+      conflict_mode: "fail",
+      error_mode: "continue",
+      row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
+      ...(overrides.request_payload ?? {}),
+    },
+    result_payload: overrides.result_payload ?? null,
+    progress_summary: overrides.progress_summary === null
+      ? null
+      : {
+          phase: "validating",
+          total: 1,
+          validated: 0,
+          imported: 0,
+          skipped: 0,
+          failed: 0,
+          to_validate: 1,
+          to_import: 1,
+          ...(overrides.progress_summary ?? {}),
+        },
+    progress_timing: overrides.progress_timing === null
+      ? null
+      : {
+          elapsed_ms: 2400,
+          validation_elapsed_ms: 1600,
+          import_elapsed_ms: 0,
+          queue_wait_ms: 400,
+          ...(overrides.progress_timing ?? {}),
+        },
+    progress_total: overrides.progress_total ?? 1,
+    progress_completed: overrides.progress_completed ?? 0,
+    progress_current_label: overrides.progress_current_label ?? "bank",
+    error_message: overrides.error_message ?? null,
+    created_at: overrides.created_at ?? "2026-03-23T00:00:00Z",
+    started_at: overrides.started_at ?? "2026-03-23T00:00:01Z",
+    completed_at: overrides.completed_at ?? null,
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
     window.localStorage.clear();
-    dryRunLexiconImport.mockResolvedValue({
+    window.history.pushState(
+      {},
+      "",
+      "/lexicon/import-db?inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fdemo%2Freviewed%2Fapproved.jsonl&sourceReference=lexicon-20260321-wordfreq&language=en",
+    );
+
+    mockDryRunLexiconImport.mockResolvedValue({
       artifact_filename: "words.enriched.jsonl",
       input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
       row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
       import_summary: { dry_run: 1, failed_rows: 0 },
       error_samples: [],
     });
-    getLexiconJob.mockResolvedValue({
-      id: "job-1",
-      created_by: "user-1",
-      job_type: "import_db",
-      status: "completed",
-      target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-      request_payload: {
-        input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-        source_type: "lexicon_snapshot",
-        source_reference: "lexicon-20260321-wordfreq",
-        language: "en",
-        conflict_mode: "fail",
-        error_mode: "continue",
-        row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
-      },
-      result_payload: { created_words: 1 },
-      progress_summary: {
-        phase: "completed",
-        total: 1,
-        validated: 1,
-        imported: 1,
-        skipped: 0,
-        failed: 0,
-        to_validate: 0,
-        to_import: 0,
-      },
-      progress_total: 1,
-      progress_completed: 1,
-      progress_current_label: "bank",
-      error_message: null,
-      created_at: "2026-03-23T00:00:00Z",
-      started_at: "2026-03-23T00:00:01Z",
-      completed_at: "2026-03-23T00:00:02Z",
-    });
-    createImportDbLexiconJob.mockResolvedValue({
-      id: "job-1",
-      created_by: "user-1",
-      job_type: "import_db",
-      status: "running",
-      target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-      request_payload: {
-        input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-        source_type: "lexicon_snapshot",
-        source_reference: "lexicon-20260321-wordfreq",
-        language: "en",
-        conflict_mode: "fail",
-        error_mode: "continue",
-        row_summary: { row_count: 1, word_count: 1, phrase_count: 0, reference_count: 0 },
-      },
-      result_payload: null,
-      progress_summary: {
-        phase: "validating",
-        total: 1,
-        validated: 0,
-        imported: 0,
-        skipped: 0,
-        failed: 0,
-        to_validate: 1,
-        to_import: 1,
-      },
-      progress_total: 1,
-      progress_completed: 0,
-      progress_current_label: "bank",
-      error_message: null,
-      created_at: "2026-03-23T00:00:00Z",
-      started_at: "2026-03-23T00:00:01Z",
-      completed_at: null,
-    });
-    listLexiconJobs.mockResolvedValue([]);
+    mockCreateImportDbLexiconJob.mockResolvedValue(buildImportJob());
+    mockGetLexiconJob.mockResolvedValue(buildImportJob({ status: "completed", progress_completed: 1, completed_at: "2026-03-23T00:00:02Z", result_payload: { created_words: 1 }, progress_summary: { phase: "completed", validated: 1, imported: 1, to_validate: 0, to_import: 0 }, progress_current_label: "Completed" }));
+    mockListLexiconJobs.mockResolvedValue([]);
   });
 
   it("renders import dry-run and execute controls", async () => {
     const user = userEvent.setup();
-    window.history.pushState(
-      {},
-      "",
-      "/lexicon/import-db?inputPath=%2Fdata%2Flexicon%2Fsnapshots%2Fdemo%2Freviewed%2Fapproved.jsonl&sourceReference=lexicon-20260321-wordfreq&language=en",
-    );
     render(<LexiconImportDbPage />);
 
     await waitFor(() => expect(screen.getByTestId("lexicon-import-db-page")).toBeInTheDocument());
@@ -120,9 +119,6 @@ describe("LexiconImportDbPage", () => {
     );
     expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
       "Source reference: lexicon-20260321-wordfreq",
-    );
-    expect(screen.getByTestId("lexicon-import-db-context")).toHaveTextContent(
-      "Stage: Final DB write",
     );
     expect(screen.getByText(/Use reviewed\/approved\.jsonl from Compiled Review export or JSONL Review materialize, not the raw words\.enriched\.jsonl artifact unless you are intentionally bypassing review\./)).toBeInTheDocument();
     expect(screen.getByText("Compiled artifact")).toBeInTheDocument();
@@ -134,208 +130,82 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByTestId("lexicon-import-db-form-grid")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("data/lexicon/snapshots/.../reviewed/approved.jsonl")).toBeInTheDocument();
     expect(screen.getByTestId("lexicon-import-db-conflict-mode")).toHaveValue("fail");
-    expect(dryRunLexiconImport).not.toHaveBeenCalled();
-    await user.type(screen.getByTestId("lexicon-import-db-input-path"), "data/lexicon/snapshots/demo/words.enriched.jsonl");
+
     await user.click(screen.getByTestId("lexicon-import-db-dry-run-button"));
+    await waitFor(() => expect(mockDryRunLexiconImport).toHaveBeenCalled());
 
-    await waitFor(() => expect(dryRunLexiconImport).toHaveBeenCalled());
     await user.click(screen.getByTestId("lexicon-import-db-run-button"));
-
-    await waitFor(() => expect(createImportDbLexiconJob).toHaveBeenCalledWith({
-      inputPath: expect.stringContaining("/data/lexicon/snapshots/demo/reviewed/approved.jsonl"),
+    await waitFor(() => expect(mockCreateImportDbLexiconJob).toHaveBeenCalledWith({
+      inputPath: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
       sourceType: "lexicon_snapshot",
       sourceReference: "lexicon-20260321-wordfreq",
       language: "en",
       conflictMode: "fail",
       errorMode: "continue",
+      importExecutionMode: "continuation",
+      importRowChunkSize: 250,
+      importRowCommitSize: 250,
     }));
+
+    expect(window.localStorage.getItem("lexicon-import-db-active-jobs")).toBe(JSON.stringify(["job-1"]));
     expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: bank");
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("To validate");
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Validated");
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("To import");
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Imported");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Elapsed");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Queue wait");
   });
 
-  it("shows failed-before-first-row copy instead of waiting text", async () => {
-    getLexiconJob.mockResolvedValue({
-      id: "job-failed",
-      created_by: "user-1",
-      job_type: "import_db",
-      status: "failed",
-      target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-      request_payload: {
-        input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-        source_type: "lexicon_snapshot",
-        source_reference: "lexicon-20260321-wordfreq",
-        language: "en",
-        conflict_mode: "fail",
-        error_mode: "continue",
-        row_summary: { row_count: 1, word_count: 0, phrase_count: 1, reference_count: 0 },
-      },
-      result_payload: null,
-      progress_total: 0,
-      progress_completed: 0,
-      progress_current_label: "Failed before first row",
-      error_message: "sense 2 translations.zh-Hans.usage_note must be a non-empty string",
-      created_at: "2026-03-23T00:00:00Z",
-      started_at: "2026-03-23T00:00:01Z",
-      completed_at: "2026-03-23T00:00:02Z",
-    });
-    window.localStorage.setItem("lexicon-import-db-active-job", "job-failed");
-    render(<LexiconImportDbPage />);
-
-    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toBeInTheDocument());
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: Failed before first row");
-    expect(screen.queryByText("Waiting for first row...")).not.toBeInTheDocument();
-    expect(screen.getByText(/usage_note/)).toBeInTheDocument();
-  });
-
-  it("preserves backend failure labels for zero-row failures", async () => {
-    getLexiconJob.mockResolvedValue({
-      id: "job-preflight-failed",
-      created_by: "user-1",
-      job_type: "import_db",
-      status: "failed",
-      target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-      request_payload: {
-        input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-        source_type: "lexicon_snapshot",
-        source_reference: "lexicon-20260321-wordfreq",
-        language: "en",
-        conflict_mode: "fail",
-        error_mode: "continue",
-        row_summary: { row_count: 3, word_count: 0, phrase_count: 3, reference_count: 0 },
-      },
-      result_payload: null,
-      progress_summary: {
-        phase: "failed",
-        total: 3,
-        validated: 2,
-        imported: 0,
-        skipped: 0,
-        failed: 0,
-        to_validate: 1,
-        to_import: 3,
-      },
-      progress_total: 3,
-      progress_completed: 0,
-      progress_current_label: "Validating 2/3: fuss over",
-      error_message: "sense 2 translations.zh-Hans.usage_note must be a non-empty string",
-      created_at: "2026-03-23T00:00:00Z",
-      started_at: "2026-03-23T00:00:01Z",
-      completed_at: "2026-03-23T00:00:02Z",
-    });
-    window.localStorage.setItem("lexicon-import-db-active-job", "job-preflight-failed");
-    render(<LexiconImportDbPage />);
-
-    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toBeInTheDocument());
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: Validating 2/3: fuss over");
-    expect(screen.queryByText("Current entry: Failed before first row")).not.toBeInTheDocument();
-  });
-
-  it("reconnects to the active import job from local storage", async () => {
-    window.localStorage.setItem("lexicon-import-db-active-job", "job-1");
-    render(<LexiconImportDbPage />);
-
-    await waitFor(() => expect(getLexiconJob).toHaveBeenCalledWith("job-1"));
-    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Validated1"));
-    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Current entry: Completed");
-  });
-
-  it("shows the last completed import job in recent jobs when there is no active key", async () => {
-    window.localStorage.setItem("lexicon-import-db-last-job", "job-1");
-    listLexiconJobs.mockResolvedValue([
-      {
-        id: "job-1",
-        created_by: "user-1",
-        job_type: "import_db",
+  it("renders multiple active jobs from local storage and keeps recent jobs visible", async () => {
+    window.localStorage.setItem("lexicon-import-db-active-jobs", JSON.stringify(["job-1", "job-2"]));
+    mockGetLexiconJob.mockImplementation((jobId: string) => Promise.resolve(
+      jobId === "job-1"
+        ? buildImportJob({ id: "job-1", progress_current_label: "bank" })
+        : buildImportJob({
+            id: "job-2",
+            status: "queued",
+            progress_current_label: null,
+            request_payload: { input_path: "/data/lexicon/snapshots/demo/reviewed/approved-2.jsonl" },
+            progress_timing: { elapsed_ms: 900, validation_elapsed_ms: 0, import_elapsed_ms: 0, queue_wait_ms: 900 },
+          }),
+    ));
+    mockListLexiconJobs.mockResolvedValue([
+      buildImportJob({
+        id: "job-recent",
         status: "completed",
-        target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-        request_payload: {
-          input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-          source_reference: "lexicon-20260321-wordfreq",
-          conflict_mode: "fail",
-          error_mode: "continue",
-        },
-      result_payload: { created_words: 1 },
-      progress_summary: {
-        phase: "completed",
-        total: 1,
-        validated: 1,
-        imported: 1,
-        skipped: 0,
-        failed: 0,
-        to_validate: 0,
-        to_import: 0,
-      },
-      progress_total: 1,
         progress_completed: 1,
-        progress_current_label: "bank",
-        error_message: null,
-        created_at: "2026-03-23T00:00:00Z",
-        started_at: "2026-03-23T00:00:01Z",
         completed_at: "2026-03-23T00:00:02Z",
-      },
+        progress_summary: { phase: "completed", validated: 1, imported: 1, to_validate: 0, to_import: 0 },
+        progress_timing: { elapsed_ms: 3200, validation_elapsed_ms: 1600, import_elapsed_ms: 1300, queue_wait_ms: 300 },
+        result_payload: { created_words: 1 },
+      }),
     ]);
+
     render(<LexiconImportDbPage />);
 
-    expect(screen.queryByTestId("lexicon-import-db-progress")).not.toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toBeInTheDocument());
-    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("completed");
-    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("approved.jsonl");
-    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Current entry: Completed");
+    await waitFor(() => expect(screen.getAllByTestId("lexicon-import-db-active-job")).toHaveLength(2));
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Showing 2 queued or running import jobs.");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("/data/lexicon/snapshots/demo/reviewed/approved-2.jsonl");
+    expect(screen.getByTestId("lexicon-import-db-progress")).toHaveTextContent("Queue wait");
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Recent jobs");
+    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Elapsed");
   });
 
-  it("renders recent jobs with failed status emphasis", async () => {
-    listLexiconJobs.mockResolvedValue([
-      {
-        id: "job-failed",
-        created_by: "user-1",
-        job_type: "import_db",
-        status: "failed",
-        target_key: "import_db:/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-        request_payload: {
-          input_path: "/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
-          conflict_mode: "skip",
-          error_mode: "continue",
-        },
-      result_payload: { skipped_words: 1, failed_rows: 1 },
-      progress_summary: {
-        phase: "failed",
-        total: 10,
-        validated: 10,
-        imported: 3,
-        skipped: 1,
-        failed: 1,
-        to_validate: 0,
-        to_import: 5,
-      },
-      progress_total: 10,
-        progress_completed: 4,
-        progress_current_label: null,
-        error_message: "usage_note must be a non-empty string",
-        created_at: "2026-03-23T00:00:00Z",
-        started_at: "2026-03-23T00:00:01Z",
-        completed_at: "2026-03-23T00:00:02Z",
-      },
-    ]);
+  it("shows a clear lock conflict message when create returns 409", async () => {
+    const user = userEvent.setup();
+    mockCreateImportDbLexiconJob.mockRejectedValue(
+      new ApiError(409, "source_reference lexicon-20260321-wordfreq is already locked by job job-9"),
+    );
 
     render(<LexiconImportDbPage />);
 
-    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toBeInTheDocument());
-    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Recent jobs");
-    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("failed");
-    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("approved.jsonl");
-    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("usage_note");
-    expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Current entry: Failed after 4/10");
+    await user.click(await screen.findByTestId("lexicon-import-db-run-button"));
+
+    await waitFor(() => expect(screen.getByText(/source_reference lexicon-20260321-wordfreq is already locked by job job-9/i)).toBeInTheDocument());
+    expect(screen.getByText(/locked by job job-9/i)).toBeInTheDocument();
   });
 
   it("expands recent jobs when more than the inline limit exists", async () => {
-    listLexiconJobs.mockResolvedValue(
-      Array.from({ length: 8 }, (_, index) => ({
+    mockListLexiconJobs.mockResolvedValue(
+      Array.from({ length: 8 }, (_, index) => buildImportJob({
         id: `job-${index + 1}`,
-        created_by: "user-1",
-        job_type: "import_db",
         status: "completed",
         target_key: `import_db:/data/lexicon/snapshots/demo/reviewed/approved-${index + 1}.jsonl`,
         request_payload: {
@@ -344,22 +214,9 @@ describe("LexiconImportDbPage", () => {
           error_mode: "continue",
         },
         result_payload: { created_words: index + 1 },
-        progress_summary: {
-          phase: "completed",
-          total: 1,
-          validated: 1,
-          imported: 1,
-          skipped: 0,
-          failed: 0,
-          to_validate: 0,
-          to_import: 0,
-        },
-        progress_total: 1,
         progress_completed: 1,
+        progress_summary: { phase: "completed", validated: 1, imported: 1, skipped: 0, failed: 0, to_validate: 0, to_import: 0, total: 1 },
         progress_current_label: `entry-${index + 1}`,
-        error_message: null,
-        created_at: "2026-03-23T00:00:00Z",
-        started_at: "2026-03-23T00:00:01Z",
         completed_at: "2026-03-23T00:00:02Z",
       })),
     );

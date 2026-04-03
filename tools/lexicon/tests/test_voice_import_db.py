@@ -593,6 +593,45 @@ def test_run_voice_import_file_dry_run_reports_failed_rows_without_writing(tmp_p
     assert summary["failed_rows"] == 1
 
 
+def test_summarize_voice_manifest_rows_from_path_streams_manifest(tmp_path: Path):
+    from tools.lexicon.voice_import_db import summarize_voice_manifest_rows_from_path
+
+    manifest_rows = [
+        _word_manifest_row(
+            word="bank",
+            entry_id="word_bank",
+            source_reference="words-001",
+            content_scope="word",
+            source_text="bank",
+            relative_path="bank/word/en_us/example.mp3",
+            source_text_hash="hash-bank",
+        ),
+        {
+            **_word_manifest_row(
+                word="harbor",
+                entry_id="word_harbor",
+                source_reference="words-002",
+                content_scope="word",
+                source_text="harbor",
+                relative_path="harbor/word/en_us/example.mp3",
+                source_text_hash="hash-harbor",
+            ),
+            "status": "existing",
+        },
+    ]
+    manifest_path = tmp_path / "voice_manifest.jsonl"
+    manifest_path.write_text("".join(f"{json.dumps(row)}\n" for row in manifest_rows), encoding="utf-8")
+
+    summary = summarize_voice_manifest_rows_from_path(manifest_path)
+
+    assert summary == {
+        "row_count": 2,
+        "generated_count": 1,
+        "existing_count": 1,
+        "failed_count": 0,
+    }
+
+
 def test_run_voice_import_file_continue_mode_reports_row_level_failures(tmp_path: Path):
     manifest_rows = [
         {"status": "generated", "entry_type": "word", "entry_id": "word_bank", "word": "bank", "language": "en", "content_scope": "word", "source_text": "bank", "locale": "en-US", "voice_role": "female", "provider": "google", "family": "neural2", "voice_id": "en-US-Neural2-C", "profile_key": "word", "audio_format": "mp3", "storage_kind": "local", "storage_base": "/tmp/voice", "relative_path": "bank.mp3", "source_text_hash": "hash-1"},

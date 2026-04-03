@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -18,7 +19,16 @@ class TestLexiconWorkerTasks:
     @staticmethod
     def _mock_session(session_cls, *execute_results):
         mock_db = MagicMock()
-        mock_db.execute.side_effect = execute_results
+        execute_queue = list(execute_results)
+
+        def _execute_side_effect(*args, **kwargs):
+            if execute_queue:
+                return execute_queue.pop(0)
+            fallback = MagicMock()
+            fallback.scalar_one_or_none.return_value = None
+            return fallback
+
+        mock_db.execute.side_effect = _execute_side_effect
 
         mock_session_cm = MagicMock()
         mock_session_cm.__enter__.return_value = mock_db
@@ -37,6 +47,7 @@ class TestLexiconWorkerTasks:
     def test_import_db_task_updates_progress_and_completes(self, mock_session_cls, mock_import_module):
         job = LexiconJob(
             id=uuid.uuid4(),
+            created_at=datetime.now(timezone.utc) - timedelta(seconds=2),
             created_by=uuid.uuid4(),
             job_type="import_db",
             target_key="import_db:/app/data/lexicon/snapshots/demo/reviewed/approved.jsonl",
@@ -45,14 +56,17 @@ class TestLexiconWorkerTasks:
                 "source_type": "lexicon_snapshot",
                 "source_reference": "demo",
                 "language": "en",
+                "row_summary": {"row_count": 2},
             },
         )
         mock_db = self._mock_session(mock_session_cls, self._job_result(job))
 
-        def fake_run_import_file(path, *, progress_callback=None, **kwargs):
+        def fake_run_import_file(path, *, import_started_callback=None, progress_callback=None, **kwargs):
+            assert import_started_callback is not None
+            import_started_callback()
             progress_callback(row={"word": "bank"}, completed_rows=1, total_rows=2)
             progress_callback(row={"word": "harbor"}, completed_rows=2, total_rows=2)
-            return {"created_words": 2}
+            return {"created_words": 2, "processed_row_count": 2}
 
         mock_import_module.return_value.run_import_file = fake_run_import_file
 
@@ -64,7 +78,14 @@ class TestLexiconWorkerTasks:
         assert job.progress_completed == 2
         assert job.progress_total == 2
         assert job.progress_current_label == "Importing 2/2: harbor"
-        assert mock_db.commit.call_count >= 2
+        assert mock_db.commit.call_count == 3
+        assert job.request_payload["progress_timing"]["queue_wait_ms"] >= 1900
+        assert set(job.request_payload["progress_timing"]).issuperset({
+            "queue_wait_ms",
+            "elapsed_ms",
+            "validation_elapsed_ms",
+            "import_elapsed_ms",
+        })
 
     @patch("app.tasks.lexicon_jobs._import_db_module")
     @patch("app.tasks.lexicon_jobs.Session")
@@ -84,13 +105,15 @@ class TestLexiconWorkerTasks:
         )
         mock_db = self._mock_session(mock_session_cls, self._job_result(job))
 
-        def fake_run_import_file(path, *, preflight_progress_callback=None, progress_callback=None, **kwargs):
+        def fake_run_import_file(path, *, import_started_callback=None, preflight_progress_callback=None, progress_callback=None, **kwargs):
             assert preflight_progress_callback is not None
             assert progress_callback is not None
             preflight_progress_callback({"word": "fuss over", "_progress_label": "Validating 1/2"}, 1, 2)
+            assert import_started_callback is not None
+            import_started_callback()
             progress_callback({"word": "bank", "_progress_label": "Skipping existing word: bank"}, 1, 2)
             progress_callback({"word": "harbor"}, 2, 2)
-            return {"skipped_words": 1, "created_words": 1, "failed_rows": 0}
+            return {"skipped_words": 1, "created_words": 1, "failed_rows": 0, "processed_row_count": 2}
 
         mock_import_module.return_value.run_import_file = fake_run_import_file
 
@@ -103,8 +126,10 @@ class TestLexiconWorkerTasks:
         assert job.progress_completed == 2
         assert job.progress_total == 2
         assert job.progress_current_label == "Importing 2/2: harbor"
-        assert mock_db.commit.call_count >= 3
-        assert job.request_payload["progress_summary"] == {
+        assert mock_db.commit.call_count == 3
+        progress_summary = dict(job.request_payload["progress_summary"])
+        progress_summary.pop("phase_started_at_ms", None)
+        assert progress_summary == {
             "phase": "completed",
             "total": 2,
             "validated": 2,
@@ -147,7 +172,9 @@ class TestLexiconWorkerTasks:
         assert job.progress_completed == 2
         assert job.progress_total == 3
         assert job.progress_current_label == "Validating 2/3: fuss over"
-        assert job.request_payload["progress_summary"] == {
+        progress_summary = dict(job.request_payload["progress_summary"])
+        progress_summary.pop("phase_started_at_ms", None)
+        assert progress_summary == {
             "phase": "failed",
             "total": 3,
             "validated": 2,
@@ -175,10 +202,12 @@ class TestLexiconWorkerTasks:
         )
         mock_db = self._mock_session(mock_session_cls, self._job_result(job))
 
-        def fake_run_voice_import_file(path, *, preflight_progress_callback=None, progress_callback=None, **kwargs):
+        def fake_run_voice_import_file(path, *, import_started_callback=None, preflight_progress_callback=None, progress_callback=None, **kwargs):
             assert preflight_progress_callback is not None
             assert progress_callback is not None
             preflight_progress_callback({"word": "bank", "_progress_label": "Validating 1/2"}, 1, 2)
+            assert import_started_callback is not None
+            import_started_callback()
             progress_callback({"word": "bank", "_progress_label": "Skipping existing word: bank"}, 1, 2)
             progress_callback({"word": "harbor"}, 2, 2)
             return {"created_assets": 1, "updated_assets": 0, "skipped_rows": 1, "failed_rows": 0}
@@ -193,8 +222,10 @@ class TestLexiconWorkerTasks:
         assert job.progress_completed == 2
         assert job.progress_total == 2
         assert job.progress_current_label == "harbor"
-        assert mock_db.commit.call_count >= 3
-        assert job.request_payload["progress_summary"] == {
+        assert mock_db.commit.call_count == 3
+        progress_summary = dict(job.request_payload["progress_summary"])
+        progress_summary.pop("phase_started_at_ms", None)
+        assert progress_summary == {
             "phase": "completed",
             "total": 2,
             "validated": 2,
@@ -204,6 +235,12 @@ class TestLexiconWorkerTasks:
             "to_validate": 0,
             "to_import": 0,
         }
+        assert set(job.request_payload["progress_timing"]).issuperset({
+            "queue_wait_ms",
+            "elapsed_ms",
+            "validation_elapsed_ms",
+            "import_elapsed_ms",
+        })
 
     @patch("app.tasks.lexicon_jobs.apply_lexicon_job_progress")
     @patch("app.tasks.lexicon_jobs._voice_import_db_module")
@@ -298,7 +335,12 @@ class TestLexiconWorkerTasks:
 
         assert result["status"] == "completed"
         importing_summaries = [summary for summary in progress_summaries if summary["phase"] == "importing"]
-        assert importing_summaries == [
+        sanitized_importing = []
+        for summary in importing_summaries:
+            next_summary = dict(summary)
+            next_summary.pop("phase_started_at_ms", None)
+            sanitized_importing.append(next_summary)
+        assert sanitized_importing == [
             {
                 "phase": "importing",
                 "total": 6,
@@ -320,7 +362,9 @@ class TestLexiconWorkerTasks:
                 "to_import": 4,
             },
         ]
-        assert job.request_payload["progress_summary"] == {
+        progress_summary = dict(job.request_payload["progress_summary"])
+        progress_summary.pop("phase_started_at_ms", None)
+        assert progress_summary == {
             "phase": "completed",
             "total": 6,
             "validated": 6,
@@ -365,7 +409,9 @@ class TestLexiconWorkerTasks:
 
         assert result["status"] == "failed"
         assert job.progress_current_label == "Validating 5/5: bank"
-        assert job.request_payload["progress_summary"] == {
+        progress_summary = dict(job.request_payload["progress_summary"])
+        progress_summary.pop("phase_started_at_ms", None)
+        assert progress_summary == {
             "phase": "failed",
             "total": 5,
             "validated": 5,
@@ -409,7 +455,9 @@ class TestLexiconWorkerTasks:
         result = run_lexicon_voice_import_db(str(job.id))
 
         assert result["status"] == "completed"
-        assert job.request_payload["progress_summary"] == {
+        progress_summary = dict(job.request_payload["progress_summary"])
+        progress_summary.pop("phase_started_at_ms", None)
+        assert progress_summary == {
             "phase": "completed",
             "total": 1,
             "validated": 1,
