@@ -630,7 +630,7 @@ class TestKnowledgeMapList:
         assert learning_response.json()["items"][0]["primary_definition"] == "Bank definition"
 
         search_response = await client.get(
-            "/api/knowledge-map/list?status=to_learn&q=bank&sort=rank_desc",
+            "/api/knowledge-map/list?status=to_learn&q=bank&sort=rank&order=desc",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert search_response.status_code == 200

@@ -64,6 +64,69 @@ def make_user(user_id: uuid.UUID) -> User:
 
 class TestCreateImport:
     @pytest.mark.asyncio
+    async def test_import_job_response_uses_explicit_source_without_lazy_loading(self):
+        source_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+        created_at = datetime.now(timezone.utc)
+        import_source = ImportSource(
+            id=source_id,
+            source_type="epub",
+            source_hash_sha256="a" * 64,
+            status="completed",
+            matched_entry_count=4,
+            title="Clean title",
+            author="Author Name",
+            publisher="Publisher Name",
+            published_year=2020,
+            isbn="9780000000000",
+        )
+
+        class LazyLoadGuardJob:
+            def __init__(self) -> None:
+                self.id = uuid.uuid4()
+                self.user_id = user_id
+                self.import_source_id = source_id
+                self.word_list_id = None
+                self.status = "completed"
+                self.source_filename = "book.epub"
+                self.source_hash = "a" * 64
+                self.list_name = "Imported list"
+                self.list_description = None
+                self.total_items = 0
+                self.processed_items = 0
+                self.progress_stage = "completed"
+                self.progress_total = 0
+                self.progress_completed = 0
+                self.progress_current_label = "Completed from cached import"
+                self.matched_entry_count = 0
+                self.created_count = 0
+                self.skipped_count = 0
+                self.not_found_count = 0
+                self.not_found_words = None
+                self.error_count = 0
+                self.error_message = None
+                self.created_at = created_at
+                self.started_at = None
+                self.completed_at = created_at
+                self.word_entry_count = 3
+                self.phrase_entry_count = 1
+
+            @property
+            def import_source(self):
+                raise AssertionError("serializer should not lazy-load import_source when explicit source is provided")
+
+        response = word_lists_api._to_import_job_response(
+            LazyLoadGuardJob(),
+            import_source=import_source,
+        )
+
+        assert response.import_source_id == str(source_id)
+        assert response.source_title == "Clean title"
+        assert response.source_author == "Author Name"
+        assert response.source_publisher == "Publisher Name"
+        assert response.total_entries_extracted == 4
+
+    @pytest.mark.asyncio
     async def test_create_import_helper_caches_user_id_before_source_commit_boundary(self, mock_db):
         user_id = uuid.uuid4()
 

@@ -168,9 +168,13 @@ class BulkDeleteWordListItemsRequest(BaseModel):
     item_ids: list[uuid.UUID]
 
 
-def _to_import_job_response(job: ImportJob) -> ImportJobResponse:
-    import_source = getattr(job, "import_source", None)
-    from_cache = bool(job.status == "completed" and job.started_at is None and import_source is not None)
+def _to_import_job_response(
+    job: ImportJob,
+    *,
+    import_source: ImportSource | None = None,
+) -> ImportJobResponse:
+    resolved_import_source = import_source if import_source is not None else getattr(job, "import_source", None)
+    from_cache = bool(job.status == "completed" and job.started_at is None and resolved_import_source is not None)
     processing_duration_seconds = None
     if job.started_at is not None and job.completed_at is not None:
         processing_duration_seconds = max(
@@ -180,8 +184,8 @@ def _to_import_job_response(job: ImportJob) -> ImportJobResponse:
     total_entries_extracted = job.matched_entry_count
     word_entry_count = getattr(job, "word_entry_count", 0) or 0
     phrase_entry_count = getattr(job, "phrase_entry_count", 0) or 0
-    if import_source is not None:
-        total_entries_extracted = import_source.matched_entry_count
+    if resolved_import_source is not None:
+        total_entries_extracted = resolved_import_source.matched_entry_count
     return ImportJobResponse(
         id=str(job.id),
         user_id=str(job.user_id),
@@ -205,13 +209,13 @@ def _to_import_job_response(job: ImportJob) -> ImportJobResponse:
         not_found_words=job.not_found_words,
         error_count=job.error_count,
         error_message=job.error_message,
-        source_title=import_source.title if import_source else None,
-        source_author=import_source.author if import_source else None,
-        source_publisher=import_source.publisher if import_source else None,
-        source_language=import_source.language if import_source else None,
-        source_identifier=import_source.source_identifier if import_source else None,
-        source_published_year=import_source.published_year if import_source else None,
-        source_isbn=import_source.isbn if import_source else None,
+        source_title=resolved_import_source.title if resolved_import_source else None,
+        source_author=resolved_import_source.author if resolved_import_source else None,
+        source_publisher=resolved_import_source.publisher if resolved_import_source else None,
+        source_language=resolved_import_source.language if resolved_import_source else None,
+        source_identifier=resolved_import_source.source_identifier if resolved_import_source else None,
+        source_published_year=resolved_import_source.published_year if resolved_import_source else None,
+        source_isbn=resolved_import_source.isbn if resolved_import_source else None,
         from_cache=from_cache,
         processing_duration_seconds=processing_duration_seconds,
         total_entries_extracted=total_entries_extracted,
@@ -466,7 +470,7 @@ async def _create_import_job_from_upload(
     if import_source.status == "completed":
         response.status_code = status.HTTP_200_OK
         saved_path.unlink(missing_ok=True)
-        return _to_import_job_response(job)
+        return _to_import_job_response(job, import_source=import_source)
 
     try:
         process_word_list_import.delay(str(job.id), str(user_id), str(saved_path))
@@ -481,7 +485,7 @@ async def _create_import_job_from_upload(
         raise HTTPException(status_code=503, detail="Import queue is unavailable")
 
     response.status_code = status.HTTP_201_CREATED
-    return _to_import_job_response(job)
+    return _to_import_job_response(job, import_source=import_source)
 
 
 @router.post("/import", response_model=ImportJobResponse, status_code=status.HTTP_201_CREATED)

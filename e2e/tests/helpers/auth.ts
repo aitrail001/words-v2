@@ -45,7 +45,7 @@ const getDbConfig = () => {
     host: process.env.E2E_DB_HOST ?? inferDbHost(),
     port: Number(process.env.E2E_DB_PORT ?? 5432),
     user: process.env.E2E_DB_USER ?? "vocabapp",
-    password: process.env.E2E_DB_PASSWORD ?? "change_this_password_in_production",
+    password: process.env.E2E_DB_PASSWORD ?? "devpassword",
     database: process.env.E2E_DB_NAME ?? "vocabapp_dev",
   };
 };

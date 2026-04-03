@@ -109,13 +109,14 @@ describe("knowledge-map-client", () => {
     const result = await getKnowledgeMapList({
       status: "to_learn",
       q: "bank",
-      sort: "rank_desc",
+      sort: "rank",
+      order: "desc",
       limit: 20,
     });
 
     expect(result).toEqual({ items: [] });
     expect(mockApiClient.get).toHaveBeenCalledWith(
-      "/knowledge-map/list?status=to_learn&q=bank&sort=rank_desc&limit=20",
+      "/knowledge-map/list?status=to_learn&q=bank&sort=rank&order=desc&limit=20",
     );
   });
 
