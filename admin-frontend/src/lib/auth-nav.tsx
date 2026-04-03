@@ -51,11 +51,11 @@ export function AuthNavigation() {
         Enrichment Review
       </Link>
       <Link
-        href="/lexicon/import-db"
+        href="/lexicon/epub-cache"
         className="hover:text-gray-900"
-        data-testid="nav-lexicon-db-link"
+        data-testid="nav-lexicon-epub-cache-link"
       >
-        DB
+        EPUB Cache
       </Link>
       {isAuthenticated ? (
         <button

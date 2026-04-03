@@ -2,9 +2,9 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { LexiconSectionNav } from "@/components/lexicon/section-nav";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
+import { ApiError } from "@/lib/api-client";
 import {
   bulkDeleteAdminImportSources,
   deleteAdminImportSourceCache,
@@ -48,6 +48,13 @@ function isBatchTerminal(batch: AdminImportBatchSummary | null): boolean {
   return Number(batch.active_jobs ?? 0) === 0;
 }
 
+function resolveUiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export default function LexiconEpubCachePage() {
   const [sources, setSources] = useState<AdminImportSourceSummary[]>([]);
   const [sourcesTotal, setSourcesTotal] = useState(0);
@@ -85,8 +92,8 @@ export default function LexiconEpubCachePage() {
       });
       setSources(response.items);
       setSourcesTotal(response.total);
-    } catch {
-      setError("Failed to load cache sources");
+    } catch (error) {
+      setError(resolveUiErrorMessage(error, "Failed to load cache sources"));
     } finally {
       setLoadingSources(false);
     }
@@ -111,8 +118,8 @@ export default function LexiconEpubCachePage() {
       setSelectedSource(source);
       setSelectedSourceJobs(jobs.items);
       setSelectedSourceEntries(entries.items);
-    } catch {
-      setError("Failed to load source details");
+    } catch (error) {
+      setError(resolveUiErrorMessage(error, "Failed to load source details"));
     }
   }, []);
 
@@ -128,8 +135,8 @@ export default function LexiconEpubCachePage() {
         window.localStorage.removeItem(ACTIVE_BATCH_STORAGE_KEY);
         setActiveBatchId(null);
       }
-    } catch {
-      setError("Failed to load active batch");
+    } catch (error) {
+      setError(resolveUiErrorMessage(error, "Failed to load active batch"));
     }
   }, []);
 
@@ -189,8 +196,8 @@ export default function LexiconEpubCachePage() {
       if (selectedSourceId === sourceId) {
         await loadSelectedSource(sourceId);
       }
-    } catch {
-      setError("Failed to delete cache source");
+    } catch (error) {
+      setError(resolveUiErrorMessage(error, "Failed to delete cache source"));
     }
   };
 
@@ -202,8 +209,8 @@ export default function LexiconEpubCachePage() {
       setSelectedIds(new Set());
       setMessage("Selected cache sources deleted");
       await loadSources();
-    } catch {
-      setError("Failed to bulk delete sources");
+    } catch (error) {
+      setError(resolveUiErrorMessage(error, "Failed to bulk delete sources"));
     }
   };
 
@@ -227,8 +234,8 @@ export default function LexiconEpubCachePage() {
       setMessage(`Batch created with ${response.jobs.length} jobs`);
       await loadSources();
       await loadRecentBatches();
-    } catch {
-      setError("Failed to start pre-import batch");
+    } catch (error) {
+      setError(resolveUiErrorMessage(error, "Failed to start pre-import batch"));
     } finally {
       setCreatingBatch(false);
     }
@@ -238,15 +245,6 @@ export default function LexiconEpubCachePage() {
     <div className="space-y-6" data-testid="lexicon-epub-cache-page">
       <header className="space-y-3">
         <h1 className="text-2xl font-semibold text-slate-900">EPUB Cache Management</h1>
-        <LexiconSectionNav
-          testId="lexicon-epub-cache-nav"
-          items={[
-            { label: "Lexicon Ops", href: "/lexicon/ops" },
-            { label: "Compiled Review", href: "/lexicon/compiled-review" },
-            { label: "Import DB", href: "/lexicon/import-db" },
-            { label: "EPUB Cache", href: "/lexicon/epub-cache", active: true },
-          ]}
-        />
       </header>
 
       {error ? <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}

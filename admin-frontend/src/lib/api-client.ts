@@ -12,6 +12,33 @@ const API_BASE_URL =
 const parseJsonBody = async (response: Response): Promise<any> =>
   response.json().catch(() => null);
 
+const normalizeErrorDetail = (detail: unknown, status: number): string => {
+  if (typeof detail === "string" && detail.trim().length > 0) {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item && typeof (item as { msg?: unknown }).msg === "string") {
+          return (item as { msg: string }).msg;
+        }
+        return null;
+      })
+      .filter((value): value is string => Boolean(value && value.trim().length > 0));
+    if (messages.length > 0) {
+      return messages.join("; ");
+    }
+  }
+  if (detail && typeof detail === "object" && "message" in detail) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+  }
+  return `Request failed: ${status}`;
+};
+
 class ApiClient {
   private baseUrl: string;
   private accessToken: string | null = null;
@@ -133,7 +160,7 @@ class ApiClient {
       const body = await parseJsonBody(response);
       throw new ApiError(
         response.status,
-        body?.detail ?? `Request failed: ${response.status}`,
+        normalizeErrorDetail(body?.detail, response.status),
       );
     }
 
