@@ -23,7 +23,12 @@ from app.api.word_lists import (
 from app.core.database import get_db
 from app.models.import_job import ImportJob
 from app.models.user import User
-from app.services.source_imports import EntryRef, create_word_list_from_entries, fetch_review_entries
+from app.services.source_imports import (
+    EntryRef,
+    ImportCacheDeletedError,
+    create_word_list_from_entries,
+    fetch_review_entries,
+)
 
 router = APIRouter()
 
@@ -121,6 +126,16 @@ async def list_import_job_entries(
     job = await _get_import_job_for_user(db, job_id=job_id, user_id=current_user.id)
     if job.import_source_id is None:
         raise HTTPException(status_code=409, detail="Import source is not ready")
+    await _hydrate_import_jobs_with_source_details(db, [job])
+    import_source = getattr(job, "import_source", None)
+    if import_source is not None and import_source.deleted_at is not None:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "IMPORT_CACHE_DELETED",
+                "message": "This cached import is no longer available. Re-upload the EPUB to regenerate import cache.",
+            },
+        )
     total, items = await fetch_review_entries(
         db,
         import_source_id=job.import_source_id,
@@ -157,7 +172,15 @@ async def create_word_list_from_import_job(
             ],
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 400
+        detail: str | dict[str, str] = str(exc)
+        if isinstance(exc, ImportCacheDeletedError):
+            status_code = 410
+            detail = {
+                "code": "IMPORT_CACHE_DELETED",
+                "message": str(exc),
+            }
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     return _to_word_list_response(word_list)
 
 

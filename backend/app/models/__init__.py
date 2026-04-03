@@ -1,6 +1,7 @@
 from app.models.book import Book
 from app.models.entry_review import EntryReviewEvent, EntryReviewState
 from app.models.epub_import import EpubImport
+from app.models.import_batch import ImportBatch
 from app.models.import_job import ImportJob
 from app.models.import_source import ImportSource
 from app.models.import_source_entry import ImportSourceEntry
@@ -56,6 +57,7 @@ __all__ = [
     "TranslationExample",
     "EpubImport",
     "Book",
+    "ImportBatch",
     "WordList",
     "WordListItem",
     "ImportJob",

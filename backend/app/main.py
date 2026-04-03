@@ -11,6 +11,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.api.auth import router as auth_router
+from app.api.admin_import_batches import router as admin_import_batches_router
+from app.api.admin_import_sources import router as admin_import_sources_router
 from app.api.health import router as health_router
 from app.api.import_jobs import router as import_jobs_router
 from app.api.lexicon_compiled_reviews import router as lexicon_compiled_reviews_router
@@ -110,6 +112,8 @@ app.include_router(imports_router, prefix="/api/imports", tags=["imports"])
 app.include_router(word_lists_router, prefix="/api/word-lists", tags=["word-lists"])
 app.include_router(user_preferences_router, prefix="/api/user-preferences", tags=["user-preferences"])
 app.include_router(import_jobs_router, prefix="/api/import-jobs", tags=["import-jobs"])
+app.include_router(admin_import_sources_router, prefix="/api/admin/import-sources", tags=["admin-import-sources"])
+app.include_router(admin_import_batches_router, prefix="/api/admin/import-batches", tags=["admin-import-batches"])
 app.include_router(lexicon_compiled_reviews_router, prefix="/api/lexicon-compiled-reviews", tags=["lexicon-compiled-reviews"])
 app.include_router(lexicon_jsonl_reviews_router, prefix="/api/lexicon-jsonl-reviews", tags=["lexicon-jsonl-reviews"])
 app.include_router(lexicon_ops_router, prefix="/api/lexicon-ops", tags=["lexicon-ops"])

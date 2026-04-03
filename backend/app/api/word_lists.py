@@ -1,7 +1,5 @@
-import hashlib
 import uuid
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field
@@ -10,8 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
-from app.core.logging import get_logger
-from app.core.uploads import resolve_upload_dir
 from app.models.import_job import ImportJob
 from app.models.import_source import ImportSource
 from app.models.import_source_entry import ImportSourceEntry
@@ -21,6 +17,7 @@ from app.models.translation import Translation
 from app.models.user import User
 from app.models.word_list import WordList
 from app.models.word_list_item import WordListItem
+from app.services.epub_import_jobs import enqueue_epub_import_upload
 from app.services.knowledge_map import (
     build_word_translation_map,
     get_preferences,
@@ -30,19 +27,11 @@ from app.services.knowledge_map import (
 from app.services.source_imports import (
     ENTRY_TYPE_PHRASE,
     ENTRY_TYPE_WORD,
-    SOURCE_TYPE_EPUB,
-    create_import_job,
     fetch_import_matcher,
-    get_or_create_import_source,
     hydrate_word_list_items,
     parse_bulk_entry_text,
 )
-from app.tasks.epub_processing import process_word_list_import
-
-logger = get_logger(__name__)
 router = APIRouter()
-UPLOAD_DIR = resolve_upload_dir()
-MAX_ACTIVE_IMPORTS_PER_USER = 3
 
 
 class ImportJobResponse(BaseModel):
@@ -75,6 +64,11 @@ class ImportJobResponse(BaseModel):
     source_identifier: str | None
     source_published_year: int | None
     source_isbn: str | None
+    cache_available: bool
+    cache_deleted: bool
+    cache_deleted_at: datetime | None
+    cache_deleted_by_user_id: str | None
+    cache_deleted_message: str | None
     from_cache: bool
     processing_duration_seconds: float | None
     total_entries_extracted: int
@@ -174,7 +168,14 @@ def _to_import_job_response(
     import_source: ImportSource | None = None,
 ) -> ImportJobResponse:
     resolved_import_source = import_source if import_source is not None else getattr(job, "import_source", None)
-    from_cache = bool(job.status == "completed" and job.started_at is None and resolved_import_source is not None)
+    cache_deleted = bool(resolved_import_source is not None and resolved_import_source.deleted_at is not None)
+    cache_available = bool(resolved_import_source is not None and resolved_import_source.deleted_at is None)
+    from_cache = bool(
+        job.status == "completed"
+        and job.started_at is None
+        and resolved_import_source is not None
+        and resolved_import_source.deleted_at is None
+    )
     processing_duration_seconds = None
     if job.started_at is not None and job.completed_at is not None:
         processing_duration_seconds = max(
@@ -209,13 +210,38 @@ def _to_import_job_response(
         not_found_words=job.not_found_words,
         error_count=job.error_count,
         error_message=job.error_message,
-        source_title=resolved_import_source.title if resolved_import_source else None,
-        source_author=resolved_import_source.author if resolved_import_source else None,
+        source_title=(
+            resolved_import_source.title
+            if resolved_import_source and resolved_import_source.title
+            else job.source_title_snapshot
+        ),
+        source_author=(
+            resolved_import_source.author
+            if resolved_import_source and resolved_import_source.author
+            else job.source_author_snapshot
+        ),
         source_publisher=resolved_import_source.publisher if resolved_import_source else None,
         source_language=resolved_import_source.language if resolved_import_source else None,
         source_identifier=resolved_import_source.source_identifier if resolved_import_source else None,
         source_published_year=resolved_import_source.published_year if resolved_import_source else None,
-        source_isbn=resolved_import_source.isbn if resolved_import_source else None,
+        source_isbn=(
+            resolved_import_source.isbn
+            if resolved_import_source and resolved_import_source.isbn
+            else job.source_isbn_snapshot
+        ),
+        cache_available=cache_available,
+        cache_deleted=cache_deleted,
+        cache_deleted_at=resolved_import_source.deleted_at if resolved_import_source else None,
+        cache_deleted_by_user_id=(
+            str(resolved_import_source.deleted_by_user_id)
+            if resolved_import_source and resolved_import_source.deleted_by_user_id
+            else None
+        ),
+        cache_deleted_message=(
+            "This cached import is no longer available. Re-upload the EPUB to regenerate import cache."
+            if cache_deleted
+            else None
+        ),
         from_cache=from_cache,
         processing_duration_seconds=processing_duration_seconds,
         total_entries_extracted=total_entries_extracted,
@@ -416,74 +442,18 @@ async def _create_import_job_from_upload(
     list_description: str | None,
     response: Response,
 ) -> ImportJobResponse:
-    user_id = user.id
-    filename = (file.filename or "").strip()
-    if not filename.lower().endswith(".epub"):
-        raise HTTPException(status_code=400, detail="Only .epub files are supported")
-
-    active_import_count = int(
-        (
-            await db.execute(
-                select(func.count())
-                .select_from(ImportJob)
-                .where(
-                    ImportJob.user_id == user_id,
-                    ImportJob.status.in_(("queued", "processing")),
-                )
-            )
-        ).scalar_one()
-    )
-    if active_import_count >= MAX_ACTIVE_IMPORTS_PER_USER:
-        raise HTTPException(status_code=429, detail="Too many active imports")
-
-    file_id = uuid.uuid4()
-    safe_name = Path(filename).name
-    saved_path = UPLOAD_DIR / f"{file_id}-{safe_name}"
-
-    hasher = hashlib.sha256()
-    try:
-        with saved_path.open("wb") as out:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                hasher.update(chunk)
-                out.write(chunk)
-    finally:
-        await file.close()
-
-    source_hash = hasher.hexdigest()
-    import_source = await get_or_create_import_source(
-        db,
-        source_type=SOURCE_TYPE_EPUB,
-        source_hash_sha256=source_hash,
-    )
-    job = await create_import_job(
-        db,
-        user_id=user_id,
-        import_source=import_source,
-        source_filename=safe_name,
-        list_name=(list_name or Path(safe_name).stem).strip() or "Imported list",
+    job, import_source, completed_from_cache = await enqueue_epub_import_upload(
+        db=db,
+        actor_user=user,
+        file=file,
+        list_name=list_name,
         list_description=list_description,
+        job_origin="user_import",
+        enforce_active_import_limit=True,
     )
-
-    if import_source.status == "completed":
+    if completed_from_cache:
         response.status_code = status.HTTP_200_OK
-        saved_path.unlink(missing_ok=True)
         return _to_import_job_response(job, import_source=import_source)
-
-    try:
-        process_word_list_import.delay(str(job.id), str(user_id), str(saved_path))
-    except Exception as exc:
-        logger.error("Failed to enqueue source import task", import_job_id=str(job.id), error=str(exc))
-        saved_path.unlink(missing_ok=True)
-        job.status = "failed"
-        job.error_count += 1
-        job.error_message = "Failed to queue import task"
-        job.completed_at = datetime.now(timezone.utc)
-        await db.commit()
-        raise HTTPException(status_code=503, detail="Import queue is unavailable")
-
     response.status_code = status.HTTP_201_CREATED
     return _to_import_job_response(job, import_source=import_source)
 

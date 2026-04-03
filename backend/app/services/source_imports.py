@@ -60,6 +60,10 @@ class EntryRef:
     entry_id: uuid.UUID
 
 
+class ImportCacheDeletedError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class MatchedImportEntry:
     entry_type: str
@@ -1427,6 +1431,16 @@ async def get_or_create_import_source(
     )
     import_source = existing.scalar_one_or_none()
     if import_source is not None:
+        if import_source.deleted_at is not None:
+            import_source.deleted_at = None
+            import_source.deleted_by_user_id = None
+            import_source.deletion_reason = None
+            import_source.status = "pending"
+            import_source.error_message = None
+            import_source.processed_at = None
+            import_source.matched_entry_count = 0
+            await db.commit()
+            await db.refresh(import_source)
         return import_source
 
     import_source = ImportSource(
@@ -1468,6 +1482,16 @@ def get_or_create_import_source_sync(
         )
     ).scalar_one_or_none()
     if import_source is not None:
+        if import_source.deleted_at is not None:
+            import_source.deleted_at = None
+            import_source.deleted_by_user_id = None
+            import_source.deletion_reason = None
+            import_source.status = "pending"
+            import_source.error_message = None
+            import_source.processed_at = None
+            import_source.matched_entry_count = 0
+            db.commit()
+            db.refresh(import_source)
         return import_source
 
     import_source = ImportSource(
@@ -1501,22 +1525,30 @@ async def create_import_job(
     source_filename: str,
     list_name: str,
     list_description: str | None,
+    job_origin: str = "user_import",
+    import_batch_id: uuid.UUID | None = None,
 ) -> ImportJob:
-    completed_at = datetime.now(timezone.utc) if import_source.status == "completed" else None
+    cache_available = import_source.status == "completed" and import_source.deleted_at is None
+    completed_at = datetime.now(timezone.utc) if cache_available else None
     job = ImportJob(
         user_id=user_id,
         import_source_id=import_source.id,
+        import_batch_id=import_batch_id,
+        job_origin=job_origin,
         source_filename=source_filename,
         source_hash=import_source.source_hash_sha256,
         list_name=list_name,
         list_description=list_description,
-        status="completed" if import_source.status == "completed" else "queued",
+        source_title_snapshot=import_source.title,
+        source_author_snapshot=import_source.author,
+        source_isbn_snapshot=import_source.isbn,
+        status="completed" if cache_available else "queued",
         total_items=import_source.matched_entry_count,
-        processed_items=import_source.matched_entry_count if import_source.status == "completed" else 0,
-        progress_stage="completed" if import_source.status == "completed" else "queued",
-        progress_total=import_source.matched_entry_count if import_source.status == "completed" else 0,
-        progress_completed=import_source.matched_entry_count if import_source.status == "completed" else 0,
-        progress_current_label="Completed from cached import" if import_source.status == "completed" else "Queued",
+        processed_items=import_source.matched_entry_count if cache_available else 0,
+        progress_stage="completed" if cache_available else "queued",
+        progress_total=import_source.matched_entry_count if cache_available else 0,
+        progress_completed=import_source.matched_entry_count if cache_available else 0,
+        progress_current_label="Completed from cached import" if cache_available else "Queued",
         matched_entry_count=import_source.matched_entry_count,
         completed_at=completed_at,
     )
@@ -1644,6 +1676,10 @@ async def create_word_list_from_entries(
     import_source = (
         await db.execute(select(ImportSource).where(ImportSource.id == job.import_source_id))
     ).scalar_one()
+    if import_source.deleted_at is not None:
+        raise ImportCacheDeletedError(
+            "This cached import is no longer available. Re-upload the EPUB to regenerate import cache."
+        )
 
     wanted = {(entry.entry_type, entry.entry_id) for entry in selected_entries}
     source_entries = await db.execute(
