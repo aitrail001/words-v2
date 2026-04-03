@@ -12,6 +12,8 @@ from app.models.import_job import ImportJob
 from app.models.import_source import ImportSource
 from app.services.source_imports import (
     EpubTextExtractor,
+    ExtractionProgress,
+    MatchProgress,
     fetch_import_matcher_sync,
     get_or_create_import_source_sync,
     sync_job_with_source,
@@ -63,6 +65,32 @@ def _mark_linked_jobs(db: Session, import_source: ImportSource) -> None:
             job.completed_at = datetime.now(timezone.utc)
 
 
+def _set_job_progress(
+    db: Session,
+    job: ImportJob,
+    *,
+    status: str | None = None,
+    stage: str | None = None,
+    total: int | None = None,
+    completed: int | None = None,
+    label: str | None = None,
+    matched_entry_count: int | None = None,
+) -> None:
+    if status is not None:
+        job.status = status
+    if stage is not None:
+        job.progress_stage = stage
+    if total is not None:
+        job.progress_total = max(0, total)
+    if completed is not None:
+        job.progress_completed = max(0, completed)
+    if label is not None:
+        job.progress_current_label = label
+    if matched_entry_count is not None:
+        job.matched_entry_count = max(0, matched_entry_count)
+    db.commit()
+
+
 @celery_app.task(bind=True, name="process_source_import", queue="imports")
 def process_source_import(self, job_id: str, user_id: str, file_path: str) -> dict:
     job_uuid = uuid.UUID(job_id)
@@ -81,9 +109,17 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
             source_hash_sha256=job.source_hash,
         )
         job.import_source_id = import_source.id
-        job.status = "processing"
         job.started_at = datetime.now(timezone.utc)
-        db.commit()
+        _set_job_progress(
+            db,
+            job,
+            status="processing",
+            stage="queued",
+            total=0,
+            completed=0,
+            label="Queued for import",
+            matched_entry_count=0,
+        )
 
         try:
             _acquire_import_source_lock(db, import_source.id)
@@ -113,12 +149,58 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
             db.commit()
 
             extractor = EpubTextExtractor()
-            metadata, chunks = extractor.extract_metadata_and_chunks(file_path)
+            _set_job_progress(
+                db,
+                job,
+                stage="reading_metadata",
+                label="Reading EPUB metadata",
+                total=0,
+                completed=0,
+            )
+
+            def extraction_progress(progress: ExtractionProgress) -> None:
+                _set_job_progress(
+                    db,
+                    job,
+                    stage="extracting_text",
+                    total=progress.total,
+                    completed=progress.completed,
+                    label=progress.label,
+                )
+
+            metadata, chunks = extractor.extract_metadata_and_chunks(
+                file_path,
+                progress_callback=extraction_progress,
+            )
             matcher, _, learner_catalog = fetch_import_matcher_sync(db)
-            matched_entries = matcher.match_chunks(chunks)
+            _set_job_progress(
+                db,
+                job,
+                stage="matching_entries",
+                total=len(chunks),
+                completed=0,
+                label=f"Matching entries 0/{len(chunks)}" if chunks else "Matching entries",
+            )
+
+            def matching_progress(progress: MatchProgress) -> None:
+                _set_job_progress(
+                    db,
+                    job,
+                    stage="matching_entries",
+                    total=progress.total,
+                    completed=progress.completed,
+                    label=progress.label,
+                    matched_entry_count=progress.matched_entries,
+                )
+
+            matched_entries = matcher.match_chunks_with_progress(
+                chunks,
+                progress_callback=matching_progress,
+            )
 
             import_source.title = metadata.title
             import_source.author = metadata.author
+            import_source.publisher = metadata.publisher
             import_source.language = metadata.language
             import_source.source_identifier = metadata.source_identifier
             import_source.published_year = metadata.published_year
@@ -128,6 +210,15 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
             import_source.processed_at = datetime.now(timezone.utc)
             import_source.error_message = None
 
+            _set_job_progress(
+                db,
+                job,
+                stage="writing_results",
+                total=len(matched_entries),
+                completed=0,
+                label="Writing matched entries",
+                matched_entry_count=len(matched_entries),
+            )
             upsert_import_source_entries_sync(
                 db,
                 import_source_id=import_source.id,
@@ -135,6 +226,16 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
                 learner_catalog=learner_catalog,
             )
             _mark_linked_jobs(db, import_source)
+            _set_job_progress(
+                db,
+                job,
+                status="completed",
+                stage="completed",
+                total=len(matched_entries),
+                completed=len(matched_entries),
+                label="Import completed",
+                matched_entry_count=len(matched_entries),
+            )
             db.commit()
             return {"status": "completed", "matched_entry_count": import_source.matched_entry_count}
         except Exception as exc:
@@ -143,6 +244,13 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
             import_source.error_message = str(exc)
             import_source.processed_at = datetime.now(timezone.utc)
             _mark_linked_jobs(db, import_source)
+            _set_job_progress(
+                db,
+                job,
+                status="failed",
+                stage="failed",
+                label="Import failed",
+            )
             db.commit()
             return {"status": "failed", "error": str(exc)}
         finally:

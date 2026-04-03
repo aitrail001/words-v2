@@ -11,6 +11,7 @@ import {
   deleteWordList,
   deleteWordListItem,
   getImportEntries,
+  getImportElapsedSeconds,
   getImportJob,
   getImportProgressPercent,
   getWordList,
@@ -181,7 +182,27 @@ describe("imports-client", () => {
   it("calculates progress percentage safely", () => {
     expect(getImportProgressPercent({ total_items: 0, processed_items: 0 } as any)).toBe(0);
     expect(getImportProgressPercent({ total_items: 10, processed_items: 4 } as any)).toBe(40);
+    expect(
+      getImportProgressPercent({
+        total_items: 10,
+        processed_items: 4,
+        progress_total: 8,
+        progress_completed: 2,
+      } as any),
+    ).toBe(25);
     expect(getImportProgressPercent({ total_items: 10, processed_items: 19 } as any)).toBe(100);
+  });
+
+  it("derives elapsed seconds for active imports", () => {
+    const started = new Date(Date.now() - 5000).toISOString();
+    const seconds = getImportElapsedSeconds({
+      processing_duration_seconds: null,
+      started_at: started,
+      completed_at: null,
+      status: "processing",
+    } as any);
+    expect(seconds).not.toBeNull();
+    expect(seconds).toBeGreaterThanOrEqual(4);
   });
 
   it("detects terminal statuses", () => {

@@ -217,6 +217,8 @@ class TestCreateImport:
         assert data["status"] == "completed"
         assert data["import_source_id"] == str(source_id)
         assert data["completed_at"] is not None
+        assert data["progress_stage"] == "completed"
+        assert data["progress_current_label"] == "Completed from cached import"
         mock_delay.assert_not_called()
 
     @pytest.mark.asyncio
@@ -337,6 +339,7 @@ class TestListImports:
                 source_hash_sha256="a" * 64,
                 title="Book Title",
                 author="Alice",
+                publisher="Publisher House",
                 published_year=2024,
                 isbn="9781234567890",
                 pipeline_version="v1",
@@ -358,4 +361,5 @@ class TestListImports:
         data = response.json()
         assert len(data) == 1
         assert data[0]["source_title"] == "Book Title"
+        assert data[0]["source_publisher"] == "Publisher House"
         assert data[0]["source_hash"] == "a" * 64

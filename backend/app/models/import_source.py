@@ -25,6 +25,7 @@ class ImportSource(Base):
     lexicon_version: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     author: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    publisher: Mapped[str | None] = mapped_column(String(500), nullable=True)
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     source_identifier: Mapped[str | None] = mapped_column(String(255), nullable=True)
     published_year: Mapped[int | None] = mapped_column(Integer, nullable=True)

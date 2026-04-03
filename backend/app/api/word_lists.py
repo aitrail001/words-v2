@@ -57,6 +57,10 @@ class ImportJobResponse(BaseModel):
     list_description: str | None
     total_items: int
     processed_items: int
+    progress_stage: str | None
+    progress_total: int
+    progress_completed: int
+    progress_current_label: str | None
     matched_entry_count: int
     created_count: int
     skipped_count: int
@@ -66,6 +70,7 @@ class ImportJobResponse(BaseModel):
     error_message: str | None
     source_title: str | None
     source_author: str | None
+    source_publisher: str | None
     source_language: str | None
     source_identifier: str | None
     source_published_year: int | None
@@ -189,6 +194,10 @@ def _to_import_job_response(job: ImportJob) -> ImportJobResponse:
         list_description=job.list_description,
         total_items=job.total_items,
         processed_items=job.processed_items,
+        progress_stage=job.progress_stage,
+        progress_total=job.progress_total,
+        progress_completed=job.progress_completed,
+        progress_current_label=job.progress_current_label,
         matched_entry_count=job.matched_entry_count,
         created_count=job.created_count,
         skipped_count=job.skipped_count,
@@ -198,6 +207,7 @@ def _to_import_job_response(job: ImportJob) -> ImportJobResponse:
         error_message=job.error_message,
         source_title=import_source.title if import_source else None,
         source_author=import_source.author if import_source else None,
+        source_publisher=import_source.publisher if import_source else None,
         source_language=import_source.language if import_source else None,
         source_identifier=import_source.source_identifier if import_source else None,
         source_published_year=import_source.published_year if import_source else None,

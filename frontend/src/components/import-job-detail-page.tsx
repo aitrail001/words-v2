@@ -6,8 +6,10 @@ import { ApiError } from "@/lib/api-client";
 import { getImportDisplayTitle } from "@/lib/import-display";
 import {
   createListFromImport,
+  getImportElapsedSeconds,
   getImportEntries,
   getImportJob,
+  getImportProgressPercent,
   isImportJobTerminal,
   type ImportJob,
   type ReviewEntry,
@@ -34,8 +36,21 @@ function formatImportDuration(seconds: number | null): string {
   return `${minutes}m ${remainingSeconds}s`;
 }
 
+function formatProgressSummary(job: ImportJob): string {
+  const total = job.progress_total > 0 ? job.progress_total : job.total_items;
+  const completed = job.progress_total > 0 ? job.progress_completed : job.processed_items;
+  if (total > 0) {
+    return `${completed}/${total}`;
+  }
+  return "Pending";
+}
+
 function getAuthorLabel(job: ImportJob): string {
   return job.source_author?.trim() || "Unknown";
+}
+
+function getPublisherLabel(job: ImportJob): string {
+  return job.source_publisher?.trim() || "Unknown";
 }
 
 function getPublishedLabel(job: ImportJob): string {
@@ -51,7 +66,7 @@ function compactSummaryPairs(job: ImportJob): Array<[string, string]> {
     ["File", job.source_filename],
     ["Status", job.status],
     ["Source", job.from_cache ? "Cached" : "Fresh import"],
-    ["Duration", formatImportDuration(job.processing_duration_seconds)],
+    ["Duration", formatImportDuration(getImportElapsedSeconds(job))],
     ["Extracted", String(job.total_entries_extracted)],
     ["Words", String(job.word_entry_count)],
     ["Phrases", String(job.phrase_entry_count)],
@@ -248,6 +263,8 @@ export function ImportJobDetailPage({ jobId }: { jobId: string }) {
             <p className="text-xs text-gray-600">
               <span className="font-semibold">Author:</span> {getAuthorLabel(job)}
               {" · "}
+              <span className="font-semibold">Publisher:</span> {getPublisherLabel(job)}
+              {" · "}
               <span className="font-semibold">Published:</span> {getPublishedLabel(job)}
               {" · "}
               <span className="font-semibold">ISBN:</span> {getIsbnLabel(job)}
@@ -259,6 +276,23 @@ export function ImportJobDetailPage({ jobId }: { jobId: string }) {
                 </p>
               ))}
             </div>
+            {!isImportJobTerminal(job.status) ? (
+              <div className="space-y-2 pt-2">
+                <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
+                  <div
+                    data-testid="import-job-progress-bar"
+                    className="h-full bg-blue-600"
+                    style={{ width: `${getImportProgressPercent(job)}%` }}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                  <p data-testid="import-job-progress-label">
+                    {job.progress_current_label?.trim() || "Queued"}
+                  </p>
+                  <p data-testid="import-job-progress-counts">{formatProgressSummary(job)}</p>
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
       ) : null}

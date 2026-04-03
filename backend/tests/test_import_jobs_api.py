@@ -117,6 +117,10 @@ class TestImportJobStatusEndpoints:
             source_hash="a" * 64,
             list_name="Active Import",
             status="processing",
+            progress_stage="extracting_text",
+            progress_total=12,
+            progress_completed=4,
+            progress_current_label="Extracting text 4/12",
             created_at=datetime.now(timezone.utc),
         )
 
@@ -139,6 +143,10 @@ class TestImportJobStatusEndpoints:
 
         assert response.status_code == 200
         assert response.json()[0]["status"] == "processing"
+        assert response.json()[0]["progress_stage"] == "extracting_text"
+        assert response.json()[0]["progress_total"] == 12
+        assert response.json()[0]["progress_completed"] == 4
+        assert response.json()[0]["progress_current_label"] == "Extracting text 4/12"
 
     @pytest.mark.asyncio
     async def test_list_import_jobs_filters_history_jobs(self, client, mock_db):

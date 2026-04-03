@@ -7,6 +7,7 @@ import {
   bulkDeleteImportJobs,
   createWordListImport,
   deleteImportJob,
+  getImportElapsedSeconds,
   getImportJob,
   getImportProgressPercent,
   listImportJobs,
@@ -32,8 +33,21 @@ function formatImportDuration(seconds: number | null): string {
   return `${minutes}m ${remainingSeconds}s`;
 }
 
+function formatProgressSummary(job: ImportJob): string {
+  const total = job.progress_total > 0 ? job.progress_total : job.total_items;
+  const completed = job.progress_total > 0 ? job.progress_completed : job.processed_items;
+  if (total > 0) {
+    return `${completed}/${total}`;
+  }
+  return "Pending";
+}
+
 function getAuthorLabel(job: ImportJob): string {
   return job.source_author?.trim() || "Unknown";
+}
+
+function getPublisherLabel(job: ImportJob): string {
+  return job.source_publisher?.trim() || "Unknown";
 }
 
 function getPublishedLabel(job: ImportJob): string {
@@ -49,7 +63,7 @@ function compactMetricPairs(job: ImportJob): Array<[string, string]> {
     ["File", job.source_filename],
     ["Status", job.status],
     ["Source", job.from_cache ? "Cached" : "Fresh import"],
-    ["Duration", formatImportDuration(job.processing_duration_seconds)],
+    ["Duration", formatImportDuration(getImportElapsedSeconds(job))],
     ["Extracted", String(job.total_entries_extracted)],
     ["Words", String(job.word_entry_count)],
     ["Phrases", String(job.phrase_entry_count)],
@@ -247,6 +261,8 @@ export default function ImportsPage() {
                 <p className="text-xs text-gray-600">
                   <span className="font-semibold">Author:</span> {getAuthorLabel(job)}
                   {" · "}
+                  <span className="font-semibold">Publisher:</span> {getPublisherLabel(job)}
+                  {" · "}
                   <span className="font-semibold">Published:</span> {getPublishedLabel(job)}
                   {" · "}
                   <span className="font-semibold">ISBN:</span> {getIsbnLabel(job)}
@@ -288,9 +304,12 @@ export default function ImportsPage() {
                   style={{ width: `${getImportProgressPercent(job)}%` }}
                 />
               </div>
-              <p className="mt-1 text-xs text-gray-500">
-                {job.processed_items}/{job.total_items || 0} processed
-              </p>
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                <p data-testid={`imports-progress-label-${job.id}`}>
+                  {job.progress_current_label?.trim() || "Queued"}
+                </p>
+                <p data-testid={`imports-progress-counts-${job.id}`}>{formatProgressSummary(job)}</p>
+              </div>
             </div>
           </li>
         ))}

@@ -20,9 +20,12 @@ jest.mock("@/lib/imports-client", () => ({
   deleteImportJob: jest.fn(),
   listImportJobs: jest.fn(),
   getImportJob: jest.fn(),
+  getImportElapsedSeconds: jest.fn((job) => job.processing_duration_seconds ?? null),
   getImportProgressPercent: jest.fn((job) => {
-    if (!job.total_items) return 0;
-    return Math.round((job.processed_items / job.total_items) * 100);
+    const total = job.progress_total || job.total_items;
+    const completed = job.progress_total ? job.progress_completed : job.processed_items;
+    if (!total) return 0;
+    return Math.round((completed / total) * 100);
   }),
   isImportJobTerminal: jest.fn((status: string) => status === "completed" || status === "failed"),
 }));
@@ -47,10 +50,15 @@ describe("ImportsPage", () => {
             source_filename: "book.epub",
             source_title: "Book Title",
             source_author: "Alice, Bob",
+            source_publisher: "Publisher House",
             source_published_year: 2024,
             source_isbn: "9781234567890",
             total_items: 10,
             processed_items: 10,
+            progress_stage: "completed",
+            progress_total: 10,
+            progress_completed: 10,
+            progress_current_label: "Completed from cached import",
             word_entry_count: 8,
             phrase_entry_count: 2,
             matched_entry_count: 10,
@@ -81,6 +89,10 @@ describe("ImportsPage", () => {
       status: "completed",
       list_name: "My Import",
       source_filename: "book.epub",
+      progress_stage: "completed",
+      progress_total: 2,
+      progress_completed: 2,
+      progress_current_label: "Import completed",
       total_items: 2,
       processed_items: 2,
       created_at: "2026-04-02T00:00:00.000Z",
@@ -110,8 +122,10 @@ describe("ImportsPage", () => {
     await user.click(await screen.findByTestId("imports-history-toggle"));
     expect(await screen.findByTestId("imports-history-jobs-list")).toHaveTextContent("Title:");
     expect(screen.getByTestId("imports-history-jobs-list")).toHaveTextContent("Author:");
+    expect(screen.getByTestId("imports-history-jobs-list")).toHaveTextContent("Publisher:");
     expect(screen.getByTestId("imports-history-jobs-list")).toHaveTextContent("Published:");
     expect(screen.getByTestId("imports-history-jobs-list")).toHaveTextContent("ISBN:");
+    expect(screen.getByTestId("imports-progress-label-history-1")).toHaveTextContent("Completed from cached import");
 
     await user.click(screen.getByTestId("imports-delete-history-1"));
     await waitFor(() => expect(mockDeleteImportJob).toHaveBeenCalledWith("history-1"));
@@ -128,10 +142,15 @@ describe("ImportsPage", () => {
             source_filename: "Pygmalion by George Bernard Shaw ( PDFDrive.com ).epub",
             source_title: "Pygmalion by George Bernard Shaw ( PDFDrive.com ).epub",
             source_author: "George Bernard Shaw",
+            source_publisher: null,
             source_published_year: 1913,
             source_isbn: null,
             total_items: 10,
             processed_items: 10,
+            progress_stage: "completed",
+            progress_total: 10,
+            progress_completed: 10,
+            progress_current_label: "Completed from cached import",
             word_entry_count: 8,
             phrase_entry_count: 2,
             matched_entry_count: 10,
@@ -165,10 +184,15 @@ describe("ImportsPage", () => {
             source_filename: "book.epub",
             source_title: "Book Title",
             source_author: "Alice, Bob",
+            source_publisher: "Publisher House",
             source_published_year: 2024,
             source_isbn: "9781234567890",
             total_items: 10,
             processed_items: 10,
+            progress_stage: "completed",
+            progress_total: 10,
+            progress_completed: 10,
+            progress_current_label: "Completed from cached import",
             word_entry_count: 8,
             phrase_entry_count: 2,
             matched_entry_count: 10,
@@ -184,10 +208,15 @@ describe("ImportsPage", () => {
             source_filename: "second.epub",
             source_title: "Second Title",
             source_author: "Carol",
+            source_publisher: "Second Press",
             source_published_year: 2021,
             source_isbn: "9781111111111",
             total_items: 5,
             processed_items: 5,
+            progress_stage: "failed",
+            progress_total: 5,
+            progress_completed: 5,
+            progress_current_label: "Import failed",
             word_entry_count: 5,
             phrase_entry_count: 0,
             matched_entry_count: 5,

@@ -15,6 +15,10 @@ export type ImportJob = {
   list_description: string | null;
   total_items: number;
   processed_items: number;
+  progress_stage: string | null;
+  progress_total: number;
+  progress_completed: number;
+  progress_current_label: string | null;
   matched_entry_count: number;
   created_count: number;
   skipped_count: number;
@@ -24,6 +28,7 @@ export type ImportJob = {
   error_message: string | null;
   source_title: string | null;
   source_author: string | null;
+  source_publisher: string | null;
   source_language: string | null;
   source_identifier: string | null;
   source_published_year: number | null;
@@ -222,12 +227,30 @@ export const isImportJobTerminal = (status: ImportJobStatus): boolean =>
   status === "completed" || status === "failed";
 
 export const getImportProgressPercent = (
-  job: Pick<ImportJob, "total_items" | "processed_items">,
+  job: Pick<ImportJob, "total_items" | "processed_items" | "progress_total" | "progress_completed">,
 ): number => {
-  if (job.total_items <= 0) {
+  const total = job.progress_total > 0 ? job.progress_total : job.total_items;
+  const completed = job.progress_total > 0 ? job.progress_completed : job.processed_items;
+  if (total <= 0) {
     return 0;
   }
 
-  const rawPercent = Math.round((job.processed_items / job.total_items) * 100);
+  const rawPercent = Math.round((completed / total) * 100);
   return Math.max(0, Math.min(100, rawPercent));
+};
+
+export const getImportElapsedSeconds = (
+  job: Pick<ImportJob, "processing_duration_seconds" | "started_at" | "completed_at" | "status">,
+): number | null => {
+  if (job.processing_duration_seconds != null) {
+    return job.processing_duration_seconds;
+  }
+  if (!job.started_at || job.status !== "processing") {
+    return null;
+  }
+  const startedAt = Date.parse(job.started_at);
+  if (Number.isNaN(startedAt)) {
+    return null;
+  }
+  return Math.max(0, (Date.now() - startedAt) / 1000);
 };

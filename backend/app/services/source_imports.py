@@ -3,8 +3,10 @@ import hashlib
 import io
 import re
 import uuid
+import xml.etree.ElementTree as ET
+import zipfile
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,10 +65,54 @@ class MatchedImportEntry:
 class ExtractedSourceMetadata:
     title: str | None
     author: str | None
+    publisher: str | None
     language: str | None
     source_identifier: str | None
     published_year: int | None
     isbn: str | None
+
+
+@dataclass(frozen=True)
+class EpubMetadataEntry:
+    value: str
+    id: str | None
+    attrs: dict[str, str]
+    refinements: dict[str, list[str]]
+
+
+@dataclass(frozen=True)
+class EpubPackageMetadata:
+    titles: list[EpubMetadataEntry]
+    creators: list[EpubMetadataEntry]
+    contributors: list[EpubMetadataEntry]
+    dates: list[EpubMetadataEntry]
+    identifiers: list[EpubMetadataEntry]
+    publishers: list[EpubMetadataEntry]
+    languages: list[EpubMetadataEntry]
+    content_title_candidates: list[str]
+
+
+@dataclass(frozen=True)
+class EpubContentFallbacks:
+    title_candidates: list[str]
+    author_candidates: list[str]
+    publisher_candidates: list[str]
+    isbn_candidates: list[str]
+
+
+@dataclass(frozen=True)
+class ExtractionProgress:
+    completed: int
+    total: int
+    label: str
+
+
+@dataclass(frozen=True)
+class MatchProgress:
+    completed: int
+    total: int
+    matched_entries: int
+    label: str
 
 
 YEAR_RE = re.compile(r"(19|20)\d{2}")
@@ -74,6 +120,50 @@ ISBN_CLEAN_RE = re.compile(r"[^0-9Xx]")
 TITLE_FILE_EXT_RE = re.compile(r"\.(epub|pdf|mobi|azw3)\s*$", re.IGNORECASE)
 TITLE_VENDOR_TAG_RE = re.compile(r"\(\s*pdfdrive(?:\.com)?\s*\)", re.IGNORECASE)
 TITLE_MULTI_SPACE_RE = re.compile(r"\s{2,}")
+BRACKET_DUPLICATE_RE = re.compile(r"\s*\[[^\]]+\]\s*$")
+TITLE_WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’\-:;,!?]+")
+TITLE_BY_AUTHOR_RE = re.compile(r"^(?P<title>.+?)\s+by\s+(?P<author>.+)$", re.IGNORECASE)
+NON_AUTHOR_HINT_RE = re.compile(
+    r"\b(ed\.?|editor|edited by|translator|translated by|foreword|introduction|preface)\b",
+    re.IGNORECASE,
+)
+PUBLISHER_NOISE_RE = re.compile(
+    r"\b(pdfdrive|welib|calibre|ebooks?|chenjin|publisher|media)\b",
+    re.IGNORECASE,
+)
+BAD_TITLE_VALUE_RE = re.compile(r"^(unknown|cover|contents?|chapter(?:\s+\d+)?)$", re.IGNORECASE)
+SITE_NOISE_RE = re.compile(r"(?:https?://|www\.|\.com\b|\.org\b)")
+UNKNOWN_PERSON_RE = re.compile(r"^(unknown|anonymous|n/?a)$", re.IGNORECASE)
+COPYRIGHT_LINE_RE = re.compile(
+    r"(?:©|copyright(?:\s+©)?)(?:\s*\d{4})?(?:\s+by)?\s+(?P<names>[^.]{5,260})",
+    re.IGNORECASE,
+)
+BYLINE_RE = re.compile(r"\bby\s+(?P<names>[A-Z][^.]{3,160})", re.IGNORECASE)
+ISBN_TEXT_RE = re.compile(r"\bISBN(?:-?1[03])?(?::|\s)\s*(?P<value>[0-9Xx\- ]{10,24})")
+PUBLISHER_TEXT_RE = re.compile(
+    r"\b(?P<publisher>[A-Z][A-Za-z&' .-]{2,80}(?:Press|Publishing Group|Publishing|Books|House|Perennial|LLC|Inc\.?|Group))\b"
+)
+IMPRINT_PUBLISHER_RE = re.compile(
+    r"\b(?:AN\s+IMPRINT\s+OF|Published\s+by|Publisher)\s+(?P<publisher>[A-Z][A-Za-z0-9&' .-]{2,120}?)(?=\s+(?:\d{2,}|Copyright|ISBN|All rights|Printed in)\b|$)",
+    re.IGNORECASE,
+)
+NON_PERSON_ENTITY_RE = re.compile(
+    r"\b(isbn|press|publishing|books|house|llc|group|portland|oregon|academy|company|project|guide|rights|reserved|cover|story|fundamentals|chapter|personal|penguin|random)\b",
+    re.IGNORECASE,
+)
+CONTENT_TITLE_BY_AUTHOR_RE = re.compile(
+    r"(?P<title>[A-Z][A-Za-z0-9'’:;,\-!? ]{2,120})\s+By\s+(?P<author>[A-Z][A-Za-z0-9'’.\- ]{2,80})",
+    re.IGNORECASE,
+)
+CONTENT_TITLE_PREFIX_RE = re.compile(r"^(unknown|cover|contents?)\s+", re.IGNORECASE)
+
+CONTAINER_NS = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
+OPF_NS = {
+    "opf": "http://www.idpf.org/2007/opf",
+    "dc": "http://purl.org/dc/elements/1.1/",
+}
+OPF_ROLE_ATTR = "{http://www.idpf.org/2007/opf}role"
+OPF_EVENT_ATTR = "{http://www.idpf.org/2007/opf}event"
 
 
 def sha256_digest_from_bytes(content: bytes) -> str:
@@ -170,6 +260,8 @@ class SourceTextExtractor:
     def extract_metadata_and_chunks(
         self,
         file_path: str | Path,
+        *,
+        progress_callback: Callable[[ExtractionProgress], None] | None = None,
     ) -> tuple[ExtractedSourceMetadata, Iterable[str]]:
         raise NotImplementedError
 
@@ -178,51 +270,506 @@ class EpubTextExtractor(SourceTextExtractor):
     def extract_metadata_and_chunks(
         self,
         file_path: str | Path,
+        *,
+        progress_callback: Callable[[ExtractionProgress], None] | None = None,
     ) -> tuple[ExtractedSourceMetadata, Iterable[str]]:
         book = epub.read_epub(str(file_path))
-        title_entries = book.get_metadata("DC", "title")
-        author_entries = book.get_metadata("DC", "creator")
-        language_entries = book.get_metadata("DC", "language")
-        date_entries = book.get_metadata("DC", "date")
-        identifier_entries = book.get_metadata("DC", "identifier")
+        package_metadata = _read_epub_package_metadata(file_path)
+        content_fallbacks = _collect_content_fallbacks_for_file(file_path)
+        author_values = _select_best_author_names(
+            package_metadata.creators,
+            package_metadata.contributors,
+        )
+        if not author_values:
+            author_values = _select_best_author_names(
+                package_metadata.creators,
+                package_metadata.contributors,
+                content_author_candidates=content_fallbacks.author_candidates,
+            )
+        content_title_candidates = _collect_content_title_candidates_for_file(file_path, author_values)
+        best_identifier = _select_best_identifier(package_metadata.identifiers)
+        best_isbn = _select_best_isbn(package_metadata.identifiers)
+        if best_isbn is None and content_fallbacks.isbn_candidates:
+            best_isbn = content_fallbacks.isbn_candidates[0]
+        if best_identifier is None and best_isbn is not None:
+            best_identifier = best_isbn
 
-        authors = [entry[0].strip() for entry in author_entries if entry and entry[0].strip()]
-        identifiers = [entry[0].strip() for entry in identifier_entries if entry and entry[0].strip()]
-        published_year = _extract_published_year(date_entries)
-        isbn = _extract_isbn(identifiers)
+        publisher = _select_best_publisher(package_metadata.publishers)
+        if publisher is None and content_fallbacks.publisher_candidates:
+            publisher = _select_best_publisher([], content_candidates=content_fallbacks.publisher_candidates)
 
         metadata = ExtractedSourceMetadata(
-            title=_normalize_source_title(title_entries[0][0] if title_entries else None),
-            author=", ".join(authors) if authors else None,
-            language=language_entries[0][0] if language_entries else None,
-            source_identifier=identifiers[0] if identifiers else None,
-            published_year=published_year,
-            isbn=isbn,
+            title=_select_best_title(
+                title_entries=package_metadata.titles,
+                author_values=author_values,
+                content_title_candidates=content_title_candidates,
+                source_filename=Path(file_path).name,
+            ),
+            author=", ".join(author_values) if author_values else None,
+            publisher=publisher,
+            language=package_metadata.languages[0].value if package_metadata.languages else None,
+            source_identifier=best_identifier,
+            published_year=_extract_published_year(package_metadata.dates),
+            isbn=best_isbn,
         )
 
-        def iter_chunks() -> Iterable[str]:
-            for item in book.get_items():
-                if item.get_type() != ebooklib.ITEM_DOCUMENT:
-                    continue
-                name = str(getattr(item, "file_name", "") or "").lower()
-                if "nav" in name or "toc" in name:
-                    continue
-                soup = BeautifulSoup(item.get_content(), "html.parser")
-                text = soup.get_text(" ", strip=True)
-                if text:
-                    yield text
+        document_items = []
+        for item in book.get_items():
+            if item.get_type() != ebooklib.ITEM_DOCUMENT:
+                continue
+            name = str(getattr(item, "file_name", "") or "").lower()
+            if "nav" in name or "toc" in name:
+                continue
+            document_items.append(item)
 
-        return metadata, iter_chunks()
+        chunks: list[str] = []
+        total_documents = len(document_items)
+        for index, item in enumerate(document_items, start=1):
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+            text = soup.get_text(" ", strip=True)
+            if text:
+                chunks.append(text)
+            if progress_callback is not None:
+                progress_callback(
+                    ExtractionProgress(
+                        completed=index,
+                        total=total_documents,
+                        label=f"Extracting text {index}/{total_documents}",
+                    )
+                )
+
+        return metadata, chunks
 
 
-def _extract_published_year(date_entries: Sequence[tuple[str, object]]) -> int | None:
-    for entry in date_entries:
-        raw_value = str(entry[0] or "").strip()
+def _read_epub_package_metadata(file_path: str | Path) -> EpubPackageMetadata:
+    with zipfile.ZipFile(file_path) as archive:
+        container_root = ET.fromstring(archive.read("META-INF/container.xml"))
+        rootfile = container_root.find(".//c:rootfile", CONTAINER_NS)
+        if rootfile is None:
+            return EpubPackageMetadata([], [], [], [], [], [], [], [])
+
+        opf_path = rootfile.attrib["full-path"]
+        opf_root = ET.fromstring(archive.read(opf_path))
+        metadata = opf_root.find(".//opf:metadata", OPF_NS)
+        if metadata is None:
+            return EpubPackageMetadata([], [], [], [], [], [], [], [])
+
+        refinements = _collect_metadata_refinements(metadata)
+        package_metadata = EpubPackageMetadata(
+            titles=_collect_metadata_entries(metadata, "title", refinements),
+            creators=_collect_metadata_entries(metadata, "creator", refinements),
+            contributors=_collect_metadata_entries(metadata, "contributor", refinements),
+            dates=_collect_metadata_entries(metadata, "date", refinements),
+            identifiers=_collect_metadata_entries(metadata, "identifier", refinements),
+            publishers=_collect_metadata_entries(metadata, "publisher", refinements),
+            languages=_collect_metadata_entries(metadata, "language", refinements),
+            content_title_candidates=[],
+        )
+        return package_metadata
+
+
+def _collect_content_title_candidates_for_file(
+    file_path: str | Path,
+    author_values: Sequence[str],
+) -> list[str]:
+    return _collect_content_fallbacks_for_file(file_path, author_values=author_values).title_candidates
+
+
+def _collect_content_fallbacks_for_file(
+    file_path: str | Path,
+    *,
+    author_values: Sequence[str] = (),
+) -> EpubContentFallbacks:
+    with zipfile.ZipFile(file_path) as archive:
+        container_root = ET.fromstring(archive.read("META-INF/container.xml"))
+        rootfile = container_root.find(".//c:rootfile", CONTAINER_NS)
+        if rootfile is None:
+            return EpubContentFallbacks([], [], [], [])
+        opf_path = rootfile.attrib["full-path"]
+        opf_root = ET.fromstring(archive.read(opf_path))
+        return _collect_content_fallbacks(archive, opf_root, opf_path, author_values)
+
+
+def _collect_metadata_refinements(metadata: ET.Element) -> dict[str, dict[str, list[str]]]:
+    refinements: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    for meta in metadata.findall("opf:meta", OPF_NS):
+        refines = (meta.attrib.get("refines") or "").strip()
+        prop = (meta.attrib.get("property") or "").strip()
+        value = (meta.text or "").strip()
+        if not refines or not prop or not value:
+            continue
+        refinements[refines.lstrip("#")][prop].append(value)
+    return {key: dict(value) for key, value in refinements.items()}
+
+
+def _collect_metadata_entries(
+    metadata: ET.Element,
+    tag: str,
+    refinements: dict[str, dict[str, list[str]]],
+) -> list[EpubMetadataEntry]:
+    entries: list[EpubMetadataEntry] = []
+    for element in metadata.findall(f"dc:{tag}", OPF_NS):
+        value = (element.text or "").strip()
+        if not value:
+            continue
+        entry_id = element.attrib.get("id")
+        entries.append(
+            EpubMetadataEntry(
+                value=value,
+                id=entry_id,
+                attrs=dict(element.attrib),
+                refinements=refinements.get(entry_id or "", {}),
+            )
+        )
+    return entries
+
+
+def _collect_content_fallbacks(
+    archive: zipfile.ZipFile,
+    opf_root: ET.Element,
+    opf_path: str,
+    author_values: Sequence[str],
+) -> EpubContentFallbacks:
+    manifest = {
+        item.attrib.get("id"): item.attrib.get("href")
+        for item in opf_root.findall(".//opf:item", OPF_NS)
+    }
+    spine_ids = [item.attrib.get("idref") for item in opf_root.findall(".//opf:itemref", OPF_NS)]
+    base_path = Path(opf_path).parent
+    title_candidates: list[str] = []
+    author_candidates: list[str] = []
+    publisher_candidates: list[str] = []
+    isbn_candidates: list[str] = []
+
+    for spine_id in spine_ids[:5]:
+        href = manifest.get(spine_id)
+        if not href:
+            continue
+        lowered_href = href.casefold()
+        if any(marker in lowered_href for marker in ("cover", "nav", "toc")):
+            continue
+        full_path = (base_path / href).as_posix()
+        try:
+            content = archive.read(full_path)
+        except KeyError:
+            continue
+        soup = BeautifulSoup(content, "html.parser")
+        title_text = soup.title.get_text(" ", strip=True) if soup.title else ""
+        heading = soup.find(["h1", "h2"])
+        heading_text = heading.get_text(" ", strip=True) if heading else ""
+        body_text = WHITESPACE_RE.sub(" ", soup.get_text(" ", strip=True))
+
+        for candidate in (title_text, heading_text):
+            normalized = _normalize_source_title(candidate)
+            if normalized and not BAD_TITLE_VALUE_RE.match(normalized):
+                title_candidates.append(normalized)
+
+        snippet_title = _extract_title_from_content_text(body_text, author_values)
+        if snippet_title:
+            title_candidates.append(snippet_title)
+        author_candidates.extend(_extract_authors_from_content_text(body_text))
+        publisher_candidates.extend(_extract_publishers_from_content_text(body_text))
+        isbn_candidates.extend(_extract_isbns_from_content_text(body_text))
+
+    return EpubContentFallbacks(
+        title_candidates=_dedupe_casefold(title_candidates),
+        author_candidates=_dedupe_casefold(author_candidates),
+        publisher_candidates=_dedupe_casefold(publisher_candidates),
+        isbn_candidates=_dedupe_casefold(isbn_candidates),
+    )
+
+
+def _dedupe_casefold(values: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
+    return deduped
+
+
+def _extract_title_from_content_text(text: str, author_values: Sequence[str]) -> str | None:
+    if not text:
+        return None
+    snippet = WHITESPACE_RE.sub(" ", text).strip()[:400]
+    if author_values:
+        for author in author_values:
+            match = re.search(
+                rf"(?P<title>[A-Z][A-Za-z0-9'’:;,\-!? ]{{2,120}}?)\s+By\s+{re.escape(author)}\b",
+                snippet,
+                flags=re.IGNORECASE,
+            )
+            if not match:
+                continue
+            title = _normalize_source_title(match.group("title"))
+            while title and CONTENT_TITLE_PREFIX_RE.match(title):
+                title = CONTENT_TITLE_PREFIX_RE.sub("", title).strip()
+            if not title or BAD_TITLE_VALUE_RE.match(title):
+                continue
+            alpha_only = "".join(character for character in title if character.isalpha())
+            if alpha_only and alpha_only.upper() == alpha_only:
+                title = title.title()
+            return title
+
+    match = CONTENT_TITLE_BY_AUTHOR_RE.search(snippet)
+    if not match:
+        return None
+    matched_author = _clean_person_name(match.group("author"))
+    if author_values and (
+        not matched_author
+        or normalize_matching_text(matched_author) not in {normalize_matching_text(value) for value in author_values}
+    ):
+        return None
+    title = _normalize_source_title(match.group("title"))
+    while title and CONTENT_TITLE_PREFIX_RE.match(title):
+        title = CONTENT_TITLE_PREFIX_RE.sub("", title).strip()
+    if not title or BAD_TITLE_VALUE_RE.match(title):
+        return None
+    alpha_only = "".join(character for character in title if character.isalpha())
+    if alpha_only and alpha_only.upper() == alpha_only:
+        title = title.title()
+    return title
+
+
+def _extract_published_year(date_entries: Sequence[EpubMetadataEntry]) -> int | None:
+    ranked_dates = sorted(date_entries, key=_score_date_entry, reverse=True)
+    for entry in ranked_dates:
+        raw_value = str(entry.value or "").strip()
         if not raw_value:
             continue
         match = YEAR_RE.search(raw_value)
         if match:
             return int(match.group(0))
+    return None
+
+
+def _score_date_entry(entry: EpubMetadataEntry) -> int:
+    score = 0
+    event = (entry.attrs.get(OPF_EVENT_ATTR) or "").strip().lower()
+    if event == "modification":
+        score -= 50
+    if YEAR_RE.search(entry.value):
+        score += 20
+    return score
+
+
+def _select_best_title(
+    *,
+    title_entries: Sequence[EpubMetadataEntry],
+    author_values: Sequence[str],
+    content_title_candidates: Sequence[str],
+    source_filename: str,
+) -> str | None:
+    candidates: list[tuple[int, str]] = []
+    for entry in title_entries:
+        for candidate in _build_title_candidates(entry, title_entries):
+            candidates.append((_score_title_candidate(candidate, author_values) + 20, candidate))
+
+    for candidate in content_title_candidates:
+        candidates.append((_score_title_candidate(candidate, author_values) + 5, candidate))
+
+    if not candidates:
+        return _normalize_source_title(source_filename)
+
+    best_score, best_value = max(candidates, key=lambda item: item[0])
+    if best_score < 5:
+        return _normalize_source_title(source_filename)
+    return best_value
+
+
+def _build_title_candidates(
+    entry: EpubMetadataEntry,
+    all_entries: Sequence[EpubMetadataEntry],
+) -> list[str]:
+    candidates: list[str] = []
+    normalized = _normalize_source_title(entry.value)
+    if normalized:
+        candidates.append(normalized)
+
+    title_type_values = [value.casefold() for value in entry.refinements.get("title-type", [])]
+    entry_id = (entry.id or "").casefold()
+    if "main" in title_type_values or "maintitle" in entry_id or entry_id.endswith("main"):
+        subtitle = _find_subtitle_candidate(all_entries, exclude_id=entry.id)
+        if normalized and subtitle:
+            candidates.append(f"{normalized}: {subtitle}")
+    return list(dict.fromkeys(candidates))
+
+
+def _find_subtitle_candidate(entries: Sequence[EpubMetadataEntry], exclude_id: str | None) -> str | None:
+    for entry in entries:
+        if entry.id == exclude_id:
+            continue
+        title_type_values = [value.casefold() for value in entry.refinements.get("title-type", [])]
+        entry_id = (entry.id or "").casefold()
+        if "subtitle" in title_type_values or "subtitle" in entry_id:
+            return _normalize_source_title(entry.value)
+    return None
+
+
+def _score_title_candidate(candidate: str | None, author_values: Sequence[str]) -> int:
+    if not candidate:
+        return -100
+    score = 0
+    normalized = candidate.strip()
+    lowered = normalized.casefold()
+    if BAD_TITLE_VALUE_RE.match(normalized):
+        return -100
+    if TITLE_VENDOR_TAG_RE.search(normalized) or TITLE_FILE_EXT_RE.search(normalized):
+        score -= 80
+    if SITE_NOISE_RE.search(normalized):
+        score -= 40
+    if " -- " in normalized or " _ " in normalized:
+        score -= 15
+    if len(normalized) < 3:
+        score -= 20
+    if len(normalized) <= 80:
+        score += 15
+    if len(normalized) > 140:
+        score -= 20
+    if ": " in normalized:
+        score += 5
+    if len(TITLE_WORD_RE.findall(normalized)) >= 2:
+        score += 10
+    for author in author_values:
+        author_match = TITLE_BY_AUTHOR_RE.match(normalized)
+        if author_match and normalize_matching_text(author_match.group("author")) == normalize_matching_text(author):
+            score -= 50
+            score += 20
+            break
+        if normalize_matching_text(author) in lowered:
+            score -= 10
+    return score
+
+
+def _select_best_author_names(
+    creator_entries: Sequence[EpubMetadataEntry],
+    contributor_entries: Sequence[EpubMetadataEntry],
+    *,
+    content_author_candidates: Sequence[str] = (),
+) -> list[str]:
+    candidates: list[tuple[int, int, str]] = []
+    order = 0
+    for entry in [*creator_entries, *contributor_entries]:
+        base_score = _score_person_entry(entry, is_contributor=entry in contributor_entries)
+        for person in _split_person_candidates(entry.value):
+            cleaned = _clean_person_name(person)
+            if not cleaned:
+                continue
+            score = base_score + _score_person_name(cleaned, raw_value=person)
+            candidates.append((score, order, cleaned))
+            order += 1
+    for person in content_author_candidates:
+        cleaned = _clean_person_name(person)
+        if not cleaned:
+            continue
+        candidates.append((35 + _score_person_name(cleaned, raw_value=person), order, cleaned))
+        order += 1
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    best_score = candidates[0][0]
+    selected: list[str] = []
+    seen: set[str] = set()
+    for score, _, name in candidates:
+        if score < max(20, best_score - 40):
+            continue
+        key = normalize_matching_text(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(name)
+        if len(selected) == 3:
+            break
+    return selected
+
+
+def _split_person_candidates(raw_value: str) -> list[str]:
+    if ";" in raw_value:
+        return [part.strip() for part in raw_value.split(";") if part.strip()]
+    return [raw_value.strip()]
+
+
+def _clean_person_name(raw_value: str) -> str | None:
+    value = BRACKET_DUPLICATE_RE.sub("", raw_value).strip(" ,")
+    value = re.sub(r",\s*(ed|eds|editor|edited by)\.?$", "", value, flags=re.IGNORECASE).strip(" ,")
+    value = WHITESPACE_RE.sub(" ", value)
+    if UNKNOWN_PERSON_RE.match(value):
+        return None
+    if "," in value:
+        parts = [part.strip() for part in value.split(",")]
+        if (
+            len(parts) == 2
+            and len(parts[0].split()) == 1
+            and 1 <= len(parts[1].split()) <= 2
+            and parts[1].casefold() not in {"md", "phd", "jr", "sr", "ii", "iii", "iv"}
+        ):
+            value = f"{parts[1]} {parts[0]}".strip()
+    return value or None
+
+
+def _score_person_entry(entry: EpubMetadataEntry, *, is_contributor: bool) -> int:
+    score = 30 if not is_contributor else 15
+    role_values = [value.casefold() for value in entry.refinements.get("role", [])]
+    role_attr = (entry.attrs.get(OPF_ROLE_ATTR) or "").strip().casefold()
+    roles = set(role_values + ([role_attr] if role_attr else []))
+    if "aut" in roles:
+        score += 40
+    if entry.refinements.get("display-seq"):
+        score += 10
+    if roles & {"edt", "ed"}:
+        score -= 30
+    return score
+
+
+def _score_person_name(value: str, *, raw_value: str | None = None) -> int:
+    score = 0
+    if NON_AUTHOR_HINT_RE.search(value) or (raw_value and NON_AUTHOR_HINT_RE.search(raw_value)):
+        score -= 60
+    if PUBLISHER_NOISE_RE.search(value):
+        score -= 60
+    if SITE_NOISE_RE.search(value):
+        score -= 80
+    if len(value.split()) >= 2:
+        score += 10
+    return score
+
+
+def _select_best_publisher(
+    entries: Sequence[EpubMetadataEntry],
+    *,
+    content_candidates: Sequence[str] = (),
+) -> str | None:
+    candidates = [(_score_publisher(entry.value), entry.value.strip()) for entry in entries if entry.value.strip()]
+    candidates.extend((_score_publisher(value) + 10, value.strip()) for value in content_candidates if value.strip())
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][1] if candidates[0][0] > 0 else None
+
+
+def _score_publisher(value: str) -> int:
+    score = 20
+    if PUBLISHER_NOISE_RE.search(value):
+        score -= 60
+    if SITE_NOISE_RE.search(value):
+        score -= 80
+    if any(marker in value for marker in ("Press", "Publishing", "Books", "House", "Perennial", "Group", "LLC")):
+        score += 15
+    return score
+
+
+def _select_best_identifier(entries: Sequence[EpubMetadataEntry]) -> str | None:
+    ranked = sorted(entries, key=_score_identifier_entry, reverse=True)
+    for entry in ranked:
+        if entry.value.strip():
+            normalized = _normalize_identifier_for_storage(entry)
+            if normalized:
+                return normalized
     return None
 
 
@@ -232,25 +779,176 @@ def _normalize_source_title(raw_title: str | None) -> str | None:
     title = str(raw_title).strip()
     if not title:
         return None
+    title = title.replace("\\(", "(").replace("\\)", ")")
     title = TITLE_VENDOR_TAG_RE.sub("", title)
     title = TITLE_FILE_EXT_RE.sub("", title)
     title = TITLE_MULTI_SPACE_RE.sub(" ", title).strip(" -_\t")
     return title or None
 
 
-def _extract_isbn(identifier_entries: Sequence[str]) -> str | None:
-    for raw_identifier in identifier_entries:
-        if not raw_identifier:
-            continue
-        cleaned = ISBN_CLEAN_RE.sub("", raw_identifier)
-        if len(cleaned) in {10, 13}:
-            return cleaned.upper()
-        lowered = raw_identifier.lower()
-        if "isbn" in lowered:
-            trailing = ISBN_CLEAN_RE.sub("", raw_identifier.split(":")[-1])
-            if len(trailing) in {10, 13}:
-                return trailing.upper()
+def _select_best_isbn(entries: Sequence[EpubMetadataEntry]) -> str | None:
+    ranked = sorted(entries, key=_score_identifier_entry, reverse=True)
+    for entry in ranked:
+        normalized = _extract_isbn_from_identifier(entry)
+        if normalized:
+            return normalized
     return None
+
+
+def _score_identifier_entry(entry: EpubMetadataEntry) -> int:
+    cleaned = ISBN_CLEAN_RE.sub("", entry.value)
+    scheme = " ".join(
+        [
+            (entry.attrs.get("scheme") or ""),
+            (entry.attrs.get("{http://www.idpf.org/2007/opf}scheme") or ""),
+            (entry.id or ""),
+            " ".join(entry.refinements.get("identifier-type", [])),
+        ]
+    ).casefold()
+    if len(cleaned) in {10, 13}:
+        return 100
+    if "isbn" in scheme or "isbn" in entry.value.casefold():
+        return 90
+    if "asin" in scheme:
+        return 20
+    if "uuid" in scheme or "uuid" in entry.value.casefold():
+        return 5
+    if "calibre" in scheme:
+        return 0
+    return 10
+
+
+def _normalize_identifier_for_storage(entry: EpubMetadataEntry) -> str | None:
+    isbn = _extract_isbn_from_identifier(entry)
+    if isbn:
+        return isbn
+    value = entry.value.strip()
+    return value or None
+
+
+def _extract_isbn_from_identifier(entry: EpubMetadataEntry) -> str | None:
+    raw_identifier = entry.value
+    if not raw_identifier:
+        return None
+    cleaned = ISBN_CLEAN_RE.sub("", raw_identifier)
+    if len(cleaned) in {10, 13}:
+        return cleaned.upper()
+    lowered = raw_identifier.lower()
+    scheme = " ".join(
+        [
+            lowered,
+            (entry.attrs.get("scheme") or "").lower(),
+            (entry.attrs.get("{http://www.idpf.org/2007/opf}scheme") or "").lower(),
+            (entry.id or "").lower(),
+            " ".join(value.lower() for value in entry.refinements.get("identifier-type", [])),
+        ]
+    )
+    if "isbn" in scheme:
+        trailing = ISBN_CLEAN_RE.sub("", raw_identifier.split(":")[-1])
+        if len(trailing) in {10, 13}:
+            return trailing.upper()
+    return None
+
+
+def _extract_authors_from_content_text(text: str) -> list[str]:
+    matches: list[str] = []
+    snippet = WHITESPACE_RE.sub(" ", text).strip()[:800]
+    for match in COPYRIGHT_LINE_RE.finditer(snippet):
+        segment = re.split(
+            r"\b(?:ISBN(?:-?1[03])?|All rights|Printed in|For ordering|Copyright)\b",
+            match.group("names"),
+            maxsplit=1,
+        )[0]
+        matches.extend(_extract_person_names(segment))
+    return _dedupe_casefold(matches)
+
+
+def _extract_person_names(text: str) -> list[str]:
+    names: list[str] = []
+    normalized = re.sub(r"^\d{4}\s+", "", text.strip())
+    normalized = normalized.replace("&", ";").replace(" and ", ";")
+    for segment in re.split(r"[;]", normalized):
+        segment = segment.strip(" ,")
+        if not segment:
+            continue
+        for match in re.finditer(r"[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,3}", segment):
+            candidate = re.split(
+                r"\b(?:The|All|Rights|Reserved|Cover|Project|Guide|Story|Fundamentals|Chapter|Personal)\b",
+                match.group(0),
+                maxsplit=1,
+            )[0].strip()
+            cleaned = _clean_person_name(candidate)
+            if cleaned and not NON_PERSON_ENTITY_RE.search(cleaned):
+                names.append(cleaned)
+    return names
+
+
+def _extract_publishers_from_content_text(text: str) -> list[str]:
+    snippet = WHITESPACE_RE.sub(" ", text).strip()[:800]
+    publishers: list[str] = []
+    normalized_snippet = _normalize_fragmented_publisher_text(snippet)
+    for match in IMPRINT_PUBLISHER_RE.finditer(normalized_snippet):
+        publisher = _normalize_publisher_value(match.group("publisher"))
+        if publisher:
+            publishers.append(publisher)
+    for match in PUBLISHER_TEXT_RE.finditer(snippet):
+        publisher = _normalize_publisher_value(match.group("publisher"))
+        if publisher and sum(1 for token in publisher.split() if len(token) == 1) < 3:
+            publishers.append(publisher)
+    return _dedupe_casefold(publishers)
+
+
+def _extract_isbns_from_content_text(text: str) -> list[str]:
+    snippet = WHITESPACE_RE.sub(" ", text).strip()[:800]
+    isbns: list[str] = []
+    for match in ISBN_TEXT_RE.finditer(snippet):
+        cleaned = ISBN_CLEAN_RE.sub("", match.group("value"))
+        if len(cleaned) in {10, 13}:
+            isbns.append(cleaned.upper())
+    return _dedupe_casefold(isbns)
+
+
+def _normalize_fragmented_publisher_text(text: str) -> str:
+    normalized = text
+    suffixes = {"LLC", "INC", "LTD", "CO", "CORP"}
+    while True:
+        updated = re.sub(
+            r"\b([A-Z])\s+([A-Z]{2,8})\b",
+            lambda match: f"{match.group(1)}{match.group(2)}",
+            normalized,
+        )
+        updated = re.sub(
+            r"\b([A-Z]{3,6})\s+([A-Z]{1,3})\b",
+            lambda match: (
+                match.group(0)
+                if match.group(1) in {"THE", "AND", "FOR", "WITH", "FROM", "THIS", "THAT"}
+                or match.group(2) in suffixes
+                else f"{match.group(1)}{match.group(2)}"
+            ),
+            updated,
+        )
+        if updated == normalized:
+            return updated
+        normalized = updated
+
+
+def _normalize_publisher_value(raw_value: str | None) -> str | None:
+    if not raw_value:
+        return None
+    value = _normalize_fragmented_publisher_text(WHITESPACE_RE.sub(" ", raw_value).strip(" ,.;:-"))
+    value = re.sub(r"^(?:An\s+Imprint\s+Of|Published\s+by|Publisher)\s+", "", value, flags=re.IGNORECASE)
+    if not value:
+        return None
+    alpha_only = "".join(character for character in value if character.isalpha())
+    if alpha_only and alpha_only.upper() == alpha_only:
+        tokens = []
+        for token in value.split():
+            if token in {"LLC", "INC", "LTD", "USA", "UK"}:
+                tokens.append(token)
+            else:
+                tokens.append(token.title())
+        value = " ".join(tokens)
+    return value or None
 
 
 class ImportMatcher:
@@ -298,11 +996,21 @@ class ImportMatcher:
         )
 
     def match_chunks(self, chunks: Iterable[str]) -> list[MatchedImportEntry]:
+        return self.match_chunks_with_progress(chunks)
+
+    def match_chunks_with_progress(
+        self,
+        chunks: Iterable[str],
+        *,
+        progress_callback: Callable[[MatchProgress], None] | None = None,
+    ) -> list[MatchedImportEntry]:
         word_counts: Counter[uuid.UUID] = Counter()
         phrase_counts: Counter[uuid.UUID] = Counter()
         phrase_rows_by_id: dict[uuid.UUID, dict[str, object]] = {}
+        chunk_list = list(chunks)
+        total_chunks = len(chunk_list)
 
-        for text in chunks:
+        for index, text in enumerate(chunk_list, start=1):
             normalized_words = iter_normalized_words(text)
             for match in self._match_phrases(normalized_words):
                 phrase_counts[match["entry_id"]] += 1
@@ -312,6 +1020,16 @@ class ImportMatcher:
                 resolved = self._resolve_word(surface)
                 if resolved is not None:
                     word_counts[resolved] += 1
+
+            if progress_callback is not None:
+                progress_callback(
+                    MatchProgress(
+                        completed=index,
+                        total=total_chunks,
+                        matched_entries=len(word_counts) + len(phrase_counts),
+                        label=f"Matching entries {index}/{total_chunks}",
+                    )
+                )
 
         matched_entries: list[MatchedImportEntry] = []
         for entry_id, frequency_count in word_counts.items():
@@ -702,6 +1420,10 @@ async def create_import_job(
         status="completed" if import_source.status == "completed" else "queued",
         total_items=import_source.matched_entry_count,
         processed_items=import_source.matched_entry_count if import_source.status == "completed" else 0,
+        progress_stage="completed" if import_source.status == "completed" else "queued",
+        progress_total=import_source.matched_entry_count if import_source.status == "completed" else 0,
+        progress_completed=import_source.matched_entry_count if import_source.status == "completed" else 0,
+        progress_current_label="Completed from cached import" if import_source.status == "completed" else "Queued",
         matched_entry_count=import_source.matched_entry_count,
         completed_at=completed_at,
     )
@@ -715,9 +1437,20 @@ def sync_job_with_source(job: ImportJob, import_source: ImportSource) -> None:
     job.import_source_id = import_source.id
     job.source_hash = import_source.source_hash_sha256
     job.total_items = import_source.matched_entry_count
-    job.processed_items = import_source.matched_entry_count if import_source.status == "completed" else 0
+    is_completed = import_source.status == "completed"
+    is_failed = import_source.status == "failed"
+    job.processed_items = import_source.matched_entry_count if is_completed else 0
+    job.progress_total = import_source.matched_entry_count
+    job.progress_completed = import_source.matched_entry_count if is_completed else 0
     job.matched_entry_count = import_source.matched_entry_count
-    job.status = "completed" if import_source.status == "completed" else "processing"
+    job.status = "completed" if is_completed else "failed" if is_failed else "processing"
+    job.progress_stage = "completed" if is_completed else "failed" if is_failed else "matching"
+    if is_completed:
+        job.progress_current_label = "Completed from cached import" if job.started_at is None else "Import completed"
+    elif is_failed:
+        job.progress_current_label = "Import failed"
+    else:
+        job.progress_current_label = "Continuing import"
     job.error_message = import_source.error_message
 
 

@@ -1,4 +1,5 @@
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -11,6 +12,7 @@ from app.models.import_source_entry import ImportSourceEntry
 from app.models.word import Word
 from app.models.word_form import WordForm
 from app.services.source_imports import (
+    EpubTextExtractor,
     EntryRef,
     ImportMatcher,
     build_import_cache_key,
@@ -23,6 +25,52 @@ from app.services.source_imports import (
     sha256_digest_from_bytes,
     _normalize_source_title,
 )
+
+
+def _write_epub_fixture(tmp_path, *, metadata_xml: str, body_title: str = "Chapter", body_text: str = "Hello world"):
+    file_path = tmp_path / f"{uuid.uuid4()}.epub"
+    container_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml" />
+  </rootfiles>
+</container>
+"""
+    content_opf = f"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0" unique-identifier="bookid">
+  <metadata>
+    {metadata_xml}
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />
+    <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml" />
+  </manifest>
+  <spine>
+    <itemref idref="nav" />
+    <itemref idref="chapter1" />
+  </spine>
+</package>
+"""
+    nav_xhtml = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+  <head><title>Contents</title></head>
+  <body><nav epub:type="toc"><ol><li>Chapter 1</li></ol></nav></body>
+</html>
+"""
+    chapter_xhtml = f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>{body_title}</title></head>
+  <body><p>{body_text}</p></body>
+</html>
+"""
+
+    with zipfile.ZipFile(file_path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr("META-INF/container.xml", container_xml)
+        archive.writestr("OEBPS/content.opf", content_opf)
+        archive.writestr("OEBPS/nav.xhtml", nav_xhtml)
+        archive.writestr("OEBPS/chapter1.xhtml", chapter_xhtml)
+    return file_path
 
 
 def test_sha256_digest_from_bytes_is_stable():
@@ -177,6 +225,167 @@ def test_normalize_source_title_strips_vendor_noise_and_extensions():
         "Pygmalion by George Bernard Shaw"
     )
     assert _normalize_source_title("Pygmalion.epub") == "Pygmalion"
+
+
+def test_epub_text_extractor_combines_title_subtitle_and_isbn_publisher(tmp_path):
+    epub_path = _write_epub_fixture(
+        tmp_path,
+        metadata_xml="""
+<dc:title id="maintitle">The 5 Types of Wealth</dc:title>
+<dc:title id="subtitle">A Transformative Guide to Design Your Dream Life</dc:title>
+<meta refines="#maintitle" property="title-type">main</meta>
+<meta refines="#subtitle" property="title-type">subtitle</meta>
+<dc:creator id="creator1">Sahil Bloom</dc:creator>
+<meta refines="#creator1" property="role">aut</meta>
+<dc:publisher>Random House Publishing Group</dc:publisher>
+<dc:date>2025-02-04</dc:date>
+<dc:identifier id="uuid_id">urn:uuid:12345678-1234-1234-1234-123456789abc</dc:identifier>
+<dc:identifier id="EbookISBN">9780593723197</dc:identifier>
+<dc:language>en-US</dc:language>
+""",
+    )
+
+    metadata, chunks = EpubTextExtractor().extract_metadata_and_chunks(epub_path)
+
+    assert metadata.title == "The 5 Types of Wealth: A Transformative Guide to Design Your Dream Life"
+    assert metadata.author == "Sahil Bloom"
+    assert metadata.publisher == "Random House Publishing Group"
+    assert metadata.published_year == 2025
+    assert metadata.isbn == "9780593723197"
+    assert metadata.source_identifier == "9780593723197"
+    assert list(chunks) == ["Hello world"]
+
+
+def test_epub_text_extractor_prefers_author_and_content_title_when_package_title_is_noisy(tmp_path):
+    epub_path = _write_epub_fixture(
+        tmp_path,
+        metadata_xml="""
+<dc:title>Pygmalion by George Bernard Shaw ( PDFDrive.com ).epub</dc:title>
+<dc:creator id="creator1">Jim Manis, ed.; George Bernard Shaw</dc:creator>
+<meta refines="#creator1" property="role">aut</meta>
+<dc:date>2011-07-22T05:15:47+00:00</dc:date>
+<dc:identifier id="uuid_id">a81a033e-90ef-4945-bf84-88dcaffcc26e</dc:identifier>
+<dc:language>en</dc:language>
+""",
+        body_title="Unknown",
+        body_text="Unknown PYGMALION By George Bernard Shaw A Penn State Electronic Classics Series Publication",
+    )
+
+    metadata, _ = EpubTextExtractor().extract_metadata_and_chunks(epub_path)
+
+    assert metadata.title == "Pygmalion"
+    assert metadata.author == "George Bernard Shaw"
+    assert metadata.publisher is None
+    assert metadata.published_year == 2011
+    assert metadata.isbn is None
+    assert metadata.source_identifier == "a81a033e-90ef-4945-bf84-88dcaffcc26e"
+
+
+def test_epub_text_extractor_prefers_non_modification_year_and_uuid_fallback_identifier(tmp_path):
+    epub_path = _write_epub_fixture(
+        tmp_path,
+        metadata_xml="""
+<dc:title>Scrambled or Sunny-Side Up?</dc:title>
+<dc:creator>Loren Ridinger</dc:creator>
+<dc:publisher>Post Hill Press</dc:publisher>
+<dc:date opf:event="modification" xmlns:opf="http://www.idpf.org/2007/opf">2025-01-22</dc:date>
+<dc:date>2025-01-17T17:08:08+00:00</dc:date>
+<dc:identifier id="bookid">urn:uuid:54eb2f5a-76d9-4b41-b742-483199aa625e</dc:identifier>
+<dc:language>en-US</dc:language>
+""",
+    )
+
+    metadata, _ = EpubTextExtractor().extract_metadata_and_chunks(epub_path)
+
+    assert metadata.title == "Scrambled or Sunny-Side Up?"
+    assert metadata.author == "Loren Ridinger"
+    assert metadata.publisher == "Post Hill Press"
+    assert metadata.published_year == 2025
+    assert metadata.isbn is None
+    assert metadata.source_identifier == "urn:uuid:54eb2f5a-76d9-4b41-b742-483199aa625e"
+
+
+def test_epub_text_extractor_includes_secondary_creator_when_ranked_close(tmp_path):
+    epub_path = _write_epub_fixture(
+        tmp_path,
+        metadata_xml="""
+<dc:title id="maintitle">Good Energy</dc:title>
+<dc:title id="subtitle">The Surprising Connection Between Metabolism and Limitless Health</dc:title>
+<meta refines="#maintitle" property="title-type">main</meta>
+<meta refines="#subtitle" property="title-type">subtitle</meta>
+<dc:creator id="creator1">Casey Means, MD</dc:creator>
+<meta refines="#creator1" property="role">aut</meta>
+<meta refines="#creator1" property="display-seq">1</meta>
+<dc:creator id="creator2">Calley Means</dc:creator>
+<meta refines="#creator2" property="role">ive</meta>
+<meta refines="#creator2" property="display-seq">2</meta>
+<dc:publisher>Penguin Publishing Group</dc:publisher>
+<dc:date>2024-05-14</dc:date>
+<dc:identifier id="EbookISBN">9780593712665</dc:identifier>
+""",
+    )
+
+    metadata, _ = EpubTextExtractor().extract_metadata_and_chunks(epub_path)
+
+    assert metadata.author == "Casey Means, MD, Calley Means"
+
+
+def test_epub_text_extractor_reorders_last_first_and_drops_noisy_publisher(tmp_path):
+    epub_path = _write_epub_fixture(
+        tmp_path,
+        metadata_xml="""
+<dc:title>Things That Matter: Three Decades of Passions, Pastimes and Politics.epub</dc:title>
+<dc:creator>Krauthammer, Charles</dc:creator>
+<dc:publisher>chenjin5.com 万千书友聚集地</dc:publisher>
+<dc:date>2013-10-21T18:30:00+00:00</dc:date>
+<dc:identifier id="uuid_id">9f21bbd8-8f9e-42e4-933d-661e9623508b</dc:identifier>
+""",
+    )
+
+    metadata, _ = EpubTextExtractor().extract_metadata_and_chunks(epub_path)
+
+    assert metadata.author == "Charles Krauthammer"
+    assert metadata.publisher is None
+
+
+def test_epub_text_extractor_falls_back_to_imprint_publisher_with_fragmented_caps(tmp_path):
+    epub_path = _write_epub_fixture(
+        tmp_path,
+        metadata_xml="""
+<dc:title>Atomic Habits: Tiny Changes, Remarkable Results</dc:title>
+<dc:creator>James Clear [James Clear]</dc:creator>
+<dc:publisher>chenjin5.com 万千书友聚集地</dc:publisher>
+<dc:date>2018-10-16</dc:date>
+<dc:identifier id="uuid_id">1b20ac53-08ed-40ec-9887-ad3f85944d88</dc:identifier>
+""",
+        body_title="copyright",
+        body_text="AN IMPRINT OF P ENGUIN R AND OM H OUSE LLC 375 Hudson Street New York, New York 10014 Copyright © 2018 by James Clear Ebook ISBN 9780735211308",
+    )
+
+    metadata, _ = EpubTextExtractor().extract_metadata_and_chunks(epub_path)
+
+    assert metadata.publisher == "Penguin Random House LLC"
+
+
+def test_epub_text_extractor_falls_back_to_content_authors_publisher_and_isbn(tmp_path):
+    epub_path = _write_epub_fixture(
+        tmp_path,
+        metadata_xml="""
+<dc:title>The Phoenix Project : A Novel about IT, DevOps, and Helping Your Business Win \\( PDFDrive.com \\).epub</dc:title>
+<dc:creator>Unknown</dc:creator>
+<dc:date>2014-08-05T21:17:02+00:00</dc:date>
+<dc:identifier id="uuid_id">71c48faa-e199-4507-8004-4c1c212a67e1</dc:identifier>
+""",
+        body_title="index",
+        body_text="The Phoenix Project A Novel About IT, DevOps, and Helping Your Business Win Gene Kim, Kevin Behr & George Spafford © 2013 Gene Kim, Kevin Behr & George Spafford ISBN13: 978-0-9882625-0-8 IT Revolution Press Portland, Oregon",
+    )
+
+    metadata, _ = EpubTextExtractor().extract_metadata_and_chunks(epub_path)
+
+    assert metadata.author == "Gene Kim, Kevin Behr, George Spafford"
+    assert metadata.publisher == "IT Revolution Press"
+    assert metadata.isbn == "9780988262508"
+    assert metadata.source_identifier == "71c48faa-e199-4507-8004-4c1c212a67e1"
 
 
 @pytest.mark.asyncio
