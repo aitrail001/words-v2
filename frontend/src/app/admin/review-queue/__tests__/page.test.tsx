@@ -1,11 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import AdminReviewQueuePage from "@/app/admin/review-queue/page";
-import { apiClient } from "@/lib/api-client";
+import { cookies } from "next/headers";
 
-jest.mock("@/lib/api-client", () => ({
-  apiClient: {
-    get: jest.fn(),
-  },
+jest.mock("next/headers", () => ({
+  cookies: jest.fn(),
 }));
 
 function makeQueueResponse(overrides?: {
@@ -28,14 +26,29 @@ function makeQueueResponse(overrides?: {
 }
 
 describe("AdminReviewQueuePage", () => {
-  const mockGet = apiClient.get as jest.MockedFunction<typeof apiClient.get>;
+  const mockCookies = cookies as jest.MockedFunction<typeof cookies>;
+  const originalFetch = global.fetch;
+
+  const mockFetchJson = (payload: unknown) => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payload,
+    } as Response);
+  };
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    mockCookies.mockResolvedValue({
+      get: jest.fn().mockReturnValue({ value: "admin-token" }),
+    } as never);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
   it("renders admin-only queue metadata and debug-only fields from the grouped admin API", async () => {
-    mockGet.mockResolvedValueOnce(
+    mockFetchJson(
       makeQueueResponse({
         effectiveNow: "2026-10-05T09:00:00+00:00",
         totalCount: 1,
@@ -63,13 +76,21 @@ describe("AdminReviewQueuePage", () => {
             ],
           },
         ],
-      }) as never,
+      }),
     );
 
     render(await AdminReviewQueuePage({}));
 
     expect(await screen.findByRole("heading", { name: /srs queue debug/i })).toBeInTheDocument();
-    await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/reviews/admin/queue/grouped"));
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        "http://localhost:8000/api/reviews/admin/queue/grouped",
+        expect.objectContaining({
+          cache: "no-store",
+          headers: { Authorization: "Bearer admin-token" },
+        }),
+      ),
+    );
     expect(screen.getByText(/admin-only queue inspection/i)).toBeInTheDocument();
     expect(screen.getByText(/effective time in use/i)).toBeInTheDocument();
     expect(screen.getByText("2026-10-05T09:00:00+00:00")).toBeInTheDocument();
@@ -90,7 +111,7 @@ describe("AdminReviewQueuePage", () => {
   });
 
   it("renders the effective time override controls for request-scoped inspection", async () => {
-    mockGet.mockResolvedValueOnce(
+    mockFetchJson(
       makeQueueResponse({
         effectiveNow: "2026-10-05T09:00:00+00:00",
         totalCount: 1,
@@ -118,7 +139,7 @@ describe("AdminReviewQueuePage", () => {
             ],
           },
         ],
-      }) as never,
+      }),
     );
 
     render(await AdminReviewQueuePage({}));
@@ -129,7 +150,7 @@ describe("AdminReviewQueuePage", () => {
   });
 
   it("shows an admin-oriented empty state when no queue items match the selected time", async () => {
-    mockGet.mockResolvedValueOnce(makeQueueResponse() as never);
+    mockFetchJson(makeQueueResponse());
 
     render(await AdminReviewQueuePage({}));
 
@@ -138,10 +159,10 @@ describe("AdminReviewQueuePage", () => {
   });
 
   it("uses the initial effective_now search param on first render", async () => {
-    mockGet.mockResolvedValueOnce(
+    mockFetchJson(
       makeQueueResponse({
         effectiveNow: "2026-10-05T09:00:00+00:00",
-      }) as never,
+      }),
     );
 
     render(
@@ -151,7 +172,12 @@ describe("AdminReviewQueuePage", () => {
     );
 
     await waitFor(() =>
-      expect(mockGet).toHaveBeenCalledWith("/reviews/admin/queue/grouped?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00"),
+      expect(global.fetch).toHaveBeenCalledWith(
+        "http://localhost:8000/api/reviews/admin/queue/grouped?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer admin-token" },
+        }),
+      ),
     );
     expect(screen.getByDisplayValue("2026-10-05T09:00:00+00:00")).toBeInTheDocument();
     expect(screen.getByText("2026-10-05T09:00:00+00:00")).toBeInTheDocument();
