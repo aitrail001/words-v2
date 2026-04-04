@@ -72,6 +72,7 @@ describe("HomePage (Knowledge Map)", () => {
     expect(await screen.findByRole("heading", { name: /review/i })).toBeInTheDocument();
     expect(screen.getByText("3 words to review")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /start review/i })).toHaveAttribute("href", "/review");
+    expect(screen.getByRole("link", { name: /view review queue/i })).toHaveAttribute("href", "/review/queue");
     expect(screen.getByRole("link", { name: /queue debug/i })).toHaveAttribute("href", "/review/debug");
     expect(screen.getByRole("link", { name: /discover/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /learn next: drum/i })).toBeInTheDocument();
@@ -90,7 +91,7 @@ describe("HomePage (Knowledge Map)", () => {
     expect(mockGetReviewQueueStats).toHaveBeenCalled();
   });
 
-  it("hides the review card when there are no due review items", async () => {
+  it("keeps the review card visible when items are scheduled but not yet due", async () => {
     mockGetReviewQueueStats.mockResolvedValueOnce({
       total_items: 8,
       due_items: 0,
@@ -102,8 +103,10 @@ describe("HomePage (Knowledge Map)", () => {
     render(<HomePage />);
 
     expect(await screen.findByText("13,760")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /review/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/words to review/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /review/i })).toBeInTheDocument();
+    expect(screen.getByText("8 scheduled review items")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /start review/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view review queue/i })).toHaveAttribute("href", "/review/queue");
   });
 
   it("keeps the main dashboard navigation visible", async () => {

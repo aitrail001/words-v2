@@ -164,7 +164,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {dueReviewCount > 0 ? (
+      {(reviewQueueStats?.total_items ?? 0) > 0 ? (
         <section className="rounded-[0.85rem] bg-white px-3 py-3 shadow-[0_8px_18px_rgba(95,53,177,0.08)]">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -172,18 +172,30 @@ export default function HomePage() {
                 Review
               </h2>
               <p className="mt-1 text-[0.86rem] leading-5 text-[#7b6795]">
-                {dueReviewCount} {dueReviewCount === 1 ? "word" : "words"} to review
+                {dueReviewCount > 0
+                  ? `${dueReviewCount} ${dueReviewCount === 1 ? "word" : "words"} to review`
+                  : `${reviewQueueStats?.total_items ?? 0} scheduled review ${(reviewQueueStats?.total_items ?? 0) === 1 ? "item" : "items"}`}
               </p>
               <Link href="/review/debug" className="mt-2 inline-block text-[0.82rem] font-semibold text-[#7b32d3]">
                 Queue debug
               </Link>
             </div>
-            <Link
-              href="/review"
-              className="rounded-full bg-[#7b32d3] px-4 py-2 text-sm font-semibold text-white"
-            >
-              Start Review
-            </Link>
+            <div className="flex flex-col items-end gap-2">
+              {dueReviewCount > 0 ? (
+                <Link
+                  href="/review"
+                  className="rounded-full bg-[#7b32d3] px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Start Review
+                </Link>
+              ) : null}
+              <Link
+                href="/review/queue"
+                className="rounded-full border border-[#d8caec] px-4 py-2 text-sm font-semibold text-[#684f85]"
+              >
+                View Review Queue
+              </Link>
+            </div>
           </div>
         </section>
       ) : null}

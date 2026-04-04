@@ -107,6 +107,39 @@ export type ReviewQueueStats = {
   accuracy: number;
 };
 
+export type ReviewQueueBucket =
+  | "overdue"
+  | "due_now"
+  | "later_today"
+  | "tomorrow"
+  | "this_week"
+  | "this_month"
+  | "one_to_three_months"
+  | "three_to_six_months"
+  | "six_plus_months";
+
+export type GroupedReviewQueueItem = {
+  queue_item_id: string;
+  entry_id: string;
+  entry_type: KnowledgeEntryType;
+  text: string;
+  status: KnowledgeStatus;
+  next_review_at: string | null;
+  last_reviewed_at: string | null;
+};
+
+export type GroupedReviewQueueGroup = {
+  bucket: ReviewQueueBucket;
+  count: number;
+  items: GroupedReviewQueueItem[];
+};
+
+export type GroupedReviewQueueResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: GroupedReviewQueueGroup[];
+};
+
 export type KnowledgeMapRange = {
   range_start: number;
   range_end: number;
@@ -360,6 +393,9 @@ export const getKnowledgeMapDashboard = (): Promise<KnowledgeMapDashboard> =>
 
 export const getReviewQueueStats = (): Promise<ReviewQueueStats> =>
   apiClient.get<ReviewQueueStats>("/reviews/queue/stats");
+
+export const getGroupedReviewQueue = (): Promise<GroupedReviewQueueResponse> =>
+  apiClient.get<GroupedReviewQueueResponse>("/reviews/queue/grouped");
 
 export const getKnowledgeMapRange = (rangeStart: number): Promise<KnowledgeMapRange> =>
   apiClient.get<KnowledgeMapRange>(`/knowledge-map/ranges/${rangeStart}`);
