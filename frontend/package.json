@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "test": "jest --passWithNoTests",
-    "test:review": "jest --runInBand src/app/review/__tests__/page.test.tsx src/app/settings/__tests__/page.test.tsx src/lib/__tests__/knowledge-map-client.test.ts src/lib/__tests__/user-preferences-client.test.ts src/lib/__tests__/learner-audio.test.ts",
+    "test:review": "jest --runInBand src/app/__tests__/page.test.tsx src/app/review/__tests__/page.test.tsx src/app/review/queue/__tests__/page.test.tsx src/app/admin/review-queue/__tests__/page.test.tsx src/app/settings/__tests__/page.test.tsx src/lib/__tests__/knowledge-map-client.test.ts src/lib/__tests__/user-preferences-client.test.ts src/lib/__tests__/learner-audio.test.ts",
     "test:watch": "jest --watch"
   },
   "dependencies": {

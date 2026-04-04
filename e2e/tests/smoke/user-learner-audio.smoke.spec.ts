@@ -352,7 +352,7 @@ test("@smoke learner audio covers range cards and review replay", async ({
   await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
 
   await page.goto("/review");
-  await expect(page.getByRole("button", { name: /^play audio$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /replay audio/i }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /exit review/i })).toBeVisible();
   await expect
     .poll(() =>

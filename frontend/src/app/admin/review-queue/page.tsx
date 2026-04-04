@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
 import {
   type AdminGroupedReviewQueueItem,
   type AdminGroupedReviewQueueResponse,
@@ -44,6 +43,14 @@ function formatBucketLabel(bucket: ReviewQueueBucket): string {
 
 function formatStatusLabel(status: KnowledgeStatus): string {
   return STATUS_LABELS[status] ?? status.replaceAll("_", " ");
+}
+
+function getKnowledgeEntryHref(entryType: KnowledgeEntryType, entryId: string): string {
+  return entryType === "phrase" ? `/phrase/${entryId}` : `/word/${entryId}`;
+}
+
+function getKnowledgeEntryPath(entryType: KnowledgeEntryType, entryId: string): string {
+  return entryType === "phrase" ? `/phrase/${entryId}` : `/word/${entryId}`;
 }
 
 async function fetchAdminGroupedReviewQueue(
@@ -135,7 +142,7 @@ function QueueItemCard({
 
         <div className="flex flex-wrap gap-2">
           <Link
-            href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
+            href={getKnowledgeEntryPath(item.entry_type, item.entry_id)}
             aria-label={`Open detail for ${item.text}`}
             className="rounded-full border border-[#d8caec] px-3 py-2 text-sm font-semibold text-[#684f85]"
           >

@@ -5,6 +5,7 @@ import { Client } from "pg";
 
 type EntryType = "word" | "phrase";
 type PromptType =
+  | "confidence_check"
   | "sentence_gap"
   | "collocation_check"
   | "situation_matching"
@@ -46,6 +47,29 @@ type ReviewScenarioDefinition = {
 type ResolvedReviewScenarioDefinition = ReviewScenarioDefinition & {
   resolvedEntryId: string;
   resolvedTargetId: string;
+};
+
+type ReviewQueueSeedStatus = "learning" | "known" | "to_learn";
+
+type ReviewQueueSeedItem = {
+  scenarioKey: string;
+  status: ReviewQueueSeedStatus;
+  dueAt?: Date;
+  lastReviewedAt?: Date | null;
+};
+
+export type GroupedReviewQueueFixture = {
+  dueNowText: string;
+  dueNowDefinition: string;
+  tomorrowText: string;
+  hiddenKnownText: string;
+  hiddenToLearnText: string;
+  effectiveNow: string;
+};
+
+export type FailedReviewQueueFixture = {
+  failedText: string;
+  futureText: string;
 };
 
 const WORD_POLICY_ID = "6c19a4f5-5970-4d94-8af8-728e4433c200";
@@ -779,6 +803,170 @@ const ensureScenarioCatalog = async (): Promise<ResolvedReviewScenarioDefinition
   return await catalogSeedPromise;
 };
 
+const upsertUserPreferences = async (client: Client, userId: string): Promise<void> => {
+  await client.query(
+    `
+    INSERT INTO user_preferences (
+      id,
+      user_id,
+      accent_preference,
+      translation_locale,
+      knowledge_view_preference,
+      review_depth_preset,
+      enable_confidence_check,
+      enable_word_spelling,
+      enable_audio_spelling,
+      show_pictures_in_questions
+    )
+    VALUES ($1::uuid, $2::uuid, 'us', 'es', 'cards', 'balanced', true, true, true, false)
+    ON CONFLICT (user_id)
+    DO UPDATE SET
+      accent_preference = EXCLUDED.accent_preference,
+      translation_locale = EXCLUDED.translation_locale,
+      knowledge_view_preference = EXCLUDED.knowledge_view_preference,
+      review_depth_preset = EXCLUDED.review_depth_preset,
+      enable_confidence_check = EXCLUDED.enable_confidence_check,
+      enable_word_spelling = EXCLUDED.enable_word_spelling,
+      enable_audio_spelling = EXCLUDED.enable_audio_spelling,
+      show_pictures_in_questions = EXCLUDED.show_pictures_in_questions,
+      updated_at = now()
+    `,
+    [randomUUID(), userId],
+  );
+};
+
+const upsertLearnerStatus = async (
+  client: Client,
+  userId: string,
+  scenario: ResolvedReviewScenarioDefinition,
+  status: ReviewQueueSeedStatus,
+): Promise<void> => {
+  await client.query(
+    `
+    INSERT INTO learner_entry_statuses (id, user_id, entry_type, entry_id, status)
+    VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5)
+    ON CONFLICT (user_id, entry_type, entry_id)
+    DO UPDATE SET status = EXCLUDED.status, updated_at = now()
+    `,
+    [randomUUID(), userId, scenario.entryType, scenario.resolvedEntryId, status],
+  );
+};
+
+const insertReviewQueueState = async (
+  client: Client,
+  userId: string,
+  scenario: ResolvedReviewScenarioDefinition,
+  dueAt: Date,
+  lastReviewedAt: Date | null,
+): Promise<void> => {
+  const createdAt = new Date(dueAt.getTime() - 3_600_000);
+  const reviewedAt = lastReviewedAt ?? new Date(dueAt.getTime() - 86_400_000);
+  await client.query(
+    `
+    INSERT INTO entry_review_states (
+      id,
+      user_id,
+      target_type,
+      target_id,
+      entry_type,
+      entry_id,
+      stability,
+      difficulty,
+      success_streak,
+      lapse_count,
+      exposure_count,
+      times_remembered,
+      last_prompt_type,
+      last_submission_prompt_id,
+      last_outcome,
+      is_fragile,
+      is_suspended,
+      relearning,
+      relearning_trigger,
+      recheck_due_at,
+      last_reviewed_at,
+      next_due_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      $1::uuid,
+      $2::uuid,
+      $3,
+      $4::uuid,
+      $5,
+      $6::uuid,
+      2.0,
+      0.45,
+      0,
+      0,
+      0,
+      0,
+      $7,
+      $8,
+      NULL,
+      false,
+      false,
+      false,
+      NULL,
+      NULL,
+      $9::timestamptz,
+      $10::timestamptz,
+      $11::timestamptz,
+      $11::timestamptz
+    )
+    `,
+    [
+      randomUUID(),
+      userId,
+      scenario.entryType === "word" ? "meaning" : "phrase_sense",
+      scenario.resolvedTargetId,
+      scenario.entryType,
+      scenario.resolvedEntryId,
+      scenario.lastPromptType ?? null,
+      `manual_prompt_type:${scenario.expectedPromptType}`,
+      reviewedAt.toISOString(),
+      dueAt.toISOString(),
+      createdAt.toISOString(),
+    ],
+  );
+};
+
+const seedCustomReviewQueue = async (
+  userId: string,
+  items: readonly ReviewQueueSeedItem[],
+): Promise<Record<string, ResolvedReviewScenarioDefinition>> => {
+  const resolvedScenarios = await ensureScenarioCatalog();
+  const scenarioMap = new Map(resolvedScenarios.map((scenario) => [scenario.key, scenario]));
+  const client = await connectClient();
+
+  try {
+    await client.query("BEGIN");
+    await upsertUserPreferences(client, userId);
+    await client.query(`DELETE FROM entry_review_states WHERE user_id = $1::uuid`, [userId]);
+
+    for (const item of items) {
+      const scenario = scenarioMap.get(item.scenarioKey);
+      if (!scenario) {
+        throw new Error(`Missing review scenario definition for ${item.scenarioKey}`);
+      }
+      await upsertLearnerStatus(client, userId, scenario, item.status);
+      if (item.status === "learning" && item.dueAt) {
+        await insertReviewQueueState(client, userId, scenario, item.dueAt, item.lastReviewedAt ?? null);
+      }
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    await client.end();
+  }
+
+  return Object.fromEntries(items.map((item) => [item.scenarioKey, scenarioMap.get(item.scenarioKey)!]));
+};
+
 export const seedReviewScenarioQueue = async (userId: string): Promise<void> => {
   const resolvedScenarios = await ensureScenarioCatalog();
 
@@ -910,4 +1098,100 @@ export const seedReviewScenarioQueue = async (userId: string): Promise<void> => 
   } finally {
     await client.end();
   }
+};
+
+export const seedGroupedReviewQueueFixture = async (
+  userId: string,
+): Promise<GroupedReviewQueueFixture> => {
+  const now = new Date();
+  const dueNowAt = new Date(now.getTime() - 60_000);
+  const tomorrowAt = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+      9,
+      0,
+      0,
+      0,
+    ),
+  );
+  const oneToThreeMonthsAt = new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000);
+  const sixPlusMonthsAt = new Date(now.getTime() + 220 * 24 * 60 * 60 * 1000);
+
+  const scenarios = await seedCustomReviewQueue(userId, [
+    {
+      scenarioKey: "entry-to-definition",
+      status: "learning",
+      dueAt: dueNowAt,
+      lastReviewedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+    },
+    {
+      scenarioKey: "definition-to-entry",
+      status: "learning",
+      dueAt: tomorrowAt,
+      lastReviewedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+    },
+    {
+      scenarioKey: "situation",
+      status: "learning",
+      dueAt: oneToThreeMonthsAt,
+      lastReviewedAt: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000),
+    },
+    {
+      scenarioKey: "collocation",
+      status: "learning",
+      dueAt: sixPlusMonthsAt,
+      lastReviewedAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
+    },
+    { scenarioKey: "typed-recall", status: "known" },
+    { scenarioKey: "sentence-gap", status: "to_learn" },
+  ]);
+
+  return {
+    dueNowText: scenarios["entry-to-definition"].displayText,
+    dueNowDefinition: scenarios["entry-to-definition"].definition,
+    tomorrowText: scenarios["definition-to-entry"].displayText,
+    hiddenKnownText: scenarios["typed-recall"].displayText,
+    hiddenToLearnText: scenarios["sentence-gap"].displayText,
+    effectiveNow: tomorrowAt.toISOString(),
+  };
+};
+
+export const seedFailedReviewQueueFixture = async (
+  userId: string,
+): Promise<FailedReviewQueueFixture> => {
+  const now = new Date();
+  const dueNowAt = new Date(now.getTime() - 60_000);
+  const tomorrowAt = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+      9,
+      0,
+      0,
+      0,
+    ),
+  );
+
+  const scenarios = await seedCustomReviewQueue(userId, [
+    {
+      scenarioKey: "sentence-gap",
+      status: "learning",
+      dueAt: dueNowAt,
+      lastReviewedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+    },
+    {
+      scenarioKey: "definition-to-entry",
+      status: "learning",
+      dueAt: tomorrowAt,
+      lastReviewedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+    },
+  ]);
+
+  return {
+    failedText: scenarios["sentence-gap"].displayText,
+    futureText: scenarios["definition-to-entry"].displayText,
+  };
 };

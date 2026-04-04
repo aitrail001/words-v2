@@ -32,6 +32,10 @@ const clickOptionByLabel = async (page: Page, label: string) => {
 };
 
 const answerVisiblePrompt = async (page: Page, scenario: (typeof REVIEW_SCENARIO_DEFINITIONS)[number]) => {
+  const definitionButtons = page.getByRole("button", {
+    name: new RegExp(escapeRegExp(scenario.definition), "i"),
+  });
+
   if (await page.getByTestId("review-collocation-prompt").count()) {
     await clickOptionByLabel(page, scenario.displayText);
     return;
@@ -40,10 +44,8 @@ const answerVisiblePrompt = async (page: Page, scenario: (typeof REVIEW_SCENARIO
     await clickOptionByLabel(page, scenario.displayText);
     return;
   }
-  if (await page.getByRole("button", { name: "Play audio", exact: true }).count()) {
-    await expect(page.getByRole("button", { name: /replay audio/i })).toBeVisible();
-    await page.getByRole("button", { name: "Play audio", exact: true }).click();
-    await page.getByRole("button", { name: new RegExp(escapeRegExp(scenario.definition), "i") }).click();
+  if (await page.getByTestId("review-confidence-prompt").count()) {
+    await page.getByRole("button", { name: /i remember it/i }).click();
     return;
   }
   if (await page.getByTestId("review-speech-placeholder").count()) {
@@ -56,13 +58,32 @@ const answerVisiblePrompt = async (page: Page, scenario: (typeof REVIEW_SCENARIO
     await page.getByRole("button", { name: /check answer/i }).click();
     return;
   }
+  if (await page.getByRole("button", { name: /replay audio/i }).count()) {
+    await expect(page.getByRole("button", { name: /replay audio/i })).toBeVisible();
+    await page.getByRole("button", { name: /replay audio/i }).first().click();
+    if (await definitionButtons.count()) {
+      await definitionButtons.first().click();
+      return;
+    }
+    if (await page.getByPlaceholder(/type the word or phrase/i).count()) {
+      await page.getByPlaceholder(/type the word or phrase/i).fill(scenario.displayText);
+      await page.getByRole("button", { name: /check answer/i }).click();
+      return;
+    }
+    await clickOptionByLabel(page, scenario.displayText);
+    return;
+  }
   if (await page.getByText(new RegExp(`^${escapeRegExp(scenario.displayText)}$`, "i")).count()) {
-    await page.getByRole("button", { name: new RegExp(escapeRegExp(scenario.definition), "i") }).click();
+    if (await definitionButtons.count()) {
+      await definitionButtons.first().click();
+      return;
+    }
+    await clickOptionByLabel(page, scenario.displayText);
     return;
   }
   await expect(page.getByText(new RegExp(escapeRegExp(scenario.definition), "i"))).toBeVisible();
-  if (await page.getByRole("button", { name: new RegExp(escapeRegExp(scenario.definition), "i") }).count()) {
-    await page.getByRole("button", { name: new RegExp(escapeRegExp(scenario.definition), "i") }).click();
+  if (await definitionButtons.count()) {
+    await definitionButtons.first().click();
     return;
   }
   await clickOptionByLabel(page, scenario.displayText);
