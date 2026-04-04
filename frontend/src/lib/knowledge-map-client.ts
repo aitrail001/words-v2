@@ -140,6 +140,31 @@ export type GroupedReviewQueueResponse = {
   groups: GroupedReviewQueueGroup[];
 };
 
+export type AdminGroupedReviewQueueItem = GroupedReviewQueueItem & {
+  target_type: string | null;
+  target_id: string | null;
+  recheck_due_at: string | null;
+  next_due_at: string | null;
+  last_outcome: string | null;
+  relearning: boolean | null;
+  relearning_trigger: string | null;
+};
+
+export type AdminGroupedReviewQueueGroup = {
+  bucket: ReviewQueueBucket;
+  count: number;
+  items: AdminGroupedReviewQueueItem[];
+};
+
+export type AdminGroupedReviewQueueResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: AdminGroupedReviewQueueGroup[];
+  debug: {
+    effective_now: string;
+  };
+};
+
 export type KnowledgeMapRange = {
   range_start: number;
   range_end: number;
@@ -396,6 +421,20 @@ export const getReviewQueueStats = (): Promise<ReviewQueueStats> =>
 
 export const getGroupedReviewQueue = (): Promise<GroupedReviewQueueResponse> =>
   apiClient.get<GroupedReviewQueueResponse>("/reviews/queue/grouped");
+
+export const getAdminGroupedReviewQueue = (
+  effectiveNow?: string,
+): Promise<AdminGroupedReviewQueueResponse> => {
+  const searchParams = new URLSearchParams();
+  if (effectiveNow) {
+    searchParams.set("effective_now", effectiveNow);
+  }
+
+  const query = searchParams.toString();
+  return apiClient.get<AdminGroupedReviewQueueResponse>(
+    `/reviews/admin/queue/grouped${query ? `?${query}` : ""}`,
+  );
+};
 
 export const getKnowledgeMapRange = (rangeStart: number): Promise<KnowledgeMapRange> =>
   apiClient.get<KnowledgeMapRange>(`/knowledge-map/ranges/${rangeStart}`);
