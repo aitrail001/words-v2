@@ -174,6 +174,183 @@ class TestQueueDue:
         assert int(response.headers["X-Reviews-Query-Count"]) >= 1
         assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
 
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_success(self, client, mock_db, auth_token, monkeypatch):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+
+        learning_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+        )
+        learning_state.next_due_at = now + timedelta(hours=1)
+        learning_state.last_reviewed_at = now - timedelta(days=1)
+
+        known_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+        )
+        known_state.next_due_at = now + timedelta(days=1)
+
+        to_learn_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+        )
+        to_learn_state.next_due_at = now + timedelta(days=2)
+
+        phrase_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=uuid.uuid4(),
+            target_type="phrase_sense",
+            target_id=uuid.uuid4(),
+        )
+        phrase_state.next_due_at = now + timedelta(days=1)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        state_result = MagicMock()
+        state_result.all.return_value = [
+            (learning_state, "learning"),
+            (known_state, "known"),
+            (to_learn_state, "to_learn"),
+            (phrase_state, "learning"),
+        ]
+        word_result = MagicMock()
+        word_result.all.return_value = [
+            (learning_state.entry_id, "persistence"),
+            (known_state.entry_id, "resilience"),
+            (to_learn_state.entry_id, "tranquil"),
+        ]
+        phrase_result = MagicMock()
+        phrase_result.all.return_value = [(phrase_state.entry_id, "break down")]
+        mock_db.execute.side_effect = [user_result, state_result, word_result, phrase_result]
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now if tz is None else now.astimezone(tz)
+
+        monkeypatch.setattr("app.api.reviews.datetime", FrozenDateTime)
+
+        response = await client.get(
+            "/api/reviews/queue/grouped",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_count"] == 2
+        assert data["groups"][0]["bucket"] == "later_today"
+        assert data["groups"][0]["items"][0]["text"] == "persistence"
+        assert data["groups"][0]["items"][0]["status"] == "learning"
+        assert "target_type" not in data["groups"][0]["items"][0]
+        assert data["groups"][1]["bucket"] == "tomorrow"
+        assert data["groups"][1]["items"][0]["entry_type"] == "phrase"
+        assert data["groups"][1]["items"][0]["text"] == "break down"
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_admin_supports_effective_time_override(
+        self, client, mock_db
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        admin_user = User(
+            id=user_id,
+            email="admin@example.com",
+            password_hash="hashed",
+            role="admin",
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = admin_user
+        future_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+        )
+        future_state.next_due_at = datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+        state_result = MagicMock()
+        state_result.all.return_value = [(future_state, "learning")]
+        word_result = MagicMock()
+        word_result.all.return_value = [(future_state.entry_id, "candidate")]
+        mock_db.execute.side_effect = [user_result, state_result, word_result]
+
+        response = await client.get(
+            "/api/reviews/admin/queue/grouped?effective_now=2026-10-05T09:00:00%2B00:00",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["debug"]["effective_now"] == "2026-10-05T09:00:00+00:00"
+        assert data["groups"][0]["bucket"] == "due_now"
+        assert data["groups"][0]["items"][0]["text"] == "candidate"
+        assert data["groups"][0]["items"][0]["target_type"] == "meaning"
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_admin_normalizes_naive_effective_time(
+        self, client, mock_db
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        admin_user = User(
+            id=user_id,
+            email="admin@example.com",
+            password_hash="hashed",
+            role="admin",
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = admin_user
+        state_result = MagicMock()
+        state_result.all.return_value = []
+        mock_db.execute.side_effect = [user_result, state_result]
+
+        response = await client.get(
+            "/api/reviews/admin/queue/grouped?effective_now=2026-10-05T09:00:00",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["debug"]["effective_now"] == "2026-10-05T09:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_admin_requires_admin(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        response = await client.get(
+            "/api/reviews/admin/queue/grouped",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+
 
 class TestQueueScheduleUpdate:
     @pytest.mark.asyncio

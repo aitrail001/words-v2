@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_admin_user, get_current_user
 from app.api.request_db_metrics import finalize_request_db_metrics
 from app.core.database import get_db
 from app.core.logging import get_logger
@@ -189,6 +189,55 @@ class QueueScheduleResponse(BaseModel):
     current_schedule_value: str
     current_schedule_label: str
     schedule_options: list[ScheduleOptionResponse] = []
+
+
+class GroupedQueueItemResponse(BaseModel):
+    queue_item_id: str
+    entry_id: str
+    entry_type: str
+    text: str
+    status: str
+    next_review_at: datetime | None = None
+    last_reviewed_at: datetime | None = None
+
+
+class GroupedQueueBucketResponse(BaseModel):
+    bucket: str
+    count: int
+    items: list[GroupedQueueItemResponse]
+
+
+class GroupedQueueResponse(BaseModel):
+    generated_at: datetime
+    total_count: int
+    groups: list[GroupedQueueBucketResponse]
+
+
+class AdminGroupedQueueItemResponse(GroupedQueueItemResponse):
+    target_type: str | None = None
+    target_id: str | None = None
+    recheck_due_at: datetime | None = None
+    next_due_at: datetime | None = None
+    last_outcome: str | None = None
+    relearning: bool | None = None
+    relearning_trigger: str | None = None
+
+
+class AdminGroupedQueueBucketResponse(BaseModel):
+    bucket: str
+    count: int
+    items: list[AdminGroupedQueueItemResponse]
+
+
+class GroupedQueueDebugResponse(BaseModel):
+    effective_now: str
+
+
+class AdminGroupedQueueResponse(BaseModel):
+    generated_at: datetime
+    total_count: int
+    groups: list[AdminGroupedQueueBucketResponse]
+    debug: GroupedQueueDebugResponse
 
 
 class ReviewAnalyticsBucketResponse(BaseModel):
@@ -460,6 +509,57 @@ async def get_queue_stats(
     )
     logger.info("reviews_request", route_name="queue_stats", **metrics)
     return QueueStatsResponse(**stats)
+
+
+@router.get("/queue/grouped", response_model=GroupedQueueResponse)
+async def get_grouped_review_queue(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GroupedQueueResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    payload = await service.get_grouped_review_queue(
+        user_id=current_user.id,
+        now=datetime.now().astimezone(),
+        include_debug_fields=False,
+    )
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_grouped", **metrics)
+    return GroupedQueueResponse(**payload)
+
+
+@router.get("/admin/queue/grouped", response_model=AdminGroupedQueueResponse)
+async def get_grouped_review_queue_admin(
+    effective_now: datetime | None = Query(default=None),
+    request: Request = None,
+    response: Response = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminGroupedQueueResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    resolved_now = service._normalize_bucket_datetime(effective_now) or datetime.now().astimezone()
+    payload = await service.get_grouped_review_queue(
+        user_id=current_user.id,
+        now=resolved_now,
+        include_debug_fields=True,
+    )
+    payload["debug"] = {"effective_now": resolved_now.isoformat()}
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_grouped_admin", **metrics)
+    return AdminGroupedQueueResponse(**payload)
 
 
 @router.get("/queue/{item_id}", response_model=QueueItemResponse)
