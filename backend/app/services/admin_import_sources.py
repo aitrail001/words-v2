@@ -258,6 +258,86 @@ async def list_admin_import_sources(
     return total, items
 
 
+async def get_admin_import_source_detail(
+    db: AsyncSession,
+    *,
+    source_id: uuid.UUID,
+) -> dict[str, object] | None:
+    total, items = await list_admin_import_sources(
+        db,
+        q=None,
+        status_filter="all",
+        sort="created_at",
+        order="desc",
+        limit=1,
+        offset=0,
+    )
+    del total
+    source = (await db.execute(select(ImportSource).where(ImportSource.id == source_id))).scalar_one_or_none()
+    if source is None:
+        return None
+
+    source_summary = next((item for item in items if item.get("id") == str(source_id)), None)
+    if source_summary is not None:
+        return source_summary
+
+    entry_counts = (
+        await db.execute(
+            select(
+                func.sum(case((ImportSourceEntry.entry_type == "word", 1), else_=0)).label("word_entry_count"),
+                func.sum(case((ImportSourceEntry.entry_type == "phrase", 1), else_=0)).label("phrase_entry_count"),
+            ).where(ImportSourceEntry.import_source_id == source_id)
+        )
+    ).one()
+    usage = (
+        await db.execute(
+            select(
+                func.count().label("total_jobs"),
+                func.sum(
+                    case(
+                        (and_(ImportJob.status == "completed", ImportJob.started_at.is_(None)), 1),
+                        else_=0,
+                    )
+                ).label("cache_hit_count"),
+            ).where(ImportJob.import_source_id == source_id)
+        )
+    ).one()
+
+    return {
+        "id": str(source.id),
+        "source_type": source.source_type,
+        "source_hash_sha256": source.source_hash_sha256,
+        "title": source.title,
+        "author": source.author,
+        "publisher": source.publisher,
+        "language": source.language,
+        "source_identifier": source.source_identifier,
+        "published_year": source.published_year,
+        "isbn": source.isbn,
+        "status": source.status,
+        "matched_entry_count": source.matched_entry_count,
+        "word_entry_count": int(entry_counts.word_entry_count or 0),
+        "phrase_entry_count": int(entry_counts.phrase_entry_count or 0),
+        "created_at": source.created_at,
+        "processed_at": source.processed_at,
+        "deleted_at": source.deleted_at,
+        "deleted_by_user_id": str(source.deleted_by_user_id) if source.deleted_by_user_id else None,
+        "deletion_reason": source.deletion_reason,
+        "first_imported_at": None,
+        "first_imported_by_user_id": None,
+        "first_imported_by_email": None,
+        "first_imported_by_role": None,
+        "processing_duration_seconds": None,
+        "source_filename": None,
+        "total_jobs": int(usage.total_jobs or 0),
+        "cache_hit_count": int(usage.cache_hit_count or 0),
+        "last_reused_at": None,
+        "last_reused_by_user_id": None,
+        "last_reused_by_email": None,
+        "last_reused_by_role": None,
+    }
+
+
 async def list_import_source_jobs(
     db: AsyncSession,
     *,

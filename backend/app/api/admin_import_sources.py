@@ -11,6 +11,7 @@ from app.models.import_source import ImportSource
 from app.models.user import User
 from app.services.admin_import_sources import (
     DELETE_MODE_CACHE_ONLY,
+    get_admin_import_source_detail,
     list_admin_import_sources,
     list_import_source_jobs,
     soft_delete_import_source_cache,
@@ -60,40 +61,9 @@ async def get_source_detail(
     _: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    total, items = await list_admin_import_sources(
-        db,
-        q=None,
-        status_filter="all",
-        sort="created_at",
-        order="desc",
-        limit=1,
-        offset=0,
-    )
-    del total
-    source = (await db.execute(select(ImportSource).where(ImportSource.id == source_id))).scalar_one_or_none()
-    if source is None:
-        raise HTTPException(status_code=404, detail="Import source not found")
-    source_summary = next((item for item in items if item.get("id") == str(source_id)), None)
+    source_summary = await get_admin_import_source_detail(db, source_id=source_id)
     if source_summary is None:
-        source_summary = {
-            "id": str(source.id),
-            "source_type": source.source_type,
-            "source_hash_sha256": source.source_hash_sha256,
-            "title": source.title,
-            "author": source.author,
-            "publisher": source.publisher,
-            "language": source.language,
-            "source_identifier": source.source_identifier,
-            "published_year": source.published_year,
-            "isbn": source.isbn,
-            "status": source.status,
-            "matched_entry_count": source.matched_entry_count,
-            "created_at": source.created_at,
-            "processed_at": source.processed_at,
-            "deleted_at": source.deleted_at,
-            "deleted_by_user_id": str(source.deleted_by_user_id) if source.deleted_by_user_id else None,
-            "deletion_reason": source.deletion_reason,
-        }
+        raise HTTPException(status_code=404, detail="Import source not found")
     return source_summary
 
 

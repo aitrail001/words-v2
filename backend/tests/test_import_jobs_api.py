@@ -586,6 +586,7 @@ class TestImportJobStatusEndpoints:
             pipeline_version="v1",
             lexicon_version="v1",
             status="completed",
+            matched_entry_count=7,
         )
         setattr(job, "import_source", source)
 
@@ -612,3 +613,62 @@ class TestImportJobStatusEndpoints:
             "code": "IMPORT_CACHE_DELETED",
             "message": "This cached import is no longer available. Re-upload the EPUB to regenerate import cache.",
         }
+
+    @pytest.mark.asyncio
+    async def test_list_import_job_entries_allows_empty_completed_cache_when_book_has_no_matches(
+        self,
+        client,
+        mock_db,
+        monkeypatch,
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        source_id = uuid.uuid4()
+        user = make_user(user_id)
+        job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=source_id,
+            source_filename="empty.epub",
+            source_hash="c" * 64,
+            list_name="Empty Import",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        )
+        source = ImportSource(
+            id=source_id,
+            source_type="epub",
+            source_hash_sha256="c" * 64,
+            pipeline_version="v1",
+            lexicon_version="v1",
+            status="completed",
+            matched_entry_count=0,
+        )
+        setattr(job, "import_source", source)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        job_result = MagicMock()
+        job_result.scalar_one_or_none.return_value = job
+        empty_count_result = MagicMock()
+        empty_count_result.scalar_one.return_value = 0
+        entries_result = MagicMock()
+        entries_result.all.return_value = []
+        mock_db.execute.side_effect = [user_result, job_result, empty_count_result, entries_result]
+
+        async def fake_hydrate(_db, jobs):
+            return jobs
+
+        async def fake_fetch_review_entries(*_args, **_kwargs):
+            return 0, []
+
+        monkeypatch.setattr(import_jobs_api, "_hydrate_import_jobs_with_source_details", fake_hydrate)
+        monkeypatch.setattr(import_jobs_api, "fetch_review_entries", fake_fetch_review_entries)
+
+        response = await client.get(
+            f"/api/import-jobs/{job.id}/entries",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"total": 0, "items": []}

@@ -1625,7 +1625,7 @@ def is_import_source_cache_available(import_source: ImportSource | None, *, cach
         return False
     if import_source.status != "completed":
         return False
-    if cached_entry_count is not None and cached_entry_count <= 0:
+    if cached_entry_count is not None and cached_entry_count <= 0 and (import_source.matched_entry_count or 0) > 0:
         return False
     return True
 
