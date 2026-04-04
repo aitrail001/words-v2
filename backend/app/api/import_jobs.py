@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -23,12 +23,15 @@ from app.api.word_lists import (
 )
 from app.core.database import get_db
 from app.models.import_job import ImportJob
+from app.models.import_source_entry import ImportSourceEntry
 from app.models.user import User
 from app.services.source_imports import (
     EntryRef,
     ImportCacheDeletedError,
+    IMPORT_CACHE_DELETED_MESSAGE,
     create_word_list_from_entries,
     fetch_review_entries,
+    is_import_source_cache_available,
 )
 
 router = APIRouter()
@@ -36,6 +39,13 @@ router = APIRouter()
 
 class BulkDeleteImportJobsRequest(BaseModel):
     job_ids: list[uuid.UUID]
+
+
+def _import_cache_deleted_detail() -> dict[str, str]:
+    return {
+        "code": "IMPORT_CACHE_DELETED",
+        "message": IMPORT_CACHE_DELETED_MESSAGE,
+    }
 
 
 def _default_word_list_name_for_import_job(job: ImportJob) -> str:
@@ -156,13 +166,19 @@ async def list_import_job_entries(
         raise HTTPException(status_code=409, detail="Import source is not ready")
     await _hydrate_import_jobs_with_source_details(db, [job])
     import_source = getattr(job, "import_source", None)
-    if import_source is not None and import_source.deleted_at is not None:
+    cached_entry_count = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(ImportSourceEntry)
+                .where(ImportSourceEntry.import_source_id == job.import_source_id)
+            )
+        ).scalar_one()
+    )
+    if not is_import_source_cache_available(import_source, cached_entry_count=cached_entry_count):
         raise HTTPException(
             status_code=410,
-            detail={
-                "code": "IMPORT_CACHE_DELETED",
-                "message": "This cached import is no longer available. Re-upload the EPUB to regenerate import cache.",
-            },
+            detail=_import_cache_deleted_detail(),
         )
     total, items = await fetch_review_entries(
         db,
@@ -210,10 +226,7 @@ async def create_word_list_from_import_job(
         detail: str | dict[str, str] = str(exc)
         if isinstance(exc, ImportCacheDeletedError):
             status_code = 410
-            detail = {
-                "code": "IMPORT_CACHE_DELETED",
-                "message": str(exc),
-            }
+            detail = _import_cache_deleted_detail()
         raise HTTPException(status_code=status_code, detail=detail) from exc
     return _to_word_list_response(word_list)
 

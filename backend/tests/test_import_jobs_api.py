@@ -209,6 +209,67 @@ class TestImportJobStatusEndpoints:
         assert response.json()["detail"] == "Import job not found"
 
     @pytest.mark.asyncio
+    async def test_get_import_job_uses_cached_source_word_phrase_counts_when_job_snapshot_is_zero(self, client, mock_db):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        import_source_id = uuid.uuid4()
+        job_id = uuid.uuid4()
+        user = make_user(user_id)
+        job = ImportJob(
+            id=job_id,
+            user_id=user_id,
+            import_source_id=import_source_id,
+            source_filename="cached.epub",
+            source_hash="a" * 64,
+            list_name="Cached Import",
+            status="completed",
+            matched_entry_count=5682,
+            progress_total=5682,
+            progress_completed=5682,
+            word_entry_count=0,
+            phrase_entry_count=0,
+            created_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+        )
+        source = ImportSource(
+            id=import_source_id,
+            source_type="epub",
+            source_hash_sha256="a" * 64,
+            pipeline_version="v1",
+            lexicon_version="v1",
+            status="completed",
+            matched_entry_count=5682,
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        job_result = MagicMock()
+        job_result.scalar_one_or_none.return_value = job
+        sources_result = MagicMock()
+        sources_result.scalars.return_value.all.return_value = [source]
+        counts_result = MagicMock()
+        counts_result.all.return_value = [
+            MagicMock(
+                import_source_id=import_source_id,
+                word_entry_count=4123,
+                phrase_entry_count=1559,
+            )
+        ]
+        mock_db.execute.side_effect = [user_result, job_result, sources_result, counts_result]
+
+        response = await client.get(
+            f"/api/import-jobs/{job_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["from_cache"] is True
+        assert payload["matched_entry_count"] == 5682
+        assert payload["word_entry_count"] == 4123
+        assert payload["phrase_entry_count"] == 1559
+
+    @pytest.mark.asyncio
     async def test_delete_import_job_removes_terminal_user_record_only(self, client, mock_db):
         user_id = uuid.uuid4()
         token = create_access_token(subject=str(user_id))
@@ -228,7 +289,9 @@ class TestImportJobStatusEndpoints:
         user_result.scalar_one_or_none.return_value = user
         job_result = MagicMock()
         job_result.scalar_one_or_none.return_value = job
-        mock_db.execute.side_effect = [user_result, job_result]
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
+        mock_db.execute.side_effect = [user_result, job_result, count_result]
 
         response = await client.delete(
             f"/api/import-jobs/{job.id}",
@@ -399,7 +462,9 @@ class TestImportJobStatusEndpoints:
         user_result.scalar_one_or_none.return_value = user
         job_result = MagicMock()
         job_result.scalar_one_or_none.return_value = job
-        mock_db.execute.side_effect = [user_result, job_result]
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
+        mock_db.execute.side_effect = [user_result, job_result, count_result]
 
         async def fake_hydrate(_db, _jobs):
             return _jobs
@@ -447,3 +512,103 @@ class TestImportJobStatusEndpoints:
         assert response.status_code == 201
         assert captured["name"] == "Atomic Habits"
         assert captured["description"] == "bookname: Atomic Habits\nfilename: Atomic Habits.epub\nauthor: James Clear"
+
+    @pytest.mark.asyncio
+    async def test_list_import_job_entries_returns_410_when_source_not_completed(self, client, mock_db, monkeypatch):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        source_id = uuid.uuid4()
+        user = make_user(user_id)
+        job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=source_id,
+            source_filename="good-energy.epub",
+            source_hash="a" * 64,
+            list_name="Good Energy",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        )
+        source = ImportSource(
+            id=source_id,
+            source_type="epub",
+            source_hash_sha256="a" * 64,
+            pipeline_version="v1",
+            lexicon_version="v1",
+            status="pending",
+        )
+        setattr(job, "import_source", source)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        job_result = MagicMock()
+        job_result.scalar_one_or_none.return_value = job
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 0
+        mock_db.execute.side_effect = [user_result, job_result, count_result]
+
+        async def fake_hydrate(_db, jobs):
+            return jobs
+
+        monkeypatch.setattr(import_jobs_api, "_hydrate_import_jobs_with_source_details", fake_hydrate)
+
+        response = await client.get(
+            f"/api/import-jobs/{job.id}/entries",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 410
+        assert response.json()["detail"] == {
+            "code": "IMPORT_CACHE_DELETED",
+            "message": "This cached import is no longer available. Re-upload the EPUB to regenerate import cache.",
+        }
+
+    @pytest.mark.asyncio
+    async def test_list_import_job_entries_returns_410_when_cache_rows_missing(self, client, mock_db, monkeypatch):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        source_id = uuid.uuid4()
+        user = make_user(user_id)
+        job = ImportJob(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            import_source_id=source_id,
+            source_filename="good-energy.epub",
+            source_hash="b" * 64,
+            list_name="Good Energy",
+            status="completed",
+            created_at=datetime.now(timezone.utc),
+        )
+        source = ImportSource(
+            id=source_id,
+            source_type="epub",
+            source_hash_sha256="b" * 64,
+            pipeline_version="v1",
+            lexicon_version="v1",
+            status="completed",
+        )
+        setattr(job, "import_source", source)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        job_result = MagicMock()
+        job_result.scalar_one_or_none.return_value = job
+        empty_count_result = MagicMock()
+        empty_count_result.scalar_one.return_value = 0
+        mock_db.execute.side_effect = [user_result, job_result, empty_count_result]
+
+        async def fake_hydrate(_db, jobs):
+            return jobs
+
+        monkeypatch.setattr(import_jobs_api, "_hydrate_import_jobs_with_source_details", fake_hydrate)
+
+        response = await client.get(
+            f"/api/import-jobs/{job.id}/entries",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 410
+        assert response.json()["detail"] == {
+            "code": "IMPORT_CACHE_DELETED",
+            "message": "This cached import is no longer available. Re-upload the EPUB to regenerate import cache.",
+        }

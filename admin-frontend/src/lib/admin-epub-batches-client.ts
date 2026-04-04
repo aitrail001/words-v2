@@ -26,6 +26,26 @@ export type AdminImportBatchJob = {
   completed_at: string | null;
 };
 
+export const createAdminImportBatch = async (input: {
+  batchName?: string;
+}): Promise<AdminImportBatchSummary> =>
+  apiClient.post("/admin/import-batches", {
+    batch_name: input.batchName?.trim() || undefined,
+  });
+
+export const addAdminEpubFilesToBatch = async (
+  batchId: string,
+  input: {
+    files: File[];
+  },
+): Promise<{ batch: AdminImportBatchSummary; jobs: AdminImportBatchJob[]; failures?: Array<{ source_filename: string; error: string }> }> => {
+  const formData = new FormData();
+  for (const file of input.files) {
+    formData.append("files", file);
+  }
+  return apiClient.post(`/admin/import-batches/${batchId}/epub`, formData);
+};
+
 export const createAdminEpubImportBatch = async (input: {
   files: File[];
   batchName?: string;

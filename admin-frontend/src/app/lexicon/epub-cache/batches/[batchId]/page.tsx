@@ -33,6 +33,18 @@ function formatDuration(seconds: number | null | undefined): string {
   return `${minutes}m ${remainingSeconds}s`;
 }
 
+function formatStarted(value: string | null | undefined, fromCache: boolean): string {
+  if (value) return formatDate(value);
+  if (fromCache) return "Cached import (not processed)";
+  return "-";
+}
+
+function formatDetailDuration(seconds: number | null | undefined, fromCache: boolean): string {
+  if (seconds != null) return formatDuration(seconds);
+  if (fromCache) return "Cached import (no processing duration)";
+  return "-";
+}
+
 function resolveUiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.message.trim().length > 0) {
     return error.message;
@@ -157,8 +169,8 @@ export default function EpubCacheBatchDetailPage() {
               <p><span className="font-medium">Words:</span> {selectedJobDetail.word_entry_count}</p>
               <p><span className="font-medium">Phrases:</span> {selectedJobDetail.phrase_entry_count}</p>
               <p><span className="font-medium">Progress:</span> {selectedJobDetail.progress_completed}/{selectedJobDetail.progress_total}</p>
-              <p><span className="font-medium">Duration:</span> {formatDuration(selectedJobDetail.processing_duration_seconds)}</p>
-              <p><span className="font-medium">Started:</span> {formatDate(selectedJobDetail.started_at)}</p>
+              <p><span className="font-medium">Duration:</span> {formatDetailDuration(selectedJobDetail.processing_duration_seconds, selectedJobDetail.from_cache)}</p>
+              <p><span className="font-medium">Started:</span> {formatStarted(selectedJobDetail.started_at, selectedJobDetail.from_cache)}</p>
               <p><span className="font-medium">Completed:</span> {formatDate(selectedJobDetail.completed_at)}</p>
               {selectedJobDetail.error_message ? <p className="text-rose-700"><span className="font-medium">Error:</span> {selectedJobDetail.error_message}</p> : null}
             </div>

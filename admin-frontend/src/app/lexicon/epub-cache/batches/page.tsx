@@ -8,10 +8,13 @@ import { ApiError } from "@/lib/api-client";
 import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 import {
-  createAdminEpubImportBatch,
+  addAdminEpubFilesToBatch,
+  createAdminImportBatch,
   listAdminImportBatches,
   type AdminImportBatchSummary,
 } from "@/lib/admin-epub-batches-client";
+
+const MAX_BATCH_FILES = 10;
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "-";
@@ -32,6 +35,11 @@ export default function EpubCacheBatchesPage() {
   const [batchName, setBatchName] = useState("");
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [recentBatches, setRecentBatches] = useState<AdminImportBatchSummary[]>([]);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [submissionTotal, setSubmissionTotal] = useState(0);
+  const [uploadedCount, setUploadedCount] = useState(0);
+  const [queuedJobCount, setQueuedJobCount] = useState(0);
+  const [failedUploadCount, setFailedUploadCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -58,24 +66,61 @@ export default function EpubCacheBatchesPage() {
       setError("Select one or more EPUB files");
       return;
     }
+    if (uploadFiles.length > MAX_BATCH_FILES) {
+      setError(`Too many files in batch (max ${MAX_BATCH_FILES})`);
+      return;
+    }
 
     setCreatingBatch(true);
     setError(null);
     setMessage(null);
+    setSubmissionTotal(uploadFiles.length);
+    setUploadedCount(0);
+    setQueuedJobCount(0);
+    setFailedUploadCount(0);
+    setActiveBatchId(null);
     try {
-      const response = await createAdminEpubImportBatch({ files: uploadFiles, batchName: batchName.trim() || undefined });
+      const batch = await createAdminImportBatch({ batchName: batchName.trim() || undefined });
+      setActiveBatchId(batch.id);
+      setMessage(`Batch created. Uploading 0/${uploadFiles.length} books...`);
+      await loadRecentBatches();
+
+      let totalQueuedJobs = 0;
+      let totalFailures = 0;
+      const failureMessages: string[] = [];
+      for (let index = 0; index < uploadFiles.length; index += 1) {
+        const file = uploadFiles[index];
+        try {
+          const response = await addAdminEpubFilesToBatch(batch.id, { files: [file] });
+          totalQueuedJobs += response.jobs.length;
+          totalFailures += response.failures?.length || 0;
+          if (response.failures?.length) {
+            failureMessages.push(...response.failures.map((item) => `${item.source_filename}: ${item.error}`));
+          }
+        } catch (nextError) {
+          totalFailures += 1;
+          failureMessages.push(`${file.name}: ${resolveUiErrorMessage(nextError, "Failed to enqueue import")}`);
+        }
+        setUploadedCount(index + 1);
+        setQueuedJobCount(totalQueuedJobs);
+        setFailedUploadCount(totalFailures);
+        setMessage(`Batch created. Uploading ${index + 1}/${uploadFiles.length} books...`);
+        if ((index + 1) % 3 === 0 || index === uploadFiles.length - 1) {
+          await loadRecentBatches();
+        }
+      }
+
       setUploadFiles([]);
       setBatchName("");
-      const failedCount = response.failures?.length || 0;
-      setMessage(`Batch created with ${response.jobs.length} jobs${failedCount > 0 ? `, ${failedCount} failed` : ""}`);
-      if (failedCount > 0) {
-        setError(response.failures?.map((item) => `${item.source_filename}: ${item.error}`).join(" | ") || "Some files failed");
+      setMessage(`Batch created with ${totalQueuedJobs} jobs${totalFailures > 0 ? `, ${totalFailures} failed` : ""}`);
+      if (totalFailures > 0) {
+        setError(failureMessages.join(" | ") || "Some files failed");
       }
-      await loadRecentBatches();
     } catch (nextError) {
       setError(resolveUiErrorMessage(nextError, "Failed to start pre-import batch"));
     } finally {
       setCreatingBatch(false);
+      setSubmissionTotal(0);
     }
   };
 
@@ -88,6 +133,15 @@ export default function EpubCacheBatchesPage() {
 
       {error ? <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
       {message ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p> : null}
+      {creatingBatch && activeBatchId ? (
+        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+          Upload progress: {uploadedCount}/{submissionTotal} books submitted, {queuedJobCount} jobs queued
+          {failedUploadCount > 0 ? `, ${failedUploadCount} failed` : ""}.{" "}
+          <Link href={`/lexicon/epub-cache/batches/${activeBatchId}`} className="underline">
+            Open batch
+          </Link>
+        </div>
+      ) : null}
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-base font-semibold text-slate-900">Batch Import</h2>
@@ -108,17 +162,27 @@ export default function EpubCacheBatchesPage() {
               type="file"
               accept=".epub"
               multiple
-              onChange={(event) => setUploadFiles(Array.from(event.target.files ?? []))}
+              onChange={(event) => {
+                const nextFiles = Array.from(event.target.files ?? []);
+                setUploadFiles(nextFiles);
+                if (nextFiles.length > MAX_BATCH_FILES) {
+                  setError(`Too many files in batch (max ${MAX_BATCH_FILES})`);
+                } else {
+                  setError(null);
+                }
+              }}
               className="block text-sm"
             />
-            <p className="mt-1 text-xs text-slate-500">{uploadFiles.length} selected</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {uploadFiles.length} selected. Max {MAX_BATCH_FILES} books per batch.
+            </p>
           </div>
           <button
             type="submit"
-            disabled={creatingBatch || uploadFiles.length === 0}
+            disabled={creatingBatch || uploadFiles.length === 0 || uploadFiles.length > MAX_BATCH_FILES}
             className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {creatingBatch ? "Starting..." : "Start pre-import batch"}
+            {creatingBatch ? `Submitting ${uploadedCount}/${submissionTotal} book${submissionTotal === 1 ? "" : "s"}...` : "Start pre-import batch"}
           </button>
         </form>
       </section>
@@ -141,6 +205,11 @@ export default function EpubCacheBatchesPage() {
                 <div className="space-y-1">
                   <p className="font-medium text-slate-900">{batch.name || batch.id}</p>
                   <p className="text-xs text-slate-600">{formatDate(batch.created_at)}</p>
+                  <p className="text-xs text-slate-600">
+                    Launched by: {batch.created_by_email || batch.created_by_user_id}
+                    {" · "}
+                    Books: {batch.total_jobs ?? 0}
+                  </p>
                 </div>
                 <Link
                   href={`/lexicon/epub-cache/batches/${batch.id}`}

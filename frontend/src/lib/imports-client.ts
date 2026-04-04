@@ -33,6 +33,11 @@ export type ImportJob = {
   source_identifier: string | null;
   source_published_year: number | null;
   source_isbn: string | null;
+  cache_available?: boolean;
+  cache_deleted?: boolean;
+  cache_deleted_at?: string | null;
+  cache_deleted_by_user_id?: string | null;
+  cache_deleted_message?: string | null;
   from_cache: boolean;
   processing_duration_seconds: number | null;
   total_entries_extracted: number;

@@ -183,10 +183,14 @@ def _to_import_job_response(
             (job.completed_at - job.started_at).total_seconds(),
         )
     total_entries_extracted = job.matched_entry_count
-    word_entry_count = getattr(job, "word_entry_count", 0) or 0
-    phrase_entry_count = getattr(job, "phrase_entry_count", 0) or 0
-    if resolved_import_source is not None:
-        total_entries_extracted = resolved_import_source.matched_entry_count
+    word_entry_count = job.word_entry_count
+    phrase_entry_count = job.phrase_entry_count
+    source_word_entry_count = int(getattr(resolved_import_source, "word_entry_count", 0) or 0)
+    source_phrase_entry_count = int(getattr(resolved_import_source, "phrase_entry_count", 0) or 0)
+    if word_entry_count == 0 and source_word_entry_count > 0:
+        word_entry_count = source_word_entry_count
+    if phrase_entry_count == 0 and source_phrase_entry_count > 0:
+        phrase_entry_count = source_phrase_entry_count
     return ImportJobResponse(
         id=str(job.id),
         user_id=str(job.user_id),
@@ -315,29 +319,34 @@ async def _hydrate_import_jobs_with_source_details(
         await db.execute(select(ImportSource).where(ImportSource.id.in_(import_source_ids)))
     ).scalars().all()
     sources_by_id = {source.id: source for source in import_sources}
-
-    counts_result = await db.execute(
-        select(
-            ImportSourceEntry.import_source_id,
-            func.count().label("total_entries"),
-            func.sum(case((ImportSourceEntry.entry_type == ENTRY_TYPE_WORD, 1), else_=0)).label("word_entries"),
-            func.sum(case((ImportSourceEntry.entry_type == ENTRY_TYPE_PHRASE, 1), else_=0)).label("phrase_entries"),
+    entry_count_rows = (
+        await db.execute(
+            select(
+                ImportSourceEntry.import_source_id.label("import_source_id"),
+                func.sum(case((ImportSourceEntry.entry_type == ENTRY_TYPE_WORD, 1), else_=0)).label("word_entry_count"),
+                func.sum(case((ImportSourceEntry.entry_type == ENTRY_TYPE_PHRASE, 1), else_=0)).label("phrase_entry_count"),
+            )
+            .where(ImportSourceEntry.import_source_id.in_(import_source_ids))
+            .group_by(ImportSourceEntry.import_source_id)
         )
-        .where(ImportSourceEntry.import_source_id.in_(import_source_ids))
-        .group_by(ImportSourceEntry.import_source_id)
-    )
-    counts_by_source_id = {
-        row.import_source_id: row
-        for row in counts_result.all()
+    ).all()
+    entry_counts_by_source_id = {
+        row.import_source_id: (
+            int(row.word_entry_count or 0),
+            int(row.phrase_entry_count or 0),
+        )
+        for row in entry_count_rows
     }
+
+    for source in import_sources:
+        word_count, phrase_count = entry_counts_by_source_id.get(source.id, (0, 0))
+        setattr(source, "word_entry_count", word_count)
+        setattr(source, "phrase_entry_count", phrase_count)
 
     for job in jobs:
         if job.import_source_id is None:
             continue
         setattr(job, "import_source", sources_by_id.get(job.import_source_id))
-        count_row = counts_by_source_id.get(job.import_source_id)
-        setattr(job, "word_entry_count", int(getattr(count_row, "word_entries", 0) or 0))
-        setattr(job, "phrase_entry_count", int(getattr(count_row, "phrase_entries", 0) or 0))
     return jobs
 
 

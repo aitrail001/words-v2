@@ -13,6 +13,8 @@ export type AdminImportSourceSummary = {
   isbn: string | null;
   status: string;
   matched_entry_count: number;
+  word_entry_count: number;
+  phrase_entry_count: number;
   created_at: string;
   processed_at: string | null;
   deleted_at: string | null;

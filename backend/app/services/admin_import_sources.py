@@ -86,6 +86,32 @@ async def list_admin_import_sources(
     )
     first_processing = select(processing_jobs).where(processing_jobs.c.rn == 1).subquery()
 
+    latest_completed_processing_jobs = (
+        select(
+            ImportJob.import_source_id.label("import_source_id"),
+            ImportJob.started_at.label("started_at"),
+            ImportJob.completed_at.label("completed_at"),
+            func.row_number()
+            .over(
+                partition_by=ImportJob.import_source_id,
+                order_by=ImportJob.started_at.desc(),
+            )
+            .label("rn"),
+        )
+        .where(
+            ImportJob.import_source_id.is_not(None),
+            ImportJob.started_at.is_not(None),
+            ImportJob.completed_at.is_not(None),
+            ImportJob.status == "completed",
+        )
+        .subquery()
+    )
+    latest_completed_processing = (
+        select(latest_completed_processing_jobs)
+        .where(latest_completed_processing_jobs.c.rn == 1)
+        .subquery()
+    )
+
     cache_hit_jobs = (
         select(
             ImportJob.import_source_id.label("import_source_id"),
@@ -123,6 +149,15 @@ async def list_admin_import_sources(
         .group_by(ImportJob.import_source_id)
         .subquery()
     )
+    entry_counts = (
+        select(
+            ImportSourceEntry.import_source_id.label("import_source_id"),
+            func.sum(case((ImportSourceEntry.entry_type == "word", 1), else_=0)).label("word_entry_count"),
+            func.sum(case((ImportSourceEntry.entry_type == "phrase", 1), else_=0)).label("phrase_entry_count"),
+        )
+        .group_by(ImportSourceEntry.import_source_id)
+        .subquery()
+    )
 
     first_user = aliased(User)
     last_user = aliased(User)
@@ -146,6 +181,8 @@ async def list_admin_import_sources(
             ImportSource,
             usage_agg.c.total_jobs,
             usage_agg.c.cache_hit_count,
+            entry_counts.c.word_entry_count,
+            entry_counts.c.phrase_entry_count,
             first_processing.c.sort_started_at.label("first_imported_at"),
             first_processing.c.started_at.label("first_started_at"),
             first_processing.c.completed_at.label("first_completed_at"),
@@ -153,6 +190,8 @@ async def list_admin_import_sources(
             first_processing.c.user_id.label("first_imported_by_user_id"),
             first_user.email.label("first_imported_by_email"),
             first_user.role.label("first_imported_by_role"),
+            latest_completed_processing.c.started_at.label("duration_started_at"),
+            latest_completed_processing.c.completed_at.label("duration_completed_at"),
             last_cache_hit.c.created_at.label("last_reused_at"),
             last_cache_hit.c.user_id.label("last_reused_by_user_id"),
             last_user.email.label("last_reused_by_email"),
@@ -160,8 +199,10 @@ async def list_admin_import_sources(
         )
         .select_from(base_subquery.join(ImportSource, ImportSource.id == base_subquery.c.id))
         .outerjoin(usage_agg, usage_agg.c.import_source_id == ImportSource.id)
+        .outerjoin(entry_counts, entry_counts.c.import_source_id == ImportSource.id)
         .outerjoin(first_processing, first_processing.c.import_source_id == ImportSource.id)
         .outerjoin(first_user, first_user.id == first_processing.c.user_id)
+        .outerjoin(latest_completed_processing, latest_completed_processing.c.import_source_id == ImportSource.id)
         .outerjoin(last_cache_hit, last_cache_hit.c.import_source_id == ImportSource.id)
         .outerjoin(last_user, last_user.id == last_cache_hit.c.user_id)
         .order_by(order_column.nullslast(), ImportSource.created_at.desc())
@@ -173,8 +214,8 @@ async def list_admin_import_sources(
     items: list[dict[str, object]] = []
     for row in rows:
         source: ImportSource = row[0]
-        first_started_at = row.first_started_at
-        first_completed_at = row.first_completed_at
+        first_started_at = row.duration_started_at
+        first_completed_at = row.duration_completed_at
         processing_duration_seconds = None
         if first_started_at is not None and first_completed_at is not None:
             processing_duration_seconds = max(0.0, (first_completed_at - first_started_at).total_seconds())
@@ -192,6 +233,8 @@ async def list_admin_import_sources(
                 "isbn": source.isbn,
                 "status": source.status,
                 "matched_entry_count": source.matched_entry_count,
+                "word_entry_count": int(row.word_entry_count or 0),
+                "phrase_entry_count": int(row.phrase_entry_count or 0),
                 "created_at": source.created_at,
                 "processed_at": source.processed_at,
                 "deleted_at": source.deleted_at,
@@ -285,13 +328,28 @@ async def soft_delete_import_source_cache(
     if delete_mode not in {DELETE_MODE_CACHE_ONLY, DELETE_MODE_CACHE_ONLY_AND_DELETE_ORPHAN_JOBS}:
         raise HTTPException(status_code=400, detail="Unsupported delete mode")
 
-    deleted_entry_count = int(
-        (
-            await db.execute(
-                select(func.count()).select_from(ImportSourceEntry).where(ImportSourceEntry.import_source_id == source.id)
-            )
-        ).scalar_one()
-    )
+    entry_count_row = (
+        await db.execute(
+            select(
+                func.count().label("total_entries"),
+                func.sum(case((ImportSourceEntry.entry_type == "word", 1), else_=0)).label("word_entries"),
+                func.sum(case((ImportSourceEntry.entry_type == "phrase", 1), else_=0)).label("phrase_entries"),
+            ).where(ImportSourceEntry.import_source_id == source.id)
+        )
+    ).one()
+    deleted_entry_count = int(entry_count_row.total_entries or 0)
+    source_word_count = int(entry_count_row.word_entries or 0)
+    source_phrase_count = int(entry_count_row.phrase_entries or 0)
+
+    linked_jobs = (
+        await db.execute(select(ImportJob).where(ImportJob.import_source_id == source.id))
+    ).scalars().all()
+    for job in linked_jobs:
+        if job.word_entry_count == 0 and source_word_count > 0:
+            job.word_entry_count = source_word_count
+        if job.phrase_entry_count == 0 and source_phrase_count > 0:
+            job.phrase_entry_count = source_phrase_count
+
     await db.execute(
         ImportSourceEntry.__table__.delete().where(ImportSourceEntry.import_source_id == source.id)
     )
@@ -333,10 +391,30 @@ async def list_import_batches(
     offset: int,
 ) -> tuple[int, list[dict[str, object]]]:
     total = int((await db.execute(select(func.count()).select_from(ImportBatch))).scalar_one())
+    jobs_agg = (
+        select(
+            ImportJob.import_batch_id.label("import_batch_id"),
+            func.count().label("total_jobs"),
+            func.sum(case((ImportJob.status == "completed", 1), else_=0)).label("completed_jobs"),
+            func.sum(case((ImportJob.status == "failed", 1), else_=0)).label("failed_jobs"),
+            func.sum(case((ImportJob.status.in_(("queued", "processing")), 1), else_=0)).label("active_jobs"),
+        )
+        .where(ImportJob.import_batch_id.is_not(None))
+        .group_by(ImportJob.import_batch_id)
+        .subquery()
+    )
     rows = (
         await db.execute(
-            select(ImportBatch, User.email.label("created_by_email"))
+            select(
+                ImportBatch,
+                User.email.label("created_by_email"),
+                jobs_agg.c.total_jobs,
+                jobs_agg.c.completed_jobs,
+                jobs_agg.c.failed_jobs,
+                jobs_agg.c.active_jobs,
+            )
             .outerjoin(User, User.id == ImportBatch.created_by_user_id)
+            .outerjoin(jobs_agg, jobs_agg.c.import_batch_id == ImportBatch.id)
             .order_by(ImportBatch.created_at.desc())
             .offset(offset)
             .limit(limit)
@@ -353,6 +431,10 @@ async def list_import_batches(
                 "batch_type": batch.batch_type,
                 "name": batch.name,
                 "created_at": batch.created_at,
+                "total_jobs": int(row.total_jobs or 0),
+                "completed_jobs": int(row.completed_jobs or 0),
+                "failed_jobs": int(row.failed_jobs or 0),
+                "active_jobs": int(row.active_jobs or 0),
             }
         )
     return total, items

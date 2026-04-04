@@ -154,6 +154,12 @@ export function ImportJobDetailPage({ jobId }: { jobId: string }) {
       setReviewTotal(0);
       return;
     }
+    if (job.cache_deleted) {
+      setReviewEntries([]);
+      setReviewTotal(0);
+      setError(job.cache_deleted_message || "This cached import is no longer available. Re-upload the EPUB to regenerate import cache.");
+      return;
+    }
 
     setError(null);
     getImportEntries(jobId, {
@@ -172,8 +178,12 @@ export function ImportJobDetailPage({ jobId }: { jobId: string }) {
         setReviewTotal(response.total);
         setSelectedEntryKeys(new Set(response.items.map((entry) => `${entry.entry_type}:${entry.entry_id}`)));
       })
-      .catch(() => {
+      .catch((nextError: unknown) => {
         if (active) {
+          if (nextError instanceof ApiError && nextError.status === 410) {
+            setError(job.cache_deleted_message || "This cached import is no longer available. Re-upload the EPUB to regenerate import cache.");
+            return;
+          }
           setError("Failed to load review entries");
         }
       });
@@ -304,6 +314,11 @@ export function ImportJobDetailPage({ jobId }: { jobId: string }) {
                   <p data-testid="import-job-progress-counts">{formatProgressSummary(job)}</p>
                 </div>
               </div>
+            ) : null}
+            {job.cache_deleted ? (
+              <p className="rounded border border-amber-300 bg-amber-50 px-2 py-2 text-xs text-amber-800" data-testid="import-job-cache-deleted-message">
+                {job.cache_deleted_message || "This cached import is no longer available. Re-upload the EPUB to regenerate import cache."}
+              </p>
             ) : null}
           </div>
         </section>

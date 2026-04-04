@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EpubCacheNav } from "@/components/lexicon/epub-cache-nav";
 import { ApiError } from "@/lib/api-client";
@@ -16,6 +16,8 @@ import {
   type AdminImportSourceJob,
   type AdminImportSourceSummary,
 } from "@/lib/admin-epub-cache-client";
+
+const SOURCE_DETAIL_POLL_INTERVAL_MS = 2500;
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "-";
@@ -48,11 +50,13 @@ export default function EpubCacheSourcesPage() {
   const [selectedSource, setSelectedSource] = useState<AdminImportSourceSummary | null>(null);
   const [selectedSourceJobs, setSelectedSourceJobs] = useState<AdminImportSourceJob[]>([]);
   const [selectedSourceEntries, setSelectedSourceEntries] = useState<Array<Record<string, unknown>>>([]);
+  const [selectedSourceNotice, setSelectedSourceNotice] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const selectedSourceRequestIdRef = useRef(0);
 
   const selectedSourceIds = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
@@ -76,16 +80,44 @@ export default function EpubCacheSourcesPage() {
   }, [q, statusFilter]);
 
   const loadSelectedSource = useCallback(async (sourceId: string) => {
+    const requestId = selectedSourceRequestIdRef.current + 1;
+    selectedSourceRequestIdRef.current = requestId;
+    setSelectedSourceNotice(null);
     try {
-      const [source, jobs, entries] = await Promise.all([
+      const [source, jobs] = await Promise.all([
         getAdminImportSource(sourceId),
         listAdminImportSourceJobs(sourceId, { limit: 20 }),
-        listAdminImportSourceEntries(sourceId, { limit: 20, offset: 0, sort: "book_frequency", order: "desc" }),
       ]);
+      if (selectedSourceRequestIdRef.current !== requestId) {
+        return;
+      }
       setSelectedSource(source);
       setSelectedSourceJobs(jobs.items);
-      setSelectedSourceEntries(entries.items);
+      try {
+        const entries = await listAdminImportSourceEntries(sourceId, { limit: 20, offset: 0, sort: "book_frequency", order: "desc" });
+        if (selectedSourceRequestIdRef.current !== requestId) {
+          return;
+        }
+        setSelectedSourceEntries(entries.items);
+        setSelectedSourceNotice(null);
+      } catch (nextError) {
+        if (selectedSourceRequestIdRef.current !== requestId) {
+          return;
+        }
+        setSelectedSourceEntries([]);
+        if (nextError instanceof ApiError && nextError.status === 410) {
+          const sourceTitle = source.title?.trim() || "This book";
+          setSelectedSourceNotice(
+            `${sourceTitle}: This cached import is no longer available. Re-upload the EPUB to regenerate import cache.`,
+          );
+          return;
+        }
+        throw nextError;
+      }
     } catch (nextError) {
+      if (selectedSourceRequestIdRef.current !== requestId) {
+        return;
+      }
       setError(resolveUiErrorMessage(nextError, "Failed to load source details"));
     }
   }, []);
@@ -100,13 +132,33 @@ export default function EpubCacheSourcesPage() {
 
   useEffect(() => {
     if (!selectedSourceId) {
+      selectedSourceRequestIdRef.current += 1;
       setSelectedSource(null);
       setSelectedSourceJobs([]);
       setSelectedSourceEntries([]);
+      setSelectedSourceNotice(null);
       return;
     }
     void loadSelectedSource(selectedSourceId);
   }, [loadSelectedSource, selectedSourceId]);
+
+  useEffect(() => {
+    if (!selectedSourceId) {
+      return;
+    }
+    const shouldPoll =
+      selectedSourceNotice !== null
+      || selectedSource?.status === "pending"
+      || selectedSource?.status === "processing"
+      || selectedSource?.status === "deleted";
+    if (!shouldPoll) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      void loadSelectedSource(selectedSourceId);
+    }, SOURCE_DETAIL_POLL_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [loadSelectedSource, selectedSource, selectedSourceId, selectedSourceNotice]);
 
   const toggleSelect = (sourceId: string) => {
     setSelectedIds((current) => {
@@ -196,7 +248,7 @@ export default function EpubCacheSourcesPage() {
         </div>
         <p className="mt-2 text-xs text-slate-500">{sourcesTotal.toLocaleString()} sources</p>
 
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 max-h-[50vh] overflow-auto">
           <table className="min-w-full divide-y divide-slate-200 text-sm" data-testid="epub-cache-sources-table">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-600">
               <tr>
@@ -207,6 +259,8 @@ export default function EpubCacheSourcesPage() {
                 <th className="px-2 py-2">ISBN</th>
                 <th className="px-2 py-2">Status</th>
                 <th className="px-2 py-2">Matched</th>
+                <th className="px-2 py-2">Words</th>
+                <th className="px-2 py-2">Phrases</th>
                 <th className="px-2 py-2">First imported</th>
                 <th className="px-2 py-2">Duration</th>
                 <th className="px-2 py-2">Cache hits</th>
@@ -215,8 +269,8 @@ export default function EpubCacheSourcesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loadingSources ? <tr><td className="px-2 py-3 text-slate-500" colSpan={12}>Loading...</td></tr> : null}
-              {!loadingSources && sources.length === 0 ? <tr><td className="px-2 py-3 text-slate-500" colSpan={12}>No cache sources found.</td></tr> : null}
+              {loadingSources ? <tr><td className="px-2 py-3 text-slate-500" colSpan={14}>Loading...</td></tr> : null}
+              {!loadingSources && sources.length === 0 ? <tr><td className="px-2 py-3 text-slate-500" colSpan={14}>No cache sources found.</td></tr> : null}
               {sources.map((source) => (
                 <tr key={source.id} className={selectedSourceId === source.id ? "bg-sky-50/40" : ""}>
                   <td className="px-2 py-2 align-top">
@@ -228,6 +282,8 @@ export default function EpubCacheSourcesPage() {
                   <td className="px-2 py-2 align-top">{source.isbn || "-"}</td>
                   <td className="px-2 py-2 align-top">{source.status}{source.deleted_at ? " (cache deleted)" : ""}</td>
                   <td className="px-2 py-2 align-top">{source.matched_entry_count}</td>
+                  <td className="px-2 py-2 align-top">{source.word_entry_count}</td>
+                  <td className="px-2 py-2 align-top">{source.phrase_entry_count}</td>
                   <td className="px-2 py-2 align-top">{formatDate(source.first_imported_at)}</td>
                   <td className="px-2 py-2 align-top">{formatDuration(source.processing_duration_seconds)}</td>
                   <td className="px-2 py-2 align-top">{source.cache_hit_count}</td>
@@ -258,9 +314,9 @@ export default function EpubCacheSourcesPage() {
             <p><span className="font-medium">Title:</span> {selectedSource.title || "(untitled)"}</p>
             <p><span className="font-medium">Source hash:</span> {selectedSource.source_hash_sha256}</p>
             <p><span className="font-medium">Status:</span> {selectedSource.status}{selectedSource.deleted_at ? " (cache deleted)" : ""}</p>
-            {selectedSource.deleted_at ? (
+            {selectedSourceNotice ? (
               <p className="rounded border border-amber-300 bg-amber-50 px-2 py-2 text-amber-800">
-                Cache deleted at {formatDate(selectedSource.deleted_at)}. Re-upload EPUB to regenerate import cache.
+                {selectedSourceNotice}
               </p>
             ) : null}
 

@@ -57,6 +57,13 @@ export function AuthNavigation() {
       >
         EPUB Cache
       </Link>
+      <Link
+        href="/lexicon/import-db"
+        className="hover:text-gray-900"
+        data-testid="nav-lexicon-import-db-link"
+      >
+        DB Management
+      </Link>
       {isAuthenticated ? (
         <button
           type="button"

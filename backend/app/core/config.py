@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # Rate limiting
     rate_limit_per_minute: int = 60
     max_active_imports_per_user: int = 3
-    max_active_admin_preimports_per_request: int = 20
+    max_active_admin_preimports_per_request: int = 10
 
     # Lexicon artifact root (admin read-only ops API)
     lexicon_snapshot_root: str = "data/lexicon/snapshots"

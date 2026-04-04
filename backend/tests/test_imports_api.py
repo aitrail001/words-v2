@@ -121,7 +121,7 @@ class TestCreateImport:
         assert response.source_title == "Clean title"
         assert response.source_author == "Author Name"
         assert response.source_publisher == "Publisher Name"
-        assert response.total_entries_extracted == 4
+        assert response.total_entries_extracted == 0
 
     @pytest.mark.asyncio
     async def test_create_import_helper_uses_shared_enqueue_service(self, mock_db):
