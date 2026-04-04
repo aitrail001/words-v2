@@ -400,6 +400,347 @@ class TestQueueDue:
         assert kwargs["forced_prompt_type"] == "speak_recall"
 
 
+class TestGroupedQueue:
+    @pytest.mark.asyncio
+    async def test_group_queue_items_buckets_states_by_due_window(self, review_service):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        overdue = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        overdue.next_due_at = now - timedelta(hours=2)
+        overdue.last_reviewed_at = now - timedelta(days=1)
+        overdue.entry_text = "alpha"
+        overdue.learner_status = "learning"
+
+        tomorrow = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=uuid.uuid4(),
+            target_type="phrase_sense",
+            target_id=uuid.uuid4(),
+            stability=14,
+            difficulty=0.5,
+        )
+        tomorrow.next_due_at = now + timedelta(days=1, hours=1)
+        tomorrow.last_reviewed_at = None
+        tomorrow.entry_text = "break down"
+        tomorrow.learner_status = "learning"
+
+        review_service._list_active_queue_states = AsyncMock(return_value=[overdue, tomorrow])
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload == {
+            "generated_at": now.isoformat(),
+            "total_count": 2,
+            "groups": [
+                {
+                    "bucket": "overdue",
+                    "count": 1,
+                    "items": [
+                        {
+                            "queue_item_id": str(overdue.id),
+                            "entry_id": str(overdue.entry_id),
+                            "entry_type": "word",
+                            "text": "alpha",
+                            "status": "learning",
+                            "next_review_at": overdue.next_due_at.isoformat(),
+                            "last_reviewed_at": overdue.last_reviewed_at.isoformat(),
+                        }
+                    ],
+                },
+                {
+                    "bucket": "tomorrow",
+                    "count": 1,
+                    "items": [
+                        {
+                            "queue_item_id": str(tomorrow.id),
+                            "entry_id": str(tomorrow.entry_id),
+                            "entry_type": "phrase",
+                            "text": "break down",
+                            "status": "learning",
+                            "next_review_at": tomorrow.next_due_at.isoformat(),
+                            "last_reviewed_at": None,
+                        }
+                    ],
+                },
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_group_queue_items_excludes_known_and_to_learn_entries(
+        self, review_service, mock_db
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        learning_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        learning_state.next_due_at = now + timedelta(hours=3)
+        learning_state.last_reviewed_at = now - timedelta(days=1)
+
+        known_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        known_state.next_due_at = now + timedelta(days=1)
+
+        to_learn_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        to_learn_state.next_due_at = now + timedelta(days=2)
+
+        learning_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=learning_state.entry_id,
+            status="learning",
+        )
+        known_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=known_state.entry_id,
+            status="known",
+        )
+        to_learn_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=to_learn_state.entry_id,
+            status="to_learn",
+        )
+
+        state_result = MagicMock()
+        state_result.all.return_value = [
+            (learning_state, learning_status.status),
+            (known_state, known_status.status),
+            (to_learn_state, to_learn_status.status),
+        ]
+        state_result.scalars.return_value.all.return_value = [
+            learning_state,
+            known_state,
+            to_learn_state,
+        ]
+        word_result = MagicMock()
+        word_result.all.return_value = [
+            (learning_state.entry_id, "alpha"),
+            (known_state.entry_id, "bravo"),
+            (to_learn_state.entry_id, "charlie"),
+        ]
+        mock_db.execute.side_effect = [state_result, word_result]
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload["generated_at"] == now.isoformat()
+        assert payload["total_count"] == 1
+        assert payload["groups"] == [
+            {
+                "bucket": "later_today",
+                "count": 1,
+                "items": [
+                    {
+                        "queue_item_id": str(learning_state.id),
+                        "entry_id": str(learning_state.entry_id),
+                        "entry_type": "word",
+                        "text": "alpha",
+                        "status": "learning",
+                        "next_review_at": learning_state.next_due_at.isoformat(),
+                        "last_reviewed_at": learning_state.last_reviewed_at.isoformat(),
+                    }
+                ],
+            }
+        ]
+        included_ids = {
+            item["queue_item_id"]
+            for group in payload["groups"]
+            for item in group["items"]
+        }
+        assert str(learning_state.id) in included_ids
+        assert str(known_state.id) not in included_ids
+        assert str(to_learn_state.id) not in included_ids
+
+    @pytest.mark.asyncio
+    async def test_group_queue_items_buries_sibling_targets_for_same_entry(
+        self, review_service, mock_db
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+        shared_entry_id = uuid.uuid4()
+
+        first_sibling = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=shared_entry_id,
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        first_sibling.next_due_at = now + timedelta(hours=1)
+
+        second_sibling = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=shared_entry_id,
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        second_sibling.next_due_at = now + timedelta(hours=2)
+
+        other_entry = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        other_entry.next_due_at = now + timedelta(days=1)
+
+        state_result = MagicMock()
+        state_result.all.return_value = [
+            (first_sibling, "learning"),
+            (second_sibling, "learning"),
+            (other_entry, "learning"),
+        ]
+        word_result = MagicMock()
+        word_result.all.return_value = [
+            (shared_entry_id, "alpha"),
+            (other_entry.entry_id, "bravo"),
+        ]
+        mock_db.execute.side_effect = [state_result, word_result]
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload["total_count"] == 2
+        item_ids = [
+            item["queue_item_id"]
+            for group in payload["groups"]
+            for item in group["items"]
+        ]
+        assert str(first_sibling.id) in item_ids
+        assert str(second_sibling.id) not in item_ids
+        assert str(other_entry.id) in item_ids
+
+    @pytest.mark.asyncio
+    async def test_group_queue_items_skips_states_without_source_entry(
+        self, review_service, mock_db
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        valid_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        valid_state.next_due_at = now + timedelta(hours=1)
+
+        missing_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        missing_state.next_due_at = now + timedelta(hours=2)
+
+        state_result = MagicMock()
+        state_result.all.return_value = [
+            (valid_state, "learning"),
+            (missing_state, "learning"),
+        ]
+        word_result = MagicMock()
+        word_result.all.return_value = [
+            (valid_state.entry_id, "alpha"),
+        ]
+        mock_db.execute.side_effect = [state_result, word_result]
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload["total_count"] == 1
+        assert payload["groups"] == [
+            {
+                "bucket": "later_today",
+                "count": 1,
+                "items": [
+                    {
+                        "queue_item_id": str(valid_state.id),
+                        "entry_id": str(valid_state.entry_id),
+                        "entry_type": "word",
+                        "text": "alpha",
+                        "status": "learning",
+                        "next_review_at": valid_state.next_due_at.isoformat(),
+                        "last_reviewed_at": None,
+                    }
+                ],
+            }
+        ]
+
+    @pytest.mark.parametrize(
+        ("due_at", "expected_bucket"),
+        [
+            (datetime(2026, 4, 5, 8, 59, 59, tzinfo=timezone.utc), "overdue"),
+            (datetime(2026, 4, 5, 9, 0, 0, tzinfo=timezone.utc), "due_now"),
+            (datetime(2026, 4, 5, 9, 0, 1, tzinfo=timezone.utc), "later_today"),
+            (datetime(2026, 4, 6, 9, 0, 0, tzinfo=timezone.utc), "tomorrow"),
+            (datetime(2026, 4, 12, 9, 0, 0, tzinfo=timezone.utc), "this_week"),
+            (datetime(2026, 5, 6, 9, 0, 0, tzinfo=timezone.utc), "this_month"),
+            (datetime(2026, 7, 6, 9, 0, 0, tzinfo=timezone.utc), "one_to_three_months"),
+            (datetime(2026, 7, 9, 9, 0, 0, tzinfo=timezone.utc), "three_to_six_months"),
+            (datetime(2026, 10, 6, 9, 0, 0, tzinfo=timezone.utc), "six_plus_months"),
+        ],
+    )
+    def test_classify_review_bucket_handles_exact_boundaries(self, due_at, expected_bucket):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+
+        assert ReviewService.classify_review_bucket(due_at, now) == expected_bucket
+
+
 class TestQueueSubmit:
     @pytest.mark.asyncio
     async def test_submit_queue_review_applies_sm2_and_increments_counters(

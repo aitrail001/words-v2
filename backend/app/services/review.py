@@ -51,6 +51,18 @@ from app.services.voice_assets import (
 logger = get_logger(__name__)
 settings = get_settings()
 
+REVIEW_BUCKET_ORDER = [
+    "overdue",
+    "due_now",
+    "later_today",
+    "tomorrow",
+    "this_week",
+    "this_month",
+    "one_to_three_months",
+    "three_to_six_months",
+    "six_plus_months",
+]
+
 
 class ReviewService:
     SCHEDULE_OVERRIDE_DAYS = {
@@ -2051,6 +2063,189 @@ class ReviewService:
             "current_schedule_value": current_value,
             "current_schedule_label": current_label,
             "schedule_options": schedule_options,
+        }
+
+    @staticmethod
+    def _normalize_bucket_datetime(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @classmethod
+    def classify_review_bucket(cls, due_at: datetime | None, now: datetime) -> str:
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        resolved_due_at = cls._normalize_bucket_datetime(due_at)
+
+        if resolved_due_at is None or resolved_due_at <= resolved_now - timedelta(seconds=1):
+            return "overdue"
+        if resolved_due_at <= resolved_now:
+            return "due_now"
+        if resolved_due_at.date() == resolved_now.date():
+            return "later_today"
+        if resolved_due_at.date() == (resolved_now + timedelta(days=1)).date():
+            return "tomorrow"
+        if resolved_due_at <= resolved_now + timedelta(days=7):
+            return "this_week"
+        if resolved_due_at <= resolved_now + timedelta(days=31):
+            return "this_month"
+        if resolved_due_at <= resolved_now + timedelta(days=92):
+            return "one_to_three_months"
+        if resolved_due_at <= resolved_now + timedelta(days=183):
+            return "three_to_six_months"
+        return "six_plus_months"
+
+    @staticmethod
+    def _resolve_grouped_queue_due_at(state: EntryReviewState) -> datetime | None:
+        return state.recheck_due_at or state.next_due_at
+
+    async def _list_active_queue_states(
+        self,
+        *,
+        user_id: uuid.UUID,
+        now: datetime | None = None,
+    ) -> list[EntryReviewState]:
+        state_result = await self.db.execute(
+            select(EntryReviewState, LearnerEntryStatus.status)
+            .outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
+                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
+                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
+                ),
+            )
+            .where(EntryReviewState.user_id == user_id)
+            .where(EntryReviewState.is_suspended.is_(False))
+            .order_by(
+                EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                EntryReviewState.next_due_at.asc().nullsfirst(),
+                EntryReviewState.created_at.asc(),
+            )
+        )
+        rows = list(state_result.all())
+        states: list[EntryReviewState] = []
+        for state, learner_status in rows:
+            if learner_status not in {None, "learning"}:
+                continue
+            state.learner_status = learner_status or "learning"
+            states.append(state)
+        if not states:
+            return states
+
+        word_entry_ids = list(
+            {
+                state.entry_id
+                for state in states
+                if self._normalize_entry_type(state.entry_type) == "word"
+            }
+        )
+        phrase_entry_ids = list(
+            {
+                state.entry_id
+                for state in states
+                if self._normalize_entry_type(state.entry_type) == "phrase"
+            }
+        )
+
+        word_text_by_id: dict[uuid.UUID, str] = {}
+        if word_entry_ids:
+            word_result = await self.db.execute(
+                select(Word.id, Word.word).where(Word.id.in_(word_entry_ids))
+            )
+            word_text_by_id = {
+                entry_id: text for entry_id, text in word_result.all() if self._normalize_prompt_text(text)
+            }
+
+        phrase_text_by_id: dict[uuid.UUID, str] = {}
+        if phrase_entry_ids:
+            phrase_result = await self.db.execute(
+                select(PhraseEntry.id, PhraseEntry.phrase_text).where(PhraseEntry.id.in_(phrase_entry_ids))
+            )
+            phrase_text_by_id = {
+                entry_id: text
+                for entry_id, text in phrase_result.all()
+                if self._normalize_prompt_text(text)
+            }
+
+        hydrated_states: list[EntryReviewState] = []
+        for state in states:
+            normalized_entry_type = self._normalize_entry_type(state.entry_type)
+            if normalized_entry_type == "word":
+                entry_text = word_text_by_id.get(state.entry_id)
+            else:
+                entry_text = phrase_text_by_id.get(state.entry_id)
+            if not entry_text:
+                continue
+            state.entry_text = entry_text
+
+            hydrated_states.append(state)
+
+        return self._apply_sibling_bury_rule(hydrated_states)
+
+    def _serialize_grouped_queue_row(
+        self,
+        state: EntryReviewState,
+        *,
+        include_debug_fields: bool = False,
+    ) -> dict[str, Any]:
+        due_at = self._resolve_grouped_queue_due_at(state)
+        payload = {
+            "queue_item_id": str(state.id),
+            "entry_id": str(state.entry_id),
+            "entry_type": self._normalize_entry_type(state.entry_type),
+            "text": self._normalize_prompt_text(getattr(state, "entry_text", None)) or "Unavailable",
+            "status": getattr(state, "learner_status", None) or "learning",
+            "next_review_at": due_at.isoformat() if due_at is not None else None,
+            "last_reviewed_at": state.last_reviewed_at.isoformat()
+            if state.last_reviewed_at is not None
+            else None,
+        }
+        if include_debug_fields:
+            payload.update(
+                {
+                    "target_type": state.target_type,
+                    "target_id": str(state.target_id) if state.target_id is not None else None,
+                    "recheck_due_at": state.recheck_due_at.isoformat()
+                    if state.recheck_due_at is not None
+                    else None,
+                    "next_due_at": state.next_due_at.isoformat() if state.next_due_at is not None else None,
+                    "last_outcome": state.last_outcome,
+                    "relearning": bool(state.relearning),
+                    "relearning_trigger": state.relearning_trigger,
+                }
+            )
+        return payload
+
+    async def get_grouped_review_queue(
+        self,
+        *,
+        user_id: uuid.UUID,
+        now: datetime,
+        include_debug_fields: bool = False,
+    ) -> dict[str, Any]:
+        resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        groups: dict[str, list[dict[str, Any]]] = {bucket: [] for bucket in REVIEW_BUCKET_ORDER}
+
+        for state in states:
+            bucket = self.classify_review_bucket(self._resolve_grouped_queue_due_at(state), resolved_now)
+            groups[bucket].append(
+                self._serialize_grouped_queue_row(
+                    state,
+                    include_debug_fields=include_debug_fields,
+                )
+            )
+
+        return {
+            "generated_at": resolved_now.isoformat(),
+            "total_count": sum(len(items) for items in groups.values()),
+            "groups": [
+                {"bucket": bucket, "count": len(groups[bucket]), "items": groups[bucket]}
+                for bucket in REVIEW_BUCKET_ORDER
+                if groups[bucket]
+            ],
         }
 
     async def get_entry_queue_schedule(
