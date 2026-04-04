@@ -14,7 +14,7 @@ from pathlib import Path
 import ebooklib
 from bs4 import BeautifulSoup
 from ebooklib import epub
-from sqlalchemy import Select, and_, func, literal_column, or_, select
+from sqlalchemy import Select, and_, case, func, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +58,15 @@ LIGATURE_TRANSLATION = str.maketrans({
 class EntryRef:
     entry_type: str
     entry_id: uuid.UUID
+
+
+class ImportCacheDeletedError(ValueError):
+    pass
+
+
+IMPORT_CACHE_DELETED_MESSAGE = (
+    "This cached import is no longer available. Re-upload the EPUB to regenerate import cache."
+)
 
 
 @dataclass(frozen=True)
@@ -1501,23 +1510,47 @@ async def create_import_job(
     source_filename: str,
     list_name: str,
     list_description: str | None,
+    job_origin: str = "user_import",
+    import_batch_id: uuid.UUID | None = None,
 ) -> ImportJob:
-    completed_at = datetime.now(timezone.utc) if import_source.status == "completed" else None
+    cache_available = import_source.status == "completed" and import_source.deleted_at is None
+    completed_at = datetime.now(timezone.utc) if cache_available else None
+    word_entry_count = 0
+    phrase_entry_count = 0
+    if cache_available:
+        counts_row = (
+            await db.execute(
+                select(
+                    func.sum(case((ImportSourceEntry.entry_type == ENTRY_TYPE_WORD, 1), else_=0)).label("word_entries"),
+                    func.sum(case((ImportSourceEntry.entry_type == ENTRY_TYPE_PHRASE, 1), else_=0)).label("phrase_entries"),
+                ).where(ImportSourceEntry.import_source_id == import_source.id)
+            )
+        ).one()
+        word_entry_count = int(getattr(counts_row, "word_entries", 0) or 0)
+        phrase_entry_count = int(getattr(counts_row, "phrase_entries", 0) or 0)
+
     job = ImportJob(
         user_id=user_id,
         import_source_id=import_source.id,
+        import_batch_id=import_batch_id,
+        job_origin=job_origin,
         source_filename=source_filename,
         source_hash=import_source.source_hash_sha256,
         list_name=list_name,
         list_description=list_description,
-        status="completed" if import_source.status == "completed" else "queued",
+        source_title_snapshot=import_source.title,
+        source_author_snapshot=import_source.author,
+        source_isbn_snapshot=import_source.isbn,
+        status="completed" if cache_available else "queued",
         total_items=import_source.matched_entry_count,
-        processed_items=import_source.matched_entry_count if import_source.status == "completed" else 0,
-        progress_stage="completed" if import_source.status == "completed" else "queued",
-        progress_total=import_source.matched_entry_count if import_source.status == "completed" else 0,
-        progress_completed=import_source.matched_entry_count if import_source.status == "completed" else 0,
-        progress_current_label="Completed from cached import" if import_source.status == "completed" else "Queued",
+        processed_items=import_source.matched_entry_count if cache_available else 0,
+        progress_stage="completed" if cache_available else "queued",
+        progress_total=import_source.matched_entry_count if cache_available else 0,
+        progress_completed=import_source.matched_entry_count if cache_available else 0,
+        progress_current_label="Completed from cached import" if cache_available else "Queued",
         matched_entry_count=import_source.matched_entry_count,
+        word_entry_count=word_entry_count,
+        phrase_entry_count=phrase_entry_count,
         completed_at=completed_at,
     )
     db.add(job)
@@ -1585,6 +1618,22 @@ def upsert_import_source_entries_sync(
     db.execute(stmt)
 
 
+def is_import_source_cache_available(import_source: ImportSource | None, *, cached_entry_count: int | None = None) -> bool:
+    if import_source is None:
+        return False
+    if import_source.deleted_at is not None:
+        return False
+    if import_source.status != "completed":
+        return False
+    if cached_entry_count is not None and cached_entry_count <= 0 and (import_source.matched_entry_count or 0) > 0:
+        return False
+    return True
+
+
+def raise_import_cache_deleted_error() -> None:
+    raise ImportCacheDeletedError(IMPORT_CACHE_DELETED_MESSAGE)
+
+
 async def fetch_review_entries(
     db: AsyncSession,
     *,
@@ -1644,6 +1693,17 @@ async def create_word_list_from_entries(
     import_source = (
         await db.execute(select(ImportSource).where(ImportSource.id == job.import_source_id))
     ).scalar_one()
+    if not is_import_source_cache_available(import_source):
+        raise_import_cache_deleted_error()
+    has_cached_entries = (
+        await db.execute(
+            select(ImportSourceEntry.id)
+            .where(ImportSourceEntry.import_source_id == job.import_source_id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if has_cached_entries is None:
+        raise_import_cache_deleted_error()
 
     wanted = {(entry.entry_type, entry.entry_id) for entry in selected_entries}
     source_entries = await db.execute(

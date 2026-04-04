@@ -1,11 +1,12 @@
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -22,14 +23,56 @@ from app.api.word_lists import (
 )
 from app.core.database import get_db
 from app.models.import_job import ImportJob
+from app.models.import_source_entry import ImportSourceEntry
 from app.models.user import User
-from app.services.source_imports import EntryRef, create_word_list_from_entries, fetch_review_entries
+from app.services.source_imports import (
+    EntryRef,
+    ImportCacheDeletedError,
+    IMPORT_CACHE_DELETED_MESSAGE,
+    create_word_list_from_entries,
+    fetch_review_entries,
+    is_import_source_cache_available,
+)
 
 router = APIRouter()
 
 
 class BulkDeleteImportJobsRequest(BaseModel):
     job_ids: list[uuid.UUID]
+
+
+def _import_cache_deleted_detail() -> dict[str, str]:
+    return {
+        "code": "IMPORT_CACHE_DELETED",
+        "message": IMPORT_CACHE_DELETED_MESSAGE,
+    }
+
+
+def _default_word_list_name_for_import_job(job: ImportJob) -> str:
+    import_source = getattr(job, "import_source", None)
+    title_candidate = (
+        (import_source.title if import_source is not None else None)
+        or job.source_title_snapshot
+        or ""
+    ).strip()
+    if title_candidate:
+        return title_candidate
+    filename_stem = Path(job.source_filename or "").stem.strip()
+    if filename_stem:
+        return filename_stem
+    return "Imported list"
+
+
+def _default_word_list_description_for_import_job(job: ImportJob) -> str:
+    import_source = getattr(job, "import_source", None)
+    book_name = _default_word_list_name_for_import_job(job)
+    author = (
+        (import_source.author if import_source is not None else None)
+        or job.source_author_snapshot
+        or "Unknown"
+    ).strip() or "Unknown"
+    filename = (job.source_filename or "Unknown").strip() or "Unknown"
+    return f"bookname: {book_name}\nfilename: {filename}\nauthor: {author}"
 
 
 @router.get("", response_model=list[ImportJobResponse])
@@ -121,6 +164,22 @@ async def list_import_job_entries(
     job = await _get_import_job_for_user(db, job_id=job_id, user_id=current_user.id)
     if job.import_source_id is None:
         raise HTTPException(status_code=409, detail="Import source is not ready")
+    await _hydrate_import_jobs_with_source_details(db, [job])
+    import_source = getattr(job, "import_source", None)
+    cached_entry_count = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(ImportSourceEntry)
+                .where(ImportSourceEntry.import_source_id == job.import_source_id)
+            )
+        ).scalar_one()
+    )
+    if not is_import_source_cache_available(import_source, cached_entry_count=cached_entry_count):
+        raise HTTPException(
+            status_code=410,
+            detail=_import_cache_deleted_detail(),
+        )
     total, items = await fetch_review_entries(
         db,
         import_source_id=job.import_source_id,
@@ -143,21 +202,32 @@ async def create_word_list_from_import_job(
     db: AsyncSession = Depends(get_db),
 ) -> WordListResponse:
     job = await _get_import_job_for_user(db, job_id=job_id, user_id=current_user.id)
-    await _assert_unique_word_list_name(db, user_id=current_user.id, name=request.name)
+    await _hydrate_import_jobs_with_source_details(db, [job])
+    requested_name = (request.name or "").strip()
+    resolved_name = requested_name or _default_word_list_name_for_import_job(job)
+    resolved_description = (
+        request.description if request.description is not None else _default_word_list_description_for_import_job(job)
+    )
+    await _assert_unique_word_list_name(db, user_id=current_user.id, name=resolved_name)
     try:
         word_list = await create_word_list_from_entries(
             db,
             user_id=current_user.id,
             job=job,
-            name=request.name.strip(),
-            description=request.description,
+            name=resolved_name,
+            description=resolved_description,
             selected_entries=[
                 EntryRef(entry_type=entry.entry_type, entry_id=entry.entry_id)
                 for entry in request.selected_entries
             ],
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 400
+        detail: str | dict[str, str] = str(exc)
+        if isinstance(exc, ImportCacheDeletedError):
+            status_code = 410
+            detail = _import_cache_deleted_detail()
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     return _to_word_list_response(word_list)
 
 

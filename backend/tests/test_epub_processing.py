@@ -155,3 +155,91 @@ def test_process_source_import_updates_live_progress_fields(
     assert job.matched_entry_count == 7
     mock_upsert_import_source_entries_sync.assert_called_once()
     mock_cleanup.assert_called_once()
+
+
+@patch("app.tasks.epub_processing._cleanup_uploaded_file")
+@patch("app.tasks.epub_processing._release_import_source_lock")
+@patch("app.tasks.epub_processing._acquire_import_source_lock")
+@patch("app.tasks.epub_processing.upsert_import_source_entries_sync")
+@patch("app.tasks.epub_processing.fetch_import_matcher_sync")
+@patch("app.tasks.epub_processing.EpubTextExtractor")
+@patch("app.tasks.epub_processing.get_or_create_import_source_sync")
+@patch("app.tasks.epub_processing.Session")
+def test_process_source_import_clears_deleted_tombstone_only_after_success(
+    mock_session_cls,
+    mock_get_or_create_import_source_sync,
+    mock_extractor_cls,
+    mock_fetch_import_matcher_sync,
+    mock_upsert_import_source_entries_sync,
+    mock_acquire_lock,
+    mock_release_lock,
+    mock_cleanup,
+):
+    job = MagicMock()
+    job.id = "job-1"
+    job.source_hash = "a" * 64
+    job.completed_at = None
+
+    import_source = MagicMock()
+    import_source.id = "source-1"
+    import_source.status = "deleted"
+    import_source.deleted_at = "2026-04-04T00:00:00Z"
+    import_source.deleted_by_user_id = "user-1"
+    import_source.deletion_reason = "manual delete"
+    import_source.matched_entry_count = 0
+
+    locked_source = MagicMock()
+    locked_source.id = "source-1"
+    locked_source.status = "deleted"
+    locked_source.deleted_at = "2026-04-04T00:00:00Z"
+    locked_source.deleted_by_user_id = "user-1"
+    locked_source.deletion_reason = "manual delete"
+    locked_source.matched_entry_count = 0
+
+    job_result = MagicMock()
+    job_result.scalar_one_or_none.return_value = job
+    source_result = MagicMock()
+    source_result.scalar_one.return_value = locked_source
+    linked_jobs_result = MagicMock()
+    linked_jobs_result.scalars.return_value.all.return_value = [job]
+
+    mock_db = MagicMock()
+    mock_db.execute.side_effect = [job_result, source_result, linked_jobs_result]
+    mock_session_ctx = MagicMock()
+    mock_session_ctx.__enter__.return_value = mock_db
+    mock_session_ctx.__exit__.return_value = None
+    mock_session_cls.return_value = mock_session_ctx
+    mock_get_or_create_import_source_sync.return_value = import_source
+
+    extractor = MagicMock()
+    extractor.extract_metadata_and_chunks.return_value = (
+        MagicMock(
+            title="Book",
+            author="Author",
+            publisher="Press",
+            language="en",
+            source_identifier="id",
+            published_year=2024,
+            isbn="9781234567890",
+        ),
+        ["one"],
+    )
+    mock_extractor_cls.return_value = extractor
+
+    matcher = MagicMock()
+    matcher.match_chunks_with_progress.return_value = [MagicMock(entry_type="word")]
+    mock_fetch_import_matcher_sync.return_value = (matcher, {}, {})
+
+    result = process_source_import(
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+        "/tmp/book.epub",
+    )
+
+    assert result == {"status": "completed", "matched_entry_count": 1}
+    assert locked_source.deleted_at is None
+    assert locked_source.deleted_by_user_id is None
+    assert locked_source.deletion_reason is None
+    assert locked_source.status == "completed"
+    mock_upsert_import_source_entries_sync.assert_called_once()
+    mock_cleanup.assert_called_once()

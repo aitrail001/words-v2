@@ -14,6 +14,7 @@ from app.models.word_form import WordForm
 from app.services.source_imports import (
     EpubTextExtractor,
     EntryRef,
+    ImportCacheDeletedError,
     ImportMatcher,
     build_import_cache_key,
     create_word_list_from_entries,
@@ -459,6 +460,9 @@ async def test_create_word_list_from_entries_uses_import_source_id_without_lazy_
         id=import_source_id,
         source_type="epub",
         source_hash_sha256="a" * 64,
+        pipeline_version="epub-import-v2",
+        lexicon_version="learner-catalog-v1",
+        status="completed",
     )
     source_entries_result = MagicMock()
     source_entries_result.scalars.return_value.all.return_value = [
@@ -469,9 +473,11 @@ async def test_create_word_list_from_entries_uses_import_source_id_without_lazy_
             frequency_count=3,
         )
     ]
+    cache_presence_result = MagicMock()
+    cache_presence_result.scalar_one_or_none.return_value = uuid.uuid4()
 
     db = AsyncMock()
-    db.execute.side_effect = [import_source_result, source_entries_result]
+    db.execute.side_effect = [import_source_result, cache_presence_result, source_entries_result]
     db.add = MagicMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
@@ -503,7 +509,114 @@ async def test_create_word_list_from_entries_uses_import_source_id_without_lazy_
     assert word_list.source_reference == str(job_id)
     assert job.word_list_id == word_list.id
     assert job.created_count == 1
-    assert db.execute.await_count == 2
+    assert db.execute.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_create_word_list_from_entries_rejects_unavailable_cache_without_rows():
+    import_source_id = uuid.uuid4()
+    entry_id = uuid.uuid4()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        import_source_id=import_source_id,
+        word_list_id=None,
+        created_count=0,
+    )
+
+    import_source_result = MagicMock()
+    import_source_result.scalar_one.return_value = ImportSource(
+        id=import_source_id,
+        source_type="epub",
+        source_hash_sha256="a" * 64,
+        pipeline_version="epub-import-v2",
+        lexicon_version="learner-catalog-v1",
+        status="completed",
+    )
+    source_entries_result = MagicMock()
+    source_entries_result.scalars.return_value.all.return_value = []
+    cache_presence_result = MagicMock()
+    cache_presence_result.scalar_one_or_none.return_value = None
+
+    db = AsyncMock()
+    db.execute.side_effect = [import_source_result, cache_presence_result]
+
+    with pytest.raises(ImportCacheDeletedError, match="cached import is no longer available"):
+        await create_word_list_from_entries(
+            db,
+            user_id=uuid.uuid4(),
+            job=job,
+            name="Runtime list",
+            description=None,
+            selected_entries=[EntryRef(entry_type="word", entry_id=entry_id)],
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_import_source_keeps_deleted_source_tombstoned_until_regenerated():
+    deleted_source = ImportSource(
+        id=uuid.uuid4(),
+        source_type="epub",
+        source_hash_sha256="b" * 64,
+        pipeline_version="epub-import-v2",
+        lexicon_version="learner-catalog-v1",
+        status="deleted",
+        deleted_at=datetime.now(timezone.utc),
+        matched_entry_count=123,
+    )
+
+    select_result_existing = MagicMock()
+    select_result_existing.scalar_one_or_none.return_value = deleted_source
+
+    db = AsyncMock()
+    db.execute.return_value = select_result_existing
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    result = await get_or_create_import_source(
+        db,
+        source_type="epub",
+        source_hash_sha256="b" * 64,
+    )
+
+    assert result is deleted_source
+    assert result.deleted_at is not None
+    assert result.status == "deleted"
+    assert result.matched_entry_count == 123
+    db.commit.assert_not_awaited()
+    db.refresh.assert_not_awaited()
+
+
+def test_get_or_create_import_source_sync_keeps_deleted_source_tombstoned_until_regenerated():
+    deleted_source = ImportSource(
+        id=uuid.uuid4(),
+        source_type="epub",
+        source_hash_sha256="c" * 64,
+        pipeline_version="epub-import-v2",
+        lexicon_version="learner-catalog-v1",
+        status="deleted",
+        deleted_at=datetime.now(timezone.utc),
+        matched_entry_count=55,
+    )
+
+    select_result_existing = MagicMock()
+    select_result_existing.scalar_one_or_none.return_value = deleted_source
+
+    db = MagicMock()
+    db.execute.return_value = select_result_existing
+
+    result = get_or_create_import_source_sync(
+        db,
+        source_type="epub",
+        source_hash_sha256="c" * 64,
+    )
+
+    assert result is deleted_source
+    assert result.deleted_at is not None
+    assert result.status == "deleted"
+    assert result.matched_entry_count == 55
+    db.commit.assert_not_called()
+    db.refresh.assert_not_called()
 
 
 @pytest.mark.asyncio

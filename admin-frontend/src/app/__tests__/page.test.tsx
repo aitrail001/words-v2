@@ -44,10 +44,11 @@ describe("AuthNavigation", () => {
     expect(screen.getByTestId("nav-lexicon-voice-link")).toHaveTextContent("Voice");
     expect(screen.getByTestId("nav-lexicon-voice-link")).toHaveAttribute("href", "/lexicon/voice-runs");
     expect(screen.getByTestId("nav-lexicon-compiled-review-link")).toHaveTextContent("Enrichment Review");
-    expect(screen.getByTestId("nav-lexicon-db-link")).toHaveTextContent("DB");
+    expect(screen.getByTestId("nav-lexicon-epub-cache-link")).toHaveTextContent("EPUB Cache");
+    expect(screen.getByTestId("nav-lexicon-import-db-link")).toHaveTextContent("DB Management");
+    expect(screen.getByTestId("nav-lexicon-import-db-link")).toHaveAttribute("href", "/lexicon/import-db");
     expect(screen.getByTestId("nav-logout-button")).toHaveTextContent("Logout");
     expect(screen.queryByTestId("nav-lexicon-jsonl-review-link")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("nav-lexicon-import-db-link")).not.toBeInTheDocument();
     expect(screen.queryByTestId("nav-lexicon-db-inspector-link")).not.toBeInTheDocument();
   });
 });

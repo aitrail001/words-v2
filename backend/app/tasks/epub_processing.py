@@ -55,14 +55,17 @@ def _cleanup_uploaded_file(file_path: str, import_id: str) -> None:
         )
 
 
-def _mark_linked_jobs(db: Session, import_source: ImportSource) -> None:
+def _mark_linked_jobs(db: Session, import_source: ImportSource, *, current_job_id: uuid.UUID) -> None:
     linked_jobs = db.execute(
         select(ImportJob).where(ImportJob.import_source_id == import_source.id)
     ).scalars().all()
+    now = datetime.now(timezone.utc)
     for job in linked_jobs:
+        if job.id != current_job_id and job.completed_at is not None:
+            continue
         sync_job_with_source(job, import_source)
-        if import_source.status in {"completed", "failed"}:
-            job.completed_at = datetime.now(timezone.utc)
+        if import_source.status in {"completed", "failed"} and job.completed_at is None:
+            job.completed_at = now
 
 
 def _set_job_progress(
@@ -197,6 +200,8 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
                 chunks,
                 progress_callback=matching_progress,
             )
+            word_entry_count = sum(1 for entry in matched_entries if entry.entry_type == "word")
+            phrase_entry_count = sum(1 for entry in matched_entries if entry.entry_type == "phrase")
 
             import_source.title = metadata.title
             import_source.author = metadata.author
@@ -209,6 +214,9 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
             import_source.status = "completed"
             import_source.processed_at = datetime.now(timezone.utc)
             import_source.error_message = None
+            import_source.deleted_at = None
+            import_source.deleted_by_user_id = None
+            import_source.deletion_reason = None
 
             _set_job_progress(
                 db,
@@ -225,7 +233,7 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
                 matched_entries=matched_entries,
                 learner_catalog=learner_catalog,
             )
-            _mark_linked_jobs(db, import_source)
+            _mark_linked_jobs(db, import_source, current_job_id=job.id)
             _set_job_progress(
                 db,
                 job,
@@ -236,6 +244,8 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
                 label="Import completed",
                 matched_entry_count=len(matched_entries),
             )
+            job.word_entry_count = word_entry_count
+            job.phrase_entry_count = phrase_entry_count
             db.commit()
             return {"status": "completed", "matched_entry_count": import_source.matched_entry_count}
         except Exception as exc:
@@ -243,7 +253,7 @@ def process_source_import(self, job_id: str, user_id: str, file_path: str) -> di
             import_source.status = "failed"
             import_source.error_message = str(exc)
             import_source.processed_at = datetime.now(timezone.utc)
-            _mark_linked_jobs(db, import_source)
+            _mark_linked_jobs(db, import_source, current_job_id=job.id)
             _set_job_progress(
                 db,
                 job,

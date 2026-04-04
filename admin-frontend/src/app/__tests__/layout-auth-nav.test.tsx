@@ -34,8 +34,8 @@ describe("Admin RootLayout auth navigation", () => {
     expect(screen.getByTestId("nav-lexicon-ops-link")).toBeInTheDocument();
     expect(screen.getByTestId("nav-lexicon-voice-link")).toBeInTheDocument();
     expect(screen.getByTestId("nav-lexicon-compiled-review-link")).toBeInTheDocument();
-    expect(screen.getByTestId("nav-lexicon-db-link")).toBeInTheDocument();
-    expect(screen.queryByTestId("nav-lexicon-import-db-link")).not.toBeInTheDocument();
+    expect(screen.getByTestId("nav-lexicon-epub-cache-link")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-lexicon-import-db-link")).toBeInTheDocument();
     expect(screen.queryByTestId("nav-lexicon-db-inspector-link")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /logout/i }),
