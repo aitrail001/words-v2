@@ -1,13 +1,14 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
 import {
-  getAdminGroupedReviewQueue,
   type AdminGroupedReviewQueueItem,
   type AdminGroupedReviewQueueResponse,
   type KnowledgeEntryType,
   type KnowledgeStatus,
   type ReviewQueueBucket,
 } from "@/lib/knowledge-map-client";
+import { ACCESS_TOKEN_COOKIE_KEY } from "@/lib/auth-session";
 
 const BUCKET_LABELS: Record<ReviewQueueBucket, string> = {
   overdue: "Overdue",
@@ -35,12 +36,43 @@ const STATUS_LABELS: Record<KnowledgeStatus, string> = {
 
 const REVIEWABLE_BUCKETS: ReviewQueueBucket[] = ["overdue", "due_now"];
 
+const API_BASE_URL = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+
 function formatBucketLabel(bucket: ReviewQueueBucket): string {
   return BUCKET_LABELS[bucket] ?? bucket.replaceAll("_", " ");
 }
 
 function formatStatusLabel(status: KnowledgeStatus): string {
   return STATUS_LABELS[status] ?? status.replaceAll("_", " ");
+}
+
+async function fetchAdminGroupedReviewQueue(
+  effectiveNow?: string,
+): Promise<AdminGroupedReviewQueueResponse> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE_KEY)?.value;
+  if (!accessToken) {
+    throw new Error("Missing admin access token.");
+  }
+
+  const baseUrl = API_BASE_URL.endsWith("/") ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+  const url = new URL(`${baseUrl}/reviews/admin/queue/grouped`);
+  if (effectiveNow) {
+    url.searchParams.set("effective_now", effectiveNow);
+  }
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to load admin grouped review queue: ${response.status}`);
+  }
+
+  return (await response.json()) as AdminGroupedReviewQueueResponse;
 }
 
 function formatDebugValue(value: boolean | string | null | undefined): string {
@@ -136,7 +168,7 @@ export default async function AdminReviewQueuePage({
   let error: string | null = null;
 
   try {
-    queue = await getAdminGroupedReviewQueue(effectiveNow);
+    queue = await fetchAdminGroupedReviewQueue(effectiveNow);
   } catch {
     error = "Unable to load the admin review queue.";
   }
