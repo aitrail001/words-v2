@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRouter } from "next/navigation";
 import { KnowledgeEntryDetailPage } from "@/components/knowledge-entry-detail-page";
+import { apiClient } from "@/lib/api-client";
 import { getKnowledgeMapEntryDetail } from "@/lib/knowledge-map-client";
 import { playLearnerEntryAudio } from "@/lib/learner-audio";
 import { getUserPreferences, updateUserPreferences } from "@/lib/user-preferences-client";
@@ -18,6 +19,12 @@ jest.mock("@/lib/knowledge-map-client", () => {
     normalizeLearnerTranslation: jest.fn(actual.normalizeLearnerTranslation),
   };
 });
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    post: jest.fn(),
+    put: jest.fn(),
+  },
+}));
 jest.mock("@/lib/learner-audio", () => ({
   getPlayableLearnerAccents: jest.fn((voiceAssets) => {
     const locales = new Set(
@@ -97,6 +104,8 @@ describe("KnowledgeEntryDetailPage", () => {
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
   const mockUpdateUserPreferences = updateUserPreferences as jest.MockedFunction<typeof updateUserPreferences>;
   const mockPlayLearnerEntryAudio = playLearnerEntryAudio as jest.MockedFunction<typeof playLearnerEntryAudio>;
+  const mockPost = apiClient.post as jest.MockedFunction<typeof apiClient.post>;
+  const mockPut = apiClient.put as jest.MockedFunction<typeof apiClient.put>;
   const mockNormalizeLearnerTranslation = jest.requireMock("@/lib/knowledge-map-client")
     .normalizeLearnerTranslation as jest.MockedFunction<
     typeof import("@/lib/knowledge-map-client").normalizeLearnerTranslation
@@ -118,6 +127,15 @@ describe("KnowledgeEntryDetailPage", () => {
       show_translations_by_default: true,
     });
     mockPlayLearnerEntryAudio.mockResolvedValue(true);
+    mockPost.mockReset();
+    mockPut.mockReset();
+    jest.spyOn(window, "confirm").mockReturnValue(true);
+    window.sessionStorage.clear();
+    window.history.pushState({}, "", "/word/word-1");
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it("renders both English and localized text for a word detail", async () => {
@@ -643,5 +661,459 @@ describe("KnowledgeEntryDetailPage", () => {
         phraseSenseExampleId: undefined,
       },
     );
+  });
+
+  it("shows review scheduling controls on the real detail page and advances the stored review session", async () => {
+    const push = jest.fn();
+    mockUseRouter.mockReturnValue({ push } as never);
+    window.history.pushState({}, "", "/word/word-1?return_to=review&resume=1");
+    window.sessionStorage.setItem(
+      "learner-review-session-v1",
+      JSON.stringify({
+        cards: [
+          {
+            id: "state-1",
+            queue_item_id: "state-1",
+            word: "Bank",
+            definition: "A financial institution.",
+            review_mode: "mcq",
+            prompt: {
+              prompt_token: "prompt-state-1",
+            },
+            detail: {
+              entry_type: "word",
+              entry_id: "word-1",
+              display_text: "Bank",
+            },
+            schedule_options: [
+              { value: "1d", label: "Tomorrow", is_default: true },
+              { value: "7d", label: "In a week", is_default: false },
+            ],
+          },
+          {
+            id: "state-2",
+            queue_item_id: "state-2",
+            word: "Lender",
+            definition: "A person or organization that lends money.",
+          },
+        ],
+        currentIndex: 0,
+        phase: "reveal",
+        revealState: {
+          outcome: "correct_tested",
+          detail: {
+            entry_type: "word",
+            entry_id: "word-1",
+            display_text: "Bank",
+            primary_definition: "A financial institution.",
+            compare_with: [],
+            meaning_count: 1,
+            remembered_count: 0,
+            meanings: [],
+          },
+          scheduleOptions: [
+            { value: "1d", label: "Tomorrow", is_default: true },
+            { value: "7d", label: "In a week", is_default: false },
+          ],
+          selectedSchedule: "1d",
+          selectedOptionId: "A",
+          persisted: false,
+        },
+        typedAnswer: "",
+      }),
+    );
+    mockPost.mockResolvedValue({} as never);
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "learning",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      translation: "银行",
+      voice_assets: [
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en-US",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+        },
+      ],
+      primary_definition: "A financial institution.",
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A financial institution.",
+          localized_definition: "银行",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    expect(await screen.findByText(/suggested next review: tomorrow/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /back to review/i })).not.toBeInTheDocument();
+    expect(mockPlayLearnerEntryAudio).toHaveBeenCalledWith(
+      [
+        {
+          id: "voice-us",
+          content_scope: "word",
+          locale: "en-US",
+          playback_url: "/api/words/voice-assets/voice-us/content",
+        },
+      ],
+      "uk",
+      { contentScope: "word" },
+    );
+
+    fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "7d" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue review/i }));
+
+    expect(window.confirm).toHaveBeenCalledWith("Change the next review to In a week?");
+    await waitFor(() =>
+      expect(mockPost).toHaveBeenCalledWith(
+        "/reviews/queue/state-1/submit",
+        expect.objectContaining({
+          confirm: true,
+          prompt_token: "prompt-state-1",
+          selected_option_id: "A",
+          schedule_override: "7d",
+        }),
+      ),
+    );
+    expect(push).toHaveBeenCalledWith("/review?resume=1");
+    expect(JSON.parse(window.sessionStorage.getItem("learner-review-session-v1") || "{}")).toEqual(
+      expect.objectContaining({
+        currentIndex: 1,
+        phase: "challenge",
+      }),
+    );
+  });
+
+  it("persists next-review changes from the detail bottom bar for queued entries", async () => {
+    mockPut.mockResolvedValue({
+      queue_item_id: "queue-1",
+      next_review_at: "2026-04-05T00:00:00+00:00",
+      current_schedule_value: "7d",
+      current_schedule_label: "In a week",
+      schedule_options: [
+        { value: "10m", label: "Later today", is_default: false },
+        { value: "1d", label: "Tomorrow", is_default: true },
+        { value: "7d", label: "In a week", is_default: false },
+      ],
+    } as never);
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      display_text: "bank on",
+      normalized_form: "bank on",
+      browse_rank: 141,
+      status: "learning",
+      cefr_level: "B1",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "依赖",
+      primary_definition: "To depend on someone.",
+      review_queue: {
+        queue_item_id: "queue-1",
+        next_review_at: "2026-04-04T00:00:00+00:00",
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [
+          { value: "10m", label: "Later today", is_default: false },
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+      meanings: [],
+      senses: [
+        {
+          sense_id: "sense-1",
+          definition: "To depend on someone.",
+          localized_definition: "依赖",
+          part_of_speech: "phrasal_verb",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+        },
+      ],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
+
+    expect(await screen.findByLabelText(/review in/i)).toHaveValue("1d");
+    fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "7d" } });
+
+    expect(window.confirm).toHaveBeenCalledWith("Change the next review to In a week?");
+    await waitFor(() =>
+      expect(mockPut).toHaveBeenCalledWith("/reviews/queue/queue-1/schedule", {
+        schedule_override: "7d",
+      }),
+    );
+    expect(await screen.findByLabelText(/review in/i)).toHaveValue("7d");
+  });
+
+  it("does not update the queued next review when confirmation is cancelled", async () => {
+    (window.confirm as jest.Mock).mockReturnValueOnce(false);
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      display_text: "bank on",
+      normalized_form: "bank on",
+      browse_rank: 141,
+      status: "learning",
+      cefr_level: "B1",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "依赖",
+      primary_definition: "To depend on someone.",
+      review_queue: {
+        queue_item_id: "queue-1",
+        next_review_at: "2026-04-04T00:00:00+00:00",
+        current_schedule_value: "never_for_now",
+        current_schedule_label: "Pause review",
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "never_for_now", label: "Pause review", is_default: false },
+        ],
+      },
+      meanings: [],
+      senses: [
+        {
+          sense_id: "sense-1",
+          definition: "To depend on someone.",
+          localized_definition: "依赖",
+          part_of_speech: "phrasal_verb",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+        },
+      ],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
+
+    expect(await screen.findByLabelText(/review in/i)).toHaveValue("never_for_now");
+    fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "1d" } });
+
+    expect(window.confirm).toHaveBeenCalledWith("Change the next review to Tomorrow?");
+    expect(mockPut).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/review in/i)).toHaveValue("never_for_now");
+  });
+
+  it("shows next-review controls for learning entries even when no next review date exists yet", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "drum",
+      normalized_form: "drum",
+      browse_rank: 2400,
+      status: "learning",
+      cefr_level: "A2",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "鼓",
+      primary_definition: "A percussion instrument.",
+      review_queue: {
+        queue_item_id: "queue-drum",
+        next_review_at: null,
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A percussion instrument.",
+          localized_definition: "鼓",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    expect(await screen.findByText(/next review/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/review in/i)).toHaveValue("1d");
+  });
+
+  it("clears next-review controls immediately when an entry is marked as already knew", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "drum",
+      normalized_form: "drum",
+      browse_rank: 2400,
+      status: "learning",
+      cefr_level: "A2",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "鼓",
+      primary_definition: "A percussion instrument.",
+      review_queue: {
+        queue_item_id: "queue-drum",
+        next_review_at: null,
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A percussion instrument.",
+          localized_definition: "鼓",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+    mockPut.mockResolvedValueOnce({ entry_type: "word", entry_id: "word-1", status: "known" } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    expect(await screen.findByText(/next review/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /already knew/i }));
+
+    await waitFor(() => expect(screen.queryByText(/next review/i)).not.toBeInTheDocument());
+  });
+
+  it("clears next-review controls immediately when an entry is moved back to should learn", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "drum",
+      normalized_form: "drum",
+      browse_rank: 2400,
+      status: "known",
+      cefr_level: "A2",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "鼓",
+      primary_definition: "A percussion instrument.",
+      review_queue: {
+        queue_item_id: "queue-drum",
+        next_review_at: null,
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A percussion instrument.",
+          localized_definition: "鼓",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+    mockPut.mockResolvedValueOnce({ entry_type: "word", entry_id: "word-1", status: "to_learn" } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    expect(await screen.findByText(/next review/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /should learn/i }));
+
+    await waitFor(() => expect(screen.queryByText(/next review/i)).not.toBeInTheDocument());
   });
 });

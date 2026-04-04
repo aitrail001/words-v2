@@ -35,6 +35,7 @@ describe("WordEntryPage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(window, "confirm").mockReturnValue(true);
     mockUseParams.mockReturnValue({ entryId: "word-1" } as never);
     mockUseRouter.mockReturnValue({ push: jest.fn() } as never);
     mockGetKnowledgeMapDashboard.mockResolvedValue({
@@ -73,6 +74,10 @@ describe("WordEntryPage", () => {
       entry_id: "word-1",
       status: "known",
     });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it("renders the standalone word detail route with meaning navigation and translation toggle", async () => {
@@ -287,13 +292,18 @@ describe("WordEntryPage", () => {
       expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "learning");
       expect(screen.getByText(/status: learning/i)).toBeInTheDocument();
     });
+    expect((mockUseRouter.mock.results[0]?.value as { push: jest.Mock }).push).toHaveBeenCalledWith(
+      "/review?entry_type=word&entry_id=word-1",
+    );
+    expect(screen.getByRole("button", { name: /already knew/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /known/i }));
+    await user.click(screen.getByRole("button", { name: /already knew/i }));
 
     await waitFor(() => {
       expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "known");
       expect(screen.getByText(/status: known/i)).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: /should learn/i })).toBeInTheDocument();
   });
 
   it("shows a real error state when the standalone detail request fails", async () => {
@@ -305,6 +315,60 @@ describe("WordEntryPage", () => {
     expect(await screen.findByText(/unable to load this entry/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /back to knowledge map/i })).toHaveAttribute("href", "/knowledge-map");
     expect(screen.queryByText(/loading learner detail/i)).not.toBeInTheDocument();
+  });
+
+  it("requires confirmation before moving a learning entry to already knew", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false);
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "learning",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      translation: "银行",
+      primary_definition: "A financial institution.",
+      supported_translation_locales: ["ar", "es", "ja", "pt-BR", "zh-Hans"],
+      forms: null,
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A financial institution.",
+          localized_definition: "银行",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [{ id: "translation-1", language: "zh-Hans", translation: "银行", usage_note: null, examples: [] }],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<WordEntryPage />);
+
+    expect(await screen.findByText("Bank")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /already knew/i }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Mark this learning entry as Already Knew? Review history will be kept, but it will leave the review queue.",
+    );
+    expect(mockUpdateKnowledgeEntryStatus).not.toHaveBeenCalled();
   });
 
   it("routes the dashboard learn card to the standalone word detail route", async () => {

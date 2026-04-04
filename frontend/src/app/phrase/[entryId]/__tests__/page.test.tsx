@@ -41,6 +41,7 @@ describe("PhraseEntryPage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(window, "confirm").mockReturnValue(true);
     mockUseParams.mockReturnValue({ entryId: "phrase-1" } as never);
     mockUseRouter.mockReturnValue({ push: jest.fn() } as never);
     mockGetUserPreferences.mockResolvedValue({
@@ -122,6 +123,10 @@ describe("PhraseEntryPage", () => {
     });
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it("renders the standalone phrase detail route without embedded search", async () => {
     mockGetKnowledgeMapEntryDetail.mockResolvedValue({
       entry_type: "phrase",
@@ -180,10 +185,10 @@ describe("PhraseEntryPage", () => {
     expect(screen.getByText("You can bank on")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "depend on" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /learning/i }));
+    await user.click(screen.getByRole("button", { name: /already knew/i }));
 
     await waitFor(() => {
-      expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("phrase", "phrase-1", "learning");
+      expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("phrase", "phrase-1", "known");
     });
   });
 

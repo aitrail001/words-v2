@@ -2,15 +2,27 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { startTransition, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { apiClient } from "@/lib/api-client";
 import {
   getKnowledgeMapEntryDetail,
   normalizeLearnerTranslation,
+  updateReviewQueueSchedule,
   type KnowledgeEntryType,
   type KnowledgeMapEntryDetail,
   type KnowledgeStatus,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
+import {
+  getKnowledgeStatusActions,
+  shouldOpenLearningFlow,
+} from "@/lib/knowledge-status-policy";
+import {
+  advanceStoredReviewSession,
+  loadStoredReviewSession,
+  persistReviewSession,
+  type StoredReviewSession,
+} from "@/lib/review-session-storage";
 import {
   DEFAULT_USER_PREFERENCES,
   getUserPreferences,
@@ -32,21 +44,6 @@ const STATUS_LABELS: Record<KnowledgeStatus, string> = {
   learning: "Learning",
   known: "Known",
 };
-
-const PRIMARY_STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "to_learn", label: "Should Learn" },
-  { status: "known", label: "Already Know" },
-];
-
-const ALL_STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "learning", label: "Learning" },
-  { status: "known", label: "Known" },
-];
-
-const LEARN_NOW_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "learning", label: "Learn Now" },
-  { status: "known", label: "Already Know" },
-];
 
 const ACCENT_LABELS: Record<UserPreferences["accent_preference"], string> = {
   us: "US",
@@ -74,6 +71,10 @@ function actionButtonClass(status: KnowledgeStatus, activeStatus: KnowledgeStatu
   }
 
   return "bg-white text-[#684f85]";
+}
+
+function buildReviewScheduleConfirmationMessage(label: string): string {
+  return `Change the next review to ${label}?`;
 }
 
 function buildHeroStyle(seed: string): CSSProperties {
@@ -224,6 +225,10 @@ export function KnowledgeEntryDetailPage({
   const [overlayDetail, setOverlayDetail] = useState<KnowledgeMapEntryDetail | null>(null);
   const [overlayState, setOverlayState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [overlayCache, setOverlayCache] = useState<Record<string, KnowledgeMapEntryDetail>>({});
+  const [reviewSession, setReviewSession] = useState<StoredReviewSession | null>(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [queueScheduleSaving, setQueueScheduleSaving] = useState(false);
+  const autoPlayedReviewAudioRef = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -242,6 +247,7 @@ export function KnowledgeEntryDetailPage({
         setPreferences(preferencesResponse);
         setShowTranslations(preferencesResponse.show_translations_by_default);
         setDetail(detailResponse);
+        setReviewSession(loadStoredReviewSession());
         setLoadState("ready");
       })
       .catch(() => {
@@ -353,14 +359,53 @@ export function KnowledgeEntryDetailPage({
     if (!detail) {
       return;
     }
+    const previousStatus = detail.status;
+    if (
+      previousStatus === "learning"
+      && status === "known"
+      && typeof window !== "undefined"
+      && !window.confirm("Mark this learning entry as Already Knew? Review history will be kept, but it will leave the review queue.")
+    ) {
+      return;
+    }
     const response = await updateKnowledgeEntryStatus(detail.entry_type, detail.entry_id, status);
     startTransition(() => {
-      setDetail((current) => (current ? { ...current, status: response.status } : current));
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              status: response.status,
+              review_queue: response.status === "learning" ? current.review_queue : null,
+            }
+          : current,
+      );
     });
-    if (detail.status === "to_learn" && status === "learning") {
+    if (shouldOpenLearningFlow(previousStatus, status)) {
       router.push(`/review?entry_type=${detail.entry_type}&entry_id=${detail.entry_id}`);
     }
   };
+
+  useEffect(() => {
+    if (!detail) {
+      return;
+    }
+    const launchedFromReviewContext =
+      typeof window !== "undefined"
+        && new URLSearchParams(window.location.search).get("return_to") === "review";
+    const reviewVoiceAssets = getEntryLevelVoiceAssets(detail.voice_assets);
+    const canAutoPlayReviewAudio = getPlayableLearnerAccents(reviewVoiceAssets).length > 0;
+    if (
+      !launchedFromReviewContext ||
+      !canAutoPlayReviewAudio ||
+      autoPlayedReviewAudioRef.current === detail.entry_id
+    ) {
+      return;
+    }
+    autoPlayedReviewAudioRef.current = detail.entry_id;
+    void playLearnerEntryAudio(reviewVoiceAssets, preferences.accent_preference, {
+      contentScope: "word",
+    }).catch(() => undefined);
+  }, [detail, preferences.accent_preference]);
 
   if (loadState === "loading") {
     return <p className="text-sm text-slate-500">Loading learner detail...</p>;
@@ -414,12 +459,7 @@ export function KnowledgeEntryDetailPage({
   const accentLabel = displayedPronunciation ? `${ACCENT_LABELS[preferences.accent_preference]} Accent` : null;
   const entryLevelVoiceAssets = getEntryLevelVoiceAssets(detail.voice_assets);
   const playableAccents = getPlayableLearnerAccents(entryLevelVoiceAssets);
-  const statusActions =
-    detail.status === "undecided"
-      ? PRIMARY_STATUS_ACTIONS
-      : detail.status === "to_learn"
-        ? LEARN_NOW_ACTIONS
-        : ALL_STATUS_ACTIONS;
+  const statusActions = getKnowledgeStatusActions(detail.status, "detail");
   const overlayContentItems = overlayDetail
     ? overlayDetail.entry_type === "word"
       ? overlayDetail.meanings
@@ -450,6 +490,19 @@ export function KnowledgeEntryDetailPage({
     typeof window !== "undefined"
       && new URLSearchParams(window.location.search).get("return_to") === "review";
   const reviewReturnHref = "/review?resume=1";
+  const matchingReviewReveal =
+    launchedFromReview &&
+    reviewSession?.phase === "reveal" &&
+    reviewSession.revealState &&
+    reviewSession.revealState.detail?.entry_type === detail.entry_type &&
+    reviewSession.revealState.detail?.entry_id === detail.entry_id
+      ? reviewSession.revealState
+      : null;
+  const detailReviewQueue = detail.review_queue ?? null;
+  const activeReviewScheduleOptions =
+    matchingReviewReveal?.scheduleOptions ?? detailReviewQueue?.schedule_options ?? [];
+  const activeReviewScheduleValue =
+    matchingReviewReveal?.selectedSchedule ?? detailReviewQueue?.current_schedule_value ?? "";
 
   const updateAccentPreference = (accent: UserPreferences["accent_preference"]) => {
     setPreferences((current) => {
@@ -482,6 +535,83 @@ export function KnowledgeEntryDetailPage({
       meaningExampleId: detail.entry_type === "word" ? exampleId : undefined,
       phraseSenseExampleId: detail.entry_type === "phrase" ? exampleId : undefined,
     }).catch(() => undefined);
+  };
+
+  const handleContinueReview = async () => {
+    if (!reviewSession || !matchingReviewReveal) {
+      return;
+    }
+    const activeReviewCard = reviewSession.cards[reviewSession.currentIndex];
+    if (!activeReviewCard) {
+      router.push(reviewReturnHref);
+      return;
+    }
+    const selectedScheduleLabel =
+      matchingReviewReveal.scheduleOptions.find((option) => option.value === matchingReviewReveal.selectedSchedule)?.label
+      ?? matchingReviewReveal.selectedSchedule;
+    if (
+      typeof window !== "undefined"
+      && !window.confirm(buildReviewScheduleConfirmationMessage(selectedScheduleLabel))
+    ) {
+      return;
+    }
+
+    setReviewSaving(true);
+    try {
+      if (
+        activeReviewCard.queue_item_id &&
+        !matchingReviewReveal.persisted &&
+        matchingReviewReveal.outcome !== "wrong" &&
+        matchingReviewReveal.outcome !== "lookup"
+      ) {
+        const defaultSchedule =
+          matchingReviewReveal.scheduleOptions.find((option) => option.is_default)?.value ?? "";
+        await apiClient.post(`/reviews/queue/${activeReviewCard.queue_item_id}/submit`, {
+          confirm: true,
+          quality: 4,
+          time_spent_ms: 0,
+          audio_replay_count: 0,
+          card_type: activeReviewCard.card_type,
+          prompt_token: activeReviewCard.prompt?.prompt_token,
+          review_mode: activeReviewCard.review_mode,
+          outcome: matchingReviewReveal.outcome,
+          selected_option_id: matchingReviewReveal.selectedOptionId,
+          typed_answer: matchingReviewReveal.typedResponseValue,
+          schedule_override:
+            matchingReviewReveal.selectedSchedule !== defaultSchedule
+              ? matchingReviewReveal.selectedSchedule
+              : undefined,
+        });
+      }
+
+      const nextSession = advanceStoredReviewSession(reviewSession);
+      persistReviewSession(nextSession);
+      router.push(reviewReturnHref);
+    } finally {
+      setReviewSaving(false);
+    }
+  };
+
+  const handleUpdateDetailReviewSchedule = async (scheduleValue: string) => {
+    if (!detailReviewQueue?.queue_item_id) {
+      return;
+    }
+    const selectedScheduleLabel =
+      detailReviewQueue.schedule_options.find((option) => option.value === scheduleValue)?.label
+      ?? scheduleValue;
+    if (
+      typeof window !== "undefined"
+      && !window.confirm(buildReviewScheduleConfirmationMessage(selectedScheduleLabel))
+    ) {
+      return;
+    }
+    setQueueScheduleSaving(true);
+    try {
+      const updatedQueue = await updateReviewQueueSchedule(detailReviewQueue.queue_item_id, scheduleValue);
+      setDetail((current) => (current ? { ...current, review_queue: updatedQueue } : current));
+    } finally {
+      setQueueScheduleSaving(false);
+    }
   };
 
   return (
@@ -518,23 +648,32 @@ export function KnowledgeEntryDetailPage({
               •••
             </button>
           </div>
-          {launchedFromReview ? (
-            <div className="absolute inset-x-0 top-14 flex justify-center">
-              <button
-                type="button"
-                onClick={() => router.push(reviewReturnHref)}
-                className="rounded-full bg-white/75 px-4 py-2 text-sm font-semibold text-[#62368f] backdrop-blur"
-              >
-                Back to review
-              </button>
-            </div>
-          ) : null}
-
           <div className="absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(180deg,transparent,rgba(34,12,66,0.32))]" />
         </section>
 
         <section>
           <div className="space-y-3 rounded-[0.55rem] bg-white px-4 py-4 shadow-[0_8px_20px_rgba(85,48,139,0.08)]">
+            {matchingReviewReveal ? (
+              <div className="rounded-[0.65rem] border border-[#e6dcf3] bg-[#faf7ff] px-3 py-3">
+                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-[#8e38f2]">
+                  Review Decision
+                </p>
+                <p className="mt-2 text-sm font-semibold text-[#5a357b]">
+                  Suggested next review: {matchingReviewReveal.scheduleOptions.find((option) => option.is_default)?.label}
+                </p>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleContinueReview()}
+                    disabled={reviewSaving}
+                    className="w-full rounded-[0.8rem] bg-[#45c5dd] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {reviewSaving ? "Saving..." : "Continue review"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h1 className="text-[1.55rem] font-semibold leading-none text-[#572c80]">
@@ -902,17 +1041,59 @@ export function KnowledgeEntryDetailPage({
           data-testid="knowledge-detail-bottom-bar"
           className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.85rem)] left-1/2 z-30 flex w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 flex-col gap-2 rounded-[0.65rem] bg-[rgba(245,240,252,0.96)] p-2.5 shadow-[0_12px_26px_rgba(84,46,135,0.14)] backdrop-blur"
         >
-          <div className={`grid gap-3 ${statusActions.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
-            {statusActions.map((action) => (
-              <button
-                key={action.status}
-                type="button"
-                onClick={() => void updateStatus(action.status)}
-                className={`rounded-[0.95rem] px-3 py-3 text-sm font-semibold ${actionButtonClass(action.status, detail.status)}`}
-              >
-                {action.label}
-              </button>
-            ))}
+          <div className="flex items-stretch gap-3">
+            <div className={`grid flex-1 gap-3 ${statusActions.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+              {statusActions.map((action) => (
+                <button
+                  key={action.status}
+                  type="button"
+                  onClick={() => void updateStatus(action.status)}
+                  className={`rounded-[0.95rem] px-3 py-3 text-sm font-semibold ${actionButtonClass(action.status, detail.status)}`}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+            {activeReviewScheduleOptions.length > 0 ? (
+              <div className="w-[11.5rem] shrink-0 rounded-[0.95rem] border border-[#d9dcec] bg-white px-3 py-2.5">
+                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]">
+                  Next Review
+                </p>
+                <label htmlFor="detail-review-override" className="sr-only">
+                  Review in
+                </label>
+                <select
+                  id="detail-review-override"
+                  value={activeReviewScheduleValue}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    if (matchingReviewReveal) {
+                      setReviewSession((current) => {
+                        if (!current?.revealState) {
+                          return current;
+                        }
+                        const next = {
+                          ...current,
+                          revealState: { ...current.revealState, selectedSchedule: nextValue },
+                        };
+                        persistReviewSession(next);
+                        return next;
+                      });
+                      return;
+                    }
+                    void handleUpdateDetailReviewSchedule(nextValue);
+                  }}
+                  disabled={queueScheduleSaving || reviewSaving}
+                  className="mt-2 w-full rounded-[0.5rem] border border-[#d9dcec] bg-white px-3 py-2 text-sm text-[#43235f] disabled:opacity-50"
+                >
+                  {activeReviewScheduleOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

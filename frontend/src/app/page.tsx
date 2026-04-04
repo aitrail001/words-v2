@@ -5,7 +5,9 @@ import { useEffect, useState } from "react";
 import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
 import {
   getKnowledgeMapDashboard,
+  getReviewQueueStats,
   type KnowledgeMapDashboard,
+  type ReviewQueueStats,
 } from "@/lib/knowledge-map-client";
 
 function formatCount(value: number): string {
@@ -14,6 +16,7 @@ function formatCount(value: number): string {
 
 export default function HomePage() {
   const [dashboard, setDashboard] = useState<KnowledgeMapDashboard | null>(null);
+  const [reviewQueueStats, setReviewQueueStats] = useState<ReviewQueueStats | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -33,6 +36,32 @@ export default function HomePage() {
             discovery_range_end: null,
             discovery_entry: null,
             next_learn_entry: null,
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    getReviewQueueStats()
+      .then((response) => {
+        if (active) {
+          setReviewQueueStats(response);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setReviewQueueStats({
+            total_items: 0,
+            due_items: 0,
+            review_count: 0,
+            correct_count: 0,
+            accuracy: 0,
           });
         }
       });
@@ -63,6 +92,7 @@ export default function HomePage() {
         dashboard.next_learn_entry.entry_id,
       )
     : "/knowledge-map";
+  const dueReviewCount = reviewQueueStats?.due_items ?? 0;
 
   return (
     <div className="mx-auto max-w-[46rem] space-y-4 pb-10 text-[#472164]">
@@ -133,6 +163,30 @@ export default function HomePage() {
           </Link>
         </div>
       </section>
+
+      {dueReviewCount > 0 ? (
+        <section className="rounded-[0.85rem] bg-white px-3 py-3 shadow-[0_8px_18px_rgba(95,53,177,0.08)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-[1.25rem] font-semibold tracking-tight text-[#5b2590]">
+                Review
+              </h2>
+              <p className="mt-1 text-[0.86rem] leading-5 text-[#7b6795]">
+                {dueReviewCount} {dueReviewCount === 1 ? "word" : "words"} to review
+              </p>
+              <Link href="/review/debug" className="mt-2 inline-block text-[0.82rem] font-semibold text-[#7b32d3]">
+                Queue debug
+              </Link>
+            </div>
+            <Link
+              href="/review"
+              className="rounded-full bg-[#7b32d3] px-4 py-2 text-sm font-semibold text-white"
+            >
+              Start Review
+            </Link>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-[0.85rem] bg-[#eef0f7] px-2 py-2">
         <h2 className="text-center text-[1.5rem] font-semibold tracking-tight text-[#5b2590]">

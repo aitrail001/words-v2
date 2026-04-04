@@ -106,6 +106,17 @@ def mappings_one_result(value):
     return result
 
 
+@pytest.fixture(autouse=True)
+def stub_review_queue_lookup(monkeypatch):
+    async def fake_get_entry_queue_schedule(self, *, user_id, entry_type, entry_id):
+        return None
+
+    monkeypatch.setattr(
+        "app.api.knowledge_map.ReviewService.get_entry_queue_schedule",
+        fake_get_entry_queue_schedule,
+    )
+
+
 class TestKnowledgeMapOverview:
     @pytest.mark.asyncio
     async def test_overview_emits_learner_query_metrics_headers(self, client, mock_db, auth_token):
@@ -341,6 +352,8 @@ class TestKnowledgeMapRange:
             scalar_one_or_none_result(preferences),
             scalars_all_result([sense]),
             scalars_all_result([sense_localization]),
+            scalars_all_result([]),
+            scalars_all_result([]),
         ]
 
         response = await client.get(
@@ -363,6 +376,8 @@ class TestKnowledgeMapRange:
                 "pronunciations": {},
                 "translation": "contar con",
                 "primary_definition": "To depend on someone.",
+                "primary_example": None,
+                "primary_example_translation": None,
                 "part_of_speech": None,
                 "phrase_kind": "phrasal_verb",
                 "voice_assets": [],
@@ -387,6 +402,14 @@ class TestKnowledgeMapRange:
         )
         word_meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
         translation = Translation(id=uuid.uuid4(), meaning_id=word_meaning.id, language="es", translation="banco")
+        translation.example_entries = [MagicMock(text="Fui al banco.", order_index=0)]
+        word_example = MeaningExample(
+            id=uuid.uuid4(),
+            meaning_id=word_meaning.id,
+            sentence="I went to the bank.",
+            difficulty="A1",
+            order_index=0,
+        )
         phrase = PhraseEntry(
             id=uuid.uuid4(),
             phrase_text="bank on",
@@ -422,6 +445,19 @@ class TestKnowledgeMapRange:
             localized_definition="contar con",
             localized_usage_note="common",
         )
+        phrase_example = PhraseSenseExample(
+            id=uuid.uuid4(),
+            phrase_sense_id=phrase_sense.id,
+            sentence="You can bank on me.",
+            difficulty="A2",
+            order_index=0,
+        )
+        phrase_example_localization = PhraseSenseExampleLocalization(
+            id=uuid.uuid4(),
+            phrase_sense_example_id=phrase_example.id,
+            locale="es",
+            translation="Puedes contar conmigo.",
+        )
         mock_db.execute.side_effect = [
             scalar_one_or_none_result(user),
             mappings_all_result(
@@ -453,10 +489,13 @@ class TestKnowledgeMapRange:
             scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([word_meaning]),
+            scalars_all_result([word_example]),
             scalars_all_result([translation]),
             scalars_all_result([word]),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
+            scalars_all_result([phrase_example]),
+            scalars_all_result([phrase_example_localization]),
         ]
 
         response = await client.get(
@@ -473,10 +512,14 @@ class TestKnowledgeMapRange:
         assert data["items"][0]["pronunciation"] == "/baŋk/"
         assert data["items"][0]["pronunciations"] == {"us": "/bæŋk/", "uk": "/baŋk/"}
         assert data["items"][0]["translation"] == "banco"
+        assert data["items"][0]["primary_example"] == "I went to the bank."
+        assert data["items"][0]["primary_example_translation"] == "Fui al banco."
         assert data["items"][0]["voice_assets"] == []
         assert data["items"][1]["entry_type"] == "phrase"
         assert data["items"][1]["primary_definition"] == "To depend on someone."
         assert data["items"][1]["translation"] == "contar con"
+        assert data["items"][1]["primary_example"] == "You can bank on me."
+        assert data["items"][1]["primary_example_translation"] == "Puedes contar conmigo."
         assert data["items"][1]["voice_assets"] == []
 
 
@@ -506,11 +549,27 @@ class TestKnowledgeMapList:
             language="es",
             translation="resiliencia",
         )
+        word_new_translation.example_entries = [MagicMock(text="La resiliencia ayuda.", order_index=0)]
         word_learning_translation = Translation(
             id=uuid.uuid4(),
             meaning_id=word_learning_meaning.id,
             language="es",
             translation="banco",
+        )
+        word_learning_translation.example_entries = [MagicMock(text="Fui al banco.", order_index=0)]
+        word_new_example = MeaningExample(
+            id=uuid.uuid4(),
+            meaning_id=word_new_meaning.id,
+            sentence="Resilience helps people recover.",
+            difficulty="B1",
+            order_index=0,
+        )
+        word_learning_example = MeaningExample(
+            id=uuid.uuid4(),
+            meaning_id=word_learning_meaning.id,
+            sentence="I went to the bank.",
+            difficulty="A1",
+            order_index=0,
         )
         phrase_to_learn = PhraseEntry(
             id=uuid.uuid4(),
@@ -541,6 +600,19 @@ class TestKnowledgeMapList:
             localized_definition="contar con",
             localized_usage_note="common",
         )
+        phrase_example = PhraseSenseExample(
+            id=uuid.uuid4(),
+            phrase_sense_id=phrase_sense.id,
+            sentence="You can bank on me.",
+            difficulty="A2",
+            order_index=0,
+        )
+        phrase_example_localization = PhraseSenseExampleLocalization(
+            id=uuid.uuid4(),
+            phrase_sense_example_id=phrase_example.id,
+            locale="es",
+            translation="Puedes contar conmigo.",
+        )
         [
             LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_known.id, status="known"),
             LearnerEntryStatus(user_id=user_id, entry_type="word", entry_id=word_learning.id, status="learning"),
@@ -567,6 +639,7 @@ class TestKnowledgeMapList:
             scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([word_new_meaning]),
+            scalars_all_result([word_new_example]),
             scalars_all_result([word_new_translation]),
             scalars_all_result([word_new]),
             scalar_one_or_none_result(user),
@@ -588,6 +661,7 @@ class TestKnowledgeMapList:
             scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([word_learning_meaning]),
+            scalars_all_result([word_learning_example]),
             scalars_all_result([word_learning_translation]),
             scalars_all_result([word_learning]),
             scalar_one_or_none_result(user),
@@ -610,6 +684,8 @@ class TestKnowledgeMapList:
             scalar_one_or_none_result(preferences),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
+            scalars_all_result([phrase_example]),
+            scalars_all_result([phrase_example_localization]),
         ]
 
         new_response = await client.get(
@@ -619,6 +695,8 @@ class TestKnowledgeMapList:
         assert new_response.status_code == 200
         assert [item["display_text"] for item in new_response.json()["items"]] == ["resilience"]
         assert new_response.json()["items"][0]["translation"] == "resiliencia"
+        assert new_response.json()["items"][0]["primary_example"] == "Resilience helps people recover."
+        assert new_response.json()["items"][0]["primary_example_translation"] == "La resiliencia ayuda."
 
         learning_response = await client.get(
             "/api/knowledge-map/list?status=learning&sort=alpha",
@@ -628,6 +706,8 @@ class TestKnowledgeMapList:
         assert [item["display_text"] for item in learning_response.json()["items"]] == ["bank"]
         assert learning_response.json()["items"][0]["pronunciation"] == "/baŋk/"
         assert learning_response.json()["items"][0]["primary_definition"] == "Bank definition"
+        assert learning_response.json()["items"][0]["primary_example"] == "I went to the bank."
+        assert learning_response.json()["items"][0]["primary_example_translation"] == "Fui al banco."
 
         search_response = await client.get(
             "/api/knowledge-map/list?status=to_learn&q=bank&sort=rank&order=desc",
@@ -638,6 +718,8 @@ class TestKnowledgeMapList:
         assert [item["display_text"] for item in payload["items"]] == ["bank on"]
         assert payload["items"][0]["primary_definition"] == "To depend on someone."
         assert payload["items"][0]["translation"] == "contar con"
+        assert payload["items"][0]["primary_example"] == "You can bank on me."
+        assert payload["items"][0]["primary_example_translation"] == "Puedes contar conmigo."
 
 
 class TestKnowledgeMapDetail:
@@ -746,6 +828,127 @@ class TestKnowledgeMapDetail:
                 },
             }
         ]
+
+    @pytest.mark.asyncio
+    async def test_word_detail_includes_review_queue_schedule(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = Word(
+            id=uuid.uuid4(),
+            word="bank",
+            language="en",
+            frequency_rank=20,
+            phonetic="/bæŋk/",
+        )
+        meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A financial institution", order_index=0)
+        preferences = UserPreference(user_id=user_id, accent_preference="us", translation_locale="zh-Hans")
+
+        async def fake_get_entry_queue_schedule(self, *, user_id, entry_type, entry_id):
+            assert entry_type == "word"
+            return {
+                "queue_item_id": "queue-1",
+                "next_review_at": "2026-04-05T00:00:00+00:00",
+                "current_schedule_value": "1d",
+                "current_schedule_label": "Tomorrow",
+                "schedule_options": [
+                    {"value": "10m", "label": "Later today", "is_default": False},
+                    {"value": "1d", "label": "Tomorrow", "is_default": True},
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.knowledge_map.ReviewService.get_entry_queue_schedule",
+            fake_get_entry_queue_schedule,
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.get_preferences",
+            AsyncMock(return_value=preferences),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.get_status_row",
+            AsyncMock(return_value=MagicMock(status="learning")),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.load_catalog_neighbors",
+            AsyncMock(
+                return_value=(
+                    {"browse_rank": 20, "entry_type": "word", "entry_id": word.id, "display_text": "bank"},
+                    None,
+                    None,
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.load_word_detail_relations",
+            AsyncMock(return_value=({}, {}, {})),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.load_word_voice_assets",
+            AsyncMock(return_value=[]),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.load_entry_lookup_for_terms",
+            AsyncMock(return_value={}),
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(word),
+            scalars_all_result([meaning]),
+        ]
+
+        response = await client.get(
+            f"/api/knowledge-map/entries/word/{word.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["review_queue"]["queue_item_id"] == "queue-1"
+        assert data["review_queue"]["current_schedule_value"] == "1d"
+        assert data["review_queue"]["current_schedule_label"] == "Tomorrow"
+
+    @pytest.mark.asyncio
+    async def test_status_update_to_learning_ensures_review_state(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = Word(
+            id=uuid.uuid4(),
+            word="drum",
+            language="en",
+            frequency_rank=400,
+        )
+        ensured_state = MagicMock()
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(word),
+            scalar_one_or_none_result(None),
+        ]
+
+        ensure_state = AsyncMock(return_value=ensured_state)
+        monkeypatch.setattr(
+            "app.api.knowledge_map.ReviewService._ensure_entry_review_state",
+            ensure_state,
+        )
+
+        response = await client.put(
+            f"/api/knowledge-map/entries/word/{word.id}/status",
+            json={"status": "learning"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        ensure_state.assert_awaited_once_with(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word.id,
+        )
+        assert mock_db.commit.await_count == 1
 
     @pytest.mark.asyncio
     async def test_word_detail_uses_preferences(self, client, mock_db, auth_token):
@@ -1657,10 +1860,13 @@ class TestKnowledgeMapSearchAndHistory:
             scalars_all_result([]),
             scalar_one_or_none_result(preferences),
             scalars_all_result([meaning]),
+            scalars_all_result([]),
             scalars_all_result([translation]),
             scalars_all_result([word]),
             scalars_all_result([phrase_sense]),
             scalars_all_result([phrase_sense_localization]),
+            scalars_all_result([]),
+            scalars_all_result([]),
         ]
 
         response = await client.get(

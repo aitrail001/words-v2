@@ -59,6 +59,8 @@ export type KnowledgeMapEntrySummary = {
   pronunciations?: LearnerPronunciations;
   translation: string | null;
   primary_definition: string | null;
+  primary_example?: string | null;
+  primary_example_translation?: string | null;
   part_of_speech: string | null;
   phrase_kind: string | null;
   voice_assets?: LearnerVoiceAsset[];
@@ -95,6 +97,14 @@ export type KnowledgeMapDashboard = {
     browse_rank: number;
     status: KnowledgeStatus;
   } | null;
+};
+
+export type ReviewQueueStats = {
+  total_items: number;
+  due_items: number;
+  review_count: number;
+  correct_count: number;
+  accuracy: number;
 };
 
 export type KnowledgeMapRange = {
@@ -158,6 +168,14 @@ export type ReviewScheduleOption = {
   value: string;
   label: string;
   is_default: boolean;
+};
+
+export type EntryReviewQueue = {
+  queue_item_id: string;
+  next_review_at: string | null;
+  current_schedule_value: string;
+  current_schedule_label: string;
+  schedule_options: ReviewScheduleOption[];
 };
 
 export type LearningStartCard = {
@@ -280,6 +298,7 @@ export type KnowledgeMapEntryDetail = {
     note: string | null;
     target?: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
   }>;
+  review_queue?: EntryReviewQueue | null;
   previous_entry: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
   next_entry: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
 };
@@ -339,6 +358,9 @@ export const getKnowledgeMapOverview = (): Promise<KnowledgeMapOverview> =>
 export const getKnowledgeMapDashboard = (): Promise<KnowledgeMapDashboard> =>
   apiClient.get<KnowledgeMapDashboard>("/knowledge-map/dashboard");
 
+export const getReviewQueueStats = (): Promise<ReviewQueueStats> =>
+  apiClient.get<ReviewQueueStats>("/reviews/queue/stats");
+
 export const getKnowledgeMapRange = (rangeStart: number): Promise<KnowledgeMapRange> =>
   apiClient.get<KnowledgeMapRange>(`/knowledge-map/ranges/${rangeStart}`);
 
@@ -347,6 +369,14 @@ export const getKnowledgeMapEntryDetail = (
   entryId: string,
 ): Promise<KnowledgeMapEntryDetail> =>
   apiClient.get<KnowledgeMapEntryDetail>(`/knowledge-map/entries/${entryType}/${entryId}`);
+
+export const updateReviewQueueSchedule = (
+  queueItemId: string,
+  scheduleOverride: string,
+): Promise<EntryReviewQueue> =>
+  apiClient.put<EntryReviewQueue>(`/reviews/queue/${queueItemId}/schedule`, {
+    schedule_override: scheduleOverride,
+  });
 
 export const updateKnowledgeEntryStatus = (
   entryType: KnowledgeEntryType,

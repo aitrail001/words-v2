@@ -18,39 +18,13 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-# Schemas
-class SessionResponse(BaseModel):
-    id: str
-    user_id: str
-    started_at: datetime
-    completed_at: datetime | None
-    cards_reviewed: int
-
-
-class CardResponse(BaseModel):
-    id: str
-    session_id: str
-    word_id: str
-    meaning_id: str
-    card_type: str
-    quality_rating: int | None
-    time_spent_ms: int | None
-    ease_factor: float | None
-    interval_days: int | None
-    next_review: datetime | None
-
-
-class SubmitReviewRequest(BaseModel):
-    quality: int = Field(..., ge=0, le=5)
-    time_spent_ms: int = Field(..., ge=0)
-
-
 class QueueAddRequest(BaseModel):
     meaning_id: uuid.UUID
 
 
 class QueueSubmitRequest(BaseModel):
     quality: int = Field(..., ge=0, le=5)
+    confirm: bool = False
     time_spent_ms: int = Field(..., ge=0)
     audio_replay_count: int = Field(default=0, ge=0)
     card_type: str | None = Field(default=None, min_length=1, max_length=32)
@@ -198,6 +172,25 @@ class QueueStatsResponse(BaseModel):
     accuracy: float
 
 
+class QueueScheduleUpdateRequest(BaseModel):
+    schedule_override: str = Field(..., max_length=32)
+
+    @field_validator("schedule_override")
+    @classmethod
+    def validate_schedule_override(cls, value: str) -> str:
+        if value not in ReviewService.SCHEDULE_OVERRIDE_VALUES:
+            raise ValueError("Invalid schedule_override")
+        return value
+
+
+class QueueScheduleResponse(BaseModel):
+    queue_item_id: str
+    next_review_at: datetime | None = None
+    current_schedule_value: str
+    current_schedule_label: str
+    schedule_options: list[ScheduleOptionResponse] = []
+
+
 class ReviewAnalyticsBucketResponse(BaseModel):
     value: str
     count: int
@@ -212,21 +205,6 @@ class ReviewAnalyticsSummaryResponse(BaseModel):
     prompt_families: list[ReviewAnalyticsBucketResponse] = []
     outcomes: list[ReviewAnalyticsBucketResponse] = []
     response_input_modes: list[ReviewAnalyticsBucketResponse] = []
-
-
-def _to_card_response(card: Any) -> CardResponse:
-    return CardResponse(
-        id=str(card.id),
-        session_id=str(card.session_id),
-        word_id=str(card.word_id),
-        meaning_id=str(card.meaning_id),
-        card_type=card.card_type,
-        quality_rating=card.quality_rating,
-        time_spent_ms=card.time_spent_ms,
-        ease_factor=card.ease_factor,
-        interval_days=card.interval_days,
-        next_review=card.next_review,
-    )
 
 
 def _to_queue_item_response(
@@ -278,60 +256,6 @@ def _to_queue_item_response(
     )
 
 
-@router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
-async def create_session(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> SessionResponse:
-    """Create a new review session."""
-    service = ReviewService(db)
-    session = await service.create_session(current_user.id)
-
-    logger.info("Review session created", session_id=str(session.id), user_id=str(current_user.id))
-
-    return SessionResponse(
-        id=str(session.id),
-        user_id=str(session.user_id),
-        started_at=session.started_at,
-        completed_at=session.completed_at,
-        cards_reviewed=session.cards_reviewed,
-    )
-
-
-@router.get("/due", response_model=list[CardResponse])
-async def get_due_cards(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[CardResponse]:
-    """Get cards due for review."""
-    service = ReviewService(db)
-    cards = await service.get_due_cards(current_user.id)
-    return [_to_card_response(card) for card in cards]
-
-
-@router.post("/cards/{card_id}/submit", response_model=CardResponse)
-async def submit_review(
-    card_id: uuid.UUID,
-    request: SubmitReviewRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> CardResponse:
-    """Submit a review for a card."""
-    service = ReviewService(db)
-
-    try:
-        card = await service.submit_review(
-            card_id=card_id,
-            quality=request.quality,
-            time_spent_ms=request.time_spent_ms,
-            user_id=current_user.id,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-    return _to_card_response(card)
-
-
 @router.post("/queue", response_model=QueueItemResponse, status_code=status.HTTP_201_CREATED)
 async def add_to_queue(
     request: QueueAddRequest,
@@ -370,7 +294,7 @@ async def get_due_queue_items(
     """Get due items from the review queue with prompt metadata."""
     request_start = perf_counter()
     service = ReviewService(db)
-    due_items = await service.get_due_queue_items(current_user.id, limit=limit, hydrate_limit=1)
+    due_items = await service.get_due_queue_items(current_user.id, limit=limit, hydrate_limit=limit)
 
     items = [
         _to_queue_item_response(
@@ -413,6 +337,7 @@ async def submit_queue_review(
         item = await service.submit_queue_review(
             item_id=item_id,
             quality=request.quality,
+            confirm=request.confirm,
             time_spent_ms=request.time_spent_ms,
             audio_replay_count=request.audio_replay_count,
             card_type=request.card_type,
@@ -442,6 +367,42 @@ async def submit_queue_review(
         recheck_planned=bool(getattr(item, "recheck_planned", False)),
         detail=getattr(item, "detail", None),
         schedule_options=getattr(item, "schedule_options", None),
+    )
+
+
+@router.put("/queue/{item_id}/schedule", response_model=QueueScheduleResponse)
+async def update_queue_schedule(
+    item_id: uuid.UUID,
+    request: QueueScheduleUpdateRequest,
+    http_request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QueueScheduleResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    try:
+        payload = await service.update_queue_item_schedule(
+            user_id=current_user.id,
+            item_id=item_id,
+            schedule_override=request.schedule_override,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    metrics = finalize_request_db_metrics(
+        response,
+        http_request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_schedule_update", **metrics)
+    return QueueScheduleResponse(
+        queue_item_id=payload["queue_item_id"],
+        next_review_at=datetime.fromisoformat(payload["next_review_at"]) if payload["next_review_at"] else None,
+        current_schedule_value=payload["current_schedule_value"],
+        current_schedule_label=payload["current_schedule_label"],
+        schedule_options=[ScheduleOptionResponse(**option) for option in payload["schedule_options"]],
     )
 
 
@@ -557,26 +518,3 @@ async def get_review_analytics_summary(
     )
     logger.info("reviews_request", route_name="analytics_summary", **metrics)
     return ReviewAnalyticsSummaryResponse(**summary)
-
-
-@router.post("/sessions/{session_id}/complete", response_model=SessionResponse)
-async def complete_session(
-    session_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> SessionResponse:
-    """Mark a review session as completed."""
-    service = ReviewService(db)
-
-    try:
-        session = await service.complete_session(session_id, current_user.id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-    return SessionResponse(
-        id=str(session.id),
-        user_id=str(session.user_id),
-        started_at=session.started_at,
-        completed_at=session.completed_at,
-        cards_reviewed=session.cards_reviewed,
-    )

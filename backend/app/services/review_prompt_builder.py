@@ -37,6 +37,11 @@ def build_available_prompt_types(
     allow_confidence: bool,
     active_target_count: int,
 ) -> list[str]:
+    if review_mode == service.REVIEW_MODE_CONFIDENCE:
+        if sentence and allow_confidence:
+            return [service.PROMPT_TYPE_CONFIDENCE_CHECK]
+        return [service.PROMPT_TYPE_DEFINITION_TO_ENTRY]
+
     has_multiple_active_targets = active_target_count > 1
     available_prompt_types: list[str] = []
     if sentence:
@@ -203,6 +208,7 @@ async def load_prompt_distractors(
         return distractors
 
     if prompt_type in {
+        service.PROMPT_TYPE_CONFIDENCE_CHECK,
         service.PROMPT_TYPE_MEANING_DISCRIMINATION,
         service.PROMPT_TYPE_TYPED_RECALL,
         service.PROMPT_TYPE_SPEAK_RECALL,
@@ -228,12 +234,17 @@ async def load_prompt_audio_for_type(
     source_entry_type: str,
     meaning_id: uuid.UUID,
 ) -> dict[str, Any] | None:
-    if prompt_type != service.PROMPT_TYPE_AUDIO_TO_DEFINITION or source_entry_id is None:
+    if prompt_type not in {
+        service.PROMPT_TYPE_AUDIO_TO_DEFINITION,
+        service.PROMPT_TYPE_CONFIDENCE_CHECK,
+        service.PROMPT_TYPE_TYPED_RECALL,
+        service.PROMPT_TYPE_SPEAK_RECALL,
+    } or source_entry_id is None:
         return None
     audio_assets = await service._load_prompt_audio_assets(
         source_entry_type=source_entry_type,
         source_entry_id=source_entry_id,
-        target_id=meaning_id,
+        target_id=meaning_id if prompt_type == service.PROMPT_TYPE_AUDIO_TO_DEFINITION else None,
     )
     preferred_accent = await service._get_user_accent_preference(user_id) if user_id is not None else "us"
     return await service._build_prompt_audio_payload(audio_assets, preferred_accent=preferred_accent)
@@ -257,6 +268,7 @@ async def build_card_prompt(
     queue_item_id: uuid.UUID | None = None,
     previous_prompt_type: str | None = None,
     active_target_count: int = 1,
+    forced_prompt_type: str | None = None,
 ) -> dict[str, Any]:
     prompt_preferences = await resolve_prompt_preferences(service, user_id)
     available_prompt_types = build_available_prompt_types(
@@ -270,10 +282,14 @@ async def build_card_prompt(
         allow_confidence=prompt_preferences["allow_confidence"],
         active_target_count=active_target_count,
     )
-    prompt_type = service._select_prompt_type(
-        available_prompt_types,
-        index=index,
-        previous_prompt_type=previous_prompt_type,
+    prompt_type = (
+        forced_prompt_type
+        if forced_prompt_type in service.PROMPT_TYPE_OPTIONS
+        else service._select_prompt_type(
+            available_prompt_types,
+            index=index,
+            previous_prompt_type=previous_prompt_type,
+        )
     )
     normalized_entry_type = service._normalize_entry_type(
         source_entry_type or ("phrase" if is_phrase_entry else "word")

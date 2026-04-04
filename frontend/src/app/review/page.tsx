@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   startLearningEntry,
@@ -12,36 +11,17 @@ import {
 } from "@/lib/knowledge-map-client";
 import { apiClient } from "@/lib/api-client";
 import { useLearnerAudio } from "@/lib/learner-audio";
+import {
+  clearStoredReviewSession,
+  loadStoredReviewSession,
+  persistReviewSession,
+  type StoredRevealState as RevealState,
+  type StoredReviewCard as ReviewQueueCard,
+} from "@/lib/review-session-storage";
 import { getUserPreferences, type UserPreferences } from "@/lib/user-preferences-client";
 
-type ReviewQueueCard = {
-  id?: string;
-  queue_item_id?: string | null;
-  word?: string;
-  definition?: string | null;
-  card_type?: string;
-  review_mode?: string | null;
-  prompt?: ReviewPromptPayload | null;
-  source_entry_type?: "word" | "phrase" | null;
-  source_entry_id?: string | null;
-  detail?: ReviewDetailPayload | null;
-  schedule_options?: ReviewScheduleOption[];
-};
-
-type ReviewPhase = "challenge" | "relearn" | "reveal";
+type ReviewPhase = "learning" | "challenge" | "relearn" | "reveal";
 type ReviewOutcome = "correct_tested" | "remember" | "lookup" | "wrong";
-
-type RevealState = {
-  outcome: ReviewOutcome;
-  detail: ReviewDetailPayload | null;
-  scheduleOptions: ReviewScheduleOption[];
-  selectedSchedule: string;
-  selectedOptionId?: string;
-  typedResponseValue?: string;
-  persisted?: boolean;
-};
-
-const REVIEW_RESUME_STORAGE_KEY = "learner-review-session-v1";
 
 const normalizeCards = (items: ReviewQueueCard[]): ReviewQueueCard[] =>
   items.map((item) => ({
@@ -72,46 +52,20 @@ const isResumeRequested = (): boolean => {
   return new URLSearchParams(window.location.search).get("resume") === "1";
 };
 
-type StoredReviewSession = {
-  cards: ReviewQueueCard[];
-  currentIndex: number;
-  phase: ReviewPhase;
-  revealState: RevealState | null;
-  typedAnswer: string;
-};
-
-const loadStoredReviewSession = (): StoredReviewSession | null => {
+const getRequestedQueueItemId = (): string | null => {
   if (typeof window === "undefined") {
     return null;
   }
-  try {
-    const raw = window.sessionStorage.getItem(REVIEW_RESUME_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as StoredReviewSession | null;
-    if (!parsed || !Array.isArray(parsed.cards) || parsed.cards.length === 0) {
-      return null;
-    }
-    return parsed;
-  } catch {
+  return new URLSearchParams(window.location.search).get("queue_item_id");
+};
+
+const buildReviewDetailHref = (detail: ReviewDetailPayload | null): string | null => {
+  if (!detail) {
     return null;
   }
+  return `${detail.entry_type === "word" ? "/word" : "/phrase"}/${detail.entry_id}?return_to=review&resume=1`;
 };
 
-const persistReviewSession = (payload: StoredReviewSession): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.sessionStorage.setItem(REVIEW_RESUME_STORAGE_KEY, JSON.stringify(payload));
-};
-
-const clearStoredReviewSession = (): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.sessionStorage.removeItem(REVIEW_RESUME_STORAGE_KEY);
-};
 
 const formatPromptQuestion = (card: ReviewQueueCard): string => {
   const prompt = card.prompt;
@@ -127,6 +81,31 @@ const formatPromptQuestion = (card: ReviewQueueCard): string => {
 const defaultScheduleValue = (options: ReviewScheduleOption[]): string =>
   options.find((option) => option.is_default)?.value ?? "";
 
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const renderHighlightedPrompt = (text: string, target: string): ReactNode => {
+  const normalizedText = text.trim();
+  const normalizedTarget = target.trim();
+  if (!normalizedText || !normalizedTarget) {
+    return normalizedText;
+  }
+  const matcher = new RegExp(`(${escapeRegExp(normalizedTarget)})`, "ig");
+  const segments = normalizedText.split(matcher);
+  if (segments.length <= 1) {
+    return normalizedText;
+  }
+  return segments.map((segment, index) =>
+    segment.toLowerCase() === normalizedTarget.toLowerCase() ? (
+      <mark key={`${segment}-${index}`} className="rounded bg-amber-200 px-1 text-slate-900">
+        {segment}
+      </mark>
+    ) : (
+      <span key={`${segment}-${index}`}>{segment}</span>
+    ),
+  );
+};
+
 const toLearningCards = (payload: LearningStartResponse): ReviewQueueCard[] =>
   payload.cards.map((card, index) => ({
     id:
@@ -135,6 +114,7 @@ const toLearningCards = (payload: LearningStartResponse): ReviewQueueCard[] =>
       payload.queue_item_ids[0] ||
       `${payload.entry_type}-${payload.entry_id}-${index}`,
     queue_item_id: card.queue_item_id || payload.queue_item_ids[index] || payload.queue_item_ids[0] || null,
+    meaning_id: card.meaning_id,
     word: card.word,
     definition: card.definition,
     prompt: card.prompt,
@@ -143,6 +123,10 @@ const toLearningCards = (payload: LearningStartResponse): ReviewQueueCard[] =>
     detail: card.detail ?? payload.detail ?? null,
     schedule_options: payload.schedule_options ?? [],
   }));
+
+const exitReview = (router: ReturnType<typeof useRouter>) => {
+  router.push("/");
+};
 
 export default function ReviewPage() {
   const router = useRouter();
@@ -154,11 +138,13 @@ export default function ReviewPage() {
   const [phase, setPhase] = useState<ReviewPhase>("challenge");
   const [revealState, setRevealState] = useState<RevealState | null>(null);
   const [typedAnswer, setTypedAnswer] = useState("");
+  const [typedAnswerNudge, setTypedAnswerNudge] = useState<string | null>(null);
   const [resumeReady, setResumeReady] = useState(false);
   const [reviewPreferences, setReviewPreferences] = useState<UserPreferences | null>(null);
   const [audioReplayCount, setAudioReplayCount] = useState(0);
   const [challengeStartedAtMs, setChallengeStartedAtMs] = useState<number | null>(null);
-  const hydratingQueueItemIdRef = useRef<string | null>(null);
+  const [relearnMeaningIndex, setRelearnMeaningIndex] = useState(0);
+  const autoPlayedAudioKeyRef = useRef<string | null>(null);
   const { play, loadingUrl } = useLearnerAudio();
 
   useEffect(() => {
@@ -169,20 +155,33 @@ export default function ReviewPage() {
       setPhase(storedSession.phase);
       setRevealState(storedSession.revealState);
       setTypedAnswer(storedSession.typedAnswer);
-      setCompleted(false);
+      setCompleted(Boolean(storedSession.completed));
       setStarted(true);
       setChallengeStartedAtMs(Date.now());
+      setRelearnMeaningIndex(0);
     }
     setResumeReady(true);
   }, []);
+
+  useEffect(() => {
+    setRelearnMeaningIndex(0);
+  }, [currentIndex, phase]);
+
+  useEffect(() => {
+    setTypedAnswerNudge(null);
+  }, [currentIndex, phase]);
 
   useEffect(() => {
     const source = getLearningEntryFromUrl();
     if (!resumeReady) {
       return;
     }
-    if (!started && !loading && source) {
-      void startLearningMode(source.entryType, source.entryId);
+    if (!started && !loading) {
+      if (source) {
+        void startLearningMode(source.entryType, source.entryId);
+        return;
+      }
+      void startQueueReview();
     }
   }, [started, loading, resumeReady]);
 
@@ -219,7 +218,9 @@ export default function ReviewPage() {
   const promptText = currentCard ? formatPromptQuestion(currentCard) : "";
   const isCollocationPrompt = prompt?.prompt_type === "collocation_check";
   const isSituationPrompt = prompt?.prompt_type === "situation_matching";
+  const isConfidencePrompt = prompt?.prompt_type === "confidence_check";
   const isSpeechPlaceholderPrompt = prompt?.input_mode === "speech_placeholder";
+  const isTypedPrompt = ["typed", "speech_placeholder"].includes(prompt?.input_mode ?? "");
   const scheduleOptions = useMemo(
     () => currentCard?.schedule_options ?? [],
     [currentCard],
@@ -232,52 +233,6 @@ export default function ReviewPage() {
       <span className="font-semibold capitalize">{reviewDepthPreset}</span>
     </div>
   );
-
-  useEffect(() => {
-    if (!started || completed || !currentCard?.queue_item_id) {
-      return;
-    }
-    if (currentCard.prompt) {
-      return;
-    }
-    if (hydratingQueueItemIdRef.current === currentCard.queue_item_id) {
-      return;
-    }
-
-    let cancelled = false;
-    hydratingQueueItemIdRef.current = currentCard.queue_item_id;
-    void apiClient
-      .get<ReviewQueueCard>(`/reviews/queue/${currentCard.queue_item_id}`)
-      .then((payload) => {
-        if (cancelled) {
-          return;
-        }
-        setCards((existing) =>
-          existing.map((card, index) =>
-            index === currentIndex
-              ? {
-                  ...card,
-                  ...payload,
-                  queue_item_id: payload.queue_item_id ?? payload.id ?? card.queue_item_id,
-                  detail: payload.detail ?? card.detail ?? null,
-                  schedule_options: payload.schedule_options ?? card.schedule_options ?? [],
-                }
-              : card,
-          ),
-        );
-      })
-      .finally(() => {
-        if (!cancelled) {
-          if (hydratingQueueItemIdRef.current === currentCard.queue_item_id) {
-            hydratingQueueItemIdRef.current = null;
-          }
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [cards, completed, currentCard, currentIndex, started]);
 
   const buildQueueSubmitPayload = (
     card: ReviewQueueCard,
@@ -300,21 +255,89 @@ export default function ReviewPage() {
     void play(promptAudioUrl);
   };
 
+  useEffect(() => {
+    const shouldAutoPlayChallengePromptAudio =
+      phase === "challenge"
+      && Boolean(promptAudioUrl)
+      && (isTypedPrompt || prompt?.prompt_type === "audio_to_definition" || isConfidencePrompt);
+    const autoPlayKey =
+      phase === "learning"
+        ? currentCard?.queue_item_id ?? currentCard?.meaning_id ?? null
+        : phase === "relearn"
+          ? `${currentCard?.queue_item_id ?? currentCard?.meaning_id ?? ""}:${relearnMeaningIndex}`
+        : phase === "reveal"
+          ? revealState?.detail?.entry_id ?? currentCard?.queue_item_id ?? null
+          : shouldAutoPlayChallengePromptAudio
+            ? currentCard?.queue_item_id ?? currentCard?.meaning_id ?? null
+            : null;
+    const autoPlayUrl =
+      phase === "learning"
+        ? currentCard?.detail?.audio?.preferred_playback_url ?? null
+        : phase === "relearn"
+          ? revealState?.detail?.audio?.preferred_playback_url ?? currentCard?.detail?.audio?.preferred_playback_url ?? null
+        : phase === "reveal"
+          ? revealState?.detail?.audio?.preferred_playback_url ?? null
+          : shouldAutoPlayChallengePromptAudio
+            ? promptAudioUrl
+            : null;
+
+    if (!autoPlayKey || !autoPlayUrl) {
+      return;
+    }
+    const playbackKey = `${phase}:${autoPlayKey}`;
+    if (autoPlayedAudioKeyRef.current === playbackKey) {
+      return;
+    }
+    autoPlayedAudioKeyRef.current = playbackKey;
+    void play(autoPlayUrl);
+  }, [
+    currentCard?.detail?.audio?.preferred_playback_url,
+    currentCard?.meaning_id,
+    currentCard?.queue_item_id,
+    isConfidencePrompt,
+    isTypedPrompt,
+    phase,
+    play,
+    prompt?.prompt_type,
+    promptAudioUrl,
+    relearnMeaningIndex,
+    revealState?.detail?.audio?.preferred_playback_url,
+    revealState?.detail?.entry_id,
+  ]);
+
+  useEffect(() => {
+    if (phase !== "reveal" || !revealState) {
+      return;
+    }
+    const detailHref = buildReviewDetailHref(revealState.detail);
+    if (detailHref) {
+      router.push(detailHref);
+    }
+  }, [phase, revealState, router]);
+
   const startQueueReview = async () => {
     clearStoredReviewSession();
     setAudioReplayCount(0);
-    hydratingQueueItemIdRef.current = null;
     setLoading(true);
     try {
       const dueCards = await apiClient.get<ReviewQueueCard[]>("/reviews/queue/due");
-      setCards(normalizeCards(dueCards));
-      setCurrentIndex(0);
+      const normalizedCards = normalizeCards(dueCards);
+      const requestedQueueItemId = getRequestedQueueItemId();
+      const requestedIndex = requestedQueueItemId
+        ? normalizedCards.findIndex(
+            (card) => (card.queue_item_id ?? card.id ?? null) === requestedQueueItemId,
+          )
+        : -1;
+      setCards(normalizedCards);
+      setCurrentIndex(requestedIndex >= 0 ? requestedIndex : 0);
       setPhase("challenge");
       setRevealState(null);
       setTypedAnswer("");
+      setTypedAnswerNudge(null);
       setCompleted(false);
       setStarted(true);
       setChallengeStartedAtMs(Date.now());
+      setRelearnMeaningIndex(0);
     } finally {
       setLoading(false);
     }
@@ -323,30 +346,22 @@ export default function ReviewPage() {
   const startLearningMode = async (entryType: "word" | "phrase", entryId: string) => {
     clearStoredReviewSession();
     setAudioReplayCount(0);
-    hydratingQueueItemIdRef.current = null;
     setLoading(true);
     try {
       const payload = await startLearningEntry(entryType, entryId);
       setCards(normalizeCards(toLearningCards(payload)));
       setCurrentIndex(0);
-      setPhase("challenge");
+      setPhase("learning");
       setRevealState(null);
       setTypedAnswer("");
+      setTypedAnswerNudge(null);
       setCompleted(false);
       setStarted(true);
       setChallengeStartedAtMs(Date.now());
+      setRelearnMeaningIndex(0);
     } finally {
       setLoading(false);
     }
-  };
-
-  const startReview = async () => {
-    const source = getLearningEntryFromUrl();
-    if (source) {
-      await startLearningMode(source.entryType, source.entryId);
-      return;
-    }
-    await startQueueReview();
   };
 
   const advanceCard = () => {
@@ -355,8 +370,9 @@ export default function ReviewPage() {
       setPhase("challenge");
       setRevealState(null);
       setTypedAnswer("");
+      setTypedAnswerNudge(null);
       setAudioReplayCount(0);
-      hydratingQueueItemIdRef.current = null;
+      setRelearnMeaningIndex(0);
       setChallengeStartedAtMs(Date.now());
       return;
     }
@@ -399,10 +415,26 @@ export default function ReviewPage() {
     }>(`/reviews/queue/${card.queue_item_id}/submit`, {
       ...buildQueueSubmitPayload(card, {
         quality: outcome === "wrong" || outcome === "lookup" ? 1 : 4,
+        confirm: false,
       }),
       outcome,
       typed_answer: typedAnswer.trim() || undefined,
     });
+  };
+
+  const redirectToReviewDetail = (nextRevealState: RevealState) => {
+    persistReviewSession({
+      cards,
+      currentIndex,
+      phase: "reveal",
+      revealState: nextRevealState,
+      typedAnswer,
+      completed: false,
+    });
+    const detailHref = buildReviewDetailHref(nextRevealState.detail);
+    if (detailHref) {
+      router.push(detailHref);
+    }
   };
 
   const onSubmitTypedAnswer = async () => {
@@ -416,6 +448,7 @@ export default function ReviewPage() {
     const rawTypedAnswer = typedAnswer;
     const normalizedTyped = rawTypedAnswer.trim().toLowerCase();
     if (!normalizedTyped) {
+      setTypedAnswerNudge("Type your answer before checking.");
       return;
     }
     if (!currentCard.queue_item_id) {
@@ -430,18 +463,21 @@ export default function ReviewPage() {
         schedule_options?: ReviewScheduleOption[];
       }>(`/reviews/queue/${currentCard.queue_item_id}/submit`, buildQueueSubmitPayload(currentCard, {
         quality: 4,
+        confirm: false,
         typed_answer: rawTypedAnswer,
       }));
       const detail = response.detail ?? currentCard.detail ?? null;
       const options = response.schedule_options ?? currentCard.schedule_options ?? [];
       const outcome = response.outcome ?? "wrong";
-      setRevealState(
-        buildRevealState(currentCard, outcome, detail, options, {
-          typedResponseValue: rawTypedAnswer,
-          persisted: outcome !== "correct_tested",
-        }),
-      );
+      const nextRevealState = buildRevealState(currentCard, outcome, detail, options, {
+        typedResponseValue: rawTypedAnswer,
+        persisted: outcome !== "correct_tested",
+      });
+      setRevealState(nextRevealState);
       setPhase(outcome === "correct_tested" ? "reveal" : "relearn");
+      if (outcome === "correct_tested") {
+        redirectToReviewDetail(nextRevealState);
+      }
     } finally {
       setLoading(false);
     }
@@ -462,18 +498,21 @@ export default function ReviewPage() {
         schedule_options?: ReviewScheduleOption[];
       }>(`/reviews/queue/${currentCard.queue_item_id}/submit`, buildQueueSubmitPayload(currentCard, {
         quality: 4,
+        confirm: false,
         selected_option_id: optionId,
       }));
       const detail = response.detail ?? currentCard.detail ?? null;
       const options = response.schedule_options ?? currentCard.schedule_options ?? [];
       const outcome = response.outcome ?? "wrong";
-      setRevealState(
-        buildRevealState(currentCard, outcome, detail, options, {
-          selectedOptionId: optionId,
-          persisted: outcome === "wrong" || outcome === "lookup",
-        }),
-      );
+      const nextRevealState = buildRevealState(currentCard, outcome, detail, options, {
+        selectedOptionId: optionId,
+        persisted: outcome === "wrong" || outcome === "lookup",
+      });
+      setRevealState(nextRevealState);
       setPhase(outcome === "correct_tested" ? "reveal" : "relearn");
+      if (outcome === "correct_tested") {
+        redirectToReviewDetail(nextRevealState);
+      }
     } finally {
       setLoading(false);
     }
@@ -498,21 +537,6 @@ export default function ReviewPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const onRemember = async () => {
-    if (!currentCard || loading) {
-      return;
-    }
-    setRevealState(
-      buildRevealState(
-        currentCard,
-        "remember",
-        currentCard.detail ?? null,
-        currentCard.schedule_options ?? [],
-      ),
-    );
-    setPhase("reveal");
   };
 
   const onContinueReveal = async () => {
@@ -565,14 +589,9 @@ export default function ReviewPage() {
     return (
       <div className="space-y-4" data-testid="review-start-state">
         <h2 className="text-2xl font-bold">Review Session</h2>
-        <button
-          data-testid="review-start-button"
-          onClick={() => void startReview()}
-          disabled={loading}
-          className="rounded-md bg-fuchsia-600 px-4 py-2 text-white disabled:opacity-50"
-        >
-          {loading ? "Starting..." : "Start Review"}
-        </button>
+        <p className="text-sm text-slate-600">
+          {loading ? "Loading your review queue..." : "Preparing your review queue..."}
+        </p>
       </div>
     );
   }
@@ -595,26 +614,66 @@ export default function ReviewPage() {
   }
 
   if (phase === "reveal" && revealState) {
-    const detail = revealState.detail;
     return (
-      <div className="space-y-4" data-testid="review-reveal-state">
-        <div className="text-sm text-slate-500">
-          Review {currentIndex + 1}/{cards.length}
+      <div className="space-y-4" data-testid="review-redirecting-state">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            aria-label="Exit review"
+            onClick={() => exitReview(router)}
+            className="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+          >
+            ← Home
+          </button>
+          <div className="text-sm text-slate-500">
+            Review {currentIndex + 1}/{cards.length}
+          </div>
+        </div>
+        {reviewDepthBanner}
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+          Opening the full detail page...
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "learning") {
+    const detail = currentCard.detail ?? null;
+    const activeMeaning =
+      detail?.meanings.find((meaning) => meaning.id === currentCard.meaning_id)
+      ?? detail?.meanings[currentIndex]
+      ?? null;
+
+    return (
+      <div className="space-y-4" data-testid="review-learning-state">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            aria-label="Exit review"
+            onClick={() => exitReview(router)}
+            className="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+          >
+            ← Home
+          </button>
+          <h2 className="text-2xl font-bold">Learning</h2>
+          <span className="text-sm text-slate-500">
+            Learn {currentIndex + 1}/{cards.length}
+          </span>
         </div>
         {reviewDepthBanner}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-xs uppercase tracking-wide text-slate-500">
-            {revealState.outcome === "correct_tested" ? "Remembered" : "Kept in memory"}
-          </div>
+          <div className="text-xs uppercase tracking-wide text-cyan-600">Learn this meaning</div>
           <h2 className="mt-2 text-2xl font-semibold">{detail?.display_text ?? currentCard.word}</h2>
           {detail?.pronunciation ? <p className="text-sm text-slate-500">{detail.pronunciation}</p> : null}
-          <p className="mt-3 text-base text-slate-800">{detail?.primary_definition ?? currentCard.definition}</p>
-          {detail?.primary_example ? (
-            <p className="mt-2 text-sm italic text-slate-600">{detail.primary_example}</p>
+          <p className="mt-3 text-base text-slate-800">
+            {activeMeaning?.definition ?? detail?.primary_definition ?? currentCard.definition}
+          </p>
+          {activeMeaning?.part_of_speech ? (
+            <p className="mt-2 text-sm text-slate-500">{activeMeaning.part_of_speech}</p>
           ) : null}
-          {detail?.meaning_count ? (
-            <p className="mt-3 text-sm text-slate-500">
-              {detail.meaning_count} meanings, remembered {detail.remembered_count} times
+          {activeMeaning?.example ? (
+            <p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm italic text-slate-700">
+              {activeMeaning.example}
             </p>
           ) : null}
           {detail?.pro_tip ? (
@@ -622,79 +681,54 @@ export default function ReviewPage() {
               {detail.pro_tip}
             </div>
           ) : null}
-          {detail?.coverage_summary ? (
-            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-              Coverage: {detail.coverage_summary.replaceAll("_", " ")}
-            </div>
-          ) : null}
-          {detail?.compare_with?.length ? (
-            <div className="mt-4 text-sm text-slate-700">
-              Compare with: {detail.compare_with.join(", ")}
-            </div>
-          ) : null}
         </div>
-
-        <div className="space-y-2">
-          <label htmlFor="review-override" className="text-sm font-medium text-slate-700">
-            Review in
-          </label>
-          <select
-            id="review-override"
-            value={revealState.selectedSchedule}
-            onChange={(event) =>
-              setRevealState((state) =>
-                state ? { ...state, selectedSchedule: event.target.value } : state,
-              )
-            }
-            className="w-full rounded-md border border-slate-300 px-3 py-2"
-          >
-            {revealState.scheduleOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => void onContinueReveal()}
-            disabled={loading}
-            className="w-full rounded-md bg-fuchsia-600 px-4 py-2 text-white disabled:opacity-50"
-          >
-            {loading ? "Saving..." : "Continue"}
-          </button>
-        </div>
+        <button
+          onClick={advanceCard}
+          className="w-full rounded-md bg-fuchsia-600 px-4 py-2 text-white"
+        >
+          {currentIndex + 1 < cards.length ? "Next meaning" : "Finish learning"}
+        </button>
       </div>
     );
   }
 
   if (phase === "relearn" && revealState) {
     const detail = revealState.detail;
-    const detailHref = detail
-      ? `${detail.entry_type === "word" ? "/word" : "/phrase"}/${detail.entry_id}?return_to=review&resume=1`
-      : null;
+    const relearnMeanings = detail?.meanings ?? [];
+    const activeRelearnMeaning =
+      relearnMeanings[Math.min(relearnMeaningIndex, Math.max(relearnMeanings.length - 1, 0))] ?? null;
+    const hasMoreRelearnMeanings = relearnMeaningIndex + 1 < relearnMeanings.length;
     return (
       <div className="space-y-4" data-testid="review-relearn-state">
-        <div className="text-sm text-slate-500">
-          Review {currentIndex + 1}/{cards.length}
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            aria-label="Exit review"
+            onClick={() => exitReview(router)}
+            className="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+          >
+            ← Home
+          </button>
+          <div className="text-sm text-slate-500">
+            Review {currentIndex + 1}/{cards.length}
+          </div>
         </div>
         {reviewDepthBanner}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-xs uppercase tracking-wide text-amber-600">Relearn</div>
+          <div className="text-xs uppercase tracking-wide text-cyan-600">Learn this meaning</div>
           <h2 className="mt-2 text-2xl font-semibold">{detail?.display_text ?? currentCard.word}</h2>
-          <p className="mt-3 text-base text-slate-800">{detail?.primary_definition ?? currentCard.definition}</p>
-          <div className="mt-4 space-y-3">
-            {detail?.meanings?.map((meaning, index) => (
-              <div key={meaning.id} className="rounded-xl bg-slate-50 p-3">
-                <div className="text-sm font-medium text-slate-900">
-                  Meaning {index + 1}
-                  {meaning.part_of_speech ? ` · ${meaning.part_of_speech}` : ""}
-                </div>
-                <div className="mt-1 text-sm text-slate-700">{meaning.definition}</div>
-                {meaning.example ? (
-                  <div className="mt-1 text-xs italic text-slate-500">{meaning.example}</div>
-                ) : null}
-              </div>
-            ))}
-          </div>
+          {detail?.pronunciation ? <p className="text-sm text-slate-500">{detail.pronunciation}</p> : null}
+          <p className="mt-3 text-base text-slate-800">
+            {activeRelearnMeaning?.definition ?? detail?.primary_definition ?? currentCard.definition}
+          </p>
+          {activeRelearnMeaning?.part_of_speech ? (
+            <p className="mt-2 text-sm text-slate-500">{activeRelearnMeaning.part_of_speech}</p>
+          ) : null}
+          {activeRelearnMeaning?.example ? (
+            <p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm italic text-slate-700">
+              {activeRelearnMeaning.example}
+            </p>
+          ) : null}
           {detail?.pro_tip ? (
             <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
               {detail.pro_tip}
@@ -708,19 +742,17 @@ export default function ReviewPage() {
           <p className="mt-4 text-sm text-slate-500">We will bring this entry back sooner.</p>
         </div>
         <button
-          onClick={advanceCard}
+          onClick={() => {
+            if (hasMoreRelearnMeanings) {
+              setRelearnMeaningIndex((value) => value + 1);
+              return;
+            }
+            advanceCard();
+          }}
           className="w-full rounded-md bg-fuchsia-600 px-4 py-2 text-white"
         >
-          Continue
+          {hasMoreRelearnMeanings ? "Next meaning" : "Finish learning"}
         </button>
-        {detailHref ? (
-          <Link
-            href={detailHref}
-            className="block w-full rounded-md border border-slate-300 px-4 py-2 text-center text-slate-800"
-          >
-            Open full word details
-          </Link>
-        ) : null}
       </div>
     );
   }
@@ -728,6 +760,14 @@ export default function ReviewPage() {
   return (
     <div className="space-y-4" data-testid="review-active-state">
       <div className="flex items-center justify-between">
+        <button
+          type="button"
+          aria-label="Exit review"
+          onClick={() => exitReview(router)}
+          className="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+        >
+          ← Home
+        </button>
         <h2 className="text-2xl font-bold">Review Session</h2>
         <span className="text-sm text-slate-500">
           Review {currentIndex + 1}/{cards.length}
@@ -745,20 +785,13 @@ export default function ReviewPage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         {prompt?.stem ? <p className="mb-2 text-sm text-slate-500">{prompt.stem}</p> : null}
         {prompt?.prompt_type === "audio_to_definition" && promptAudioUrl ? (
-          <div className="mb-4 flex justify-center gap-3">
+          <div className="mb-4 flex justify-center">
             <button
               type="button"
               onClick={playPromptAudio}
               className="rounded-full bg-cyan-500 px-5 py-4 text-sm font-semibold text-white"
             >
-              {loadingUrl === promptAudioUrl ? "Loading..." : "Play audio"}
-            </button>
-            <button
-              type="button"
-              onClick={playPromptAudio}
-              className="rounded-full border border-cyan-300 px-5 py-4 text-sm font-semibold text-cyan-700"
-            >
-              Play again
+              {loadingUrl === promptAudioUrl ? "Loading..." : "Replay audio"}
             </button>
           </div>
         ) : null}
@@ -768,6 +801,20 @@ export default function ReviewPage() {
               Common expression
             </div>
             <p className="text-xl font-semibold text-slate-900">{promptText}</p>
+          </div>
+        ) : isConfidencePrompt ? (
+          <div className="space-y-3" data-testid="review-confidence-prompt">
+            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+              Confidence check
+            </div>
+            <button
+              type="button"
+              onClick={playPromptAudio}
+              className="w-full rounded-xl bg-amber-50 p-4 text-left text-lg text-slate-900"
+            >
+              {renderHighlightedPrompt(promptText, currentCard.word ?? "")}
+            </button>
+            <p className="text-sm text-slate-500">Tap the sentence to replay the audio.</p>
           </div>
         ) : isSituationPrompt ? (
           <div className="space-y-3" data-testid="review-situation-prompt">
@@ -779,7 +826,30 @@ export default function ReviewPage() {
         ) : (
           <p className="text-xl font-semibold text-slate-900">{promptText}</p>
         )}
+        {isTypedPrompt && promptAudioUrl ? (
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">
+            <p className="text-sm text-slate-600">
+              Listen again if the definition could match more than one answer.
+            </p>
+            <button
+              type="button"
+              onClick={playPromptAudio}
+              className="rounded-full border border-cyan-300 px-4 py-2 text-sm font-semibold text-cyan-700"
+            >
+              Replay audio
+            </button>
+          </div>
+        ) : null}
       </div>
+      ) : null}
+
+      {prompt && reviewPreferences?.show_pictures_in_questions ? (
+        <div
+          className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600"
+          data-testid="review-picture-placeholder"
+        >
+          Picture hint placeholder
+        </div>
       ) : null}
 
       {prompt ? (
@@ -817,13 +887,23 @@ export default function ReviewPage() {
             <input
               type="text"
               value={typedAnswer}
-              onChange={(event) => setTypedAnswer(event.target.value)}
+              onChange={(event) => {
+                setTypedAnswer(event.target.value);
+                if (typedAnswerNudge) {
+                  setTypedAnswerNudge(null);
+                }
+              }}
               placeholder="Type the word or phrase"
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900"
             />
+            {typedAnswerNudge ? (
+              <p className="text-sm font-medium text-amber-700" role="alert">
+                {typedAnswerNudge}
+              </p>
+            ) : null}
             <button
               onClick={() => void onSubmitTypedAnswer()}
-              disabled={loading || !typedAnswer.trim()}
+              disabled={loading}
               className="w-full rounded-md bg-fuchsia-600 px-4 py-2 text-white disabled:opacity-50"
             >
               {loading ? "Checking..." : "Check answer"}
@@ -834,20 +914,15 @@ export default function ReviewPage() {
       ) : null}
 
       <div className="space-y-2 pt-2">
-        <button
-          onClick={() => void onRemember()}
-          disabled={loading || !prompt}
-          className="w-full rounded-md bg-emerald-600 px-4 py-2 text-white disabled:opacity-50"
-        >
-          I remember it
-        </button>
-        <button
-          onClick={() => void onLookup()}
-          disabled={loading || !prompt}
-          className="w-full rounded-md bg-amber-500 px-4 py-2 text-white disabled:opacity-50"
-        >
-          Show meaning
-        </button>
+        {!isConfidencePrompt ? (
+          <button
+            onClick={() => void onLookup()}
+            disabled={loading || !prompt}
+            className="w-full rounded-md bg-amber-500 px-4 py-2 text-white disabled:opacity-50"
+          >
+            Show meaning
+          </button>
+        ) : null}
       </div>
 
       {scheduleOptions.length > 0 ? (

@@ -467,4 +467,98 @@ describe("KnowledgeMapRangeDetail", () => {
     await screen.findByText("A financial institution.");
     expect(screen.queryByRole("button", { name: "Play audio for Bank" })).not.toBeInTheDocument();
   });
+
+  it("shows bilingual examples in cards view and lets users hide translations there", async () => {
+    mockGetUserPreferences.mockResolvedValue({
+      accent_preference: "uk",
+      translation_locale: "zh-Hans",
+      knowledge_view_preference: "cards",
+      show_translations_by_default: true,
+    });
+    mockGetKnowledgeMapRange.mockResolvedValue({
+      range_start: 1,
+      range_end: 100,
+      previous_range_start: null,
+      next_range_start: null,
+      items: [
+        {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "Bank",
+          normalized_form: "bank",
+          browse_rank: 20,
+          status: "to_learn",
+          cefr_level: "A2",
+          pronunciation: "/baŋk/",
+          pronunciations: { us: "/bæŋk/", uk: "/baŋk/" },
+          translation: "银行",
+          primary_definition: "A financial institution.",
+          primary_example: "I went to the bank.",
+          primary_example_translation: "我去了银行。",
+          part_of_speech: "noun",
+          phrase_kind: null,
+        },
+      ],
+    });
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      pronunciations: { us: "/bæŋk/", uk: "/baŋk/" },
+      translation: "银行",
+      primary_definition: "A financial institution.",
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A financial institution.",
+          localized_definition: "银行",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [
+            {
+              id: "example-1",
+              sentence: "I went to the bank.",
+              difficulty: "A1",
+              translation: "我去了银行。",
+              linked_entries: [],
+            },
+          ],
+          translations: [{ id: "translation-1", language: "zh-Hans", translation: "银行", usage_note: null, examples: ["我去了银行。"] }],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeMapRangeDetail initialRangeStart={1} />);
+
+    expect(await screen.findByTestId("knowledge-card-view")).toBeInTheDocument();
+    expect(screen.getByText("A financial institution.")).toBeInTheDocument();
+    expect(screen.getByText("银行")).toBeInTheDocument();
+    expect(await screen.findByText("I went to the bank.")).toBeInTheDocument();
+    expect(await screen.findByText("我去了银行。")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /hide translation/i }));
+
+    expect(screen.queryByText("银行")).not.toBeInTheDocument();
+    expect(screen.queryByText("我去了银行。")).not.toBeInTheDocument();
+    expect(screen.getByText("I went to the bank.")).toBeInTheDocument();
+  });
 });

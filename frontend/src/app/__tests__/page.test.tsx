@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import HomePage from "@/app/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
-import { getKnowledgeMapDashboard } from "@/lib/knowledge-map-client";
+import { getKnowledgeMapDashboard, getReviewQueueStats } from "@/lib/knowledge-map-client";
 import { getUserPreferences } from "@/lib/user-preferences-client";
 
 jest.mock("next/navigation", () => ({
@@ -14,6 +14,7 @@ jest.mock("../globals.css", () => ({}));
 
 describe("HomePage (Knowledge Map)", () => {
   const mockGetKnowledgeMapDashboard = getKnowledgeMapDashboard as jest.MockedFunction<typeof getKnowledgeMapDashboard>;
+  const mockGetReviewQueueStats = getReviewQueueStats as jest.MockedFunction<typeof getReviewQueueStats>;
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
 
   beforeEach(() => {
@@ -43,6 +44,13 @@ describe("HomePage (Knowledge Map)", () => {
         status: "to_learn",
       },
     });
+    mockGetReviewQueueStats.mockResolvedValue({
+      total_items: 8,
+      due_items: 3,
+      review_count: 12,
+      correct_count: 10,
+      accuracy: 10 / 12,
+    });
     mockGetUserPreferences.mockResolvedValue({
       accent_preference: "uk",
       translation_locale: "zh-Hans",
@@ -61,6 +69,10 @@ describe("HomePage (Knowledge Map)", () => {
     expect(await screen.findByRole("link", { name: "Knew 4" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Started 7,082" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "To Learn 4,293" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /review/i })).toBeInTheDocument();
+    expect(screen.getByText("3 words to review")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /start review/i })).toHaveAttribute("href", "/review");
+    expect(screen.getByRole("link", { name: /queue debug/i })).toHaveAttribute("href", "/review/debug");
     expect(screen.getByRole("link", { name: /discover/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /learn next: drum/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /import epub/i })).toBeInTheDocument();
@@ -75,6 +87,23 @@ describe("HomePage (Knowledge Map)", () => {
     expect(await screen.findByText(/range 7000/i)).toBeInTheDocument();
     expect(screen.getByText(/next: drum/i)).toBeInTheDocument();
     expect(mockGetKnowledgeMapDashboard).toHaveBeenCalled();
+    expect(mockGetReviewQueueStats).toHaveBeenCalled();
+  });
+
+  it("hides the review card when there are no due review items", async () => {
+    mockGetReviewQueueStats.mockResolvedValueOnce({
+      total_items: 8,
+      due_items: 0,
+      review_count: 12,
+      correct_count: 10,
+      accuracy: 10 / 12,
+    });
+
+    render(<HomePage />);
+
+    expect(await screen.findByText("13,760")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /review/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/words to review/i)).not.toBeInTheDocument();
   });
 
   it("keeps the main dashboard navigation visible", async () => {

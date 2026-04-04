@@ -157,7 +157,7 @@ describe("WordListDetailRoute", () => {
             part_of_speech: null,
             translation: "弥补",
             primary_definition: "Compensate for something.",
-            status: "learning",
+            status: "to_learn",
             frequency_count: 2,
             added_at: "2026-04-02T00:00:00.000Z",
           },

@@ -12,7 +12,6 @@ from app.core.security import create_access_token
 from app.main import app
 from app.models.user import User
 from app.models.meaning import Meaning
-from app.models.review import ReviewSession, ReviewCard
 from app.models.entry_review import EntryReviewState
 from app.api.request_db_metrics import instrument_session_for_request, restore_session_after_request
 
@@ -71,133 +70,32 @@ def make_user(user_id):
     )
 
 
-class TestCreateSession:
-    @pytest.mark.asyncio
-    async def test_create_session_success(self, client, mock_db, auth_token):
-        token, user_id = auth_token
-        user = make_user(user_id)
-
-        user_result = MagicMock()
-        user_result.scalar_one_or_none.return_value = user
-        mock_db.execute.return_value = user_result
-
-        response = await client.post(
-            "/api/reviews/sessions",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert response.status_code == 201
-        data = response.json()
-        assert "id" in data
-        assert data["cards_reviewed"] == 0
-        assert data["completed_at"] is None
-
-    @pytest.mark.asyncio
-    async def test_create_session_requires_auth(self, client):
-        response = await client.post("/api/reviews/sessions")
-        assert response.status_code == 401
-
-
-class TestGetDueCards:
-    @pytest.mark.asyncio
-    async def test_get_due_cards_success(self, client, mock_db, auth_token):
-        token, user_id = auth_token
-        user = make_user(user_id)
-
-        card = ReviewCard(
-            id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            next_review=datetime.now(timezone.utc) - timedelta(days=1),
-        )
-
-        user_result = MagicMock()
-        user_result.scalar_one_or_none.return_value = user
-        cards_result = MagicMock()
-        cards_result.scalars.return_value.all.return_value = [card]
-        mock_db.execute.side_effect = [user_result, cards_result]
-
-        response = await client.get(
-            "/api/reviews/due",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["card_type"] == "flashcard"
-
-    @pytest.mark.asyncio
-    async def test_get_due_cards_requires_auth(self, client):
-        response = await client.get("/api/reviews/due")
-        assert response.status_code == 401
-
-
-class TestSubmitReview:
-    @pytest.mark.asyncio
-    async def test_submit_review_success(self, client, mock_db, auth_token):
-        token, user_id = auth_token
-        user = make_user(user_id)
-        card_id = uuid.uuid4()
-        card = ReviewCard(
-            id=card_id,
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            ease_factor=2.5,
-            interval_days=1,
-            repetitions=1,
-        )
-
-        user_result = MagicMock()
-        user_result.scalar_one_or_none.return_value = user
-        card_result = MagicMock()
-        card_result.scalar_one_or_none.return_value = card
-        mock_db.execute.side_effect = [user_result, card_result]
-
-        response = await client.post(
-            f"/api/reviews/cards/{card_id}/submit",
-            json={"quality": 4, "time_spent_ms": 5000},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["quality_rating"] == 4
-        assert data["time_spent_ms"] == 5000
-
-    @pytest.mark.asyncio
-    async def test_submit_review_requires_auth(self, client):
-        card_id = uuid.uuid4()
-        response = await client.post(
-            f"/api/reviews/cards/{card_id}/submit",
-            json={"quality": 4, "time_spent_ms": 5000},
-        )
-        assert response.status_code == 401
-
-
 class TestQueueAdd:
     @pytest.mark.asyncio
-    async def test_add_to_queue_success(self, client, mock_db, auth_token):
+    async def test_add_to_queue_success(self, client, mock_db, auth_token, monkeypatch):
         token, user_id = auth_token
         user = make_user(user_id)
         meaning = Meaning(id=uuid.uuid4(), word_id=uuid.uuid4(), definition="Queue def")
-        session = ReviewSession(id=uuid.uuid4(), user_id=user_id)
+        state_id = uuid.uuid4()
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
-        existing_item_result = MagicMock()
-        existing_item_result.scalar_one_or_none.return_value = None
-        meaning_result = MagicMock()
-        meaning_result.scalar_one_or_none.return_value = meaning
-        session_result = MagicMock()
-        session_result.scalar_one_or_none.return_value = session
-        mock_db.execute.side_effect = [
-            user_result,
-            existing_item_result,
-            meaning_result,
-            session_result,
-        ]
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_add_to_queue(self, user_id, meaning_id):
+            return EntryReviewState(
+                id=state_id,
+                user_id=user_id,
+                entry_type="word",
+                entry_id=meaning.word_id,
+                target_type="meaning",
+                target_id=meaning_id,
+            )
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.add_to_queue",
+            fake_add_to_queue,
+        )
 
         response = await client.post(
             "/api/reviews/queue",
@@ -207,9 +105,9 @@ class TestQueueAdd:
 
         assert response.status_code == 201
         data = response.json()
-        assert data["meaning_id"] == str(meaning.id)
-        assert data["word_id"] in (None, str(meaning.word_id))
-        assert data["card_type"] == "flashcard"
+        assert data["id"] == str(state_id)
+        assert data["target_type"] == "meaning"
+        assert data["target_id"] == str(meaning.id)
 
     @pytest.mark.asyncio
     async def test_add_to_queue_requires_auth(self, client):
@@ -225,14 +123,18 @@ class TestQueueDue:
     async def test_get_due_queue_items_success(self, client, mock_db, auth_token, monkeypatch):
         token, user_id = auth_token
         user = make_user(user_id)
-        due_item = ReviewCard(
+        due_item = EntryReviewState(
             id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
         )
+        due_item.word_id = due_item.entry_id
+        due_item.meaning_id = due_item.target_id
+        due_item.card_type = "flashcard"
+        due_item.next_review = datetime.now(timezone.utc) - timedelta(hours=1)
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
@@ -272,20 +174,83 @@ class TestQueueDue:
         assert int(response.headers["X-Reviews-Query-Count"]) >= 1
         assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
 
+
+class TestQueueScheduleUpdate:
+    @pytest.mark.asyncio
+    async def test_update_queue_schedule_success(self, client, mock_db, auth_token, monkeypatch):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_update_queue_item_schedule(self, *, user_id, item_id, schedule_override):
+            assert schedule_override == "7d"
+            return {
+                "queue_item_id": str(item_id),
+                "next_review_at": "2026-04-11T00:00:00+00:00",
+                "current_schedule_value": "7d",
+                "current_schedule_label": "In a week",
+                "schedule_options": [
+                    {"value": "1d", "label": "Tomorrow", "is_default": True},
+                    {"value": "7d", "label": "In a week", "is_default": False},
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.update_queue_item_schedule",
+            fake_update_queue_item_schedule,
+        )
+
+        item_id = uuid.uuid4()
+        response = await client.put(
+            f"/api/reviews/queue/{item_id}/schedule",
+            json={"schedule_override": "7d"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["queue_item_id"] == str(item_id)
+        assert data["current_schedule_value"] == "7d"
+        assert data["current_schedule_label"] == "In a week"
+
+    @pytest.mark.asyncio
+    async def test_update_queue_schedule_rejects_invalid_override(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        response = await client.put(
+            f"/api/reviews/queue/{uuid.uuid4()}/schedule",
+            json={"schedule_override": "bad-value"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 422
+
     @pytest.mark.asyncio
     async def test_get_due_queue_items_returns_audio_prompt_with_playback_url(
         self, client, mock_db, auth_token, monkeypatch
     ):
         token, user_id = auth_token
         user = make_user(user_id)
-        due_item = ReviewCard(
+        due_item = EntryReviewState(
             id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
         )
+        due_item.word_id = due_item.entry_id
+        due_item.meaning_id = due_item.target_id
+        due_item.card_type = "flashcard"
+        due_item.next_review = datetime.now(timezone.utc) - timedelta(hours=1)
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
@@ -389,14 +354,18 @@ class TestQueueDue:
         mock_db.execute.side_effect = [user_result]
 
         async def fake_get_queue_item(self, user_id, item_id):
-            item = ReviewCard(
+            item = EntryReviewState(
                 id=item_id,
-                session_id=uuid.uuid4(),
-                word_id=uuid.uuid4(),
-                meaning_id=uuid.uuid4(),
-                card_type="flashcard",
-                next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+                user_id=user_id,
+                entry_type="word",
+                entry_id=uuid.uuid4(),
+                target_type="meaning",
+                target_id=uuid.uuid4(),
             )
+            item.word_id = item.entry_id
+            item.meaning_id = item.target_id
+            item.card_type = "flashcard"
+            item.next_review = datetime.now(timezone.utc) - timedelta(hours=1)
             return {
                 "item": item,
                 "word": "ephemeral",
@@ -450,18 +419,20 @@ class TestQueueSubmit:
     async def test_submit_queue_review_success(self, client, mock_db, auth_token, monkeypatch):
         token, user_id = auth_token
         user = make_user(user_id)
-        item = ReviewCard(
+        item = EntryReviewState(
             id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            ease_factor=2.5,
-            interval_days=1,
-            repetitions=1,
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
         )
-        item.review_count = 0
-        item.correct_count = 0
+        item.word_id = item.entry_id
+        item.meaning_id = item.target_id
+        item.card_type = "flashcard"
+        item.interval_days = 1
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
@@ -672,33 +643,4 @@ class TestReviewAnalyticsSummary:
     @pytest.mark.asyncio
     async def test_get_review_analytics_summary_requires_auth(self, client):
         response = await client.get("/api/reviews/analytics/summary")
-        assert response.status_code == 401
-
-
-class TestCompleteSession:
-    @pytest.mark.asyncio
-    async def test_complete_session_success(self, client, mock_db, auth_token):
-        token, user_id = auth_token
-        user = make_user(user_id)
-        session_id = uuid.uuid4()
-        session = ReviewSession(id=session_id, user_id=user_id)
-
-        user_result = MagicMock()
-        user_result.scalar_one_or_none.return_value = user
-        session_result = MagicMock()
-        session_result.scalar_one_or_none.return_value = session
-        mock_db.execute.side_effect = [user_result, session_result]
-
-        response = await client.post(
-            f"/api/reviews/sessions/{session_id}/complete",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["completed_at"] is not None
-
-    @pytest.mark.asyncio
-    async def test_complete_session_requires_auth(self, client):
-        session_id = uuid.uuid4()
-        response = await client.post(f"/api/reviews/sessions/{session_id}/complete")
         assert response.status_code == 401

@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +34,67 @@ from app.services.voice_assets import (
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+def _voice_asset_parent_filters(asset: LexiconVoiceAsset):
+    if asset.word_id is not None:
+        return [LexiconVoiceAsset.word_id == asset.word_id]
+    if asset.meaning_id is not None:
+        return [LexiconVoiceAsset.meaning_id == asset.meaning_id]
+    if asset.meaning_example_id is not None:
+        return [LexiconVoiceAsset.meaning_example_id == asset.meaning_example_id]
+    if asset.phrase_entry_id is not None:
+        return [LexiconVoiceAsset.phrase_entry_id == asset.phrase_entry_id]
+    if asset.phrase_sense_id is not None:
+        return [LexiconVoiceAsset.phrase_sense_id == asset.phrase_sense_id]
+    if asset.phrase_sense_example_id is not None:
+        return [LexiconVoiceAsset.phrase_sense_example_id == asset.phrase_sense_example_id]
+    return []
+
+
+async def _find_voice_asset_fallback(
+    db: AsyncSession,
+    asset: LexiconVoiceAsset,
+) -> LexiconVoiceAsset | None:
+    parent_filters = _voice_asset_parent_filters(asset)
+    if not parent_filters:
+        return None
+    result = await db.execute(
+        select(LexiconVoiceAsset)
+        .options(selectinload(LexiconVoiceAsset.storage_policy))
+        .where(
+            and_(
+                LexiconVoiceAsset.id != asset.id,
+                *parent_filters,
+                LexiconVoiceAsset.content_scope == asset.content_scope,
+                LexiconVoiceAsset.locale == asset.locale,
+                LexiconVoiceAsset.voice_role == asset.voice_role,
+                LexiconVoiceAsset.profile_key == asset.profile_key,
+                LexiconVoiceAsset.source_text_hash == asset.source_text_hash,
+            )
+        )
+        .order_by(LexiconVoiceAsset.created_at.desc(), LexiconVoiceAsset.id.desc())
+    )
+    for candidate in result.scalars().all():
+        remote_url = build_storage_target_url(candidate)
+        if remote_url:
+            return candidate
+        try:
+            local_path = build_local_storage_path(candidate)
+        except FileNotFoundError:
+            fallback_remote_url = build_fallback_storage_target_url(candidate)
+            if fallback_remote_url:
+                return candidate
+            try:
+                fallback_path = build_fallback_local_storage_path(candidate)
+            except FileNotFoundError:
+                continue
+            if fallback_path.exists() and fallback_path.is_file():
+                return candidate
+            continue
+        if local_path.exists() and local_path.is_file():
+            return candidate
+    return None
 
 
 class PhoneticVariantResponse(BaseModel):
@@ -370,32 +431,86 @@ async def get_voice_asset_content(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset not found")
 
-    remote_url = build_storage_target_url(asset)
+    selected_asset = asset
+    remote_url = build_storage_target_url(selected_asset)
     if remote_url:
         return RedirectResponse(remote_url)
 
     try:
-        local_path = build_local_storage_path(asset)
+        local_path = build_local_storage_path(selected_asset)
     except FileNotFoundError as exc:
-        fallback_remote_url = build_fallback_storage_target_url(asset)
+        fallback_remote_url = build_fallback_storage_target_url(selected_asset)
         if fallback_remote_url:
             return RedirectResponse(fallback_remote_url)
         try:
-            local_path = build_fallback_local_storage_path(asset)
+            local_path = build_fallback_local_storage_path(selected_asset)
         except FileNotFoundError:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+            fallback_asset = await _find_voice_asset_fallback(db, selected_asset)
+            if fallback_asset is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+            selected_asset = fallback_asset
+            remote_url = build_storage_target_url(selected_asset)
+            if remote_url:
+                return RedirectResponse(remote_url)
+            try:
+                local_path = build_local_storage_path(selected_asset)
+            except FileNotFoundError as fallback_exc:
+                fallback_remote_url = build_fallback_storage_target_url(selected_asset)
+                if fallback_remote_url:
+                    return RedirectResponse(fallback_remote_url)
+                try:
+                    local_path = build_fallback_local_storage_path(selected_asset)
+                except FileNotFoundError:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(fallback_exc)) from fallback_exc
     if not local_path.exists() or not local_path.is_file():
-        fallback_remote_url = build_fallback_storage_target_url(asset)
+        fallback_remote_url = build_fallback_storage_target_url(selected_asset)
         if fallback_remote_url:
             return RedirectResponse(fallback_remote_url)
         try:
-            fallback_path = build_fallback_local_storage_path(asset)
+            fallback_path = build_fallback_local_storage_path(selected_asset)
         except FileNotFoundError:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
-        if not fallback_path.exists() or not fallback_path.is_file():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
-        local_path = fallback_path
-    return FileResponse(local_path, media_type=asset.mime_type or "audio/mpeg", filename=Path(asset.relative_path).name)
+            fallback_asset = await _find_voice_asset_fallback(db, selected_asset)
+            if fallback_asset is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
+            selected_asset = fallback_asset
+            remote_url = build_storage_target_url(selected_asset)
+            if remote_url:
+                return RedirectResponse(remote_url)
+            try:
+                local_path = build_local_storage_path(selected_asset)
+            except FileNotFoundError:
+                fallback_remote_url = build_fallback_storage_target_url(selected_asset)
+                if fallback_remote_url:
+                    return RedirectResponse(fallback_remote_url)
+                try:
+                    local_path = build_fallback_local_storage_path(selected_asset)
+                except FileNotFoundError:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
+        else:
+            if not fallback_path.exists() or not fallback_path.is_file():
+                fallback_asset = await _find_voice_asset_fallback(db, selected_asset)
+                if fallback_asset is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
+                selected_asset = fallback_asset
+                remote_url = build_storage_target_url(selected_asset)
+                if remote_url:
+                    return RedirectResponse(remote_url)
+                try:
+                    local_path = build_local_storage_path(selected_asset)
+                except FileNotFoundError:
+                    fallback_remote_url = build_fallback_storage_target_url(selected_asset)
+                    if fallback_remote_url:
+                        return RedirectResponse(fallback_remote_url)
+                    try:
+                        local_path = build_fallback_local_storage_path(selected_asset)
+                    except FileNotFoundError:
+                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
+                else:
+                    if not local_path.exists() or not local_path.is_file():
+                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice asset file not found")
+            else:
+                local_path = fallback_path
+    return FileResponse(local_path, media_type=selected_asset.mime_type or "audio/mpeg", filename=Path(selected_asset.relative_path).name)
 
 
 @router.get("/{word_id}/enrichment", response_model=WordEnrichmentDetailResponse)

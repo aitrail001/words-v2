@@ -24,11 +24,13 @@ describe("KnowledgeMapRangePage", () => {
   const mockGetKnowledgeMapEntryDetail = getKnowledgeMapEntryDetail as jest.MockedFunction<typeof getKnowledgeMapEntryDetail>;
   const mockUpdateKnowledgeEntryStatus = updateKnowledgeEntryStatus as jest.MockedFunction<typeof updateKnowledgeEntryStatus>;
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
+  const push = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseParams.mockReturnValue({ start: "1" } as never);
-    mockUseRouter.mockReturnValue({ push: jest.fn() } as never);
+    push.mockReset();
+    mockUseRouter.mockReturnValue({ push } as never);
     mockGetUserPreferences.mockResolvedValue({
       accent_preference: "uk",
       translation_locale: "zh-Hans",
@@ -216,14 +218,68 @@ describe("KnowledgeMapRangePage", () => {
     await waitFor(() => {
       expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "learning");
     });
+    expect(push).toHaveBeenCalledWith("/review?entry_type=word&entry_id=word-1");
+    expect(screen.queryByRole("button", { name: /^known$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^learning$/i })).not.toBeInTheDocument();
+  });
 
-    expect(await screen.findByRole("button", { name: /^learning$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^known$/i })).toBeInTheDocument();
+  it("lets known range entries move back to the learn queue without exposing learn-now buttons", async () => {
+    const user = userEvent.setup();
+    mockGetKnowledgeMapRange.mockResolvedValueOnce({
+      range_start: 1,
+      range_end: 100,
+      previous_range_start: null,
+      next_range_start: null,
+      items: [
+        {
+          entry_type: "word",
+          entry_id: "word-1",
+          display_text: "Bank",
+          normalized_form: "bank",
+          browse_rank: 20,
+          status: "known",
+          cefr_level: "A2",
+          pronunciation: "/baŋk/",
+          translation: "银行",
+          primary_definition: "A financial institution.",
+          part_of_speech: "noun",
+          phrase_kind: null,
+        },
+      ],
+    });
+    mockGetKnowledgeMapEntryDetail.mockResolvedValueOnce({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "Bank",
+      normalized_form: "bank",
+      browse_rank: 20,
+      status: "known",
+      cefr_level: "A2",
+      pronunciation: "/baŋk/",
+      translation: "银行",
+      primary_definition: "A financial institution.",
+      meanings: [],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    } as never);
+    mockUpdateKnowledgeEntryStatus.mockResolvedValueOnce({
+      entry_type: "word",
+      entry_id: "word-1",
+      status: "to_learn",
+    });
 
-    await user.click(screen.getByRole("button", { name: /^known$/i }));
+    render(<KnowledgeMapRangePage />);
+
+    expect(await screen.findByRole("button", { name: /should learn/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /learn now/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /should learn/i }));
 
     await waitFor(() => {
-      expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "known");
+      expect(mockUpdateKnowledgeEntryStatus).toHaveBeenCalledWith("word", "word-1", "to_learn");
     });
   });
 
