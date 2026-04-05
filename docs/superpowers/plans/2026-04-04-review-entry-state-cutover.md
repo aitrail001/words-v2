@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Unify learner review onto `EntryReviewState` and one post-answer state machine so correct answers go to the normal detail page, failed answers go through guided relearn, and review sessions advance deterministically.
+**Goal:** Remove legacy learner review queue compatibility, make `EntryReviewState` the sole learner review state, and fix the broken `Learn now -> submit -> continue` flow.
 
-**Architecture:** Keep the current learner-review entry points, but remove legacy learner-review runtime behavior and route all queue/session logic through `EntryReviewState` plus explicit review-session state. Reuse the normal detail page for successful answers and the existing learning-pass presentation for failed answers, with deterministic session advancement after each branch.
+**Architecture:** Keep the existing learner review endpoints, but route their behavior through persisted `EntryReviewState` rows only. Start with failing regression tests for the real learn-now flow, then remove legacy fallback branches and make `learning/start` durably persist the returned ids before any follow-up request.
 
-**Tech Stack:** FastAPI, SQLAlchemy async ORM, Next.js, React Testing Library, pytest, Playwright
+**Tech Stack:** FastAPI, SQLAlchemy async ORM, Next.js, Playwright, pytest
 
 ---
 
@@ -15,237 +15,165 @@
 - Modify: `backend/app/api/reviews.py`
 - Modify: `backend/app/services/review.py`
 - Modify: `backend/app/services/review_submission.py`
-- Modify: `backend/app/services/knowledge_map.py`
-- Modify: `backend/app/api/knowledge_map.py`
-- Modify: `backend/tests/test_review_service.py`
 - Modify: `backend/tests/test_review_api.py`
-- Modify: `backend/tests/test_knowledge_map_api.py`
-- Modify: `frontend/src/app/review/page.tsx`
+- Modify: `backend/tests/test_review_service.py`
 - Modify: `frontend/src/app/review/__tests__/page.test.tsx`
-- Modify: `frontend/src/components/knowledge-entry-detail-page.tsx`
-- Modify: `frontend/src/components/__tests__/knowledge-entry-detail-page.test.tsx`
-- Modify: `frontend/src/lib/review-session-storage.ts`
-- Modify: `frontend/src/lib/knowledge-map-client.ts`
-- Modify: `e2e/tests/helpers/review-scenario-fixture.ts`
 - Modify: `e2e/tests/smoke/user-review-submit.smoke.spec.ts`
-- Modify: `e2e/tests/smoke/user-review-prompt-families.smoke.spec.ts`
-- Modify: `scripts/seed_review_scenarios.py`
 - Modify: `docs/status/project-status.md`
 
-### Task 1: Lock the backend session contract with failing tests
+### Task 1: Add failing backend regression coverage for learn-now submit
 
 **Files:**
 - Modify: `backend/tests/test_review_service.py`
 - Modify: `backend/tests/test_review_api.py`
 
-- [ ] **Step 1: Add a failing service test for the correct-answer confirmation contract**
+- [ ] **Step 1: Add a service-level regression test for `start_learning_entry` and immediate submit**
 
 Write a test that:
 
-- creates a due `EntryReviewState`
-- submits a correct answer
-- asserts the item is not yet finalized/advanced until a separate continuation step is invoked
-- asserts the chosen schedule can still be adjusted before advancement
+- creates a word with at least one meaning
+- calls `start_learning_entry`
+- captures the returned `queue_item_id`
+- calls `submit_queue_review` with that id
+- expects success instead of `Queue item ... not found`
 
-- [ ] **Step 2: Run the targeted service test and confirm it fails for the missing confirmation boundary**
+- [ ] **Step 2: Run the targeted backend test and verify it fails for the right reason**
 
-Run: `PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_service.py -k "correct and continue" -q`
+Run:
 
-Expected: FAIL because the current flow advances or persists too early.
+```bash
+PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_service.py -k "learning and submit" -q
+```
 
-- [ ] **Step 3: Add a failing service test for the failed-answer relearn contract**
+Expected:
+
+- fail because the current learner review flow does not durably support the returned id path
+
+- [ ] **Step 3: Add an API-level regression test for `learning/start -> queue submit`**
 
 Write a test that:
 
-- creates two due `EntryReviewState` rows
-- submits a wrong answer or `Show meaning` for the first item
-- asserts failure scheduling is algorithm-selected automatically
-- asserts the failed item is not returned again in the same session
-- asserts the next pending item becomes active after relearn completion
+- authenticates a user
+- posts to `/api/reviews/entry/word/{id}/learning/start`
+- uses the returned `queue_item_id`
+- posts to `/api/reviews/queue/{id}/submit`
+- asserts `200`
 
-- [ ] **Step 4: Add an API regression test for correct-answer detail confirmation and failed-answer guided relearn**
+- [ ] **Step 4: Run the targeted API test and verify it fails before the fix**
 
-Write API tests that:
+Run:
 
-- hit the review submit endpoint for a correct answer and assert the response enters the success-detail state
-- hit the review submit endpoint for a failed answer and assert the response enters the relearn state with no schedule override controls
-- assert session advancement happens only on the correct continuation action or relearn completion action
+```bash
+PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_api.py -k "learning start" -q
+```
 
-- [ ] **Step 5: Run the targeted backend tests and confirm the new expectations fail before implementation**
+Expected:
 
-Run: `PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_service.py backend/tests/test_review_api.py -k "continue or relearn or show_meaning" -q`
+- fail before the implementation change
 
-Expected: FAIL on the old handoff behavior.
-
-### Task 2: Remove legacy learner-review runtime behavior and encode the new state machine
+### Task 2: Remove legacy learner review queue compatibility
 
 **Files:**
 - Modify: `backend/app/services/review.py`
 - Modify: `backend/app/services/review_submission.py`
 - Modify: `backend/app/api/reviews.py`
 
-- [ ] **Step 1: Remove any remaining learner-review read/submit fallback to legacy review models**
+- [ ] **Step 1: Remove legacy queue branching from learner review lookup and submit paths**
 
-Ensure learner queue lookup, due queue generation, and submit behavior resolve through `EntryReviewState` only.
+Update the review service so learner queue read and submit behavior resolves through `EntryReviewState` only.
 
-- [ ] **Step 2: Add explicit session-state transitions for success confirmation and relearn completion**
+- [ ] **Step 2: Make `learning/start` durably persist returned state ids**
 
-Implement a backend contract that distinguishes:
+Ensure `start_learning_entry` commits or otherwise durably persists new `EntryReviewState` rows before returning the response payload.
 
-- active prompt
-- pending success confirmation on detail page
-- guided relearn in progress
-- next queue advancement
+- [ ] **Step 3: Keep existing API shapes but return `EntryReviewState`-backed payloads only**
 
-- [ ] **Step 3: Make correct answers defer final advancement until `Continue review`**
+Retain the current endpoint contracts for this slice, but remove hidden fallback behavior to `ReviewCard` where it affects learner review.
 
-Keep the chosen next-review timing mutable until the user confirms on the detail page.
+- [ ] **Step 4: Run the targeted backend tests and verify they pass**
 
-- [ ] **Step 4: Make wrong answers and `Show meaning` fail immediately, schedule automatically, and enter relearn**
+Run:
 
-No schedule override should be exposed or required in this branch.
+```bash
+PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_service.py backend/tests/test_review_api.py -k "learning or queue" -q
+```
 
-- [ ] **Step 5: Advance to the next queue item after relearn completion without re-asking the failed item**
+Expected:
 
-Preserve review history while preventing same-session immediate retry.
+- targeted learner review tests pass
 
-- [ ] **Step 6: Run the targeted backend verification and confirm it passes**
-
-Run: `PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_service.py backend/tests/test_review_api.py -k "continue or relearn or queue" -q`
-
-Expected: PASS for the updated review contract.
-
-### Task 3: Reuse the normal detail page for successful answers
+### Task 3: Add a browser regression test for the real learn-now path
 
 **Files:**
-- Modify: `frontend/src/app/review/page.tsx`
-- Modify: `frontend/src/components/knowledge-entry-detail-page.tsx`
-- Modify: `frontend/src/lib/review-session-storage.ts`
-- Modify: `frontend/src/lib/knowledge-map-client.ts`
-- Modify: `frontend/src/app/review/__tests__/page.test.tsx`
-- Modify: `frontend/src/components/__tests__/knowledge-entry-detail-page.test.tsx`
-
-- [ ] **Step 1: Add failing frontend tests for the unified success handoff**
-
-Write tests that assert:
-
-- a correct answer from any prompt family transitions to the normal detail page
-- entry audio auto-plays on the success detail page
-- the page does not advance until `Continue review` is clicked
-
-- [ ] **Step 2: Add failing frontend tests for the unified failed handoff**
-
-Write tests that assert:
-
-- wrong answer or `Show meaning` transitions to the guided relearn flow
-- no next-review dropdown is shown in that flow
-- relearn completion advances to the next queue item
-
-- [ ] **Step 3: Replace inline reveal-card success handling with the detail-page confirmation flow**
-
-Use the existing detail component rather than a separate review-only success surface.
-
-- [ ] **Step 4: Keep review progress visible only inside the review shell**
-
-Ensure the home page still shows only due count while `/review` shows `Review x / y`.
-
-- [ ] **Step 5: Run the targeted frontend tests**
-
-Run: `npm --prefix frontend test -- --runInBand src/app/review/__tests__/page.test.tsx src/components/__tests__/knowledge-entry-detail-page.test.tsx`
-
-Expected: PASS.
-
-### Task 4: Reuse the learning pass for failed-review relearn
-
-**Files:**
-- Modify: `frontend/src/app/review/page.tsx`
-- Modify: `frontend/src/components/knowledge-entry-detail-page.tsx`
-- Modify: `backend/app/services/review.py`
-- Modify: `backend/app/services/review_submission.py`
-
-- [ ] **Step 1: Add failing tests that model relearn as a true learning pass**
-
-Cover:
-
-- stepping through all definitions/examples
-- auto-play behavior
-- explicit `Next` progression
-- advancement to the next queue item after the final relearn step
-
-- [ ] **Step 2: Implement a relearn mode that reuses the current learn-now presentation**
-
-Do not invent a separate one-off failed-review UI if the existing learning pass can be reused.
-
-- [ ] **Step 3: Verify the failed item is not immediately retried**
-
-Assert this in backend and frontend tests.
-
-- [ ] **Step 4: Run the targeted mixed verification set**
-
-Run: `PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_service.py backend/tests/test_review_api.py -k "relearn or learning" -q`
-
-Run: `npm --prefix frontend test -- --runInBand src/app/review/__tests__/page.test.tsx`
-
-Expected: PASS.
-
-### Task 5: Seed deterministic manual and CI scenarios for every prompt family
-
-**Files:**
-- Modify: `e2e/tests/helpers/review-scenario-fixture.ts`
-- Modify: `scripts/seed_review_scenarios.py`
 - Modify: `e2e/tests/smoke/user-review-submit.smoke.spec.ts`
-- Modify: `e2e/tests/smoke/user-review-prompt-families.smoke.spec.ts`
+- Modify: `frontend/src/app/review/__tests__/page.test.tsx`
 
-- [ ] **Step 1: Align the DB seeders with the canonical queue-state contract**
+- [ ] **Step 1: Extend browser coverage to start from learner entry detail**
 
-Ensure seeded scenarios create:
+Update or add a smoke test that:
 
-- persisted `EntryReviewState` rows only
-- deterministic prompt-family ordering
-- enough words/phrases to cover manual testing of all review types
+1. opens a learner word detail page
+2. clicks `Learn now`
+3. answers the first prompt or taps `Show meaning`
+4. continues successfully
+5. asserts no runtime not-found error appears
 
-- [ ] **Step 2: Add or update E2E tests for success and failed paths across prompt families**
+- [ ] **Step 2: Keep a focused frontend unit test for the single-model path**
 
-Cover:
+Adjust mocked review-page tests so they assume `queue_item_id` always refers to an `EntryReviewState` row and no legacy queue fallback exists.
 
-- multiple choice
-- audio
-- fill-in / sentence gap
-- typed recall
-- phrase review
+- [ ] **Step 3: Run targeted frontend and E2E checks**
 
-- [ ] **Step 3: Make the browser tests assert the canonical handoff rules instead of prompt-family-specific branches**
+Run:
 
-Each family should now have the same success and failure structure.
+```bash
+npm --prefix frontend test -- --runInBand src/app/review/__tests__/page.test.tsx
+```
 
-- [ ] **Step 4: Run the targeted Playwright suite**
+Run:
 
-Run: `E2E_API_URL=http://127.0.0.1:8000/api E2E_BASE_URL=http://127.0.0.1:3000 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 E2E_DB_PASSWORD=devpassword pnpm --dir e2e test -- tests/smoke/user-review-submit.smoke.spec.ts tests/smoke/user-review-prompt-families.smoke.spec.ts --project=chromium`
+```bash
+pnpm --dir e2e test -- tests/smoke/user-review-submit.smoke.spec.ts --project=chromium
+```
 
-Expected: PASS.
+Expected:
 
-### Task 6: Update status and final verification evidence
+- frontend review tests pass
+- smoke review regression passes
+
+### Task 4: Document the status change with evidence
 
 **Files:**
 - Modify: `docs/status/project-status.md`
 
-- [ ] **Step 1: Record the new canonical review contract**
+- [ ] **Step 1: Add a status-log entry for the learner review cutover**
 
-Update project status with:
+Record:
 
-- success path behavior
-- failed / relearn behavior
-- legacy learner-review removal
-- manual seeding availability for prompt-family testing
+- legacy learner review compatibility removed
+- `Learn now -> submit -> continue` regression fixed
+- exact verification commands and outcomes
 
-- [ ] **Step 2: Run the final verification set**
+- [ ] **Step 2: Re-run the final targeted verification set**
 
-Run: `PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_service.py backend/tests/test_review_api.py backend/tests/test_knowledge_map_api.py -q`
+Run:
 
-Run: `npm --prefix frontend run lint`
+```bash
+PYTHONPATH=backend .venv-backend/bin/python -m pytest backend/tests/test_review_service.py backend/tests/test_review_api.py -k "learning or queue" -q
+```
 
-Run: `npm --prefix frontend test -- --runInBand src/app/review/__tests__/page.test.tsx src/components/__tests__/knowledge-entry-detail-page.test.tsx src/app/__tests__/page.test.tsx`
+Run:
 
-Run: `E2E_API_URL=http://127.0.0.1:8000/api E2E_BASE_URL=http://127.0.0.1:3000 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 E2E_DB_PASSWORD=devpassword pnpm --dir e2e test -- tests/smoke/user-review-submit.smoke.spec.ts tests/smoke/user-review-prompt-families.smoke.spec.ts --project=chromium`
+```bash
+npm --prefix frontend test -- --runInBand src/app/review/__tests__/page.test.tsx
+```
 
-Expected: PASS for all commands above.
+Run:
+
+```bash
+pnpm --dir e2e test -- tests/smoke/user-review-submit.smoke.spec.ts --project=chromium
+```
+
+Expected:
+
+- all targeted verification commands pass
