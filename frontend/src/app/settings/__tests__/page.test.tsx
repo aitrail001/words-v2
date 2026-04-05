@@ -58,7 +58,8 @@ describe("SettingsPage", () => {
     expect(await screen.findByDisplayValue("Chinese (Simplified)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /uk accent/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /cards view/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /balanced review depth/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /standard review level/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /audio spelling/i })).not.toBeInTheDocument();
   });
 
   it("shows the full supported translation language names", async () => {
@@ -98,20 +99,18 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("persists review depth and spelling toggles", async () => {
+  it("persists the simplified review level control", async () => {
     const user = userEvent.setup();
     mockUpdateUserPreferences.mockImplementation(async (nextPreferences) => nextPreferences);
 
     render(<SettingsPage />);
 
-    await user.click(await screen.findByRole("button", { name: /deep review depth/i }));
-    await user.click(screen.getByRole("button", { name: /audio spelling/i }));
+    await user.click(await screen.findByRole("button", { name: /deep review level/i }));
 
     await waitFor(() => {
       expect(mockUpdateUserPreferences).toHaveBeenCalledWith(
         expect.objectContaining({
           review_depth_preset: "deep",
-          enable_audio_spelling: true,
         }),
       );
     });

@@ -177,6 +177,7 @@ export default async function AdminReviewQueueBucketPage({
               key={item.queue_item_id}
               item={item}
               bucket={bucket}
+              allowStartReview={false}
               renderSupplementalFields={(rawItem) => {
                 const adminItem = rawItem as AdminReviewQueueItem;
                 return (

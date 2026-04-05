@@ -7,18 +7,28 @@ import type {
 } from "@/lib/knowledge-map-client";
 
 export const REVIEW_QUEUE_BUCKET_LABELS: Record<ReviewQueueBucket, string> = {
-  overdue: "Overdue",
-  due_now: "Due now",
-  later_today: "Later today",
-  tomorrow: "Tomorrow",
-  this_week: "This week",
-  this_month: "This month",
-  one_to_three_months: "1-3 months",
-  three_to_six_months: "3-6 months",
-  six_plus_months: "6+ months",
+  "1d": "1d",
+  "2d": "2d",
+  "3d": "3d",
+  "5d": "5d",
+  "7d": "7d",
+  "14d": "14d",
+  "30d": "30d",
+  "90d": "90d",
+  "180d": "180d",
 };
 
-export const REVIEWABLE_BUCKETS: ReviewQueueBucket[] = ["overdue", "due_now"];
+export const REVIEWABLE_BUCKETS: ReviewQueueBucket[] = [
+  "1d",
+  "2d",
+  "3d",
+  "5d",
+  "7d",
+  "14d",
+  "30d",
+  "90d",
+  "180d",
+];
 
 export const REVIEW_QUEUE_SORT_OPTIONS: Array<{ value: ReviewQueueBucketSort; label: string }> = [
   { value: "next_review_at", label: "Due time" },
@@ -72,6 +82,19 @@ export function formatReviewQueueBucketLabel(bucket: ReviewQueueBucket): string 
   return REVIEW_QUEUE_BUCKET_LABELS[bucket] ?? bucket.replaceAll("_", " ");
 }
 
+function normalizeReviewQueueDate(value: string | null): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
 export function formatReviewQueueTime(
   value: string | null,
   options?: {
@@ -79,16 +102,42 @@ export function formatReviewQueueTime(
     invalidLabel?: string;
   },
 ): string {
-  if (!value) {
+  const parsed = normalizeReviewQueueDate(value);
+  if (!parsed) {
     return options?.emptyLabel ?? "Time to be scheduled";
   }
 
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return options?.invalidLabel ?? "Time unavailable";
+  return reviewTimeFormatter.format(parsed);
+}
+
+export function isReviewQueueItemDueNow(value: string | null): boolean {
+  const parsed = normalizeReviewQueueDate(value);
+  if (!parsed) {
+    return true;
+  }
+  return parsed.getTime() <= Date.now();
+}
+
+export function formatReviewQueueDueLabel(value: string | null): string {
+  const parsed = normalizeReviewQueueDate(value);
+  if (!parsed) {
+    return "Due now";
   }
 
-  return reviewTimeFormatter.format(parsed);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDueDay = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  const dayDiff = Math.round(
+    (startOfDueDay.getTime() - startOfToday.getTime()) / (24 * 60 * 60 * 1000),
+  );
+
+  if (dayDiff <= 0) {
+    return "Due now";
+  }
+  if (dayDiff === 1) {
+    return "Tomorrow";
+  }
+  return `In ${dayDiff} days`;
 }
 
 export function formatReviewQueueStatus(status: KnowledgeStatus): string {

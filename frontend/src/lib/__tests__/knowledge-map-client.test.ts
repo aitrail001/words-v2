@@ -1,6 +1,8 @@
 import {
   createKnowledgeMapSearchHistory,
   getAdminGroupedReviewQueue,
+  getGroupedReviewQueue,
+  getGroupedReviewQueueByDue,
   getKnowledgeMapDashboard,
   getKnowledgeMapEntryDetail,
   getKnowledgeMapList,
@@ -192,5 +194,23 @@ describe("knowledge-map-client", () => {
     expect(mockApiClient.get).toHaveBeenCalledWith(
       "/reviews/admin/queue/grouped?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00",
     );
+  });
+
+  it("loads the learner grouped review queue by stage", async () => {
+    mockApiClient.get.mockResolvedValueOnce({ groups: [] });
+
+    const result = await getGroupedReviewQueue();
+
+    expect(result).toEqual({ groups: [] });
+    expect(mockApiClient.get).toHaveBeenCalledWith("/reviews/queue/grouped");
+  });
+
+  it("loads the learner grouped review queue by due date", async () => {
+    mockApiClient.get.mockResolvedValueOnce({ groups: [] });
+
+    const result = await getGroupedReviewQueueByDue();
+
+    expect(result).toEqual({ groups: [] });
+    expect(mockApiClient.get).toHaveBeenCalledWith("/reviews/queue/grouped/by-due");
   });
 });

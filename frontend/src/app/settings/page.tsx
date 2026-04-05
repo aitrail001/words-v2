@@ -74,19 +74,13 @@ export default function SettingsPage() {
       show_translations_by_default: showTranslationsByDefault,
     });
 
-  const updateReviewToggle = <K extends keyof Pick<
-    UserPreferences,
-    | "enable_confidence_check"
-    | "enable_word_spelling"
-    | "enable_audio_spelling"
-    | "show_pictures_in_questions"
-  >>(
-    key: K,
-  ) =>
+  const updateShowPictures = () =>
     void persistPreferences({
       ...preferences,
-      [key]: !preferences[key],
+      show_pictures_in_questions: !preferences.show_pictures_in_questions,
     });
+
+  const selectedReviewLevel = preferences.review_depth_preset === "deep" ? "deep" : "standard";
 
   return (
     <div className="mx-auto max-w-[46rem] pb-10 text-[#482060]">
@@ -101,7 +95,7 @@ export default function SettingsPage() {
             <span className="w-6" />
           </div>
           <p className="pl-1 text-sm leading-6 text-[#6f6386]">
-            Personalize how learner cards sound, translate, and appear across the app.
+            Personalize pronunciation, translation, and the overall review difficulty.
           </p>
         </div>
       </section>
@@ -193,20 +187,19 @@ export default function SettingsPage() {
         <h2 className="text-[2rem] font-semibold text-[#1bb9d4]">Review Cards</h2>
         <div className="space-y-4 text-lg font-semibold text-[#543971]">
           <div className="flex items-center justify-between gap-2">
-            <span>Review Depth</span>
+            <span>Review Level</span>
             <div className="flex items-center gap-2">
               {([
-                ["gentle", "Gentle"],
-                ["balanced", "Balanced"],
+                ["standard", "Standard"],
                 ["deep", "Deep"],
               ] as const).map(([preset, label]) => (
                 <button
                   key={preset}
                   type="button"
-                  aria-label={`${label} review depth`}
-                  onClick={() => updateReviewDepthPreset(preset)}
+                  aria-label={`${label} review level`}
+                  onClick={() => updateReviewDepthPreset(preset === "deep" ? "deep" : "balanced")}
                   className={`rounded-[0.7rem] px-3 py-2 text-sm font-semibold ${
-                    preferences.review_depth_preset === preset
+                    selectedReviewLevel === preset
                       ? "bg-[#38c7dd] text-white"
                       : "bg-[#efedf7] text-[#7a6794]"
                   }`}
@@ -216,57 +209,21 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
+          <p className="text-sm font-normal leading-6 text-[#7a6794]">
+            Standard keeps prompts more recognition-based. Deep brings in harder recall prompts earlier.
+          </p>
           <div className="flex items-center justify-between">
-            <span>Confidence Check</span>
-            <button
-              type="button"
-              aria-label="Confidence check"
-              onClick={() => updateReviewToggle("enable_confidence_check")}
-              className={`rounded-[0.7rem] px-4 py-2 ${
-                preferences.enable_confidence_check
-                  ? "bg-[#38c7dd] text-white"
-                  : "bg-[#efedf7] text-[#7a6794]"
-              }`}
-            >
-              {preferences.enable_confidence_check ? "On" : "Off"}
-            </button>
-          </div>
-          <div className="flex items-center justify-between">
-            <span>Word Spelling</span>
-            <button
-              type="button"
-              aria-label="Word spelling"
-              onClick={() => updateReviewToggle("enable_word_spelling")}
-              className={`rounded-[0.7rem] px-4 py-2 ${
-                preferences.enable_word_spelling
-                  ? "bg-[#38c7dd] text-white"
-                  : "bg-[#efedf7] text-[#7a6794]"
-              }`}
-            >
-              {preferences.enable_word_spelling ? "On" : "Off"}
-            </button>
-          </div>
-          <div className="flex items-center justify-between">
-            <span>Audio Spelling</span>
-            <button
-              type="button"
-              aria-label="Audio spelling"
-              onClick={() => updateReviewToggle("enable_audio_spelling")}
-              className={`rounded-[0.7rem] px-4 py-2 ${
-                preferences.enable_audio_spelling
-                  ? "bg-[#38c7dd] text-white"
-                  : "bg-[#efedf7] text-[#7a6794]"
-              }`}
-            >
-              {preferences.enable_audio_spelling ? "On" : "Off"}
-            </button>
+            <span>Schedule</span>
+            <span className="text-right text-sm font-medium text-[#7a6794]">
+              Fixed buckets from 1 day through Known.
+            </span>
           </div>
           <div className="flex items-center justify-between">
             <span>Pictures In Questions</span>
             <button
               type="button"
               aria-label="Pictures in questions"
-              onClick={() => updateReviewToggle("show_pictures_in_questions")}
+              onClick={updateShowPictures}
               className={`rounded-[0.7rem] px-4 py-2 ${
                 preferences.show_pictures_in_questions
                   ? "bg-[#38c7dd] text-white"
@@ -297,12 +254,8 @@ export default function SettingsPage() {
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <span>Challenge Types</span>
-            <span>Change</span>
-          </div>
-          <div className="flex items-center justify-between">
             <span>Word Examples</span>
-            <span>Change</span>
+            <span className="text-sm font-medium text-[#7a6794]">Included automatically</span>
           </div>
         </div>
       </section>

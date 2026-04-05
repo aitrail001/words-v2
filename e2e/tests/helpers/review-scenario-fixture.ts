@@ -56,6 +56,12 @@ type ReviewQueueSeedItem = {
   status: ReviewQueueSeedStatus;
   dueAt?: Date;
   lastReviewedAt?: Date | null;
+  srsBucket?: "1d" | "2d" | "3d" | "5d" | "7d" | "14d" | "30d" | "90d" | "180d";
+};
+
+export type DueReviewSeedFixture = {
+  displayText: string;
+  definition: string;
 };
 
 export type GroupedReviewQueueFixture = {
@@ -79,6 +85,18 @@ export type LongHorizonReviewFixture = {
 export type AdminTimeTravelReviewFixture = {
   futureText: string;
   effectiveNow: string;
+};
+
+export type EntryDetailNullScheduleFixture = {
+  entryType: EntryType;
+  entryId: string;
+  displayText: string;
+  expectedScheduleLabel: string;
+};
+
+export type LegacyDuplicateReviewQueueFixture = {
+  bucket: "1d";
+  visibleTexts: [string, string];
 };
 
 function resolveDataRoot(): string {
@@ -986,9 +1004,32 @@ const insertReviewQueueState = async (
   scenario: ResolvedReviewScenarioDefinition,
   dueAt: Date,
   lastReviewedAt: Date | null,
+  srsBucket: ReviewQueueSeedItem["srsBucket"] = "1d",
 ): Promise<void> => {
   const createdAt = new Date(dueAt.getTime() - 3_600_000);
   const reviewedAt = lastReviewedAt ?? new Date(dueAt.getTime() - 86_400_000);
+  const cadenceStep = {
+    "1d": 0,
+    "2d": 1,
+    "3d": 2,
+    "5d": 0,
+    "7d": 1,
+    "14d": 2,
+    "30d": 0,
+    "90d": 1,
+    "180d": 2,
+  }[srsBucket];
+  const intervalDays = {
+    "1d": 1,
+    "2d": 2,
+    "3d": 3,
+    "5d": 5,
+    "7d": 7,
+    "14d": 14,
+    "30d": 30,
+    "90d": 90,
+    "180d": 180,
+  }[srsBucket];
   await client.query(
     `
     INSERT INTO entry_review_states (
@@ -1004,6 +1045,8 @@ const insertReviewQueueState = async (
       lapse_count,
       exposure_count,
       times_remembered,
+      srs_bucket,
+      cadence_step,
       last_prompt_type,
       last_submission_prompt_id,
       last_outcome,
@@ -1024,24 +1067,26 @@ const insertReviewQueueState = async (
       $4::uuid,
       $5,
       $6::uuid,
-      2.0,
+      $7,
       0.45,
       0,
       0,
       0,
       0,
-      $7,
       $8,
+      $9,
+      $10,
+      $11,
       NULL,
       false,
       false,
       false,
       NULL,
       NULL,
-      $9::timestamptz,
-      $10::timestamptz,
-      $11::timestamptz,
-      $11::timestamptz
+      $12::timestamptz,
+      $13::timestamptz,
+      $14::timestamptz,
+      $14::timestamptz
     )
     `,
     [
@@ -1051,6 +1096,9 @@ const insertReviewQueueState = async (
       scenario.resolvedTargetId,
       scenario.entryType,
       scenario.resolvedEntryId,
+      intervalDays,
+      srsBucket,
+      cadenceStep,
       scenario.lastPromptType ?? null,
       `manual_prompt_type:${scenario.expectedPromptType}`,
       reviewedAt.toISOString(),
@@ -1080,7 +1128,14 @@ const seedCustomReviewQueue = async (
       }
       await upsertLearnerStatus(client, userId, scenario, item.status);
       if (item.status === "learning" && item.dueAt) {
-        await insertReviewQueueState(client, userId, scenario, item.dueAt, item.lastReviewedAt ?? null);
+        await insertReviewQueueState(
+          client,
+          userId,
+          scenario,
+          item.dueAt,
+          item.lastReviewedAt ?? null,
+          item.srsBucket ?? "1d",
+        );
       }
     }
 
@@ -1093,6 +1148,30 @@ const seedCustomReviewQueue = async (
   }
 
   return Object.fromEntries(items.map((item) => [item.scenarioKey, scenarioMap.get(item.scenarioKey)!]));
+};
+
+export const seedDueReviewScenarioItem = async (
+  userId: string,
+  scenarioKey = "entry-to-definition",
+): Promise<DueReviewSeedFixture> => {
+  const now = new Date();
+  const scenarios = await seedCustomReviewQueue(userId, [
+    {
+      scenarioKey,
+      status: "learning",
+      dueAt: new Date(now.getTime() - 60_000),
+      lastReviewedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+      srsBucket: "1d",
+    },
+  ]);
+  const scenario = scenarios[scenarioKey];
+  if (!scenario) {
+    throw new Error(`Missing due review scenario for ${scenarioKey}`);
+  }
+  return {
+    displayText: scenario.displayText,
+    definition: scenario.definition,
+  };
 };
 
 export const seedReviewScenarioQueue = async (userId: string): Promise<void> => {
@@ -1253,24 +1332,28 @@ export const seedGroupedReviewQueueFixture = async (
       status: "learning",
       dueAt: dueNowAt,
       lastReviewedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+      srsBucket: "1d",
     },
     {
       scenarioKey: "definition-to-entry",
       status: "learning",
       dueAt: tomorrowAt,
       lastReviewedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+      srsBucket: "7d",
     },
     {
       scenarioKey: "situation",
       status: "learning",
       dueAt: oneToThreeMonthsAt,
       lastReviewedAt: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000),
+      srsBucket: "30d",
     },
     {
       scenarioKey: "collocation",
       status: "learning",
       dueAt: sixPlusMonthsAt,
       lastReviewedAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
+      srsBucket: "180d",
     },
     { scenarioKey: "typed-recall", status: "known" },
     { scenarioKey: "sentence-gap", status: "to_learn" },
@@ -1309,12 +1392,14 @@ export const seedFailedReviewQueueFixture = async (
       status: "learning",
       dueAt: dueNowAt,
       lastReviewedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+      srsBucket: "1d",
     },
     {
       scenarioKey: "definition-to-entry",
       status: "learning",
       dueAt: tomorrowAt,
       lastReviewedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+      srsBucket: "7d",
     },
   ]);
 
@@ -1336,6 +1421,7 @@ export const seedLongHorizonReviewFixture = async (
       status: "learning",
       dueAt: longHorizonAt,
       lastReviewedAt: now,
+      srsBucket: "180d",
     },
   ]);
 
@@ -1367,18 +1453,229 @@ export const seedAdminTimeTravelReviewFixture = async (
       status: "learning",
       dueAt: tomorrowAt,
       lastReviewedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+      srsBucket: "7d",
     },
     {
       scenarioKey: "situation",
       status: "learning",
       dueAt: laterAt,
       lastReviewedAt: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000),
+      srsBucket: "30d",
     },
   ]);
 
   return {
     futureText: scenarios["definition-to-entry"].displayText,
     effectiveNow: new Date(tomorrowAt.getTime() + 60_000).toISOString(),
+  };
+};
+
+export const seedEntryDetailNullScheduleFixture = async (
+  userId: string,
+): Promise<EntryDetailNullScheduleFixture> => {
+  const resolvedScenarios = await ensureScenarioCatalog();
+  const scenario = resolvedScenarios.find((item) => item.key === "entry-to-definition");
+  if (!scenario) {
+    throw new Error("Missing review scenario definition for entry-to-definition");
+  }
+
+  const client = await connectClient();
+  try {
+    await client.query("BEGIN");
+    await upsertUserPreferences(client, userId);
+    await client.query(`DELETE FROM entry_review_states WHERE user_id = $1::uuid`, [userId]);
+    await upsertLearnerStatus(client, userId, scenario, "learning");
+    await client.query(
+      `
+      INSERT INTO entry_review_states (
+        id,
+        user_id,
+        target_type,
+        target_id,
+        entry_type,
+        entry_id,
+        stability,
+        difficulty,
+        success_streak,
+        lapse_count,
+        exposure_count,
+        times_remembered,
+        srs_bucket,
+        cadence_step,
+        last_prompt_type,
+        last_submission_prompt_id,
+        last_outcome,
+        is_fragile,
+        is_suspended,
+        relearning,
+        relearning_trigger,
+        recheck_due_at,
+        last_reviewed_at,
+        next_due_at,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        $3,
+        $4::uuid,
+        $5,
+        $6::uuid,
+        1.0,
+        0.45,
+        0,
+        0,
+        0,
+        0,
+        '1d',
+        0,
+        NULL,
+        $7,
+        NULL,
+        false,
+        false,
+        false,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        now(),
+        now()
+      )
+      `,
+      [
+        randomUUID(),
+        userId,
+        scenario.entryType === "word" ? "meaning" : "phrase_sense",
+        scenario.resolvedTargetId,
+        scenario.entryType,
+        scenario.resolvedEntryId,
+        `manual_prompt_type:${scenario.expectedPromptType}`,
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    await client.end();
+  }
+
+  return {
+    entryType: scenario.entryType,
+    entryId: scenario.resolvedEntryId,
+    displayText: scenario.displayText,
+    expectedScheduleLabel: "Tomorrow",
+  };
+};
+
+export const seedLegacyDuplicateReviewQueueFixture = async (
+  userId: string,
+): Promise<LegacyDuplicateReviewQueueFixture> => {
+  const resolvedScenarios = await ensureScenarioCatalog();
+  const firstScenario = resolvedScenarios.find((item) => item.key === "confidence-check");
+  const secondScenario = resolvedScenarios.find((item) => item.key === "sentence-gap");
+  if (!firstScenario || !secondScenario) {
+    throw new Error("Missing review scenario definitions for legacy duplicate queue fixture");
+  }
+
+  const client = await connectClient();
+  const now = new Date();
+  const createdAt = new Date(now.getTime() - 60 * 60 * 1000);
+  const reviewedAt = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+  try {
+    await client.query("BEGIN");
+    await upsertUserPreferences(client, userId);
+    await client.query(`DELETE FROM entry_review_states WHERE user_id = $1::uuid`, [userId]);
+    await upsertLearnerStatus(client, userId, firstScenario, "learning");
+    await upsertLearnerStatus(client, userId, secondScenario, "learning");
+    await insertReviewQueueState(client, userId, firstScenario, now, reviewedAt, "1d");
+    await insertReviewQueueState(client, userId, secondScenario, now, reviewedAt, "1d");
+
+    for (const scenario of [firstScenario, secondScenario]) {
+      await client.query(
+        `
+        INSERT INTO entry_review_states (
+          id,
+          user_id,
+          target_type,
+          target_id,
+          entry_type,
+          entry_id,
+          stability,
+          difficulty,
+          success_streak,
+          lapse_count,
+          exposure_count,
+          times_remembered,
+          srs_bucket,
+          cadence_step,
+          last_prompt_type,
+          last_submission_prompt_id,
+          last_outcome,
+          is_fragile,
+          is_suspended,
+          relearning,
+          relearning_trigger,
+          recheck_due_at,
+          last_reviewed_at,
+          next_due_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1::uuid,
+          $2::uuid,
+          NULL,
+          NULL,
+          $3,
+          $4::uuid,
+          1.0,
+          0.45,
+          0,
+          0,
+          0,
+          0,
+          '1d',
+          0,
+          NULL,
+          $5,
+          NULL,
+          false,
+          false,
+          false,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          $6::timestamptz,
+          $7::timestamptz
+        )
+        `,
+        [
+          randomUUID(),
+          userId,
+          scenario.entryType,
+          scenario.resolvedEntryId,
+          `manual_prompt_type:${scenario.expectedPromptType}`,
+          createdAt.toISOString(),
+          createdAt.toISOString(),
+        ],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    await client.end();
+  }
+
+  return {
+    bucket: "1d",
+    visibleTexts: [firstScenario.displayText, secondScenario.displayText],
   };
 };
 

@@ -189,6 +189,40 @@ describe("ReviewPage", () => {
     expect(screen.getByRole("button", { name: /show meaning/i })).toBeInTheDocument();
   });
 
+  it("shows an inline error instead of crashing when show meaning submit fails", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-1",
+        queue_item_id: "state-1",
+        word: "barely",
+        definition: "Only just, by a very small margin.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "definition_to_entry",
+          prompt_token: "prompt-state-1",
+          stem: "Choose the word or phrase that matches this definition.",
+          question: "Only just, by a very small margin.",
+          options: [
+            { option_id: "A", label: "Barely" },
+            { option_id: "B", label: "Bravely" },
+          ],
+          audio_state: "not_available",
+        },
+        detail: null,
+        schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
+      },
+    ] as never);
+    mockPost.mockRejectedValueOnce(new Error("Request failed: 500"));
+
+    await renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /show meaning/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Request failed: 500");
+    expect(screen.getByTestId("review-active-state")).toBeInTheDocument();
+  });
+
   it("shows a single replay button for audio-to-definition prompts", async () => {
     mockGet.mockResolvedValue([
       {

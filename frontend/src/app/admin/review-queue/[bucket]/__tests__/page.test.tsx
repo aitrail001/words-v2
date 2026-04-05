@@ -26,7 +26,7 @@ describe("AdminReviewQueueBucketPage", () => {
       ok: true,
       json: async () => ({
         generated_at: "2026-10-05T09:00:00+00:00",
-        bucket: "due_now",
+        bucket: "7d",
         count: 1,
         sort: "text",
         order: "desc",
@@ -70,7 +70,7 @@ describe("AdminReviewQueueBucketPage", () => {
 
     render(
       await AdminReviewQueueBucketPage({
-        params: Promise.resolve({ bucket: "due_now" }),
+        params: Promise.resolve({ bucket: "7d" }),
         searchParams: Promise.resolve({
           effective_now: "2026-10-05T09:00:00+00:00",
           sort: "text",
@@ -81,14 +81,14 @@ describe("AdminReviewQueueBucketPage", () => {
 
     await waitFor(() =>
       expect(global.fetch).toHaveBeenCalledWith(
-        "http://localhost:8000/api/reviews/admin/queue/buckets/due_now?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00&sort=text&order=desc",
+        "http://localhost:8000/api/reviews/admin/queue/buckets/7d?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00&sort=text&order=desc",
         expect.objectContaining({
           cache: "no-store",
           headers: { Authorization: "Bearer admin-token" },
         }),
       ),
     );
-    expect(await screen.findByRole("heading", { name: /due now/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^7d$/i })).toBeInTheDocument();
     expect(screen.getByText("1 item in this bucket")).toBeInTheDocument();
     expect(screen.getByText("candidate")).toBeInTheDocument();
     expect(screen.getByText(/success streak 5/i)).toBeInTheDocument();
@@ -96,13 +96,14 @@ describe("AdminReviewQueueBucketPage", () => {
     expect(screen.getByText(/confidence_check/i)).toBeInTheDocument();
     expect(screen.getByText(/target_type: meaning/i)).toBeInTheDocument();
     expect(screen.getByText(/last_outcome: correct_tested/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /start review for candidate/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /sort by due time/i })).toHaveAttribute(
       "href",
-      "/admin/review-queue/due_now?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00&sort=next_review_at&order=desc",
+      "/admin/review-queue/7d?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00&sort=next_review_at&order=desc",
     );
     expect(screen.getByRole("link", { name: /ascending order/i })).toHaveAttribute(
       "href",
-      "/admin/review-queue/due_now?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00&sort=text&order=asc",
+      "/admin/review-queue/7d?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00&sort=text&order=asc",
     );
   });
 
@@ -114,7 +115,7 @@ describe("AdminReviewQueueBucketPage", () => {
 
     render(
       await AdminReviewQueueBucketPage({
-        params: Promise.resolve({ bucket: "due_now" }),
+        params: Promise.resolve({ bucket: "7d" }),
         searchParams: Promise.resolve({}),
       }),
     );

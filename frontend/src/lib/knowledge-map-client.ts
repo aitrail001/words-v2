@@ -116,15 +116,15 @@ export type AuthUserProfile = {
 };
 
 export type ReviewQueueBucket =
-  | "overdue"
-  | "due_now"
-  | "later_today"
-  | "tomorrow"
-  | "this_week"
-  | "this_month"
-  | "one_to_three_months"
-  | "three_to_six_months"
-  | "six_plus_months";
+  | "1d"
+  | "2d"
+  | "3d"
+  | "5d"
+  | "7d"
+  | "14d"
+  | "30d"
+  | "90d"
+  | "180d";
 
 export type ReviewQueueBucketSort = "next_review_at" | "last_reviewed_at" | "text";
 export type ReviewQueueBucketOrder = "asc" | "desc";
@@ -132,6 +132,7 @@ export type ReviewQueueBucketOrder = "asc" | "desc";
 export type ReviewQueueSummaryBucket = {
   bucket: ReviewQueueBucket;
   count: number;
+  has_due_now?: boolean;
 };
 
 export type ReviewQueueSummaryResponse = {
@@ -148,6 +149,7 @@ export type ReviewQueueItem = {
   status: KnowledgeStatus;
   next_review_at: string | null;
   last_reviewed_at: string | null;
+  bucket?: ReviewQueueBucket;
   success_streak: number;
   lapse_count: number;
   times_remembered: number;
@@ -186,6 +188,20 @@ export type GroupedReviewQueueResponse = {
   generated_at: string;
   total_count: number;
   groups: GroupedReviewQueueGroup[];
+};
+
+export type DueGroupedReviewQueueGroup = {
+  group_key: string;
+  label: string;
+  due_in_days: number;
+  count: number;
+  items: GroupedReviewQueueItem[];
+};
+
+export type DueGroupedReviewQueueResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: DueGroupedReviewQueueGroup[];
 };
 
 export type AdminReviewQueueItem = ReviewQueueItem & {
@@ -513,6 +529,9 @@ export const getReviewQueueBucketDetail = (
 
 export const getGroupedReviewQueue = (): Promise<GroupedReviewQueueResponse> =>
   apiClient.get<GroupedReviewQueueResponse>("/reviews/queue/grouped");
+
+export const getGroupedReviewQueueByDue = (): Promise<DueGroupedReviewQueueResponse> =>
+  apiClient.get<DueGroupedReviewQueueResponse>("/reviews/queue/grouped/by-due");
 
 export const getAdminReviewQueueSummary = (
   effectiveNow?: string,

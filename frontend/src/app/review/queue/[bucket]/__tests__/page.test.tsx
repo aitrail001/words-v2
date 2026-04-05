@@ -19,14 +19,14 @@ describe("ReviewQueueBucketPage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockUseParams.mockReturnValue({ bucket: "due_now" } as never);
+    mockUseParams.mockReturnValue({ bucket: "1d" } as never);
     mockUseSearchParams.mockReturnValue(new URLSearchParams("sort=text&order=desc") as never);
   });
 
-  it("renders learner bucket detail rows and sort or order controls", async () => {
+  it("renders learner bucket detail rows and only exposes start review for due items", async () => {
     mockGetReviewQueueBucketDetail.mockResolvedValue({
       generated_at: "2026-04-05T09:00:00+00:00",
-      bucket: "due_now",
+      bucket: "1d",
       count: 2,
       sort: "text",
       order: "desc",
@@ -37,8 +37,8 @@ describe("ReviewQueueBucketPage", () => {
           entry_type: "word",
           text: "zeta",
           status: "learning",
-          next_review_at: "2026-04-05T12:00:00+00:00",
-          last_reviewed_at: "2026-04-04T09:00:00+00:00",
+          next_review_at: "2000-04-05T12:00:00+00:00",
+          last_reviewed_at: "2000-04-04T09:00:00+00:00",
           success_streak: 3,
           lapse_count: 1,
           times_remembered: 4,
@@ -46,7 +46,7 @@ describe("ReviewQueueBucketPage", () => {
           history: [
             {
               id: "event-1",
-              reviewed_at: "2026-04-04T09:00:00+00:00",
+              reviewed_at: "2000-04-04T09:00:00+00:00",
               outcome: "correct_tested",
               prompt_type: "entry_to_definition",
               scheduled_by: "recommended",
@@ -54,7 +54,7 @@ describe("ReviewQueueBucketPage", () => {
             },
             {
               id: "event-2",
-              reviewed_at: "2026-04-02T09:00:00+00:00",
+              reviewed_at: "2000-04-02T09:00:00+00:00",
               outcome: "failed",
               prompt_type: "typed_recall",
               scheduled_by: "manual_override",
@@ -67,8 +67,8 @@ describe("ReviewQueueBucketPage", () => {
           entry_id: "phrase-2",
           entry_type: "phrase",
           text: "alpha",
-          status: "known",
-          next_review_at: "2026-04-05T10:00:00+00:00",
+          status: "learning",
+          next_review_at: "2999-04-05T10:00:00+00:00",
           last_reviewed_at: null,
           success_streak: 0,
           lapse_count: 0,
@@ -82,10 +82,9 @@ describe("ReviewQueueBucketPage", () => {
     render(<ReviewQueueBucketPage />);
 
     await waitFor(() =>
-      expect(mockGetReviewQueueBucketDetail).toHaveBeenCalledWith("due_now", "text", "desc"),
+      expect(mockGetReviewQueueBucketDetail).toHaveBeenCalledWith("1d", "text", "desc"),
     );
-    expect(await screen.findByRole("heading", { name: /due now/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /back to home/i })).toHaveAttribute("href", "/");
+    expect(await screen.findByRole("heading", { name: /^1d$/i })).toBeInTheDocument();
     expect(screen.getByText("2 items in this bucket")).toBeInTheDocument();
     expect(screen.getByText("zeta")).toBeInTheDocument();
     expect(screen.getByText("alpha")).toBeInTheDocument();
@@ -100,13 +99,14 @@ describe("ReviewQueueBucketPage", () => {
       "href",
       "/review?queue_item_id=queue-1",
     );
+    expect(screen.queryByRole("link", { name: /start review for alpha/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /sort by due time/i })).toHaveAttribute(
       "href",
-      "/review/queue/due_now?sort=next_review_at&order=desc",
+      "/review/queue/1d?sort=next_review_at&order=desc",
     );
     expect(screen.getByRole("link", { name: /ascending order/i })).toHaveAttribute(
       "href",
-      "/review/queue/due_now?sort=text&order=asc",
+      "/review/queue/1d?sort=text&order=asc",
     );
   });
 

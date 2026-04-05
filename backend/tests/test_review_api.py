@@ -175,6 +175,63 @@ class TestQueueDue:
         assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
 
     @pytest.mark.asyncio
+    async def test_get_due_queue_items_uses_response_target_overrides_without_mutating_item(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        legacy_target_id = uuid.uuid4()
+        first_meaning_id = uuid.uuid4()
+        due_item = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=legacy_target_id,
+        )
+        due_item.word_id = due_item.entry_id
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_due_queue_items(self, user_id, limit=20, **kwargs):
+            return [
+                {
+                    "item": due_item,
+                    "word": "ephemeral",
+                    "definition": "lasting a short time",
+                    "review_mode": "mcq",
+                    "prompt": None,
+                    "target_type": "meaning",
+                    "target_id": str(first_meaning_id),
+                    "source_meaning_id": str(first_meaning_id),
+                    "source_entry_type": "word",
+                    "source_entry_id": str(due_item.word_id),
+                    "detail": None,
+                    "schedule_options": [],
+                }
+            ]
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_due_queue_items",
+            fake_get_due_queue_items,
+        )
+
+        response = await client.get(
+            "/api/reviews/queue/due?limit=5",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["target_id"] == str(first_meaning_id)
+        assert data[0]["meaning_id"] == str(first_meaning_id)
+        assert data[0]["source_meaning_id"] == str(first_meaning_id)
+        assert due_item.target_id == legacy_target_id
+
+    @pytest.mark.asyncio
     async def test_get_grouped_review_queue_success(self, client, mock_db, auth_token, monkeypatch):
         token, user_id = auth_token
         user = make_user(user_id)
@@ -190,6 +247,7 @@ class TestQueueDue:
         )
         learning_state.next_due_at = now + timedelta(hours=1)
         learning_state.last_reviewed_at = now - timedelta(days=1)
+        learning_state.srs_bucket = "1d"
 
         known_state = EntryReviewState(
             id=uuid.uuid4(),
@@ -200,6 +258,7 @@ class TestQueueDue:
             target_id=uuid.uuid4(),
         )
         known_state.next_due_at = now + timedelta(days=1)
+        known_state.srs_bucket = "180d"
 
         to_learn_state = EntryReviewState(
             id=uuid.uuid4(),
@@ -210,6 +269,7 @@ class TestQueueDue:
             target_id=uuid.uuid4(),
         )
         to_learn_state.next_due_at = now + timedelta(days=2)
+        to_learn_state.srs_bucket = "2d"
 
         phrase_state = EntryReviewState(
             id=uuid.uuid4(),
@@ -220,6 +280,7 @@ class TestQueueDue:
             target_id=uuid.uuid4(),
         )
         phrase_state.next_due_at = now + timedelta(days=1)
+        phrase_state.srs_bucket = "7d"
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
@@ -255,13 +316,80 @@ class TestQueueDue:
         assert response.status_code == 200
         data = response.json()
         assert data["total_count"] == 2
-        assert data["groups"][0]["bucket"] == "later_today"
+        assert data["groups"][0]["bucket"] == "1d"
         assert data["groups"][0]["items"][0]["text"] == "persistence"
         assert data["groups"][0]["items"][0]["status"] == "learning"
+        assert data["groups"][0]["items"][0]["bucket"] == "1d"
         assert "target_type" not in data["groups"][0]["items"][0]
-        assert data["groups"][1]["bucket"] == "tomorrow"
+        assert len(data["groups"]) == 2
+        assert data["groups"][1]["bucket"] == "7d"
         assert data["groups"][1]["items"][0]["entry_type"] == "phrase"
         assert data["groups"][1]["items"][0]["text"] == "break down"
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_by_due_success(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_grouped_review_queue_by_due(
+            self, *, user_id, now, include_debug_fields=False
+        ):
+            assert user_id == user.id
+            assert isinstance(now, datetime)
+            assert include_debug_fields is False
+            return {
+                "generated_at": "2026-04-05T09:00:00+00:00",
+                "total_count": 2,
+                "groups": [
+                    {
+                        "group_key": "due_now",
+                        "label": "Due now",
+                        "due_in_days": 0,
+                        "count": 1,
+                        "items": [
+                            {
+                                "queue_item_id": "queue-1",
+                                "entry_id": "word-1",
+                                "entry_type": "word",
+                                "text": "persistence",
+                                "status": "learning",
+                                "next_review_at": None,
+                                "last_reviewed_at": None,
+                                "bucket": "1d",
+                                "success_streak": 0,
+                                "lapse_count": 0,
+                                "times_remembered": 0,
+                                "exposure_count": 0,
+                                "history": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_grouped_review_queue_by_due",
+            fake_get_grouped_review_queue_by_due,
+            raising=False,
+        )
+
+        response = await client.get(
+            "/api/reviews/queue/grouped/by-due",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_count"] == 2
+        assert data["groups"][0]["group_key"] == "due_now"
+        assert data["groups"][0]["label"] == "Due now"
+        assert data["groups"][0]["items"][0]["bucket"] == "1d"
 
     @pytest.mark.asyncio
     async def test_get_grouped_review_queue_admin_supports_effective_time_override(
@@ -287,6 +415,7 @@ class TestQueueDue:
             target_id=uuid.uuid4(),
         )
         future_state.next_due_at = datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+        future_state.srs_bucket = "180d"
         state_result = MagicMock()
         state_result.all.return_value = [(future_state, "learning")]
         word_result = MagicMock()
@@ -301,7 +430,7 @@ class TestQueueDue:
         assert response.status_code == 200
         data = response.json()
         assert data["debug"]["effective_now"] == "2026-10-05T09:00:00+00:00"
-        assert data["groups"][0]["bucket"] == "due_now"
+        assert data["groups"][0]["bucket"] == "180d"
         assert data["groups"][0]["items"][0]["text"] == "candidate"
         assert data["groups"][0]["items"][0]["target_type"] == "meaning"
 
@@ -367,8 +496,8 @@ class TestQueueDue:
                 "generated_at": "2026-04-05T09:00:00+00:00",
                 "total_count": 3,
                 "groups": [
-                    {"bucket": "overdue", "count": 2},
-                    {"bucket": "tomorrow", "count": 1},
+                    {"bucket": "overdue", "count": 2, "has_due_now": True},
+                    {"bucket": "tomorrow", "count": 1, "has_due_now": False},
                 ],
             }
 
@@ -387,8 +516,8 @@ class TestQueueDue:
         data = response.json()
         assert data["total_count"] == 3
         assert data["groups"] == [
-            {"bucket": "overdue", "count": 2},
-            {"bucket": "tomorrow", "count": 1},
+            {"bucket": "overdue", "count": 2, "has_due_now": True},
+            {"bucket": "tomorrow", "count": 1, "has_due_now": False},
         ]
 
     @pytest.mark.asyncio
@@ -415,7 +544,7 @@ class TestQueueDue:
                 "generated_at": "2026-10-05T09:00:00+00:00",
                 "total_count": 1,
                 "groups": [
-                    {"bucket": "due_now", "count": 1},
+                    {"bucket": "due_now", "count": 1, "has_due_now": True},
                 ],
             }
 
@@ -434,7 +563,7 @@ class TestQueueDue:
         data = response.json()
         assert data["debug"]["effective_now"] == "2026-10-05T09:00:00+00:00"
         assert data["total_count"] == 1
-        assert data["groups"] == [{"bucket": "due_now", "count": 1}]
+        assert data["groups"] == [{"bucket": "due_now", "count": 1, "has_due_now": True}]
 
     @pytest.mark.asyncio
     async def test_get_review_queue_bucket_detail_supports_sort_and_order(
@@ -734,21 +863,35 @@ class TestQueueScheduleUpdate:
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
-        total_result = MagicMock()
-        total_result.scalar_one.return_value = 3
-        due_result = MagicMock()
-        due_result.scalar_one.return_value = 2
-        aggregate_result = MagicMock()
-        aggregate_result.one.return_value = (10, 7)
-        mock_db.execute.side_effect = [user_result, total_result, due_result, aggregate_result]
+        mock_db.execute.side_effect = [user_result]
 
-        response = await client.get(
-            "/api/reviews/queue/stats",
-            headers={"Authorization": f"Bearer {token}"},
+        async def fake_get_queue_stats(self, user_id):
+            assert user_id == user.id
+            return {
+                "total_items": 3,
+                "due_items": 2,
+                "review_count": 10,
+                "correct_count": 7,
+                "accuracy": 0.7,
+            }
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_queue_stats",
+            fake_get_queue_stats,
+            raising=False,
         )
 
+        try:
+            response = await client.get(
+                "/api/reviews/queue/stats",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        finally:
+            monkeypatch.undo()
+
         assert response.status_code == 200
-        assert int(response.headers["X-Reviews-Query-Count"]) >= 2
+        assert int(response.headers["X-Reviews-Query-Count"]) >= 1
         assert float(response.headers["X-Reviews-Query-Time-Ms"]) >= 0.0
 
     @pytest.mark.asyncio
@@ -913,6 +1056,35 @@ class TestQueueSubmit:
         assert "not found" in response.json()["detail"].lower()
 
     @pytest.mark.asyncio
+    async def test_submit_queue_review_returns_400_for_stale_prompt_submission(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        item_id = uuid.uuid4()
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_submit_queue_review(self, **kwargs):
+            raise ValueError("Prompt submission is stale")
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.submit_queue_review",
+            fake_submit_queue_review,
+        )
+
+        response = await client.post(
+            f"/api/reviews/queue/{item_id}/submit",
+            json={"quality": 4, "time_spent_ms": 1234},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 400
+        assert "stale" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
     async def test_submit_queue_review_serializes_state_backed_result(
         self, client, mock_db, auth_token, monkeypatch
     ):
@@ -973,6 +1145,67 @@ class TestQueueSubmit:
         assert data["detail"]["display_text"] == "resilience"
         assert data["schedule_options"][0]["value"] == "3d"
 
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_serializes_lookup_result(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        state.quality_rating = 1
+        state.time_spent_ms = 900
+        state.interval_days = 1
+        state.outcome = "lookup"
+        state.needs_relearn = True
+        state.recheck_planned = True
+        state.detail = {
+            "entry_type": "word",
+            "entry_id": str(state.entry_id),
+            "display_text": "barely",
+            "primary_definition": "Only just, by a very small margin.",
+            "meaning_count": 1,
+            "remembered_count": 0,
+            "compare_with": [],
+            "meanings": [],
+            "audio_state": "not_available",
+        }
+        state.schedule_options = []
+
+        async def fake_submit_queue_review(self, **kwargs):
+            return state
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.submit_queue_review",
+            fake_submit_queue_review,
+        )
+
+        response = await client.post(
+            f"/api/reviews/queue/{state.id}/submit",
+            json={"quality": 1, "time_spent_ms": 900, "outcome": "lookup"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(state.id)
+        assert data["outcome"] == "lookup"
+        assert data["needs_relearn"] is True
+        assert data["recheck_planned"] is True
+        assert data["detail"]["display_text"] == "barely"
+        assert data["schedule_options"] == []
+
 
 class TestQueueStats:
     @pytest.mark.asyncio
@@ -982,18 +1215,32 @@ class TestQueueStats:
 
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
-        total_result = MagicMock()
-        total_result.scalar_one.return_value = 3
-        due_result = MagicMock()
-        due_result.scalar_one.return_value = 1
-        aggregate_result = MagicMock()
-        aggregate_result.one.return_value = (8, 6)
-        mock_db.execute.side_effect = [user_result, total_result, due_result, aggregate_result]
+        mock_db.execute.side_effect = [user_result]
 
-        response = await client.get(
-            "/api/reviews/queue/stats",
-            headers={"Authorization": f"Bearer {token}"},
+        async def fake_get_queue_stats(self, user_id):
+            assert user_id == user.id
+            return {
+                "total_items": 3,
+                "due_items": 1,
+                "review_count": 8,
+                "correct_count": 6,
+                "accuracy": 0.75,
+            }
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_queue_stats",
+            fake_get_queue_stats,
+            raising=False,
         )
+
+        try:
+            response = await client.get(
+                "/api/reviews/queue/stats",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        finally:
+            monkeypatch.undo()
 
         assert response.status_code == 200
         data = response.json()

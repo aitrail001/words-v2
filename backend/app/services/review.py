@@ -7,7 +7,7 @@ import random
 from inspect import isawaitable
 from time import monotonic
 from datetime import datetime, timezone, timedelta
-from typing import Any
+from typing import Any, Callable
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import and_, func, literal, or_, select
@@ -37,6 +37,14 @@ from app.services.review_prompt_builder import (
     load_prompt_distractors as load_prompt_distractors_impl,
     resolve_prompt_preferences as resolve_prompt_preferences_impl,
 )
+from app.services.review_srs_v1 import (
+    REVIEW_SRS_V1_BUCKETS,
+    bucket_for_interval_days,
+    bucket_to_interval_days,
+    bucket_to_label,
+    cadence_step_for_bucket,
+    due_at_for_bucket,
+)
 from app.services.review_submission import (
     apply_entry_state_review_result as apply_entry_state_review_result_impl,
     build_entry_state_detail as build_entry_state_detail_impl,
@@ -53,29 +61,30 @@ logger = get_logger(__name__)
 settings = get_settings()
 
 REVIEW_BUCKET_ORDER = [
-    "overdue",
-    "due_now",
-    "later_today",
-    "tomorrow",
-    "this_week",
-    "this_month",
-    "one_to_three_months",
-    "three_to_six_months",
-    "six_plus_months",
+    "1d",
+    "2d",
+    "3d",
+    "5d",
+    "7d",
+    "14d",
+    "30d",
+    "90d",
+    "180d",
 ]
 
 
 class ReviewService:
     SCHEDULE_OVERRIDE_DAYS = {
-        "10m": 10 / (24 * 60),
         "1d": 1,
+        "2d": 2,
         "3d": 3,
+        "5d": 5,
         "7d": 7,
         "14d": 14,
-        "1m": 30,
-        "3m": 90,
-        "6m": 180,
-        "never_for_now": 365,
+        "30d": 30,
+        "90d": 90,
+        "180d": 180,
+        "known": 180,
     }
     SCHEDULE_OVERRIDE_VALUES = set(SCHEDULE_OVERRIDE_DAYS.keys())
     REVIEW_MODE_CONFIDENCE = "confidence"
@@ -270,6 +279,7 @@ class ReviewService:
         expected_input = prompt.get("expected_input")
         return {
             "prompt_id": str(uuid.uuid4()),
+            "issued_at": datetime.now(timezone.utc).isoformat(),
             "user_id": str(user_id) if user_id is not None else None,
             "queue_item_id": str(queue_item_id) if queue_item_id is not None else None,
             "prompt_type": prompt.get("prompt_type"),
@@ -361,6 +371,13 @@ class ReviewService:
         )
         if explicit_outcome is not None:
             return explicit_outcome
+        if issued_review_mode != self.REVIEW_MODE_MCQ:
+            derived_outcome = self._derive_objective_outcome_from_prompt_token(
+                prompt_token_payload=prompt_token_payload,
+                selected_option_id=selected_option_id,
+                typed_answer=typed_answer,
+            )
+            return "remember" if derived_outcome == "correct_tested" else "lookup"
         return self._derive_objective_outcome_from_prompt_token(
             prompt_token_payload=prompt_token_payload,
             selected_option_id=selected_option_id,
@@ -1365,7 +1382,10 @@ class ReviewService:
                 EntryReviewState.is_suspended.is_(False),
             )
         )
-        return result.scalar_one_or_none()
+        state = result.scalar_one_or_none()
+        if state is not None:
+            self._normalize_active_review_state_schedule(state)
+        return state
 
     async def _get_target_review_state(
         self,
@@ -1381,7 +1401,29 @@ class ReviewService:
                 EntryReviewState.target_id == target_id,
             )
         )
-        return result.scalar_one_or_none()
+        state = result.scalar_one_or_none()
+        if state is not None:
+            self._normalize_active_review_state_schedule(state)
+        return state
+
+    @classmethod
+    def _normalize_active_review_state_schedule(cls, state: EntryReviewState) -> None:
+        resolved_bucket = cls._resolve_srs_bucket(state=state)
+        if resolved_bucket == "known":
+            state.srs_bucket = "known"
+            state.interval_days = None
+            state.next_due_at = None
+            state.cadence_step = cadence_step_for_bucket("known")
+            state.stability = max(0.15, float(state.stability or 180))
+            return
+
+        resolved_interval_days = bucket_to_interval_days(resolved_bucket)
+        state.srs_bucket = resolved_bucket
+        state.interval_days = resolved_interval_days
+        state.cadence_step = cadence_step_for_bucket(resolved_bucket)
+        state.stability = max(0.15, float(resolved_interval_days or state.stability or 1))
+        if state.next_due_at is None:
+            state.next_due_at = due_at_for_bucket(resolved_bucket)
 
     async def _ensure_entry_review_state(
         self,
@@ -1401,8 +1443,11 @@ class ReviewService:
             user_id=user_id,
             entry_type=entry_type,
             entry_id=entry_id,
-            stability=0.3,
+            stability=1.0,
             difficulty=0.5,
+            next_due_at=due_at_for_bucket("1d"),
+            srs_bucket="1d",
+            cadence_step=cadence_step_for_bucket("1d"),
             success_streak=0,
             lapse_count=0,
             exposure_count=0,
@@ -1410,6 +1455,7 @@ class ReviewService:
             is_fragile=False,
             is_suspended=False,
         )
+        state.interval_days = 1
         self.db.add(state)
         await self.db.flush()
         return state
@@ -1462,8 +1508,11 @@ class ReviewService:
             target_id=target_id,
             entry_type=entry_type,
             entry_id=entry_id,
-            stability=0.3,
+            stability=1.0,
             difficulty=0.5,
+            next_due_at=due_at_for_bucket("1d"),
+            srs_bucket="1d",
+            cadence_step=cadence_step_for_bucket("1d"),
             success_streak=0,
             lapse_count=0,
             exposure_count=0,
@@ -1471,6 +1520,7 @@ class ReviewService:
             is_fragile=False,
             is_suspended=False,
         )
+        state.interval_days = 1
         try:
             async with self.db.begin_nested():
                 self.db.add(state)
@@ -1646,21 +1696,40 @@ class ReviewService:
     def _resolve_interval_days_or_zero(value: int | None) -> int:
         return int(value or 0)
 
+    @classmethod
+    def _resolve_srs_bucket(
+        cls,
+        *,
+        state: EntryReviewState | None = None,
+        interval_days: int | None = None,
+    ) -> str:
+        if state is not None:
+            normalized_bucket = (getattr(state, "srs_bucket", None) or "").strip().lower()
+            if normalized_bucket in REVIEW_SRS_V1_BUCKETS:
+                return normalized_bucket
+            derived_interval_days = getattr(state, "interval_days", None)
+            if derived_interval_days is not None:
+                return bucket_for_interval_days(int(derived_interval_days))
+            if getattr(state, "stability", None) is not None:
+                return bucket_for_interval_days(int(round(float(state.stability or 0))))
+        if interval_days is not None:
+            return bucket_for_interval_days(interval_days)
+        return "1d"
+
     def _select_prompt_type(
         self,
         prompt_candidates: list[str],
         index: int = 0,
         previous_prompt_type: str | None = None,
     ) -> str:
+        del index
         if not prompt_candidates:
             return self.PROMPT_TYPE_DEFINITION_TO_ENTRY
         if previous_prompt_type:
             for candidate in prompt_candidates:
                 if candidate != previous_prompt_type:
                     return candidate
-        if len(prompt_candidates) == 1:
-            return prompt_candidates[0]
-        return prompt_candidates[index % len(prompt_candidates)]
+        return prompt_candidates[0]
 
     @classmethod
     def _extract_prompt_type_override(cls, state: EntryReviewState | None) -> str | None:
@@ -1851,6 +1920,8 @@ class ReviewService:
         previous_prompt_type: str | None = None,
         active_target_count: int = 1,
         forced_prompt_type: str | None = None,
+        srs_bucket: str | None = None,
+        cadence_step: int | None = None,
     ) -> dict[str, Any]:
         return await build_card_prompt_impl(
             self,
@@ -1870,6 +1941,8 @@ class ReviewService:
             previous_prompt_type=previous_prompt_type,
             active_target_count=active_target_count,
             forced_prompt_type=forced_prompt_type,
+            srs_bucket=srs_bucket,
+            cadence_step=cadence_step,
         )
 
     async def _resolve_prompt_preferences(self, user_id: uuid.UUID | None) -> dict[str, Any]:
@@ -1886,6 +1959,8 @@ class ReviewService:
         allow_audio_spelling: bool,
         allow_confidence: bool,
         active_target_count: int,
+        srs_bucket: str | None = None,
+        cadence_step: int | None = None,
     ) -> list[str]:
         return build_available_prompt_types_impl(
             self,
@@ -1897,6 +1972,8 @@ class ReviewService:
             allow_audio_spelling=allow_audio_spelling,
             allow_confidence=allow_confidence,
             active_target_count=active_target_count,
+            srs_bucket=srs_bucket,
+            cadence_step=cadence_step,
         )
 
     async def _load_prompt_distractors(
@@ -2052,64 +2129,44 @@ class ReviewService:
         base_next_review: datetime | None = None,
     ) -> tuple[int, datetime, int | None]:
         if override_value is None:
+            resolved_interval_days = ReviewService._resolve_interval_days_or_zero(original_interval_days)
             return (
-                ReviewService._resolve_interval_days_or_zero(original_interval_days),
-                base_next_review if base_next_review is not None else datetime.now(timezone.utc),
+                resolved_interval_days,
+                base_next_review
+                if base_next_review is not None
+                else due_at_for_bucket(bucket_for_interval_days(resolved_interval_days)),
                 None,
             )
 
         mapped_days = ReviewService.SCHEDULE_OVERRIDE_DAYS.get(override_value)
         if mapped_days is None:
+            resolved_interval_days = ReviewService._resolve_interval_days_or_zero(original_interval_days)
             return (
-                ReviewService._resolve_interval_days_or_zero(original_interval_days),
-                base_next_review if base_next_review is not None else datetime.now(timezone.utc),
+                resolved_interval_days,
+                base_next_review
+                if base_next_review is not None
+                else due_at_for_bucket(bucket_for_interval_days(resolved_interval_days)),
                 None,
             )
 
         return (
             int(mapped_days),
-            datetime.now(timezone.utc) + timedelta(days=mapped_days),
+            due_at_for_bucket(override_value),
             original_interval_days,
         )
 
     @classmethod
     def _default_schedule_option_value(cls, interval_days: int) -> str:
-        if interval_days <= 0:
-            return "1d"
-        if interval_days <= 1:
-            return "1d"
-        if interval_days <= 3:
-            return "3d"
-        if interval_days <= 7:
-            return "7d"
-        if interval_days <= 14:
-            return "14d"
-        if interval_days <= 30:
-            return "1m"
-        if interval_days <= 90:
-            return "3m"
-        if interval_days <= 180:
-            return "6m"
-        return "never_for_now"
+        return bucket_for_interval_days(interval_days)
 
     @classmethod
     def _schedule_option_labels(cls) -> dict[str, str]:
-        return {
-            "10m": "Later today",
-            "1d": "Tomorrow",
-            "3d": "In 3 days",
-            "7d": "In a week",
-            "14d": "In 2 weeks",
-            "1m": "In a month",
-            "3m": "In 3 months",
-            "6m": "In 6 months",
-            "never_for_now": "Pause review",
-        }
+        return {bucket: bucket_to_label(bucket) for bucket in REVIEW_SRS_V1_BUCKETS}
 
     @classmethod
     def _build_schedule_options_for_value(cls, current_value: str) -> list[dict[str, Any]]:
         labels = cls._schedule_option_labels()
-        order = ["10m", "1d", "3d", "7d", "14d", "1m", "3m", "6m", "never_for_now"]
+        order = list(REVIEW_SRS_V1_BUCKETS)
         return [
             {"value": value, "label": labels[value], "is_default": value == current_value}
             for value in order
@@ -2131,11 +2188,8 @@ class ReviewService:
             return "1d"
 
         resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
-        delta_days = max((resolved_due_at - resolved_now).total_seconds(), 0.0) / 86400.0
-        return min(
-            cls.SCHEDULE_OVERRIDE_DAYS.items(),
-            key=lambda item: (abs(item[1] - delta_days), item[1]),
-        )[0]
+        delta_days = max((resolved_due_at - resolved_now).days, 1)
+        return bucket_for_interval_days(delta_days)
 
     @classmethod
     def _build_current_schedule_payload(
@@ -2144,19 +2198,25 @@ class ReviewService:
         *,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        due_at = state.recheck_due_at or state.next_due_at
-        current_value = cls._resolve_schedule_value_from_due_at(due_at=due_at, now=now)
+        explicit_bucket = (getattr(state, "srs_bucket", None) or "").strip().lower()
+        if explicit_bucket in REVIEW_SRS_V1_BUCKETS:
+            current_value = explicit_bucket
+            current_source = "srs_bucket"
+        elif state.next_due_at is not None:
+            current_value = cls._resolve_schedule_value_from_due_at(due_at=state.next_due_at, now=now)
+            current_source = "scheduled_timestamp"
+        else:
+            current_value = cls._resolve_srs_bucket(state=state)
+            current_source = "srs_bucket"
+        due_at = state.next_due_at
         schedule_options = cls._build_schedule_options_for_value(current_value)
-        current_label = cls._schedule_option_labels().get(
-            current_value,
-            "Later today" if current_value == "10m" else "Tomorrow",
-        )
+        current_label = cls._schedule_option_labels().get(current_value, "Tomorrow")
         return {
             "queue_item_id": str(state.id),
             "next_review_at": due_at.isoformat() if due_at is not None else None,
             "current_schedule_value": current_value,
             "current_schedule_label": current_label,
-            "current_schedule_source": "scheduled_timestamp",
+            "current_schedule_source": current_source,
             "schedule_options": schedule_options,
         }
 
@@ -2193,7 +2253,7 @@ class ReviewService:
 
     @staticmethod
     def _resolve_grouped_queue_due_at(state: EntryReviewState) -> datetime | None:
-        return state.recheck_due_at or state.next_due_at
+        return state.next_due_at
 
     @classmethod
     def _validate_review_queue_bucket(cls, bucket: str) -> str:
@@ -2242,6 +2302,7 @@ class ReviewService:
         for state, learner_status in rows:
             if learner_status not in {None, "learning"}:
                 continue
+            self._normalize_active_review_state_schedule(state)
             state.learner_status = learner_status or "learning"
             states.append(state)
         if not states:
@@ -2304,6 +2365,7 @@ class ReviewService:
         include_debug_fields: bool = False,
     ) -> dict[str, Any]:
         due_at = self._resolve_grouped_queue_due_at(state)
+        bucket = self._resolve_srs_bucket(state=state)
         payload = {
             "queue_item_id": str(state.id),
             "entry_id": str(state.entry_id),
@@ -2314,6 +2376,7 @@ class ReviewService:
             "last_reviewed_at": state.last_reviewed_at.isoformat()
             if state.last_reviewed_at is not None
             else None,
+            "bucket": bucket,
         }
         if include_debug_fields:
             payload.update(
@@ -2380,9 +2443,12 @@ class ReviewService:
         now: datetime,
         include_debug_fields: bool = False,
     ) -> dict[str, list[dict[str, Any]]]:
+        del now
         groups: dict[str, list[dict[str, Any]]] = {bucket: [] for bucket in REVIEW_BUCKET_ORDER}
         for state in states:
-            bucket = self.classify_review_bucket(self._resolve_grouped_queue_due_at(state), now)
+            bucket = self._resolve_srs_bucket(state=state)
+            if bucket == "known":
+                continue
             groups[bucket].append(
                 self._serialize_grouped_queue_row(
                     state,
@@ -2390,6 +2456,70 @@ class ReviewService:
                 )
             )
         return groups
+
+    @classmethod
+    def _group_review_queue_rows_by_due(
+        cls,
+        *,
+        states: list[EntryReviewState],
+        now: datetime,
+        include_debug_fields: bool = False,
+        serialize_row: Callable[[EntryReviewState, bool], dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        grouped: dict[int, dict[str, Any]] = {}
+        for state in states:
+            bucket = cls._resolve_srs_bucket(state=state)
+            if bucket == "known":
+                continue
+            if cls._is_queue_state_due_now(state, now=now):
+                due_in_days = 0
+                label = "Due now"
+                group_key = "due_now"
+            else:
+                due_at = cls._resolve_grouped_queue_due_at(state)
+                if due_at is None:
+                    due_in_days = 0
+                    label = "Due now"
+                    group_key = "due_now"
+                else:
+                    due_in_days = max((due_at.date() - now.date()).days, 0)
+                    if due_in_days <= 0:
+                        due_in_days = 0
+                        label = "Due now"
+                        group_key = "due_now"
+                    elif due_in_days == 1:
+                        label = "Tomorrow"
+                        group_key = "tomorrow"
+                    else:
+                        label = f"In {due_in_days} days"
+                        group_key = f"in_{due_in_days}_days"
+
+            group = grouped.setdefault(
+                due_in_days,
+                {
+                    "group_key": group_key,
+                    "label": label,
+                    "due_in_days": due_in_days,
+                    "count": 0,
+                    "items": [],
+                },
+            )
+            group["items"].append(serialize_row(state, include_debug_fields))
+            group["count"] += 1
+
+        return [grouped[days] for days in sorted(grouped.keys())]
+
+    @staticmethod
+    def _is_queue_state_due_now(
+        state: EntryReviewState,
+        *,
+        now: datetime,
+    ) -> bool:
+        if state.recheck_due_at is not None and state.recheck_due_at <= now:
+            return True
+        if state.next_due_at is None:
+            return False
+        return state.next_due_at <= now
 
     @classmethod
     def _review_queue_sort_key(cls, item: dict[str, Any], sort: str) -> tuple[Any, ...]:
@@ -2412,6 +2542,8 @@ class ReviewService:
     ) -> dict[str, Any]:
         resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
         states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        for state in states:
+            self._normalize_active_review_state_schedule(state)
         groups = self._group_review_queue_rows(
             states=states,
             now=resolved_now,
@@ -2428,6 +2560,33 @@ class ReviewService:
             ],
         }
 
+    async def get_grouped_review_queue_by_due(
+        self,
+        *,
+        user_id: uuid.UUID,
+        now: datetime,
+        include_debug_fields: bool = False,
+    ) -> dict[str, Any]:
+        resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        for state in states:
+            self._normalize_active_review_state_schedule(state)
+        groups = self._group_review_queue_rows_by_due(
+            states=states,
+            now=resolved_now,
+            include_debug_fields=include_debug_fields,
+            serialize_row=lambda state, include_debug: self._serialize_grouped_queue_row(
+                state,
+                include_debug_fields=include_debug,
+            ),
+        )
+
+        return {
+            "generated_at": resolved_now.isoformat(),
+            "total_count": sum(group["count"] for group in groups),
+            "groups": groups,
+        }
+
     async def get_grouped_review_queue_summary(
         self,
         *,
@@ -2436,12 +2595,25 @@ class ReviewService:
     ) -> dict[str, Any]:
         resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
         states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        for state in states:
+            self._normalize_active_review_state_schedule(state)
         groups = self._group_review_queue_rows(states=states, now=resolved_now)
+        has_due_now_by_bucket = {bucket: False for bucket in REVIEW_BUCKET_ORDER}
+        for state in states:
+            bucket = self._resolve_srs_bucket(state=state)
+            if bucket == "known" or bucket not in has_due_now_by_bucket:
+                continue
+            if self._is_queue_state_due_now(state, now=resolved_now):
+                has_due_now_by_bucket[bucket] = True
         return {
             "generated_at": resolved_now.isoformat(),
             "total_count": sum(len(items) for items in groups.values()),
             "groups": [
-                {"bucket": bucket, "count": len(groups[bucket])}
+                {
+                    "bucket": bucket,
+                    "count": len(groups[bucket]),
+                    "has_due_now": has_due_now_by_bucket[bucket],
+                }
                 for bucket in REVIEW_BUCKET_ORDER
                 if groups[bucket]
             ],
@@ -2465,8 +2637,7 @@ class ReviewService:
         bucket_states = [
             state
             for state in states
-            if self.classify_review_bucket(self._resolve_grouped_queue_due_at(state), resolved_now)
-            == resolved_bucket
+            if self._resolve_srs_bucket(state=state) == resolved_bucket
         ]
         history_by_state_id = await self._list_review_history_by_state_ids(
             [state.id for state in bucket_states]
@@ -2547,6 +2718,7 @@ class ReviewService:
                 entry_id=entry_id,
             )
             await self.db.commit()
+        self._normalize_active_review_state_schedule(state)
         return self._build_current_schedule_payload(state)
 
     async def update_queue_item_schedule(
@@ -2569,22 +2741,35 @@ class ReviewService:
         if state is None:
             raise ValueError(f"Queue item {item_id} not found")
 
-        resolved_interval_days, resolved_next_review, _ = self._derive_interval_from_override(
-            original_interval_days=int(round(state.stability or 0)),
-            override_value=schedule_override,
-            base_next_review=state.next_due_at,
-        )
-        state.stability = max(0.15, float(resolved_interval_days))
+        resolved_bucket = schedule_override
+        resolved_interval_days = bucket_to_interval_days(resolved_bucket)
+        resolved_next_review = due_at_for_bucket(resolved_bucket)
+        state.stability = max(0.15, float(resolved_interval_days or 180))
+        state.interval_days = resolved_interval_days
+        state.srs_bucket = resolved_bucket
+        state.cadence_step = cadence_step_for_bucket(resolved_bucket)
         state.next_due_at = resolved_next_review
         state.last_reviewed_at = datetime.now(timezone.utc)
-        if schedule_override == "10m":
-            state.relearning = True
-            state.relearning_trigger = state.relearning_trigger or "manual_reschedule"
-            state.recheck_due_at = resolved_next_review
-        else:
-            state.relearning = False
-            state.relearning_trigger = None
-            state.recheck_due_at = None
+        state.relearning = False
+        state.relearning_trigger = None
+        state.recheck_due_at = None
+        learner_status_result = await self.db.execute(
+            select(LearnerEntryStatus).where(
+                LearnerEntryStatus.user_id == user_id,
+                LearnerEntryStatus.entry_type == state.entry_type,
+                LearnerEntryStatus.entry_id == state.entry_id,
+            )
+        )
+        learner_status = learner_status_result.scalar_one_or_none()
+        if learner_status is None:
+            learner_status = LearnerEntryStatus(
+                user_id=user_id,
+                entry_type=state.entry_type,
+                entry_id=state.entry_id,
+                status="learning",
+            )
+            self.db.add(learner_status)
+        learner_status.status = "known" if resolved_bucket == "known" else "learning"
         await self.db.commit()
         self._invalidate_queue_stats_cache(user_id)
         return self._build_current_schedule_payload(state)
@@ -2650,7 +2835,6 @@ class ReviewService:
         else:
             state_query = state_query.where(
                 (EntryReviewState.recheck_due_at.is_not(None) & (EntryReviewState.recheck_due_at <= now))
-                | (EntryReviewState.next_due_at.is_(None))
                 | (EntryReviewState.next_due_at <= now)
             )
         state_result = await self.db.execute(
@@ -2665,8 +2849,6 @@ class ReviewService:
         due_items: list[dict[str, Any]] = []
         review_states = self._apply_sibling_bury_rule(list(state_result.scalars().all()))[:limit]
         if review_states:
-            prefs = await self._get_user_review_preferences(user_id)
-            active_cap = self._review_depth_cap(getattr(prefs, "review_depth_preset", None))
             accent = await self._get_user_accent_preference(user_id)
             word_entry_ids = list(
                 {
@@ -2725,6 +2907,7 @@ class ReviewService:
                 )
 
             for index, state in enumerate(review_states):
+                self._normalize_active_review_state_schedule(state)
                 should_hydrate = hydrate_limit is None or index < hydrate_limit
                 if state.entry_type == "word":
                     word = words_by_id.get(state.entry_id)
@@ -2733,42 +2916,15 @@ class ReviewService:
                     meanings = meanings_by_word_id.get(word.id, [])
                     if not meanings:
                         continue
-                    if state.target_type == "meaning" and state.target_id is not None:
-                        meaning = next((item for item in meanings if item.id == state.target_id), None)
-                        active_meanings = [
-                            item
-                            for item in meanings[: max(1, min(len(meanings), active_cap))]
-                        ]
-                        if meaning is not None and meaning not in active_meanings:
-                            active_meanings.append(meaning)
-                    else:
-                        active_meanings = meanings[: max(1, min(len(meanings), active_cap))]
-                        target_index = self._select_active_target_index(
-                            total_targets=len(active_meanings),
-                            active_cap=active_cap,
-                            success_streak=int(state.success_streak or 0),
-                            lapse_count=int(state.lapse_count or 0),
-                            entry_type="word",
-                            is_fragile=bool(state.is_fragile),
-                        )
-                        meaning = active_meanings[target_index]
-                    if meaning is None:
-                        continue
+                    meaning = meanings[0]
                     sentence = meaning_sentence_map.get(meaning.id)
                     review_mode = None
                     prompt = None
                     detail = None
                     if should_hydrate:
                         forced_prompt_type = self._extract_prompt_type_override(state)
-                        review_mode = self._review_mode_for_prompt_type(forced_prompt_type) or self._select_review_mode(
-                            item=state,
-                            word=word.word,
-                            index=index,
-                            sentence=sentence,
-                            allow_confidence=bool(getattr(prefs, "enable_confidence_check", True)),
-                        )
                         prompt = await self._build_card_prompt(
-                            review_mode=review_mode,
+                            review_mode=self.REVIEW_MODE_MCQ,
                             source_text=self._normalize_prompt_text(word.word) or "Unavailable",
                             definition=self._normalize_prompt_text(meaning.definition) or "No definition available.",
                             sentence=sentence,
@@ -2776,18 +2932,19 @@ class ReviewService:
                             distractor_seed=str(meaning.id),
                             meaning_id=meaning.id,
                             index=index,
-                            alternative_definitions=[
-                                self._normalize_prompt_text(item.definition) or "No definition available."
-                                for item in active_meanings
-                                if item.id != meaning.id
-                            ],
+                            alternative_definitions=None,
                             user_id=user_id,
                             source_entry_id=word.id,
                             source_entry_type="word",
                             queue_item_id=state.id,
                             previous_prompt_type=state.last_prompt_type,
                             forced_prompt_type=forced_prompt_type,
+                            active_target_count=1,
+                            srs_bucket=getattr(state, "srs_bucket", None),
+                            cadence_step=getattr(state, "cadence_step", None),
                         )
+                        prompt_type = (prompt or {}).get("prompt_type") or forced_prompt_type
+                        review_mode = (prompt or {}).get("mode") or self._review_mode_for_prompt_type(prompt_type)
                         detail = await self._build_word_detail_payload(
                             user_id=user_id,
                             word=word,
@@ -2803,15 +2960,17 @@ class ReviewService:
                             "item": state,
                             "word": word.word,
                             "definition": meaning.definition,
-                            "target_type": state.target_type or "meaning",
-                            "target_id": str(state.target_id or meaning.id),
+                            "target_type": "meaning",
+                            "target_id": str(meaning.id),
                             "next_review": state.next_due_at,
                             "review_mode": review_mode,
                             "source_entry_type": "word",
                             "source_entry_id": str(word.id),
                             "prompt": prompt,
                             "detail": detail,
-                            "schedule_options": self._build_schedule_options(int(round(state.stability or 0))),
+                            "schedule_options": self._build_schedule_options_for_value(
+                                self._resolve_srs_bucket(state=state)
+                            ),
                             "source_word_id": str(word.id),
                             "source_meaning_id": str(meaning.id),
                         }
@@ -2824,41 +2983,15 @@ class ReviewService:
                 senses = senses_by_phrase_id.get(phrase.id, [])
                 if not senses:
                     continue
-                if state.target_type == "phrase_sense" and state.target_id is not None:
-                    sense = next((item for item in senses if item.id == state.target_id), None)
-                    active_senses = [
-                        item for item in senses[: max(1, min(len(senses), active_cap))]
-                    ]
-                    if sense is not None and sense not in active_senses:
-                        active_senses.append(sense)
-                else:
-                    active_senses = senses[: max(1, min(len(senses), active_cap))]
-                    target_index = self._select_active_target_index(
-                        total_targets=len(active_senses),
-                        active_cap=active_cap,
-                        success_streak=int(state.success_streak or 0),
-                        lapse_count=int(state.lapse_count or 0),
-                        entry_type="phrase",
-                        is_fragile=bool(state.is_fragile),
-                    )
-                    sense = active_senses[target_index]
-                if sense is None:
-                    continue
+                sense = senses[0]
                 sentence = sense_sentence_map.get(sense.id)
                 review_mode = None
                 prompt = None
                 detail = None
                 if should_hydrate:
                     forced_prompt_type = self._extract_prompt_type_override(state)
-                    review_mode = self._review_mode_for_prompt_type(forced_prompt_type) or self._select_review_mode(
-                        item=state,
-                        word=phrase.phrase_text,
-                        index=index,
-                        sentence=sentence,
-                        allow_confidence=bool(getattr(prefs, "enable_confidence_check", True)),
-                    )
                     prompt = await self._build_card_prompt(
-                        review_mode=review_mode,
+                        review_mode=self.REVIEW_MODE_MCQ,
                         source_text=self._normalize_prompt_text(phrase.phrase_text) or "Unavailable",
                         definition=self._normalize_prompt_text(sense.definition) or "No definition available.",
                         sentence=sentence,
@@ -2866,18 +2999,19 @@ class ReviewService:
                         distractor_seed=str(sense.id),
                         meaning_id=sense.id,
                         index=index,
-                        alternative_definitions=[
-                            self._normalize_prompt_text(item.definition) or "No definition available."
-                            for item in active_senses
-                            if item.id != sense.id
-                        ],
+                        alternative_definitions=None,
                         user_id=user_id,
                         source_entry_id=phrase.id,
                         source_entry_type="phrase",
                         queue_item_id=state.id,
                         previous_prompt_type=state.last_prompt_type,
                         forced_prompt_type=forced_prompt_type,
+                        active_target_count=1,
+                        srs_bucket=getattr(state, "srs_bucket", None),
+                        cadence_step=getattr(state, "cadence_step", None),
                     )
+                    prompt_type = (prompt or {}).get("prompt_type") or forced_prompt_type
+                    review_mode = (prompt or {}).get("mode") or self._review_mode_for_prompt_type(prompt_type)
                     detail = await self._build_phrase_detail_payload(
                         user_id=user_id,
                         phrase=phrase,
@@ -2891,15 +3025,17 @@ class ReviewService:
                         "item": state,
                         "word": phrase.phrase_text,
                         "definition": sense.definition,
-                        "target_type": state.target_type or "phrase_sense",
-                        "target_id": str(state.target_id or sense.id),
+                        "target_type": "phrase_sense",
+                        "target_id": str(sense.id),
                         "next_review": state.next_due_at,
                         "review_mode": review_mode,
                         "source_entry_type": "phrase",
                         "source_entry_id": str(phrase.id),
                         "prompt": prompt,
                         "detail": detail,
-                        "schedule_options": self._build_schedule_options(int(round(state.stability or 0))),
+                        "schedule_options": self._build_schedule_options_for_value(
+                            self._resolve_srs_bucket(state=state)
+                        ),
                         "source_word_id": None,
                         "source_meaning_id": str(sense.id),
                     }
@@ -2927,20 +3063,15 @@ class ReviewService:
         word: Word,
         meanings: list[Meaning],
     ) -> tuple[list[dict[str, Any]], list[str], list[str], dict[str, Any], EntryReviewState | None]:
-        prefs = await self._get_user_review_preferences(user_id)
-        active_cap = self._review_depth_cap(getattr(prefs, "review_depth_preset", None))
-        active_meanings = meanings[: max(1, min(len(meanings), active_cap))]
+        primary_meaning = meanings[0]
         accent = await self._get_user_accent_preference(user_id)
         meaning_sentence_map = await self._fetch_first_meaning_sentence_map(
-            [meaning.id for meaning in active_meanings]
+            [primary_meaning.id]
         )
         remembered_count_map = await self._fetch_history_count_by_word_id(
             user_id=user_id,
             meanings_by_word_id={word.id: meanings},
         )
-        cards: list[dict[str, Any]] = []
-        meaning_ids: list[str] = []
-        queue_item_ids: list[str] = []
         detail = await self._build_word_detail_payload(
             user_id=user_id,
             word=word,
@@ -2949,69 +3080,49 @@ class ReviewService:
             remembered_count=remembered_count_map.get(word.id, 0),
             accent=accent,
         )
-        first_target_state: EntryReviewState | None = None
 
         source_text = self._normalize_prompt_text(word.word) or "Unavailable"
-        alternative_definitions = [
-            self._normalize_prompt_text(meaning.definition) or "No definition available."
-            for meaning in meanings
+        sentence = meaning_sentence_map.get(primary_meaning.id)
+        target_state = await self._ensure_target_review_state(
+            user_id=user_id,
+            target_type="meaning",
+            target_id=primary_meaning.id,
+            entry_type="word",
+            entry_id=word.id,
+        )
+        queue_item_id = str(target_state.id)
+        prompt = await self._build_card_prompt(
+            review_mode=self.REVIEW_MODE_MCQ,
+            source_text=source_text,
+            definition=self._normalize_prompt_text(primary_meaning.definition) or "No definition available.",
+            sentence=sentence,
+            is_phrase_entry=False,
+            distractor_seed=str(primary_meaning.id),
+            meaning_id=primary_meaning.id,
+            index=0,
+            alternative_definitions=None,
+            user_id=user_id,
+            source_entry_id=word.id,
+            source_entry_type="word",
+            queue_item_id=target_state.id,
+            previous_prompt_type=getattr(target_state, "last_prompt_type", None),
+            active_target_count=1,
+            srs_bucket=getattr(target_state, "srs_bucket", None),
+            cadence_step=getattr(target_state, "cadence_step", None),
+        )
+
+        cards = [
+            {
+                "queue_item_id": queue_item_id,
+                "meaning_id": str(primary_meaning.id),
+                "word": source_text,
+                "definition": self._normalize_prompt_text(primary_meaning.definition)
+                or "No definition available.",
+                "prompt": prompt,
+                "detail": detail,
+            }
         ]
-        for index, meaning in enumerate(active_meanings):
-            sentence = meaning_sentence_map.get(meaning.id)
-            target_state = await self._ensure_target_review_state(
-                user_id=user_id,
-                target_type="meaning",
-                target_id=meaning.id,
-                entry_type="word",
-                entry_id=word.id,
-            )
-            if first_target_state is None:
-                first_target_state = target_state
-            queue_item_id = str(target_state.id)
-            review_mode = self._select_review_mode(
-                item=target_state,
-                word=source_text,
-                index=index,
-                sentence=sentence,
-                allow_confidence=bool(getattr(prefs, "enable_confidence_check", True)),
-            )
-            prompt = await self._build_card_prompt(
-                review_mode=review_mode,
-                source_text=source_text,
-                definition=self._normalize_prompt_text(meaning.definition) or "No definition available.",
-                sentence=sentence,
-                is_phrase_entry=False,
-                distractor_seed=str(meaning.id),
-                meaning_id=meaning.id,
-                index=index,
-                alternative_definitions=[
-                    definition
-                    for definition in alternative_definitions[: len(active_meanings)]
-                    if definition != (self._normalize_prompt_text(meaning.definition) or "No definition available.")
-                ],
-                user_id=user_id,
-                source_entry_id=word.id,
-                source_entry_type="word",
-                queue_item_id=target_state.id,
-                previous_prompt_type=getattr(target_state, "last_prompt_type", None),
-                active_target_count=len(active_meanings),
-            )
-
-            cards.append(
-                {
-                    "queue_item_id": queue_item_id,
-                    "meaning_id": str(meaning.id),
-                    "word": source_text,
-                    "definition": self._normalize_prompt_text(meaning.definition)
-                    or "No definition available.",
-                    "prompt": prompt,
-                    "detail": detail,
-                }
-            )
-            meaning_ids.append(str(meaning.id))
-            queue_item_ids.append(queue_item_id)
-
-        return cards, meaning_ids, queue_item_ids, detail, first_target_state
+        return cards, [str(primary_meaning.id)], [queue_item_id], detail, target_state
 
     async def _build_learning_cards_for_phrase(
         self,
@@ -3019,83 +3130,57 @@ class ReviewService:
         phrase: PhraseEntry,
         senses: list[PhraseSense],
     ) -> tuple[list[dict[str, Any]], list[str], list[str], dict[str, Any], EntryReviewState | None]:
-        prefs = await self._get_user_review_preferences(user_id)
-        active_cap = self._review_depth_cap(getattr(prefs, "review_depth_preset", None))
-        active_senses = senses[: max(1, min(len(senses), active_cap))]
+        primary_sense = senses[0]
         sense_sentence_map = await self._fetch_first_sense_sentence_map(
-            [sense.id for sense in active_senses]
+            [primary_sense.id]
         )
-        cards: list[dict[str, Any]] = []
-        meaning_ids: list[str] = []
-        queue_item_ids: list[str] = []
         source_text = self._normalize_prompt_text(phrase.phrase_text) or "Unavailable"
-        alternative_definitions = [
-            self._normalize_prompt_text(sense.definition) or "No definition available."
-            for sense in active_senses
-        ]
         detail = await self._build_phrase_detail_payload(
             user_id=user_id,
             phrase=phrase,
             senses=senses,
             example_by_sense_id=sense_sentence_map,
         )
-        first_target_state: EntryReviewState | None = None
+        sentence = sense_sentence_map.get(primary_sense.id)
+        target_state = await self._ensure_target_review_state(
+            user_id=user_id,
+            target_type="phrase_sense",
+            target_id=primary_sense.id,
+            entry_type="phrase",
+            entry_id=phrase.id,
+        )
+        prompt = await self._build_card_prompt(
+            review_mode=self.REVIEW_MODE_MCQ,
+            source_text=source_text,
+            definition=self._normalize_prompt_text(primary_sense.definition) or "No definition available.",
+            sentence=sentence,
+            is_phrase_entry=True,
+            distractor_seed=str(primary_sense.id),
+            meaning_id=primary_sense.id,
+            index=0,
+            alternative_definitions=None,
+            user_id=user_id,
+            source_entry_id=phrase.id,
+            source_entry_type="phrase",
+            queue_item_id=target_state.id,
+            previous_prompt_type=getattr(target_state, "last_prompt_type", None),
+            active_target_count=1,
+            srs_bucket=getattr(target_state, "srs_bucket", None),
+            cadence_step=getattr(target_state, "cadence_step", None),
+        )
 
-        for index, sense in enumerate(active_senses):
-            sentence = sense_sentence_map.get(sense.id)
-            target_state = await self._ensure_target_review_state(
-                user_id=user_id,
-                target_type="phrase_sense",
-                target_id=sense.id,
-                entry_type="phrase",
-                entry_id=phrase.id,
-            )
-            if first_target_state is None:
-                first_target_state = target_state
-            review_mode = self._select_review_mode(
-                item=target_state,
-                word=source_text,
-                index=index,
-                sentence=sentence,
-                allow_confidence=bool(getattr(prefs, "enable_confidence_check", True)),
-            )
-            prompt = await self._build_card_prompt(
-                review_mode=review_mode,
-                source_text=source_text,
-                definition=self._normalize_prompt_text(sense.definition) or "No definition available.",
-                sentence=sentence,
-                is_phrase_entry=True,
-                distractor_seed=str(sense.id),
-                meaning_id=sense.id,
-                index=index,
-                alternative_definitions=[
-                    definition
-                    for definition in alternative_definitions
-                    if definition != (self._normalize_prompt_text(sense.definition) or "No definition available.")
-                ],
-                user_id=user_id,
-                source_entry_id=phrase.id,
-                source_entry_type="phrase",
-                queue_item_id=target_state.id,
-                previous_prompt_type=getattr(target_state, "last_prompt_type", None),
-                active_target_count=len(active_senses),
-            )
-
-            cards.append(
-                {
-                    "queue_item_id": str(target_state.id),
-                    "meaning_id": str(sense.id),
-                    "word": source_text,
-                    "definition": self._normalize_prompt_text(sense.definition)
-                    or "No definition available.",
-                    "prompt": prompt,
-                    "detail": detail,
-                }
-            )
-            meaning_ids.append(str(sense.id))
-            queue_item_ids.append(str(target_state.id))
-
-        return cards, meaning_ids, queue_item_ids, detail, first_target_state
+        cards = [
+            {
+                "queue_item_id": str(target_state.id),
+                "meaning_id": str(primary_sense.id),
+                "word": source_text,
+                "definition": self._normalize_prompt_text(primary_sense.definition)
+                or "No definition available.",
+                "prompt": prompt,
+                "detail": detail,
+            }
+        ]
+        return cards, [str(primary_sense.id)], [str(target_state.id)], detail, target_state
 
     async def start_learning_entry(
         self,
@@ -3150,8 +3235,8 @@ class ReviewService:
                 "queue_item_ids": queue_item_ids,
                 "cards": cards,
                 "detail": detail,
-                "schedule_options": self._build_schedule_options(
-                    int(round((first_target_state.stability if first_target_state is not None else 0) or 0))
+                "schedule_options": self._build_schedule_options_for_value(
+                    self._resolve_srs_bucket(state=first_target_state)
                 ),
                 "requires_lookup_hint": False,
             }
@@ -3185,8 +3270,8 @@ class ReviewService:
             "queue_item_ids": queue_item_ids,
             "cards": cards,
             "detail": detail,
-            "schedule_options": self._build_schedule_options(
-                int(round((first_target_state.stability if first_target_state is not None else 0) or 0))
+            "schedule_options": self._build_schedule_options_for_value(
+                self._resolve_srs_bucket(state=first_target_state)
             ),
             "requires_lookup_hint": False,
         }
@@ -3298,50 +3383,11 @@ class ReviewService:
         if cached is not None:
             return cached
         now = datetime.now(timezone.utc)
-        queue_visibility_filters = (
-            EntryReviewState.user_id == user_id,
-            EntryReviewState.is_suspended.is_(False),
-            or_(
-                LearnerEntryStatus.status.is_(None),
-                LearnerEntryStatus.status == "learning",
-            ),
-        )
-        total_result = await self.db.execute(
-            select(func.count(EntryReviewState.id))
-            .select_from(EntryReviewState)
-            .outerjoin(
-                LearnerEntryStatus,
-                and_(
-                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
-                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
-                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
-                ),
-            )
-            .where(*queue_visibility_filters)
-        )
-        total_items = int(total_result.scalar_one() or 0)
-
-        due_result = await self.db.execute(
-            select(func.count(EntryReviewState.id))
-            .select_from(EntryReviewState)
-            .outerjoin(
-                LearnerEntryStatus,
-                and_(
-                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
-                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
-                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
-                ),
-            )
-            .where(
-                *queue_visibility_filters,
-                (
-                    (EntryReviewState.recheck_due_at.is_not(None) & (EntryReviewState.recheck_due_at <= now))
-                    | (EntryReviewState.next_due_at.is_(None))
-                    | (EntryReviewState.next_due_at <= now)
-                ),
-            )
-        )
-        due_items = int(due_result.scalar_one() or 0)
+        visible_states = await self._list_active_queue_states(user_id=user_id, now=now)
+        for state in visible_states:
+            self._normalize_active_review_state_schedule(state)
+        total_items = len(visible_states)
+        due_items = sum(1 for state in visible_states if self._is_queue_state_due_now(state, now=now))
 
         aggregate_result = await self.db.execute(
             select(

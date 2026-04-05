@@ -195,6 +195,7 @@ class QueueScheduleResponse(BaseModel):
 class ReviewQueueSummaryBucketResponse(BaseModel):
     bucket: str
     count: int
+    has_due_now: bool = False
 
 
 class ReviewQueueSummaryResponse(BaseModel):
@@ -221,6 +222,7 @@ class GroupedQueueItemResponse(BaseModel):
     status: str
     next_review_at: datetime | None = None
     last_reviewed_at: datetime | None = None
+    bucket: str | None = None
     success_streak: int = 0
     lapse_count: int = 0
     times_remembered: int = 0
@@ -238,6 +240,20 @@ class GroupedQueueResponse(BaseModel):
     generated_at: datetime
     total_count: int
     groups: list[GroupedQueueBucketResponse]
+
+
+class DueGroupedQueueBucketResponse(BaseModel):
+    group_key: str
+    label: str
+    due_in_days: int
+    count: int
+    items: list[GroupedQueueItemResponse]
+
+
+class DueGroupedQueueResponse(BaseModel):
+    generated_at: datetime
+    total_count: int
+    groups: list[DueGroupedQueueBucketResponse]
 
 
 class AdminGroupedQueueItemResponse(GroupedQueueItemResponse):
@@ -315,6 +331,10 @@ def _to_queue_item_response(
     definition: str | None = None,
     review_mode: str | None = None,
     prompt: dict[str, Any] | ReviewPrompt | None = None,
+    meaning_id: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    source_meaning_id: str | None = None,
     source_entry_type: str | None = None,
     source_entry_id: str | None = None,
     outcome: str | None = None,
@@ -323,16 +343,20 @@ def _to_queue_item_response(
     detail: dict[str, Any] | None = None,
     schedule_options: list[dict[str, Any]] | None = None,
 ) -> QueueItemResponse:
-    item_meaning_id = getattr(item, "meaning_id", None)
+    item_meaning_id = meaning_id or (
+        str(getattr(item, "meaning_id", "")) if getattr(item, "meaning_id", None) else ""
+    )
     return QueueItemResponse(
         id=str(item.id),
         session_id=str(getattr(item, "session_id", ""))
         if getattr(item, "session_id", None)
         else None,
         word_id=str(getattr(item, "word_id", "")) if getattr(item, "word_id", None) else None,
-        meaning_id=str(item_meaning_id) if item_meaning_id else "",
-        target_type=getattr(item, "target_type", None),
-        target_id=str(getattr(item, "target_id", "")) if getattr(item, "target_id", None) else None,
+        meaning_id=item_meaning_id,
+        target_type=target_type if target_type is not None else getattr(item, "target_type", None),
+        target_id=target_id
+        if target_id is not None
+        else (str(getattr(item, "target_id", "")) if getattr(item, "target_id", None) else None),
         card_type=getattr(item, "card_type", None),
         quality_rating=getattr(item, "quality_rating", None),
         time_spent_ms=getattr(item, "time_spent_ms", None),
@@ -347,7 +371,7 @@ def _to_queue_item_response(
         review_mode=review_mode,
         prompt=prompt,
         source_word_id=str(getattr(item, "word_id", "")) if getattr(item, "word_id", None) else None,
-        source_meaning_id=str(item_meaning_id) if item_meaning_id else None,
+        source_meaning_id=source_meaning_id or (item_meaning_id if item_meaning_id else None),
         source_entry_type=source_entry_type,
         source_entry_id=source_entry_id,
         outcome=outcome,
@@ -405,6 +429,10 @@ async def get_due_queue_items(
             definition=due_entry["definition"],
             review_mode=due_entry.get("review_mode"),
             prompt=due_entry.get("prompt"),
+            meaning_id=due_entry.get("source_meaning_id"),
+            target_type=due_entry.get("target_type"),
+            target_id=due_entry.get("target_id"),
+            source_meaning_id=due_entry.get("source_meaning_id"),
             source_entry_type=due_entry.get("source_entry_type"),
             source_entry_id=due_entry.get("source_entry_id"),
             detail=due_entry.get("detail"),
@@ -453,7 +481,15 @@ async def submit_queue_review(
             user_id=current_user.id,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        detail = str(e)
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+                if "not found" in detail.lower()
+                else status.HTTP_400_BAD_REQUEST
+            ),
+            detail=detail,
+        )
 
     metrics = finalize_request_db_metrics(
         response,
@@ -490,7 +526,15 @@ async def update_queue_schedule(
             schedule_override=request.schedule_override,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        detail = str(e)
+        raise HTTPException(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+                if "not found" in detail.lower()
+                else status.HTTP_400_BAD_REQUEST
+            ),
+            detail=detail,
+        )
 
     metrics = finalize_request_db_metrics(
         response,
@@ -587,6 +631,30 @@ async def get_grouped_review_queue(
     )
     logger.info("reviews_request", route_name="queue_grouped", **metrics)
     return GroupedQueueResponse(**payload)
+
+
+@router.get("/queue/grouped/by-due", response_model=DueGroupedQueueResponse)
+async def get_grouped_review_queue_by_due(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DueGroupedQueueResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    payload = await service.get_grouped_review_queue_by_due(
+        user_id=current_user.id,
+        now=datetime.now().astimezone(),
+        include_debug_fields=False,
+    )
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_grouped_by_due", **metrics)
+    return DueGroupedQueueResponse(**payload)
 
 
 @router.get("/admin/queue/grouped", response_model=AdminGroupedQueueResponse)

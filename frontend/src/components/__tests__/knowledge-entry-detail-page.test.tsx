@@ -19,12 +19,16 @@ jest.mock("@/lib/knowledge-map-client", () => {
     normalizeLearnerTranslation: jest.fn(actual.normalizeLearnerTranslation),
   };
 });
-jest.mock("@/lib/api-client", () => ({
-  apiClient: {
-    post: jest.fn(),
-    put: jest.fn(),
-  },
-}));
+jest.mock("@/lib/api-client", () => {
+  const actual = jest.requireActual("@/lib/api-client");
+  return {
+    ...actual,
+    apiClient: {
+      post: jest.fn(),
+      put: jest.fn(),
+    },
+  };
+});
 jest.mock("@/lib/learner-audio", () => ({
   getPlayableLearnerAccents: jest.fn((voiceAssets) => {
     const locales = new Set(
@@ -1023,7 +1027,7 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
 
-    expect(await screen.findByText(/next review scheduled: scheduled time not set yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/next review scheduled: tomorrow/i)).toBeInTheDocument();
     expect(screen.queryByText(/approximately:/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^override$/i })).toBeInTheDocument();
   });
@@ -1144,5 +1148,115 @@ describe("KnowledgeEntryDetailPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /should learn/i }));
 
     await waitFor(() => expect(screen.queryByText(/^Next Review$/i)).not.toBeInTheDocument());
+  });
+
+  it("opens the review flow after Learn Now succeeds", async () => {
+    const push = jest.fn();
+    mockUseRouter.mockReturnValue({ push } as never);
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "drum",
+      normalized_form: "drum",
+      browse_rank: 2400,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "鼓",
+      primary_definition: "A percussion instrument.",
+      review_queue: null,
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A percussion instrument.",
+          localized_definition: "鼓",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+    mockPut.mockResolvedValueOnce({ entry_type: "word", entry_id: "word-1", status: "learning" } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /learn now/i }));
+
+    await waitFor(() =>
+      expect(mockPut).toHaveBeenCalledWith("/knowledge-map/entries/word/word-1/status", {
+        status: "learning",
+      }),
+    );
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith("/review?entry_type=word&entry_id=word-1"),
+    );
+  });
+
+  it("shows an inline error when Learn Now fails", async () => {
+    const push = jest.fn();
+    mockUseRouter.mockReturnValue({ push } as never);
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "drum",
+      normalized_form: "drum",
+      browse_rank: 2400,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "鼓",
+      primary_definition: "A percussion instrument.",
+      review_queue: null,
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A percussion instrument.",
+          localized_definition: "鼓",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+    mockPut.mockRejectedValueOnce(new Error("Status update failed"));
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /learn now/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Status update failed");
+    expect(push).not.toHaveBeenCalled();
   });
 });

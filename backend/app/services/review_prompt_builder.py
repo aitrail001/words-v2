@@ -3,8 +3,63 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from app.services.review_srs_v1 import (
+    cadence_step_for_bucket,
+    normalize_review_mode,
+    select_cadence_family,
+)
+
 if TYPE_CHECKING:
     from app.services.review import ReviewService
+
+
+def _resolve_v1_bucket_and_step(
+    *,
+    srs_bucket: str | None,
+    cadence_step: int | None,
+) -> tuple[str, int]:
+    bucket = (srs_bucket or "1d").strip() or "1d"
+    try:
+        resolved_step = cadence_step_for_bucket(bucket) if cadence_step is None else int(cadence_step)
+        select_cadence_family("standard", bucket, resolved_step)
+    except (TypeError, ValueError):
+        return "1d", 0
+    return bucket, resolved_step
+
+
+def _build_v1_deep_hard_prompt_types(
+    service: "ReviewService",
+    *,
+    sentence: str | None,
+    bucket: str,
+    allow_typed_recall: bool,
+    allow_audio_spelling: bool,
+) -> list[str]:
+    hard_prompt_types: list[str] = []
+    stage_two_typed_buckets = {"7d", "14d"}
+    stage_three_buckets = {"30d", "90d", "180d", "known"}
+
+    if bucket in stage_two_typed_buckets and allow_typed_recall:
+        hard_prompt_types.append(service.PROMPT_TYPE_TYPED_RECALL)
+    if bucket in stage_three_buckets and allow_typed_recall:
+        hard_prompt_types.append(service.PROMPT_TYPE_TYPED_RECALL)
+    if sentence:
+        hard_prompt_types.append(service.PROMPT_TYPE_SENTENCE_GAP)
+    if bucket in stage_three_buckets and allow_audio_spelling:
+        if bucket == "180d":
+            hard_prompt_types = [
+                service.PROMPT_TYPE_SPEAK_RECALL,
+                *[item for item in hard_prompt_types if item != service.PROMPT_TYPE_SPEAK_RECALL],
+            ]
+        else:
+            hard_prompt_types.append(service.PROMPT_TYPE_SPEAK_RECALL)
+    if bucket == "90d" and allow_typed_recall:
+        # Rotate the later-stage hard-first ordering without randomness.
+        hard_prompt_types = [
+            service.PROMPT_TYPE_TYPED_RECALL,
+            *[item for item in hard_prompt_types if item != service.PROMPT_TYPE_TYPED_RECALL],
+        ]
+    return hard_prompt_types
 
 
 async def resolve_prompt_preferences(
@@ -15,13 +70,13 @@ async def resolve_prompt_preferences(
     review_depth_preset = service._normalize_review_depth_preset(
         getattr(prefs, "review_depth_preset", None)
     )
+    normalized_mode = normalize_review_mode(review_depth_preset)
     return {
         "prefs": prefs,
         "review_depth_preset": review_depth_preset,
-        "allow_typed_recall": review_depth_preset != "gentle",
-        "allow_audio_spelling": review_depth_preset != "gentle"
-        and (prefs is None or bool(getattr(prefs, "enable_audio_spelling", False))),
-        "allow_confidence": bool(getattr(prefs, "enable_confidence_check", True)),
+        "allow_typed_recall": normalized_mode == "deep",
+        "allow_audio_spelling": normalized_mode == "deep",
+        "allow_confidence": True,
     }
 
 
@@ -36,36 +91,46 @@ def build_available_prompt_types(
     allow_audio_spelling: bool,
     allow_confidence: bool,
     active_target_count: int,
+    srs_bucket: str | None = None,
+    cadence_step: int | None = None,
 ) -> list[str]:
+    del alternative_definitions, active_target_count
+
     if review_mode == service.REVIEW_MODE_CONFIDENCE:
         if sentence and allow_confidence:
             return [service.PROMPT_TYPE_CONFIDENCE_CHECK]
         return [service.PROMPT_TYPE_DEFINITION_TO_ENTRY]
 
-    has_multiple_active_targets = active_target_count > 1
-    available_prompt_types: list[str] = []
-    if sentence:
-        available_prompt_types.append(service.PROMPT_TYPE_SENTENCE_GAP)
-        if review_depth_preset != "gentle":
-            available_prompt_types.append(service.PROMPT_TYPE_COLLOCATION_CHECK)
-        if review_depth_preset != "gentle" or allow_confidence:
-            available_prompt_types.append(service.PROMPT_TYPE_SITUATION_MATCHING)
-    if alternative_definitions and len(alternative_definitions) >= 2:
-        available_prompt_types.append(service.PROMPT_TYPE_MEANING_DISCRIMINATION)
-    if review_mode == service.REVIEW_MODE_MCQ:
-        if allow_typed_recall and service.PROMPT_TYPE_TYPED_RECALL not in available_prompt_types:
-            available_prompt_types.append(service.PROMPT_TYPE_TYPED_RECALL)
-        if allow_audio_spelling:
-            available_prompt_types.append(service.PROMPT_TYPE_SPEAK_RECALL)
-    available_prompt_types.append(service.PROMPT_TYPE_DEFINITION_TO_ENTRY)
-    if not has_multiple_active_targets:
-        available_prompt_types.extend(
-            [
-                service.PROMPT_TYPE_ENTRY_TO_DEFINITION,
-                service.PROMPT_TYPE_AUDIO_TO_DEFINITION,
-            ]
+    bucket, step = _resolve_v1_bucket_and_step(
+        srs_bucket=srs_bucket,
+        cadence_step=cadence_step,
+    )
+    normalized_mode = normalize_review_mode(review_depth_preset)
+    cadence_family = select_cadence_family(normalized_mode, bucket, step)
+
+    simple_prompt_types = [
+        service.PROMPT_TYPE_ENTRY_TO_DEFINITION,
+        service.PROMPT_TYPE_AUDIO_TO_DEFINITION,
+        service.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+    ]
+    if sentence and allow_confidence:
+        simple_prompt_types.append(service.PROMPT_TYPE_CONFIDENCE_CHECK)
+
+    hard_prompt_types: list[str] = []
+    if normalized_mode == "deep":
+        hard_prompt_types = _build_v1_deep_hard_prompt_types(
+            service,
+            sentence=sentence,
+            bucket=bucket,
+            allow_typed_recall=allow_typed_recall,
+            allow_audio_spelling=allow_audio_spelling,
         )
-    return available_prompt_types
+    elif sentence:
+        hard_prompt_types.append(service.PROMPT_TYPE_SENTENCE_GAP)
+
+    if cadence_family == "hard" and hard_prompt_types:
+        return hard_prompt_types
+    return simple_prompt_types
 
 
 async def load_entry_target_distractors(
@@ -237,7 +302,6 @@ async def load_prompt_audio_for_type(
     if prompt_type not in {
         service.PROMPT_TYPE_AUDIO_TO_DEFINITION,
         service.PROMPT_TYPE_CONFIDENCE_CHECK,
-        service.PROMPT_TYPE_TYPED_RECALL,
         service.PROMPT_TYPE_SPEAK_RECALL,
     } or source_entry_id is None:
         return None
@@ -269,6 +333,8 @@ async def build_card_prompt(
     previous_prompt_type: str | None = None,
     active_target_count: int = 1,
     forced_prompt_type: str | None = None,
+    srs_bucket: str | None = None,
+    cadence_step: int | None = None,
 ) -> dict[str, Any]:
     prompt_preferences = await resolve_prompt_preferences(service, user_id)
     available_prompt_types = build_available_prompt_types(
@@ -281,6 +347,8 @@ async def build_card_prompt(
         allow_audio_spelling=prompt_preferences["allow_audio_spelling"],
         allow_confidence=prompt_preferences["allow_confidence"],
         active_target_count=active_target_count,
+        srs_bucket=srs_bucket,
+        cadence_step=cadence_step,
     )
     prompt_type = (
         forced_prompt_type
@@ -294,12 +362,47 @@ async def build_card_prompt(
     normalized_entry_type = service._normalize_entry_type(
         source_entry_type or ("phrase" if is_phrase_entry else "word")
     )
+
+    audio = await load_prompt_audio_for_type(
+        service,
+        prompt_type=prompt_type,
+        user_id=user_id,
+        source_entry_id=source_entry_id,
+        source_entry_type=normalized_entry_type,
+        meaning_id=meaning_id,
+    )
+    if prompt_type in {
+        service.PROMPT_TYPE_AUDIO_TO_DEFINITION,
+        service.PROMPT_TYPE_SPEAK_RECALL,
+    } and audio is None:
+        fallback_prompt_types = [
+            candidate
+            for candidate in available_prompt_types
+            if candidate != prompt_type
+        ]
+        fallback_prompt_type = service._select_prompt_type(
+            fallback_prompt_types,
+            index=index,
+            previous_prompt_type=previous_prompt_type,
+        )
+        if fallback_prompt_type != prompt_type:
+            prompt_type = fallback_prompt_type
+            audio = await load_prompt_audio_for_type(
+                service,
+                prompt_type=prompt_type,
+                user_id=user_id,
+                source_entry_id=source_entry_id,
+                source_entry_type=normalized_entry_type,
+                meaning_id=meaning_id,
+            )
+
     target_is_word = prompt_type in {
         service.PROMPT_TYPE_DEFINITION_TO_ENTRY,
         service.PROMPT_TYPE_SENTENCE_GAP,
         service.PROMPT_TYPE_COLLOCATION_CHECK,
         service.PROMPT_TYPE_SITUATION_MATCHING,
     }
+    resolved_review_mode = service._review_mode_for_prompt_type(prompt_type) or review_mode
 
     distractors = await load_prompt_distractors(
         service,
@@ -312,17 +415,9 @@ async def build_card_prompt(
         normalized_entry_type=normalized_entry_type,
         is_phrase_entry=is_phrase_entry,
     )
-    audio = await load_prompt_audio_for_type(
-        service,
-        prompt_type=prompt_type,
-        user_id=user_id,
-        source_entry_id=source_entry_id,
-        source_entry_type=normalized_entry_type,
-        meaning_id=meaning_id,
-    )
 
     prompt = await service._build_mandated_prompt(
-        review_mode=review_mode,
+        review_mode=resolved_review_mode,
         prompt_type=prompt_type,
         word=source_text,
         definition=service._prompt_value_for_options(definition),

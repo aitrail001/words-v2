@@ -3,27 +3,23 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  REVIEWABLE_BUCKETS,
-  isReviewQueueItemDueNow,
-} from "@/components/review-queue/review-queue-utils";
-import {
   ReviewQueueGroupedSection,
   ReviewQueueModeSwitch,
 } from "@/components/review-queue/review-queue-shared";
 import {
-  getGroupedReviewQueue,
-  type GroupedReviewQueueResponse,
+  getGroupedReviewQueueByDue,
+  type DueGroupedReviewQueueResponse,
 } from "@/lib/knowledge-map-client";
 
-export default function ReviewQueuePage() {
-  const [queue, setQueue] = useState<GroupedReviewQueueResponse | null>(null);
+export default function ReviewQueueByDuePage() {
+  const [queue, setQueue] = useState<DueGroupedReviewQueueResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    getGroupedReviewQueue()
+    getGroupedReviewQueueByDue()
       .then((response) => {
         if (!active) {
           return;
@@ -45,13 +41,7 @@ export default function ReviewQueuePage() {
   }, []);
 
   const totalCount = queue?.total_count;
-  const hasDueItems = Boolean(
-    queue?.groups.some(
-      (group) =>
-        REVIEWABLE_BUCKETS.includes(group.bucket) &&
-        group.items.some((item) => isReviewQueueItemDueNow(item.next_review_at)),
-    ),
-  );
+  const hasDueItems = Boolean(queue?.groups.some((group) => group.due_in_days === 0));
 
   return (
     <main className="mx-auto max-w-[46rem] space-y-4 pb-10 text-[#472164]">
@@ -62,7 +52,7 @@ export default function ReviewQueuePage() {
               Review Queue
             </p>
             <h1 className="mt-1 text-[1.4rem] font-semibold text-[#5b2590]">
-              Review Queue
+              Review Queue by Due Date
             </h1>
             {typeof totalCount === "number" ? (
               <p className="mt-2 text-sm text-[#7b6795]">
@@ -93,7 +83,7 @@ export default function ReviewQueuePage() {
         </div>
       </section>
 
-      <ReviewQueueModeSwitch mode="stage" />
+      <ReviewQueueModeSwitch mode="due" />
 
       {loading ? (
         <section className="rounded-[0.9rem] bg-white px-4 py-4 shadow-[0_8px_18px_rgba(95,53,177,0.08)]">
@@ -119,13 +109,11 @@ export default function ReviewQueuePage() {
       {!loading && !error && queue
         ? queue.groups.map((group) => (
             <ReviewQueueGroupedSection
-              key={group.bucket}
-              title={group.bucket}
+              key={group.group_key}
+              title={group.label}
               count={group.count}
               items={group.items}
-              bucket={group.bucket}
               showStageLabel
-              openHref={`/review/queue/${group.bucket}`}
             />
           ))
         : null}

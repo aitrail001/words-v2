@@ -1,9 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { injectToken, registerAdminViaApi, registerViaApi } from "../helpers/auth";
 import {
+  seedEntryDetailNullScheduleFixture,
   seedAdminTimeTravelReviewFixture,
   seedFailedReviewQueueFixture,
   seedGroupedReviewQueueFixture,
+  seedLegacyDuplicateReviewQueueFixture,
   seedLongHorizonReviewFixture,
 } from "../helpers/review-scenario-fixture";
 
@@ -44,13 +46,13 @@ test("learner review queue groups scheduled items, moves completed work forward,
   await page.goto("/review/queue");
 
   await expect(page.getByRole("heading", { name: /review queue/i }).first()).toBeVisible();
-  await expect(getBucketSection(page, /^1-3 months$/i)).toBeVisible();
-  await expect(getBucketSection(page, /^6\+ months$/i)).toBeVisible();
+  await expect(getBucketSection(page, /^30d$/i)).toBeVisible();
+  await expect(getBucketSection(page, /^180d$/i)).toBeVisible();
   await expect(page.getByText(fixture.hiddenKnownText)).toHaveCount(0);
   await expect(page.getByText(fixture.hiddenToLearnText)).toHaveCount(0);
-  await expect(page.getByRole("link", { name: /start review from overdue/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^start review$/i })).toBeVisible();
 
-  await openBucket(page, "Overdue");
+  await openBucket(page, "1d");
   await expect(page.getByText(fixture.dueNowText, { exact: true })).toBeVisible();
   await page.getByRole("link", { name: new RegExp(`Start review for ${fixture.dueNowText}`, "i") }).click();
 
@@ -61,27 +63,56 @@ test("learner review queue groups scheduled items, moves completed work forward,
   await expect(page.getByRole("button", { name: /continue review/i })).toBeVisible();
   await page.getByRole("button", { name: /override/i }).click();
   await expect(page.getByLabel(/override next review/i)).toBeVisible();
-  await page.locator("#detail-review-override").selectOption({ label: "Tomorrow" });
+  await page.locator("#detail-review-override").selectOption("1d");
   await page.getByRole("button", { name: /confirm next review change/i }).click();
   await page.getByRole("button", { name: /continue review/i }).click();
   await expect(page.getByTestId("review-complete-state")).toBeVisible();
 
   await page.goto("/review/queue");
-  await openBucket(page, "Tomorrow");
+  await openBucket(page, "1d");
   await expect(page.getByText(fixture.dueNowText, { exact: true })).toBeVisible();
+  await page.goto("/review/queue");
+  await openBucket(page, "7d");
   await expect(page.getByText(fixture.tomorrowText, { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: new RegExp(`Start review for ${fixture.tomorrowText}`, "i") })).toHaveCount(0);
-  await expect(page.getByText(fixture.dueNowText, { exact: true })).toBeVisible();
 
   await page.goto("/review/queue");
-  await openBucket(page, "Tomorrow");
+  await openBucket(page, "7d");
   await page.getByRole("link", { name: new RegExp(`Open detail for ${fixture.tomorrowText}`, "i") }).click();
   await expect(page.getByRole("button", { name: /already knew/i })).toBeVisible();
   await page.getByRole("button", { name: /already knew/i }).click();
 
   await page.goto("/review/queue");
-  await openBucket(page, "Tomorrow");
+  await expect(page.getByRole("link", { name: /open 7d bucket/i })).toHaveCount(0);
   await expect(page.getByText(fixture.tomorrowText)).toHaveCount(0);
+});
+
+test("learner can switch between stage-grouped and due-date-grouped queue views", async ({
+  page,
+  request,
+}) => {
+  const user = await registerViaApi(request, "review-queue-by-due");
+  const fixture = await seedGroupedReviewQueueFixture(user.id);
+
+  await injectToken(page, user.token);
+  await page.goto("/review/queue");
+
+  await expect(page.getByRole("link", { name: /group by due date/i })).toBeVisible();
+  await page.getByRole("link", { name: /group by due date/i }).click();
+
+  await expect(page).toHaveURL(/\/review\/queue\/by-due$/);
+  await expect(page.getByRole("heading", { name: /review queue by due date/i })).toBeVisible();
+  await expect(getBucketSection(page, /^Due now$/i)).toBeVisible();
+  await expect(getBucketSection(page, /^Tomorrow$/i)).toBeVisible();
+  await expect(page.getByText(fixture.dueNowText, { exact: true })).toBeVisible();
+  await expect(page.getByText(fixture.tomorrowText, { exact: true })).toBeVisible();
+  await expect(page.getByText(/SRS stage 1d/i)).toBeVisible();
+  await expect(page.getByText(/SRS stage 7d/i)).toBeVisible();
+
+  await page.getByRole("link", { name: /group by stage/i }).click();
+  await expect(page).toHaveURL(/\/review\/queue$/);
+  await expect(getBucketSection(page, /^1d$/i)).toBeVisible();
+  await expect(getBucketSection(page, /^7d$/i)).toBeVisible();
 });
 
 test("failed review leaves the queue but no longer renders as due-now work", async ({
@@ -95,7 +126,7 @@ test("failed review leaves the queue but no longer renders as due-now work", asy
   await injectToken(page, user.token);
   await page.goto("/review/queue");
 
-  await openBucket(page, "Overdue");
+  await openBucket(page, "1d");
   await expect(page.getByText(fixture.failedText, { exact: true })).toBeVisible();
   await page.getByRole("link", { name: new RegExp(`Start review for ${fixture.failedText}`, "i") }).click();
 
@@ -106,9 +137,8 @@ test("failed review leaves the queue but no longer renders as due-now work", asy
   await expect(page.getByTestId("review-complete-state")).toBeVisible();
 
   await page.goto("/review/queue");
-  await expect(page.getByRole("link", { name: /start review from overdue/i })).toHaveCount(0);
-  await expect(getBucketSection(page, /^later today$/i)).toBeVisible();
-  await expect(getBucketSection(page, /^tomorrow$/i)).toBeVisible();
+  await expect(getBucketSection(page, /^1d$/i)).toBeVisible();
+  await expect(getBucketSection(page, /^7d$/i)).toBeVisible();
 });
 
 test("admin queue debug uses effective_now to time-travel future work into active review buckets", async ({
@@ -122,15 +152,13 @@ test("admin queue debug uses effective_now to time-travel future work into activ
   await page.goto("/admin/review-queue");
 
   await expect(page.getByRole("heading", { name: /admin review queue/i })).toBeVisible();
-  await expect(getBucketSection(page, /^tomorrow$/i)).toBeVisible();
-  await expect(page.getByRole("link", { name: /start review from tomorrow/i })).toHaveCount(0);
+  await expect(getBucketSection(page, /^7d$/i)).toBeVisible();
 
   await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(fixture.effectiveNow)}`);
 
   await expect(page.locator('input[name="effective_now"]')).toHaveValue(fixture.effectiveNow);
-  await expect(getBucketSection(page, /^tomorrow$/i)).toHaveCount(0);
-  await expect(getBucketSection(page, /^overdue$/i)).toBeVisible();
-  await expect(getBucketSection(page, /^1-3 months$/i)).toBeVisible();
+  await expect(getBucketSection(page, /^7d$/i)).toBeVisible();
+  await expect(getBucketSection(page, /^30d$/i)).toBeVisible();
 });
 
 test("long-horizon SRS items render in the learner queue without waiting months", async ({
@@ -142,7 +170,44 @@ test("long-horizon SRS items render in the learner queue without waiting months"
 
   await injectToken(page, user.token);
   await page.goto("/review/queue");
-  await expect(getBucketSection(page, /^3-6 months$/i)).toBeVisible();
-  await openBucket(page, "3-6 months");
+  await expect(getBucketSection(page, /^180d$/i)).toBeVisible();
+  await openBucket(page, "180d");
   await expect(page.getByText(new RegExp(`^${escapeRegExp(fixture.reviewText)}$`, "i"))).toBeVisible();
+});
+
+test("detail page falls back to the bucket label when legacy schedule timestamps are missing", async ({
+  page,
+  request,
+}) => {
+  const user = await registerViaApi(request, "review-detail-null-schedule");
+  const fixture = await seedEntryDetailNullScheduleFixture(user.id);
+
+  await injectToken(page, user.token);
+  await page.goto(`/${fixture.entryType}/${fixture.entryId}`);
+
+  await expect(page.getByText(new RegExp(`^${escapeRegExp(fixture.displayText)}$`, "i")).first()).toBeVisible();
+  await expect(
+    page.getByText(new RegExp(`next review scheduled: ${escapeRegExp(fixture.expectedScheduleLabel)}`, "i")),
+  ).toBeVisible();
+  await expect(page.getByText(/scheduled time not set yet/i)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^override$/i })).toBeVisible();
+});
+
+test("legacy duplicate queue rows do not inflate learner-visible counts", async ({
+  page,
+  request,
+}) => {
+  const user = await registerViaApi(request, "review-queue-legacy-duplicates");
+  const fixture = await seedLegacyDuplicateReviewQueueFixture(user.id);
+
+  await injectToken(page, user.token);
+  await page.goto("/review/queue");
+
+  await expect(
+    page.locator("section").first().getByText("2 scheduled review items"),
+  ).toBeVisible();
+  await openBucket(page, fixture.bucket);
+  await expect(page.getByText("2 items in this bucket")).toBeVisible();
+  await expect(page.getByText(fixture.visibleTexts[0], { exact: true })).toBeVisible();
+  await expect(page.getByText(fixture.visibleTexts[1], { exact: true })).toBeVisible();
 });

@@ -1,25 +1,80 @@
 import { render, screen } from "@testing-library/react";
 import ReviewQueuePage from "@/app/review/queue/page";
-import { getReviewQueueSummary } from "@/lib/knowledge-map-client";
+import { getGroupedReviewQueue } from "@/lib/knowledge-map-client";
 
 jest.mock("@/lib/knowledge-map-client");
 
 describe("ReviewQueuePage", () => {
-  const mockGetReviewQueueSummary = getReviewQueueSummary as jest.MockedFunction<
-    typeof getReviewQueueSummary
+  const mockGetGroupedReviewQueue = getGroupedReviewQueue as jest.MockedFunction<
+    typeof getGroupedReviewQueue
   >;
 
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it("renders learner queue summary cards with bucket detail links", async () => {
-    mockGetReviewQueueSummary.mockResolvedValue({
+  it("renders learner stage-grouped queue items with a mode switch", async () => {
+    mockGetGroupedReviewQueue.mockResolvedValue({
       generated_at: "2026-04-05T09:00:00+00:00",
       total_count: 3,
       groups: [
-        { bucket: "overdue", count: 2 },
-        { bucket: "tomorrow", count: 1 },
+        {
+          bucket: "1d",
+          count: 2,
+          items: [
+            {
+              queue_item_id: "queue-1",
+              entry_id: "word-1",
+              entry_type: "word",
+              text: "persistence",
+              status: "learning",
+              next_review_at: null,
+              last_reviewed_at: "2026-04-04T09:00:00+00:00",
+              success_streak: 2,
+              lapse_count: 0,
+              times_remembered: 2,
+              exposure_count: 3,
+              history: [],
+              bucket: "1d",
+            },
+            {
+              queue_item_id: "queue-2",
+              entry_id: "word-2",
+              entry_type: "word",
+              text: "practice",
+              status: "learning",
+              next_review_at: "2999-04-06T09:00:00+00:00",
+              last_reviewed_at: null,
+              success_streak: 0,
+              lapse_count: 1,
+              times_remembered: 1,
+              exposure_count: 2,
+              history: [],
+              bucket: "1d",
+            },
+          ],
+        },
+        {
+          bucket: "7d",
+          count: 1,
+          items: [
+            {
+              queue_item_id: "queue-3",
+              entry_id: "phrase-1",
+              entry_type: "phrase",
+              text: "jump the gun",
+              status: "learning",
+              next_review_at: "2999-04-12T09:00:00+00:00",
+              last_reviewed_at: "2026-04-04T09:00:00+00:00",
+              success_streak: 4,
+              lapse_count: 1,
+              times_remembered: 4,
+              exposure_count: 5,
+              history: [],
+              bucket: "7d",
+            },
+          ],
+        },
       ],
     });
 
@@ -28,26 +83,29 @@ describe("ReviewQueuePage", () => {
     expect(await screen.findByRole("heading", { name: /review queue/i })).toBeInTheDocument();
     expect(await screen.findByText("3 scheduled review items")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /back to home/i })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("heading", { name: /overdue/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /tomorrow/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open overdue bucket/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /group by stage/i })).toHaveAttribute(
       "href",
-      "/review/queue/overdue",
+      "/review/queue",
     );
-    expect(screen.getByRole("link", { name: /open tomorrow bucket/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /group by due date/i })).toHaveAttribute(
       "href",
-      "/review/queue/tomorrow",
+      "/review/queue/by-due",
     );
-    expect(screen.getByRole("link", { name: /start review from overdue/i })).toHaveAttribute(
+    expect(screen.getByRole("heading", { name: /^1d$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^7d$/i })).toBeInTheDocument();
+    expect(screen.getByText("persistence")).toBeInTheDocument();
+    expect(screen.getByText("practice")).toBeInTheDocument();
+    expect(screen.getByText("jump the gun")).toBeInTheDocument();
+    expect(screen.getAllByText(/srs stage/i)[0]).toBeInTheDocument();
+    expect(screen.getByText(/due now/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^start review$/i })).toHaveAttribute(
       "href",
       "/review",
     );
-    expect(screen.queryByRole("link", { name: /start review from tomorrow/i })).not.toBeInTheDocument();
-    expect(screen.queryByText("persistence")).not.toBeInTheDocument();
   });
 
   it("shows a learner-friendly empty state when there are no queued review items", async () => {
-    mockGetReviewQueueSummary.mockResolvedValue({
+    mockGetGroupedReviewQueue.mockResolvedValue({
       generated_at: "2026-04-05T09:00:00+00:00",
       total_count: 0,
       groups: [],
@@ -61,7 +119,7 @@ describe("ReviewQueuePage", () => {
   });
 
   it("does not show a misleading zero-count header while loading", () => {
-    mockGetReviewQueueSummary.mockImplementation(() => new Promise(() => {}));
+    mockGetGroupedReviewQueue.mockImplementation(() => new Promise(() => {}));
 
     render(<ReviewQueuePage />);
 
