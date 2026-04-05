@@ -15,10 +15,10 @@ test("@smoke register flow can start review and show no cards due", async ({ pag
   await expect(page.getByText("Words Uncovered")).toBeVisible();
 
   await page.getByTestId("nav-review-link").click();
-  await expect(page.getByTestId("review-start-button")).toBeVisible();
+  await expect(page).toHaveURL(/\/review\/queue$/);
+  await expect(page.getByText("Your review queue is clear")).toBeVisible();
 
-  await page.getByTestId("review-start-button").click();
-
+  await page.goto("/review");
   await expect(page.getByTestId("review-empty-title")).toBeVisible();
   await expect(page.getByTestId("review-empty-description")).toContainText(
     "no cards to review",

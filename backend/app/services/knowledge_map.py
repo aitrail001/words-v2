@@ -580,7 +580,12 @@ async def load_phrase_summary_map(
     for sense in senses:
         row = summary_rows.setdefault(
             sense.phrase_entry_id,
-            {"primary_definition": None, "translation": None},
+            {
+                "primary_definition": None,
+                "translation": None,
+                "primary_example": None,
+                "primary_example_translation": None,
+            },
         )
         if row["primary_definition"] is None:
             row["primary_definition"] = _clean_text(sense.definition)
@@ -588,6 +593,110 @@ async def load_phrase_summary_map(
             localized = localized_map.get(sense.id)
             if localized is not None:
                 row["translation"] = _clean_text(localized.localized_definition)
+
+    examples_by_sense: dict[uuid.UUID, PhraseSenseExample] = {}
+    if sense_ids:
+        examples_result = await db.execute(
+            select(PhraseSenseExample)
+            .where(PhraseSenseExample.phrase_sense_id.in_(sense_ids))
+            .order_by(PhraseSenseExample.phrase_sense_id.asc(), PhraseSenseExample.order_index.asc())
+        )
+        for example in examples_result.scalars().all():
+            examples_by_sense.setdefault(example.phrase_sense_id, example)
+
+    localized_examples_by_id: dict[uuid.UUID, PhraseSenseExampleLocalization] = {}
+    example_ids = [example.id for example in examples_by_sense.values()]
+    if example_ids:
+        localized_examples_result = await db.execute(
+            select(PhraseSenseExampleLocalization)
+            .where(
+                PhraseSenseExampleLocalization.phrase_sense_example_id.in_(example_ids),
+                PhraseSenseExampleLocalization.locale == locale,
+            )
+            .order_by(PhraseSenseExampleLocalization.phrase_sense_example_id.asc())
+        )
+        for localized_example in localized_examples_result.scalars().all():
+            localized_examples_by_id[localized_example.phrase_sense_example_id] = localized_example
+
+    for sense in senses:
+        row = summary_rows.setdefault(
+            sense.phrase_entry_id,
+            {
+                "primary_definition": None,
+                "translation": None,
+                "primary_example": None,
+                "primary_example_translation": None,
+            },
+        )
+        example = examples_by_sense.get(sense.id)
+        if row["primary_example"] is None and example is not None:
+            row["primary_example"] = _clean_text(example.sentence)
+        if row["primary_example_translation"] is None and example is not None:
+            localized_example = localized_examples_by_id.get(example.id)
+            if localized_example is not None:
+                row["primary_example_translation"] = _clean_text(localized_example.translation)
+
+    return summary_rows
+
+
+async def load_word_summary_map(
+    db: AsyncSession,
+    word_ids: Sequence[uuid.UUID],
+    locale: str,
+) -> dict[uuid.UUID, dict[str, str | None]]:
+    if not word_ids:
+        return {}
+
+    primary_meanings = await load_word_primary_definitions(db, word_ids)
+    meaning_ids = [meaning.id for meaning in primary_meanings.values()]
+
+    first_examples_by_meaning: dict[uuid.UUID, MeaningExample] = {}
+    if meaning_ids:
+        examples_result = await db.execute(
+            select(MeaningExample)
+            .where(MeaningExample.meaning_id.in_(meaning_ids))
+            .order_by(MeaningExample.meaning_id.asc(), MeaningExample.order_index.asc())
+        )
+        for example in examples_result.scalars().all():
+            first_examples_by_meaning.setdefault(example.meaning_id, example)
+
+    translations_by_meaning: dict[uuid.UUID, list[Translation]] = defaultdict(list)
+    if meaning_ids:
+        translations_result = await db.execute(
+            select(Translation)
+            .where(Translation.meaning_id.in_(meaning_ids))
+            .options(selectinload(Translation.example_entries))
+            .order_by(Translation.meaning_id.asc(), Translation.language.asc())
+        )
+        for translation in translations_result.scalars().all():
+            translations_by_meaning[translation.meaning_id].append(translation)
+
+    summary_rows: dict[uuid.UUID, dict[str, str | None]] = {}
+    for word_id, meaning in primary_meanings.items():
+        localized_translation = next(
+            (
+                translation
+                for translation in translations_by_meaning.get(meaning.id, [])
+                if translation.language == locale
+            ),
+            None,
+        )
+        localized_examples = (
+            normalize_translation_examples(localized_translation)
+            if localized_translation is not None
+            else []
+        )
+        first_example = first_examples_by_meaning.get(meaning.id)
+        summary_rows[word_id] = {
+            "primary_definition": _clean_text(meaning.definition),
+            "translation": (
+                _clean_text(localized_translation.translation)
+                if localized_translation is not None
+                else None
+            ),
+            "primary_example": _clean_text(first_example.sentence) if first_example is not None else None,
+            "primary_example_translation": localized_examples[0] if localized_examples else None,
+        }
 
     return summary_rows
 
@@ -1066,6 +1175,8 @@ async def build_catalog(
                 "pronunciation": None,
                 "translation": None,
                 "primary_definition": None,
+                "primary_example": None,
+                "primary_example_translation": None,
                 "part_of_speech": _word_part_of_speech(raw_item),
                 "phrase_kind": raw_item.get("phrase_kind"),
             }
@@ -1335,6 +1446,8 @@ async def load_range_catalog_items(
                 "pronunciation": None,
                 "translation": None,
                 "primary_definition": None,
+                "primary_example": None,
+                "primary_example_translation": None,
                 "part_of_speech": _word_part_of_speech(raw_item),
                 "phrase_kind": raw_item.get("phrase_kind"),
             }
@@ -1385,6 +1498,8 @@ def build_catalog_items(
             "pronunciation": None,
             "translation": None,
             "primary_definition": None,
+            "primary_example": None,
+            "primary_example_translation": None,
             "part_of_speech": _word_part_of_speech(word),
             "phrase_kind": None,
         }
@@ -1406,6 +1521,8 @@ def build_catalog_items(
             "pronunciation": None,
             "translation": None,
             "primary_definition": None,
+            "primary_example": None,
+            "primary_example_translation": None,
             "part_of_speech": None,
             "phrase_kind": _phrase_kind(entry),
         }

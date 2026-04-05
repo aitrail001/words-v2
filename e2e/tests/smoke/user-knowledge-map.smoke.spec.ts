@@ -124,7 +124,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await page.getByRole("link", { name: /started/i }).click();
   await expect(page).toHaveURL(/\/knowledge-list\/learning$/);
   await expect(page.getByRole("heading", { name: "Learning Words" })).toBeVisible();
-  await expect(page.getByText(KNOWLEDGE_PHRASE, { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: new RegExp(`^${KNOWLEDGE_PHRASE}\\b`, "i") })).toBeVisible();
   await expect(page.getByRole("button", { name: "Alphabetic" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Asc" })).toBeVisible();
   await page.getByRole("button", { name: "Alphabetic" }).click();
@@ -136,7 +136,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await page.getByRole("link", { name: /to learn/i }).click();
   await expect(page).toHaveURL(/\/knowledge-list\/to-learn$/);
   await expect(page.getByRole("heading", { name: "To Learn" })).toBeVisible();
-  await expect(page.getByText(LEARN_WORD, { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: new RegExp(`^${LEARN_WORD}\\b`, "i") })).toBeVisible();
 
   await page.goto("/search");
   await expect(page.getByRole("heading", { name: "Search" })).toBeVisible();
@@ -157,7 +157,8 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page.getByRole("button", { name: /spanish on/i })).toBeVisible();
   await expect(page.getByText("Status: Learning")).toBeVisible();
 
-  await page.getByRole("button", { name: "Known" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Already Knew" }).click();
   await expect(page.getByText("Status: Known")).toBeVisible();
 
   await page.goto("/");

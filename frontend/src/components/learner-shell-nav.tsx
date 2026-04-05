@@ -13,7 +13,7 @@ type NavItem = {
 const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", label: "Home", icon: "⌂" },
   { href: "/knowledge-map", label: "Knowledge", icon: "◫" },
-  { href: "/review", label: "Review", icon: "↻", testId: "nav-review-link" },
+  { href: "/review/queue", label: "View Review Queue", icon: "↻", testId: "nav-review-link" },
   { href: "/imports", label: "Imports", icon: "⇪", testId: "nav-imports-link" },
   { href: "/search", label: "Search", icon: "⌕" },
   { href: "/settings", label: "Settings", icon: "✓" },

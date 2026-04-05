@@ -4,8 +4,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
 import {
+  getAuthUserProfile,
   getKnowledgeMapDashboard,
+  getReviewQueueStats,
+  type AuthUserProfile,
   type KnowledgeMapDashboard,
+  type ReviewQueueStats,
 } from "@/lib/knowledge-map-client";
 
 function formatCount(value: number): string {
@@ -14,6 +18,8 @@ function formatCount(value: number): string {
 
 export default function HomePage() {
   const [dashboard, setDashboard] = useState<KnowledgeMapDashboard | null>(null);
+  const [reviewQueueStats, setReviewQueueStats] = useState<ReviewQueueStats | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUserProfile | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -33,6 +39,52 @@ export default function HomePage() {
             discovery_range_end: null,
             discovery_entry: null,
             next_learn_entry: null,
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    getAuthUserProfile()
+      .then((response) => {
+        if (active) {
+          setCurrentUser(response);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setCurrentUser(null);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    getReviewQueueStats()
+      .then((response) => {
+        if (active) {
+          setReviewQueueStats(response);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setReviewQueueStats({
+            total_items: 0,
+            due_items: 0,
+            review_count: 0,
+            correct_count: 0,
+            accuracy: 0,
           });
         }
       });
@@ -63,6 +115,8 @@ export default function HomePage() {
         dashboard.next_learn_entry.entry_id,
       )
     : "/knowledge-map";
+  const dueReviewCount = reviewQueueStats?.due_items ?? 0;
+  const isAdminUser = currentUser?.role === "admin";
 
   return (
     <div className="mx-auto max-w-[46rem] space-y-4 pb-10 text-[#472164]">
@@ -133,6 +187,120 @@ export default function HomePage() {
           </Link>
         </div>
       </section>
+
+      {(reviewQueueStats?.total_items ?? 0) > 0 ? (
+        <section className="rounded-[0.85rem] bg-[#eef0f7] px-2 py-2">
+          <h2 className="text-center text-[1.5rem] font-semibold tracking-tight text-[#5b2590]">
+            Review
+          </h2>
+          <p className="mt-1 text-center text-[0.86rem] leading-5 text-[#7b6795]">
+            Keep your spaced repetition queue moving.
+          </p>
+
+          <div className={`mt-3 grid gap-2 ${isAdminUser ? "grid-cols-3" : "grid-cols-2"}`}>
+            {dueReviewCount > 0 ? (
+              <Link
+                href="/review"
+                aria-label="Start Review"
+                className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white shadow-[0_6px_14px_rgba(78,41,126,0.06)]"
+              >
+                <div className="flex h-36 items-center justify-center bg-[linear-gradient(145deg,#4d2283,#7b32d3_58%,#4dc8de)] px-4">
+                  <div className="text-center text-white">
+                    <p className="text-[0.74rem] font-semibold uppercase tracking-[0.16em] text-white/75">
+                      Due Today
+                    </p>
+                    <p className="mt-2 text-[2.8rem] font-semibold leading-none">
+                      {formatCount(dueReviewCount)}
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-2 px-3 py-3">
+                  <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#7b32d3] px-4 py-2.5 text-base font-semibold text-white">
+                    Start Review
+                  </div>
+                  <p className="text-center text-sm font-semibold text-[#9b85b4]">
+                    {`${dueReviewCount} due today`}
+                  </p>
+                </div>
+              </Link>
+            ) : (
+              <div className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white shadow-[0_6px_14px_rgba(78,41,126,0.06)]">
+                <div className="flex h-36 items-center justify-center bg-[linear-gradient(145deg,#4d2283,#7b32d3_58%,#4dc8de)] px-4">
+                  <div className="text-center text-white">
+                    <p className="text-[0.74rem] font-semibold uppercase tracking-[0.16em] text-white/75">
+                      Due Today
+                    </p>
+                    <p className="mt-2 text-[2.8rem] font-semibold leading-none">
+                      {formatCount(dueReviewCount)}
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-2 px-3 py-3">
+                  <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#7b32d3] px-4 py-2.5 text-base font-semibold text-white">
+                    No Reviews Due
+                  </div>
+                  <p className="text-center text-sm font-semibold text-[#9b85b4]">
+                    {`${reviewQueueStats?.total_items ?? 0} items waiting in your queue`}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <Link
+              href="/review/queue"
+              className="overflow-hidden rounded-[0.35rem] border border-[#dadceb] bg-white shadow-[0_6px_14px_rgba(78,41,126,0.06)]"
+            >
+              <div className="flex h-36 items-center justify-center bg-[linear-gradient(145deg,#e8ecf6,#f7f3ff)] px-4">
+                <div className="text-center text-[#5b2590]">
+                  <p className="text-[0.74rem] font-semibold uppercase tracking-[0.16em] text-[#9b85b4]">
+                    Review Queue
+                  </p>
+                  <p className="mt-2 text-[2.4rem] font-semibold leading-none">
+                    {formatCount(reviewQueueStats?.total_items ?? 0)}
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2 px-3 py-3">
+                <div className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#eef1f8] px-4 py-2.5 text-base font-semibold text-[#684f85]">
+                  View Review Queue
+                </div>
+                <p className="text-center text-sm font-semibold text-[#9b85b4]">
+                  {`${reviewQueueStats?.total_items ?? 0} scheduled review ${(reviewQueueStats?.total_items ?? 0) === 1 ? "item" : "items"}`}
+                </p>
+              </div>
+            </Link>
+
+            {isAdminUser ? (
+              <div className="overflow-hidden rounded-[0.35rem] border border-[#d5e7ec] bg-white shadow-[0_6px_14px_rgba(45,111,131,0.08)]">
+                <div className="flex h-36 items-center justify-center bg-[linear-gradient(145deg,#dff4f7,#f4fcfd)] px-4">
+                  <div className="text-center text-[#2d6f83]">
+                    <p className="text-[0.74rem] font-semibold uppercase tracking-[0.16em] text-[#78a4b1]">
+                      Admin Tools
+                    </p>
+                    <p className="mt-3 text-lg font-semibold leading-tight">
+                      Internal queue inspection and QA tools
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-2 px-3 py-3">
+                  <Link
+                    href="/admin/review-queue"
+                    className="flex w-full items-center justify-center rounded-[0.35rem] bg-[#dff4f7] px-4 py-2.5 text-base font-semibold text-[#2d6f83]"
+                  >
+                    Admin Review Queue
+                  </Link>
+                  <Link
+                    href="/review/debug"
+                    className="flex w-full items-center justify-center rounded-[0.35rem] border border-[#d5e7ec] bg-white px-4 py-2.5 text-base font-semibold text-[#2d6f83]"
+                  >
+                    Queue Debug
+                  </Link>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-[0.85rem] bg-[#eef0f7] px-2 py-2">
         <h2 className="text-center text-[1.5rem] font-semibold tracking-tight text-[#5b2590]">

@@ -19,6 +19,7 @@ GRADE_FACTORS = {
 }
 
 CONTEXT_FACTORS = {
+    "confidence_check": 0.9,
     "sentence_gap": 1.10,
     "definition_to_entry": 1.05,
     "audio_to_definition": 1.00,

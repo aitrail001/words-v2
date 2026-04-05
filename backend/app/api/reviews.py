@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_admin_user, get_current_user
 from app.api.request_db_metrics import finalize_request_db_metrics
 from app.core.database import get_db
 from app.core.logging import get_logger
@@ -18,39 +18,13 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-# Schemas
-class SessionResponse(BaseModel):
-    id: str
-    user_id: str
-    started_at: datetime
-    completed_at: datetime | None
-    cards_reviewed: int
-
-
-class CardResponse(BaseModel):
-    id: str
-    session_id: str
-    word_id: str
-    meaning_id: str
-    card_type: str
-    quality_rating: int | None
-    time_spent_ms: int | None
-    ease_factor: float | None
-    interval_days: int | None
-    next_review: datetime | None
-
-
-class SubmitReviewRequest(BaseModel):
-    quality: int = Field(..., ge=0, le=5)
-    time_spent_ms: int = Field(..., ge=0)
-
-
 class QueueAddRequest(BaseModel):
     meaning_id: uuid.UUID
 
 
 class QueueSubmitRequest(BaseModel):
     quality: int = Field(..., ge=0, le=5)
+    confirm: bool = False
     time_spent_ms: int = Field(..., ge=0)
     audio_replay_count: int = Field(default=0, ge=0)
     card_type: str | None = Field(default=None, min_length=1, max_length=32)
@@ -198,6 +172,127 @@ class QueueStatsResponse(BaseModel):
     accuracy: float
 
 
+class QueueScheduleUpdateRequest(BaseModel):
+    schedule_override: str = Field(..., max_length=32)
+
+    @field_validator("schedule_override")
+    @classmethod
+    def validate_schedule_override(cls, value: str) -> str:
+        if value not in ReviewService.SCHEDULE_OVERRIDE_VALUES:
+            raise ValueError("Invalid schedule_override")
+        return value
+
+
+class QueueScheduleResponse(BaseModel):
+    queue_item_id: str
+    next_review_at: datetime | None = None
+    current_schedule_value: str
+    current_schedule_label: str
+    current_schedule_source: str = "scheduled_timestamp"
+    schedule_options: list[ScheduleOptionResponse] = []
+
+
+class ReviewQueueSummaryBucketResponse(BaseModel):
+    bucket: str
+    count: int
+
+
+class ReviewQueueSummaryResponse(BaseModel):
+    generated_at: datetime
+    total_count: int
+    groups: list[ReviewQueueSummaryBucketResponse]
+
+
+class ReviewQueueHistoryEventResponse(BaseModel):
+    id: str
+    reviewed_at: datetime
+    outcome: str
+    prompt_type: str
+    prompt_family: str | None = None
+    scheduled_by: str | None = None
+    scheduled_interval_days: int | None = None
+
+
+class GroupedQueueItemResponse(BaseModel):
+    queue_item_id: str
+    entry_id: str
+    entry_type: str
+    text: str
+    status: str
+    next_review_at: datetime | None = None
+    last_reviewed_at: datetime | None = None
+    success_streak: int = 0
+    lapse_count: int = 0
+    times_remembered: int = 0
+    exposure_count: int = 0
+    history: list[ReviewQueueHistoryEventResponse] = []
+
+
+class GroupedQueueBucketResponse(BaseModel):
+    bucket: str
+    count: int
+    items: list[GroupedQueueItemResponse]
+
+
+class GroupedQueueResponse(BaseModel):
+    generated_at: datetime
+    total_count: int
+    groups: list[GroupedQueueBucketResponse]
+
+
+class AdminGroupedQueueItemResponse(GroupedQueueItemResponse):
+    target_type: str | None = None
+    target_id: str | None = None
+    recheck_due_at: datetime | None = None
+    next_due_at: datetime | None = None
+    last_outcome: str | None = None
+    relearning: bool | None = None
+    relearning_trigger: str | None = None
+
+
+class AdminGroupedQueueBucketResponse(BaseModel):
+    bucket: str
+    count: int
+    items: list[AdminGroupedQueueItemResponse]
+
+
+class ReviewQueueBucketDetailResponse(BaseModel):
+    generated_at: datetime
+    bucket: str
+    count: int
+    sort: str
+    order: str
+    items: list[GroupedQueueItemResponse]
+
+
+class GroupedQueueDebugResponse(BaseModel):
+    effective_now: str
+
+
+class AdminReviewQueueSummaryResponse(BaseModel):
+    generated_at: datetime
+    total_count: int
+    groups: list[ReviewQueueSummaryBucketResponse]
+    debug: GroupedQueueDebugResponse
+
+
+class AdminGroupedQueueResponse(BaseModel):
+    generated_at: datetime
+    total_count: int
+    groups: list[AdminGroupedQueueBucketResponse]
+    debug: GroupedQueueDebugResponse
+
+
+class AdminReviewQueueBucketDetailResponse(BaseModel):
+    generated_at: datetime
+    bucket: str
+    count: int
+    sort: str
+    order: str
+    items: list[AdminGroupedQueueItemResponse]
+    debug: GroupedQueueDebugResponse
+
+
 class ReviewAnalyticsBucketResponse(BaseModel):
     value: str
     count: int
@@ -212,21 +307,6 @@ class ReviewAnalyticsSummaryResponse(BaseModel):
     prompt_families: list[ReviewAnalyticsBucketResponse] = []
     outcomes: list[ReviewAnalyticsBucketResponse] = []
     response_input_modes: list[ReviewAnalyticsBucketResponse] = []
-
-
-def _to_card_response(card: Any) -> CardResponse:
-    return CardResponse(
-        id=str(card.id),
-        session_id=str(card.session_id),
-        word_id=str(card.word_id),
-        meaning_id=str(card.meaning_id),
-        card_type=card.card_type,
-        quality_rating=card.quality_rating,
-        time_spent_ms=card.time_spent_ms,
-        ease_factor=card.ease_factor,
-        interval_days=card.interval_days,
-        next_review=card.next_review,
-    )
 
 
 def _to_queue_item_response(
@@ -278,60 +358,6 @@ def _to_queue_item_response(
     )
 
 
-@router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
-async def create_session(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> SessionResponse:
-    """Create a new review session."""
-    service = ReviewService(db)
-    session = await service.create_session(current_user.id)
-
-    logger.info("Review session created", session_id=str(session.id), user_id=str(current_user.id))
-
-    return SessionResponse(
-        id=str(session.id),
-        user_id=str(session.user_id),
-        started_at=session.started_at,
-        completed_at=session.completed_at,
-        cards_reviewed=session.cards_reviewed,
-    )
-
-
-@router.get("/due", response_model=list[CardResponse])
-async def get_due_cards(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[CardResponse]:
-    """Get cards due for review."""
-    service = ReviewService(db)
-    cards = await service.get_due_cards(current_user.id)
-    return [_to_card_response(card) for card in cards]
-
-
-@router.post("/cards/{card_id}/submit", response_model=CardResponse)
-async def submit_review(
-    card_id: uuid.UUID,
-    request: SubmitReviewRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> CardResponse:
-    """Submit a review for a card."""
-    service = ReviewService(db)
-
-    try:
-        card = await service.submit_review(
-            card_id=card_id,
-            quality=request.quality,
-            time_spent_ms=request.time_spent_ms,
-            user_id=current_user.id,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-    return _to_card_response(card)
-
-
 @router.post("/queue", response_model=QueueItemResponse, status_code=status.HTTP_201_CREATED)
 async def add_to_queue(
     request: QueueAddRequest,
@@ -370,7 +396,7 @@ async def get_due_queue_items(
     """Get due items from the review queue with prompt metadata."""
     request_start = perf_counter()
     service = ReviewService(db)
-    due_items = await service.get_due_queue_items(current_user.id, limit=limit, hydrate_limit=1)
+    due_items = await service.get_due_queue_items(current_user.id, limit=limit, hydrate_limit=limit)
 
     items = [
         _to_queue_item_response(
@@ -413,6 +439,7 @@ async def submit_queue_review(
         item = await service.submit_queue_review(
             item_id=item_id,
             quality=request.quality,
+            confirm=request.confirm,
             time_spent_ms=request.time_spent_ms,
             audio_replay_count=request.audio_replay_count,
             card_type=request.card_type,
@@ -442,6 +469,43 @@ async def submit_queue_review(
         recheck_planned=bool(getattr(item, "recheck_planned", False)),
         detail=getattr(item, "detail", None),
         schedule_options=getattr(item, "schedule_options", None),
+    )
+
+
+@router.put("/queue/{item_id}/schedule", response_model=QueueScheduleResponse)
+async def update_queue_schedule(
+    item_id: uuid.UUID,
+    request: QueueScheduleUpdateRequest,
+    http_request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QueueScheduleResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    try:
+        payload = await service.update_queue_item_schedule(
+            user_id=current_user.id,
+            item_id=item_id,
+            schedule_override=request.schedule_override,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    metrics = finalize_request_db_metrics(
+        response,
+        http_request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_schedule_update", **metrics)
+    return QueueScheduleResponse(
+        queue_item_id=payload["queue_item_id"],
+        next_review_at=datetime.fromisoformat(payload["next_review_at"]) if payload["next_review_at"] else None,
+        current_schedule_value=payload["current_schedule_value"],
+        current_schedule_label=payload["current_schedule_label"],
+        current_schedule_source=payload.get("current_schedule_source", "scheduled_timestamp"),
+        schedule_options=[ScheduleOptionResponse(**option) for option in payload["schedule_options"]],
     )
 
 
@@ -501,6 +565,187 @@ async def get_queue_stats(
     return QueueStatsResponse(**stats)
 
 
+@router.get("/queue/grouped", response_model=GroupedQueueResponse)
+async def get_grouped_review_queue(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> GroupedQueueResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    payload = await service.get_grouped_review_queue(
+        user_id=current_user.id,
+        now=datetime.now().astimezone(),
+        include_debug_fields=False,
+    )
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_grouped", **metrics)
+    return GroupedQueueResponse(**payload)
+
+
+@router.get("/admin/queue/grouped", response_model=AdminGroupedQueueResponse)
+async def get_grouped_review_queue_admin(
+    effective_now: datetime | None = Query(default=None),
+    request: Request = None,
+    response: Response = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminGroupedQueueResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    resolved_now = service._normalize_bucket_datetime(effective_now) or datetime.now().astimezone()
+    payload = await service.get_grouped_review_queue(
+        user_id=current_user.id,
+        now=resolved_now,
+        include_debug_fields=True,
+    )
+    payload["debug"] = {"effective_now": resolved_now.isoformat()}
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_grouped_admin", **metrics)
+    return AdminGroupedQueueResponse(**payload)
+
+
+@router.get("/queue/summary", response_model=ReviewQueueSummaryResponse)
+async def get_review_queue_summary(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReviewQueueSummaryResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    payload = await service.get_grouped_review_queue_summary(
+        user_id=current_user.id,
+        now=datetime.now().astimezone(),
+    )
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_summary", **metrics)
+    return ReviewQueueSummaryResponse(**payload)
+
+
+@router.get("/queue/buckets/{bucket}", response_model=ReviewQueueBucketDetailResponse)
+async def get_review_queue_bucket_detail(
+    bucket: str,
+    sort: str = Query(default="next_review_at"),
+    order: str = Query(default="asc"),
+    request: Request = None,
+    response: Response = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReviewQueueBucketDetailResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    try:
+        payload = await service.get_grouped_review_queue_bucket_detail(
+            user_id=current_user.id,
+            now=datetime.now().astimezone(),
+            bucket=bucket,
+            sort=sort,
+            order=order,
+            include_debug_fields=False,
+        )
+    except ValueError as e:
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "bucket" in str(e).lower()
+            else status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+        raise HTTPException(status_code=status_code, detail=str(e))
+
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_bucket_detail", **metrics)
+    return ReviewQueueBucketDetailResponse(**payload)
+
+
+@router.get("/admin/queue/summary", response_model=AdminReviewQueueSummaryResponse)
+async def get_review_queue_summary_admin(
+    effective_now: datetime | None = Query(default=None),
+    request: Request = None,
+    response: Response = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminReviewQueueSummaryResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    resolved_now = service._normalize_bucket_datetime(effective_now) or datetime.now().astimezone()
+    payload = await service.get_grouped_review_queue_summary(
+        user_id=current_user.id,
+        now=resolved_now,
+    )
+    payload["debug"] = {"effective_now": resolved_now.isoformat()}
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_summary_admin", **metrics)
+    return AdminReviewQueueSummaryResponse(**payload)
+
+
+@router.get("/admin/queue/buckets/{bucket}", response_model=AdminReviewQueueBucketDetailResponse)
+async def get_review_queue_bucket_detail_admin(
+    bucket: str,
+    sort: str = Query(default="next_review_at"),
+    order: str = Query(default="asc"),
+    effective_now: datetime | None = Query(default=None),
+    request: Request = None,
+    response: Response = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdminReviewQueueBucketDetailResponse:
+    request_start = perf_counter()
+    service = ReviewService(db)
+    resolved_now = service._normalize_bucket_datetime(effective_now) or datetime.now().astimezone()
+    try:
+        payload = await service.get_grouped_review_queue_bucket_detail(
+            user_id=current_user.id,
+            now=resolved_now,
+            bucket=bucket,
+            sort=sort,
+            order=order,
+            include_debug_fields=True,
+        )
+    except ValueError as e:
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "bucket" in str(e).lower()
+            else status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+        raise HTTPException(status_code=status_code, detail=str(e))
+
+    payload["debug"] = {"effective_now": resolved_now.isoformat()}
+    metrics = finalize_request_db_metrics(
+        response,
+        request,
+        header_prefix="X-Reviews",
+        request_start=request_start,
+    )
+    logger.info("reviews_request", route_name="queue_bucket_detail_admin", **metrics)
+    return AdminReviewQueueBucketDetailResponse(**payload)
+
+
 @router.get("/queue/{item_id}", response_model=QueueItemResponse)
 async def get_queue_item(
     item_id: uuid.UUID,
@@ -557,26 +802,3 @@ async def get_review_analytics_summary(
     )
     logger.info("reviews_request", route_name="analytics_summary", **metrics)
     return ReviewAnalyticsSummaryResponse(**summary)
-
-
-@router.post("/sessions/{session_id}/complete", response_model=SessionResponse)
-async def complete_session(
-    session_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> SessionResponse:
-    """Mark a review session as completed."""
-    service = ReviewService(db)
-
-    try:
-        session = await service.complete_session(session_id, current_user.id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-    return SessionResponse(
-        id=str(session.id),
-        user_id=str(session.user_id),
-        started_at=session.started_at,
-        completed_at=session.completed_at,
-        cards_reviewed=session.cards_reviewed,
-    )

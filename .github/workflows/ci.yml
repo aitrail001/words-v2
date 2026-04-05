@@ -72,7 +72,7 @@ jobs:
           tests/test_imports_api.py
           tests/test_import_jobs_api.py
           tests/test_source_imports_service.py
-          tests/test_review_models.py
+          tests/test_lexicon_compiled_review_models.py
           tests/test_review_service.py
           tests/test_review_api.py
           tests/test_user_preferences_api.py
@@ -330,7 +330,7 @@ jobs:
         run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
 
   e2e-review-srs:
-    name: E2E Review + SRS Smoke (required)
+    name: E2E Review + SRS Scenarios (required)
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -410,7 +410,7 @@ jobs:
       - name: Apply migrations
         run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
 
-      - name: Run Playwright review smoke suite
+      - name: Run Playwright review + SRS scenario suite
         env:
           E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/vocabapp_dev
         run: |
@@ -433,11 +433,11 @@ jobs:
           docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
           docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
 
-      - name: Upload Playwright review smoke artifacts
+      - name: Upload Playwright review + SRS artifacts
         if: always()
         uses: actions/upload-artifact@v7.0.0
         with:
-          name: playwright-review-smoke-artifacts
+          name: playwright-review-srs-artifacts
           path: |
             e2e/playwright-report
             e2e/test-results

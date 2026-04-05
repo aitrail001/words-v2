@@ -4,24 +4,24 @@ import json
 import uuid
 import re
 import random
+from inspect import isawaitable
 from time import monotonic
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import and_, func, literal, literal_column, select
+from sqlalchemy import and_, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models import review as review_models
 from app.models.meaning_example import MeaningExample
 from app.models.meaning import Meaning
 from app.models.entry_review import EntryReviewEvent, EntryReviewState
 from app.models.lexicon_voice_asset import LexiconVoiceAsset
-from app.models.review import ReviewCard, ReviewSession
+from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.phrase_entry import PhraseEntry
 from app.models.phrase_sense import PhraseSense
 from app.models.phrase_sense_example import PhraseSenseExample
@@ -41,7 +41,6 @@ from app.services.review_submission import (
     apply_entry_state_review_result as apply_entry_state_review_result_impl,
     build_entry_state_detail as build_entry_state_detail_impl,
     submit_entry_state_review as submit_entry_state_review_impl,
-    submit_legacy_queue_review as submit_legacy_queue_review_impl,
     submit_queue_review as submit_queue_review_impl,
 )
 from app.services.voice_assets import (
@@ -52,6 +51,18 @@ from app.services.voice_assets import (
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+REVIEW_BUCKET_ORDER = [
+    "overdue",
+    "due_now",
+    "later_today",
+    "tomorrow",
+    "this_week",
+    "this_month",
+    "one_to_three_months",
+    "three_to_six_months",
+    "six_plus_months",
+]
 
 
 class ReviewService:
@@ -69,6 +80,7 @@ class ReviewService:
     SCHEDULE_OVERRIDE_VALUES = set(SCHEDULE_OVERRIDE_DAYS.keys())
     REVIEW_MODE_CONFIDENCE = "confidence"
     REVIEW_MODE_MCQ = "mcq"
+    PROMPT_TYPE_CONFIDENCE_CHECK = "confidence_check"
     PROMPT_TYPE_AUDIO_TO_DEFINITION = "audio_to_definition"
     PROMPT_TYPE_DEFINITION_TO_ENTRY = "definition_to_entry"
     PROMPT_TYPE_SENTENCE_GAP = "sentence_gap"
@@ -81,6 +93,7 @@ class ReviewService:
     FALLBACK_REVIEW_MODE = REVIEW_MODE_CONFIDENCE
     REVIEW_MODE_OPTIONS = [REVIEW_MODE_MCQ, REVIEW_MODE_CONFIDENCE]
     PROMPT_TYPE_OPTIONS = [
+        PROMPT_TYPE_CONFIDENCE_CHECK,
         PROMPT_TYPE_AUDIO_TO_DEFINITION,
         PROMPT_TYPE_DEFINITION_TO_ENTRY,
         PROMPT_TYPE_SENTENCE_GAP,
@@ -92,6 +105,7 @@ class ReviewService:
         PROMPT_TYPE_SITUATION_MATCHING,
     ]
     PROMPT_FAMILY_BY_TYPE = {
+        PROMPT_TYPE_CONFIDENCE_CHECK: "confidence_check",
         PROMPT_TYPE_AUDIO_TO_DEFINITION: "audio_recognition",
         PROMPT_TYPE_DEFINITION_TO_ENTRY: "definition_recall",
         PROMPT_TYPE_SENTENCE_GAP: "context_recall",
@@ -104,19 +118,14 @@ class ReviewService:
     }
     SAME_DAY_DISTRACTOR_POOL_LIMIT = 256
     QUEUE_STATS_CACHE_TTL_SECONDS = 5.0
+    ALLOWED_QUEUE_SORTS = {"next_review_at", "last_reviewed_at", "text"}
+    ALLOWED_QUEUE_ORDERS = {"asc", "desc"}
 
     def __init__(
         self,
         db: AsyncSession,
-        queue_model: type[Any] | None = None,
-        history_model: type[Any] | None = None,
     ):
         self.db = db
-        self.queue_model = queue_model or self._resolve_queue_model()
-        self.history_model = (
-            history_model if history_model is not None else self._resolve_history_model()
-        )
-        self.uses_legacy_queue = self.queue_model is ReviewCard
         self._queue_stats_cache: dict[uuid.UUID, tuple[float, dict[str, Any]]] = {}
 
     @staticmethod
@@ -612,7 +621,41 @@ class ReviewService:
         ]
 
     @staticmethod
-    def _mask_sentence(sentence: str, target: str) -> str | None:
+    def _phrase_variants(token: str) -> list[str]:
+        normalized = token.strip()
+        if not normalized:
+            return []
+
+        variants = {normalized}
+        lowered = normalized.lower()
+        variants.add(f"{lowered}s")
+        variants.add(f"{lowered}ed")
+        variants.add(f"{lowered}ing")
+
+        if lowered.endswith("e") and len(lowered) > 1:
+            variants.add(f"{lowered[:-1]}ing")
+            variants.add(f"{lowered[:-1]}ed")
+        if lowered.endswith("y") and len(lowered) > 1:
+            variants.add(f"{lowered[:-1]}ies")
+            variants.add(f"{lowered[:-1]}ied")
+
+        return sorted(variants, key=len, reverse=True)
+
+    @classmethod
+    def _mask_phrase_variant(cls, sentence: str, target: str) -> str | None:
+        parts = [part for part in target.split() if part]
+        if len(parts) < 2:
+            return None
+
+        first_token, remainder = parts[0], parts[1:]
+        first_token_pattern = "|".join(re.escape(item) for item in cls._phrase_variants(first_token))
+        remainder_pattern = r"\s+".join(re.escape(part) for part in remainder)
+        pattern = rf"\b(?:{first_token_pattern})\s+{remainder_pattern}\b"
+        masked, count = re.subn(pattern, "___", sentence, count=1, flags=re.IGNORECASE)
+        return masked if count else None
+
+    @classmethod
+    def _mask_sentence(cls, sentence: str, target: str) -> str | None:
         if not sentence or not target:
             return None
 
@@ -626,6 +669,10 @@ class ReviewService:
         )
         if count:
             return masked
+
+        phrase_masked = cls._mask_phrase_variant(sentence, target)
+        if phrase_masked:
+            return phrase_masked
 
         return sentence.replace(target, "___", 1) if target in sentence else None
 
@@ -1082,13 +1129,6 @@ class ReviewService:
         user_id: uuid.UUID,
         meanings_by_word_id: dict[uuid.UUID, list[Meaning]],
     ) -> dict[uuid.UUID, int]:
-        if (
-            self.history_model is None
-            or not hasattr(self.history_model, "user_id")
-            or not hasattr(self.history_model, "meaning_id")
-        ):
-            return {}
-
         meaning_to_word_id: dict[uuid.UUID, uuid.UUID] = {}
         for word_id, meanings in meanings_by_word_id.items():
             for meaning in meanings:
@@ -1098,10 +1138,11 @@ class ReviewService:
             return {}
 
         result = await self.db.execute(
-            select(self.history_model.meaning_id, func.count(self.history_model.id))
-            .where(self.history_model.user_id == user_id)
-            .where(self.history_model.meaning_id.in_(list(meaning_to_word_id.keys())))
-            .group_by(self.history_model.meaning_id)
+            select(EntryReviewEvent.target_id, func.count(EntryReviewEvent.id))
+            .where(EntryReviewEvent.user_id == user_id)
+            .where(EntryReviewEvent.target_id.in_(list(meaning_to_word_id.keys())))
+            .where(EntryReviewEvent.outcome.in_(["correct_tested", "remember"]))
+            .group_by(EntryReviewEvent.target_id)
         )
         counts_by_word_id: dict[uuid.UUID, int] = {}
         for meaning_id, count in result.all():
@@ -1151,24 +1192,26 @@ class ReviewService:
     ) -> list[LexiconVoiceAsset]:
         normalized_entry_type = ReviewService._normalize_entry_type(target_entry_type)
 
-        def sort_key(asset: LexiconVoiceAsset) -> tuple[int, str, str]:
+        def sort_key(asset: LexiconVoiceAsset) -> tuple[int, int, str, str]:
             locale = getattr(asset, "locale", "") or ""
             profile_key = getattr(asset, "profile_key", "") or ""
+            content_scope = (getattr(asset, "content_scope", "") or "").strip().lower()
+            scope_rank = 0 if content_scope == "word" else 1
             if normalized_entry_type == "phrase":
                 if example_id is not None and getattr(asset, "phrase_sense_example_id", None) == example_id:
-                    return (0, locale, profile_key)
+                    return (0, scope_rank, locale, profile_key)
                 if target_id is not None and getattr(asset, "phrase_sense_id", None) == target_id:
-                    return (1, locale, profile_key)
+                    return (1, scope_rank, locale, profile_key)
                 if getattr(asset, "phrase_entry_id", None) is not None:
-                    return (2, locale, profile_key)
+                    return (2, scope_rank, locale, profile_key)
             else:
                 if example_id is not None and getattr(asset, "meaning_example_id", None) == example_id:
-                    return (0, locale, profile_key)
+                    return (0, scope_rank, locale, profile_key)
                 if target_id is not None and getattr(asset, "meaning_id", None) == target_id:
-                    return (1, locale, profile_key)
+                    return (1, scope_rank, locale, profile_key)
                 if getattr(asset, "word_id", None) is not None:
-                    return (2, locale, profile_key)
-            return (3, locale, profile_key)
+                    return (2, scope_rank, locale, profile_key)
+            return (3, scope_rank, locale, profile_key)
 
         return sorted(list(assets), key=sort_key)
 
@@ -1237,11 +1280,12 @@ class ReviewService:
             )
 
         history_count = int(remembered_count or 0)
-        if remembered_count is None and self.history_model is not None and hasattr(self.history_model, "user_id"):
+        if remembered_count is None:
             history_result = await self.db.execute(
-                select(func.count(self.history_model.id))
-                .where(self.history_model.user_id == user_id)
-                .where(self.history_model.meaning_id.in_([meaning.id for meaning in meanings]))
+                select(func.count(EntryReviewEvent.id))
+                .where(EntryReviewEvent.user_id == user_id)
+                .where(EntryReviewEvent.target_id.in_([meaning.id for meaning in meanings]))
+                .where(EntryReviewEvent.outcome.in_(["correct_tested", "remember"]))
             )
             history_count = int(history_result.scalar_one() or 0)
 
@@ -1318,6 +1362,7 @@ class ReviewService:
                 EntryReviewState.user_id == user_id,
                 EntryReviewState.entry_type == entry_type,
                 EntryReviewState.entry_id == entry_id,
+                EntryReviewState.is_suspended.is_(False),
             )
         )
         return result.scalar_one_or_none()
@@ -1368,6 +1413,31 @@ class ReviewService:
         self.db.add(state)
         await self.db.flush()
         return state
+
+    async def _ensure_learning_entry_has_review_state(
+        self,
+        *,
+        user_id: uuid.UUID,
+        entry_type: str,
+        entry_id: uuid.UUID,
+    ) -> None:
+        existing_result = await self.db.execute(
+            select(EntryReviewState.id)
+            .where(
+                EntryReviewState.user_id == user_id,
+                EntryReviewState.entry_type == entry_type,
+                EntryReviewState.entry_id == entry_id,
+                EntryReviewState.is_suspended.is_(False),
+            )
+            .limit(1)
+        )
+        if existing_result.scalar_one_or_none() is not None:
+            return
+        await self._ensure_entry_review_state(
+            user_id=user_id,
+            entry_type=entry_type,
+            entry_id=entry_id,
+        )
 
     async def _ensure_target_review_state(
         self,
@@ -1592,6 +1662,27 @@ class ReviewService:
             return prompt_candidates[0]
         return prompt_candidates[index % len(prompt_candidates)]
 
+    @classmethod
+    def _extract_prompt_type_override(cls, state: EntryReviewState | None) -> str | None:
+        marker = getattr(state, "last_submission_prompt_id", None)
+        if not isinstance(marker, str):
+            return None
+        prefix = "manual_prompt_type:"
+        if not marker.startswith(prefix):
+            return None
+        prompt_type = marker[len(prefix):].strip().lower()
+        if prompt_type in cls.PROMPT_TYPE_OPTIONS:
+            return prompt_type
+        return None
+
+    @classmethod
+    def _review_mode_for_prompt_type(cls, prompt_type: str | None) -> str | None:
+        if prompt_type is None:
+            return None
+        if prompt_type == cls.PROMPT_TYPE_CONFIDENCE_CHECK:
+            return cls.REVIEW_MODE_CONFIDENCE
+        return cls.REVIEW_MODE_MCQ
+
     async def _resolve_prompt_text(
         self,
         prompt_type: str,
@@ -1599,6 +1690,9 @@ class ReviewService:
         definition: str,
         sentence: str | None = None,
     ) -> tuple[str, str]:
+        if prompt_type == self.PROMPT_TYPE_CONFIDENCE_CHECK:
+            stem = "Read the sentence and decide whether you still remember this word or phrase."
+            return stem, self._prompt_value_for_options(sentence)
         if prompt_type == self.PROMPT_TYPE_DEFINITION_TO_ENTRY:
             stem = "Choose the word or phrase that matches this definition."
             return stem, self._prompt_value_for_options(definition)
@@ -1610,7 +1704,7 @@ class ReviewService:
             return stem, self._build_collocation_fragment(sentence, word) or self._prompt_value_for_options(sentence)
         if prompt_type == self.PROMPT_TYPE_SITUATION_MATCHING and sentence:
             stem = "Which word or phrase best fits this situation?"
-            return stem, self._prompt_value_for_options(sentence)
+            return stem, self._mask_sentence(sentence, word) or self._prompt_value_for_options(sentence)
         if prompt_type == self.PROMPT_TYPE_TYPED_RECALL:
             stem = "Type the word or phrase that matches this definition."
             return stem, self._prompt_value_for_options(definition)
@@ -1619,7 +1713,7 @@ class ReviewService:
             return stem, self._prompt_value_for_options(definition)
         if prompt_type == self.PROMPT_TYPE_ENTRY_TO_DEFINITION:
             return "Choose the best definition for this word or phrase.", self._prompt_value_for_options(word)
-        return "Listen, then choose the best matching definition.", self._prompt_value_for_options(word)
+        return "Listen, then choose the best matching definition.", "Which definition matches the audio?"
 
     async def _build_mandated_prompt(
         self,
@@ -1643,6 +1737,31 @@ class ReviewService:
         expected_input = None
         sentence_masked = None
         options = None
+
+        if prompt_type == self.PROMPT_TYPE_CONFIDENCE_CHECK:
+            return self._build_review_prompt(
+                review_mode=review_mode,
+                prompt_type=prompt_type,
+                stem=stem,
+                question=question,
+                options=[
+                    {
+                        "option_id": "A",
+                        "label": "I remember it",
+                        "is_correct": True,
+                    },
+                    {
+                        "option_id": "B",
+                        "label": "Not sure",
+                        "is_correct": False,
+                    },
+                ],
+                expected_input=None,
+                input_mode="choice",
+                sentence_masked=sentence_masked,
+                audio_state="ready" if audio else "not_available",
+                audio=audio,
+            )
 
         if prompt_type == self.PROMPT_TYPE_TYPED_RECALL:
             expected_input = self._prompt_value_for_options(word)
@@ -1668,7 +1787,8 @@ class ReviewService:
                 input_mode="speech_placeholder",
                 voice_placeholder_text="Voice answer coming soon. Type the answer for now.",
                 sentence_masked=None,
-                audio_state="placeholder",
+                audio_state="ready" if audio else "placeholder",
+                audio=audio,
             )
 
         if review_mode != self.REVIEW_MODE_MCQ:
@@ -1708,7 +1828,7 @@ class ReviewService:
             expected_input=expected_input,
             input_mode="choice",
             sentence_masked=sentence_masked,
-            audio_state="ready" if prompt_type == self.PROMPT_TYPE_AUDIO_TO_DEFINITION and audio else "not_available",
+            audio_state="ready" if prompt_type in {self.PROMPT_TYPE_AUDIO_TO_DEFINITION, self.PROMPT_TYPE_CONFIDENCE_CHECK} and audio else "not_available",
             audio=audio,
         )
 
@@ -1730,6 +1850,7 @@ class ReviewService:
         queue_item_id: uuid.UUID | None = None,
         previous_prompt_type: str | None = None,
         active_target_count: int = 1,
+        forced_prompt_type: str | None = None,
     ) -> dict[str, Any]:
         return await build_card_prompt_impl(
             self,
@@ -1748,6 +1869,7 @@ class ReviewService:
             queue_item_id=queue_item_id,
             previous_prompt_type=previous_prompt_type,
             active_target_count=active_target_count,
+            forced_prompt_type=forced_prompt_type,
         )
 
     async def _resolve_prompt_preferences(self, user_id: uuid.UUID | None) -> dict[str, Any]:
@@ -1953,7 +2075,7 @@ class ReviewService:
     @classmethod
     def _default_schedule_option_value(cls, interval_days: int) -> str:
         if interval_days <= 0:
-            return "10m"
+            return "1d"
         if interval_days <= 1:
             return "1d"
         if interval_days <= 3:
@@ -1971,9 +2093,8 @@ class ReviewService:
         return "never_for_now"
 
     @classmethod
-    def _build_schedule_options(cls, interval_days: int) -> list[dict[str, Any]]:
-        default_value = cls._default_schedule_option_value(interval_days)
-        labels = {
+    def _schedule_option_labels(cls) -> dict[str, str]:
+        return {
             "10m": "Later today",
             "1d": "Tomorrow",
             "3d": "In 3 days",
@@ -1982,150 +2103,494 @@ class ReviewService:
             "1m": "In a month",
             "3m": "In 3 months",
             "6m": "In 6 months",
-            "never_for_now": "Stop reviewing",
+            "never_for_now": "Pause review",
         }
+
+    @classmethod
+    def _build_schedule_options_for_value(cls, current_value: str) -> list[dict[str, Any]]:
+        labels = cls._schedule_option_labels()
         order = ["10m", "1d", "3d", "7d", "14d", "1m", "3m", "6m", "never_for_now"]
         return [
-            {"value": value, "label": labels[value], "is_default": value == default_value}
+            {"value": value, "label": labels[value], "is_default": value == current_value}
             for value in order
         ]
 
-    @staticmethod
-    def _resolve_queue_model() -> type[Any]:
-        for model_name in (
-            "LearningQueueItem",
-            "UserMeaning",
-            "ReviewQueueItem",
-            "UserMeaningQueue",
-        ):
-            model = getattr(review_models, model_name, None)
-            if model is not None:
-                return model
+    @classmethod
+    def _build_schedule_options(cls, interval_days: int) -> list[dict[str, Any]]:
+        return cls._build_schedule_options_for_value(cls._default_schedule_option_value(interval_days))
 
-        for model in vars(review_models).values():
-            if not isinstance(model, type):
-                continue
-            table = getattr(model, "__table__", None)
-            if table is None:
-                continue
-            columns = {column.name for column in table.columns}
-            if {"user_id", "meaning_id"}.issubset(columns):
-                return model
+    @classmethod
+    def _resolve_schedule_value_from_due_at(
+        cls,
+        *,
+        due_at: datetime | None,
+        now: datetime | None = None,
+    ) -> str:
+        resolved_due_at = cls._normalize_bucket_datetime(due_at)
+        if resolved_due_at is None:
+            return "1d"
 
-        return ReviewCard
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        delta_days = max((resolved_due_at - resolved_now).total_seconds(), 0.0) / 86400.0
+        return min(
+            cls.SCHEDULE_OVERRIDE_DAYS.items(),
+            key=lambda item: (abs(item[1] - delta_days), item[1]),
+        )[0]
 
-    @staticmethod
-    def _resolve_history_model() -> type[Any] | None:
-        for model_name in ("ReviewHistory", "QueueReviewHistory"):
-            model = getattr(review_models, model_name, None)
-            if model is not None:
-                return model
-
-        for model in vars(review_models).values():
-            if not isinstance(model, type):
-                continue
-            table = getattr(model, "__table__", None)
-            if table is None:
-                continue
-            columns = {column.name for column in table.columns}
-            if "user_id" in columns and "time_spent_ms" in columns and (
-                "quality" in columns or "quality_rating" in columns
-            ):
-                return model
-
-        return None
-
-    @staticmethod
-    def _build_model_instance(model: type[Any], values: dict[str, Any]) -> Any | None:
-        table = getattr(model, "__table__", None)
-        if table is None:
-            return model(**values)
-
-        available_columns = {column.name: column for column in table.columns}
-        payload = {
-            key: value for key, value in values.items() if key in available_columns
+    @classmethod
+    def _build_current_schedule_payload(
+        cls,
+        state: EntryReviewState,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        due_at = state.recheck_due_at or state.next_due_at
+        current_value = cls._resolve_schedule_value_from_due_at(due_at=due_at, now=now)
+        schedule_options = cls._build_schedule_options_for_value(current_value)
+        current_label = cls._schedule_option_labels().get(
+            current_value,
+            "Later today" if current_value == "10m" else "Tomorrow",
+        )
+        return {
+            "queue_item_id": str(state.id),
+            "next_review_at": due_at.isoformat() if due_at is not None else None,
+            "current_schedule_value": current_value,
+            "current_schedule_label": current_label,
+            "current_schedule_source": "scheduled_timestamp",
+            "schedule_options": schedule_options,
         }
 
-        for column in table.columns:
-            if column.primary_key or column.name in payload:
-                continue
-            has_default = column.default is not None or column.server_default is not None
-            if not column.nullable and not has_default:
-                return None
+    @staticmethod
+    def _normalize_bucket_datetime(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
-        return model(**payload)
+    @classmethod
+    def classify_review_bucket(cls, due_at: datetime | None, now: datetime) -> str:
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        resolved_due_at = cls._normalize_bucket_datetime(due_at)
 
-    def _history_supports_schedule(self) -> bool:
-        if self.history_model is None or not hasattr(self.history_model, "__table__"):
-            return False
-        columns = {column.name for column in self.history_model.__table__.columns}
-        return {"meaning_id", "created_at", "interval_days", "user_id"}.issubset(columns)
+        if resolved_due_at is None or resolved_due_at <= resolved_now - timedelta(seconds=1):
+            return "overdue"
+        if resolved_due_at <= resolved_now:
+            return "due_now"
+        if resolved_due_at.date() == resolved_now.date():
+            return "later_today"
+        if resolved_due_at.date() == (resolved_now + timedelta(days=1)).date():
+            return "tomorrow"
+        if resolved_due_at <= resolved_now + timedelta(days=7):
+            return "this_week"
+        if resolved_due_at <= resolved_now + timedelta(days=31):
+            return "this_month"
+        if resolved_due_at <= resolved_now + timedelta(days=92):
+            return "one_to_three_months"
+        if resolved_due_at <= resolved_now + timedelta(days=183):
+            return "three_to_six_months"
+        return "six_plus_months"
 
-    async def create_session(self, user_id: uuid.UUID) -> ReviewSession:
-        """Create a new review session for a user."""
-        session = ReviewSession(user_id=user_id)
-        self.db.add(session)
-        await self.db.commit()
+    @staticmethod
+    def _resolve_grouped_queue_due_at(state: EntryReviewState) -> datetime | None:
+        return state.recheck_due_at or state.next_due_at
 
-        logger.info("Review session created", session_id=str(session.id), user_id=str(user_id))
-        return session
+    @classmethod
+    def _validate_review_queue_bucket(cls, bucket: str) -> str:
+        if bucket not in REVIEW_BUCKET_ORDER:
+            raise ValueError(f"Unknown review queue bucket: {bucket}")
+        return bucket
 
-    async def get_due_cards(self, user_id: uuid.UUID, limit: int = 20) -> list[ReviewCard]:
-        """Get cards due for review for a user."""
-        now = datetime.now(timezone.utc)
+    @classmethod
+    def _validate_review_queue_sort(cls, sort: str) -> str:
+        if sort not in cls.ALLOWED_QUEUE_SORTS:
+            raise ValueError(f"Unsupported review queue sort: {sort}")
+        return sort
 
-        result = await self.db.execute(
-            select(ReviewCard)
-            .join(ReviewSession)
-            .where(ReviewSession.user_id == user_id)
-            .where((ReviewCard.next_review.is_(None)) | (ReviewCard.next_review <= now))
-            .order_by(ReviewCard.next_review.asc().nullsfirst())
-            .limit(limit)
-        )
-        cards = result.scalars().all()
+    @classmethod
+    def _validate_review_queue_order(cls, order: str) -> str:
+        if order not in cls.ALLOWED_QUEUE_ORDERS:
+            raise ValueError(f"Unsupported review queue order: {order}")
+        return order
 
-        logger.info("Retrieved due cards", user_id=str(user_id), count=len(cards))
-        return list(cards)
-
-    async def add_card_to_session(
+    async def _list_active_queue_states(
         self,
-        session_id: uuid.UUID,
-        word_id: uuid.UUID,
-        meaning_id: uuid.UUID,
-        card_type: str,
-    ) -> ReviewCard:
-        """Add a card to a review session."""
-        card = ReviewCard(
-            session_id=session_id,
-            word_id=word_id,
-            meaning_id=meaning_id,
-            card_type=card_type,
+        *,
+        user_id: uuid.UUID,
+        now: datetime | None = None,
+    ) -> list[EntryReviewState]:
+        state_result = await self.db.execute(
+            select(EntryReviewState, LearnerEntryStatus.status)
+            .outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
+                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
+                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
+                ),
+            )
+            .where(EntryReviewState.user_id == user_id)
+            .where(EntryReviewState.is_suspended.is_(False))
+            .order_by(
+                EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                EntryReviewState.next_due_at.asc().nullsfirst(),
+                EntryReviewState.created_at.asc(),
+            )
         )
-        self.db.add(card)
-        await self.db.commit()
+        rows = list(state_result.all())
+        states: list[EntryReviewState] = []
+        for state, learner_status in rows:
+            if learner_status not in {None, "learning"}:
+                continue
+            state.learner_status = learner_status or "learning"
+            states.append(state)
+        if not states:
+            return states
 
-        logger.info(
-            "Card added to session",
-            session_id=str(session_id),
-            card_id=str(card.id),
-            card_type=card_type,
+        word_entry_ids = list(
+            {
+                state.entry_id
+                for state in states
+                if self._normalize_entry_type(state.entry_type) == "word"
+            }
         )
-        return card
+        phrase_entry_ids = list(
+            {
+                state.entry_id
+                for state in states
+                if self._normalize_entry_type(state.entry_type) == "phrase"
+            }
+        )
+
+        word_text_by_id: dict[uuid.UUID, str] = {}
+        if word_entry_ids:
+            word_result = await self.db.execute(
+                select(Word.id, Word.word).where(Word.id.in_(word_entry_ids))
+            )
+            word_text_by_id = {
+                entry_id: text for entry_id, text in word_result.all() if self._normalize_prompt_text(text)
+            }
+
+        phrase_text_by_id: dict[uuid.UUID, str] = {}
+        if phrase_entry_ids:
+            phrase_result = await self.db.execute(
+                select(PhraseEntry.id, PhraseEntry.phrase_text).where(PhraseEntry.id.in_(phrase_entry_ids))
+            )
+            phrase_text_by_id = {
+                entry_id: text
+                for entry_id, text in phrase_result.all()
+                if self._normalize_prompt_text(text)
+            }
+
+        hydrated_states: list[EntryReviewState] = []
+        for state in states:
+            normalized_entry_type = self._normalize_entry_type(state.entry_type)
+            if normalized_entry_type == "word":
+                entry_text = word_text_by_id.get(state.entry_id)
+            else:
+                entry_text = phrase_text_by_id.get(state.entry_id)
+            if not entry_text:
+                continue
+            state.entry_text = entry_text
+
+            hydrated_states.append(state)
+
+        return self._apply_sibling_bury_rule(hydrated_states)
+
+    def _serialize_grouped_queue_row(
+        self,
+        state: EntryReviewState,
+        *,
+        include_debug_fields: bool = False,
+    ) -> dict[str, Any]:
+        due_at = self._resolve_grouped_queue_due_at(state)
+        payload = {
+            "queue_item_id": str(state.id),
+            "entry_id": str(state.entry_id),
+            "entry_type": self._normalize_entry_type(state.entry_type),
+            "text": self._normalize_prompt_text(getattr(state, "entry_text", None)) or "Unavailable",
+            "status": getattr(state, "learner_status", None) or "learning",
+            "next_review_at": due_at.isoformat() if due_at is not None else None,
+            "last_reviewed_at": state.last_reviewed_at.isoformat()
+            if state.last_reviewed_at is not None
+            else None,
+        }
+        if include_debug_fields:
+            payload.update(
+                {
+                    "target_type": state.target_type,
+                    "target_id": str(state.target_id) if state.target_id is not None else None,
+                    "recheck_due_at": state.recheck_due_at.isoformat()
+                    if state.recheck_due_at is not None
+                    else None,
+                    "next_due_at": state.next_due_at.isoformat() if state.next_due_at is not None else None,
+                    "last_outcome": state.last_outcome,
+                    "relearning": bool(state.relearning),
+                    "relearning_trigger": state.relearning_trigger,
+                }
+            )
+        return payload
+
+    @staticmethod
+    def _serialize_review_history_event(event: EntryReviewEvent) -> dict[str, Any]:
+        return {
+            "id": str(event.id),
+            "reviewed_at": event.created_at.isoformat(),
+            "outcome": event.outcome,
+            "prompt_type": event.prompt_type,
+            "prompt_family": event.prompt_family,
+            "scheduled_by": event.scheduled_by,
+            "scheduled_interval_days": event.scheduled_interval_days,
+        }
+
+    async def _list_review_history_by_state_ids(
+        self,
+        state_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, list[dict[str, Any]]]:
+        if not state_ids:
+            return {}
+
+        event_result = await self.db.execute(
+            select(EntryReviewEvent)
+            .where(EntryReviewEvent.review_state_id.in_(state_ids))
+            .order_by(EntryReviewEvent.created_at.desc(), EntryReviewEvent.id.desc())
+        )
+        scalars_result = event_result.scalars()
+        if isawaitable(scalars_result):
+            scalars_result = await scalars_result
+        events = scalars_result.all()
+        if isawaitable(events):
+            events = await events
+        events = list(events)
+        history_by_state_id: dict[uuid.UUID, list[dict[str, Any]]] = {
+            state_id: [] for state_id in state_ids
+        }
+        for event in events:
+            if event.review_state_id is None:
+                continue
+            history_by_state_id.setdefault(event.review_state_id, []).append(
+                self._serialize_review_history_event(event)
+            )
+        return history_by_state_id
+
+    def _group_review_queue_rows(
+        self,
+        *,
+        states: list[EntryReviewState],
+        now: datetime,
+        include_debug_fields: bool = False,
+    ) -> dict[str, list[dict[str, Any]]]:
+        groups: dict[str, list[dict[str, Any]]] = {bucket: [] for bucket in REVIEW_BUCKET_ORDER}
+        for state in states:
+            bucket = self.classify_review_bucket(self._resolve_grouped_queue_due_at(state), now)
+            groups[bucket].append(
+                self._serialize_grouped_queue_row(
+                    state,
+                    include_debug_fields=include_debug_fields,
+                )
+            )
+        return groups
+
+    @classmethod
+    def _review_queue_sort_key(cls, item: dict[str, Any], sort: str) -> tuple[Any, ...]:
+        text_key = (item.get("text") or "").casefold()
+        next_review_key = item.get("next_review_at") or ""
+        last_reviewed_key = item.get("last_reviewed_at") or ""
+        queue_item_key = item.get("queue_item_id") or ""
+        if sort == "text":
+            return (text_key, next_review_key, queue_item_key)
+        if sort == "last_reviewed_at":
+            return (last_reviewed_key, text_key, queue_item_key)
+        return (next_review_key, text_key, queue_item_key)
+
+    async def get_grouped_review_queue(
+        self,
+        *,
+        user_id: uuid.UUID,
+        now: datetime,
+        include_debug_fields: bool = False,
+    ) -> dict[str, Any]:
+        resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        groups = self._group_review_queue_rows(
+            states=states,
+            now=resolved_now,
+            include_debug_fields=include_debug_fields,
+        )
+
+        return {
+            "generated_at": resolved_now.isoformat(),
+            "total_count": sum(len(items) for items in groups.values()),
+            "groups": [
+                {"bucket": bucket, "count": len(groups[bucket]), "items": groups[bucket]}
+                for bucket in REVIEW_BUCKET_ORDER
+                if groups[bucket]
+            ],
+        }
+
+    async def get_grouped_review_queue_summary(
+        self,
+        *,
+        user_id: uuid.UUID,
+        now: datetime,
+    ) -> dict[str, Any]:
+        resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        groups = self._group_review_queue_rows(states=states, now=resolved_now)
+        return {
+            "generated_at": resolved_now.isoformat(),
+            "total_count": sum(len(items) for items in groups.values()),
+            "groups": [
+                {"bucket": bucket, "count": len(groups[bucket])}
+                for bucket in REVIEW_BUCKET_ORDER
+                if groups[bucket]
+            ],
+        }
+
+    async def get_grouped_review_queue_bucket_detail(
+        self,
+        *,
+        user_id: uuid.UUID,
+        now: datetime,
+        bucket: str,
+        sort: str = "next_review_at",
+        order: str = "asc",
+        include_debug_fields: bool = False,
+    ) -> dict[str, Any]:
+        resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        resolved_bucket = self._validate_review_queue_bucket(bucket)
+        resolved_sort = self._validate_review_queue_sort(sort)
+        resolved_order = self._validate_review_queue_order(order)
+        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        bucket_states = [
+            state
+            for state in states
+            if self.classify_review_bucket(self._resolve_grouped_queue_due_at(state), resolved_now)
+            == resolved_bucket
+        ]
+        history_by_state_id = await self._list_review_history_by_state_ids(
+            [state.id for state in bucket_states]
+        )
+        items = sorted(
+            [
+                {
+                    **self._serialize_grouped_queue_row(
+                        state,
+                        include_debug_fields=include_debug_fields,
+                    ),
+                    "success_streak": int(state.success_streak or 0),
+                    "lapse_count": int(state.lapse_count or 0),
+                    "times_remembered": int(state.times_remembered or 0),
+                    "exposure_count": int(state.exposure_count or 0),
+                    "history": history_by_state_id.get(state.id, []),
+                }
+                for state in bucket_states
+            ],
+            key=lambda item: self._review_queue_sort_key(item, resolved_sort),
+            reverse=resolved_order == "desc",
+        )
+        return {
+            "generated_at": resolved_now.isoformat(),
+            "bucket": resolved_bucket,
+            "count": len(items),
+            "sort": resolved_sort,
+            "order": resolved_order,
+            "items": items,
+        }
+
+    async def get_entry_queue_schedule(
+        self,
+        *,
+        user_id: uuid.UUID,
+        entry_type: str,
+        entry_id: uuid.UUID,
+    ) -> dict[str, Any] | None:
+        status_result = await self.db.execute(
+            select(LearnerEntryStatus).where(
+                LearnerEntryStatus.user_id == user_id,
+                LearnerEntryStatus.entry_type == entry_type,
+                LearnerEntryStatus.entry_id == entry_id,
+            )
+        )
+        learner_status = status_result.scalar_one_or_none()
+        if learner_status is not None and learner_status.status != "learning":
+            return None
+        state_result = await self.db.execute(
+            select(EntryReviewState)
+            .outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
+                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
+                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
+                ),
+            )
+            .where(EntryReviewState.user_id == user_id)
+            .where(EntryReviewState.entry_type == entry_type)
+            .where(EntryReviewState.entry_id == entry_id)
+            .where(EntryReviewState.is_suspended.is_(False))
+            .where(or_(LearnerEntryStatus.id.is_(None), LearnerEntryStatus.status == "learning"))
+            .order_by(
+                EntryReviewState.recheck_due_at.asc().nullsfirst(),
+                EntryReviewState.next_due_at.asc().nullsfirst(),
+                EntryReviewState.created_at.asc(),
+            )
+            .limit(1)
+        )
+        state = state_result.scalar_one_or_none()
+        if state is None:
+            if learner_status is None or learner_status.status != "learning":
+                return None
+            state = await self._ensure_entry_review_state(
+                user_id=user_id,
+                entry_type=entry_type,
+                entry_id=entry_id,
+            )
+            await self.db.commit()
+        return self._build_current_schedule_payload(state)
+
+    async def update_queue_item_schedule(
+        self,
+        *,
+        user_id: uuid.UUID,
+        item_id: uuid.UUID,
+        schedule_override: str,
+    ) -> dict[str, Any]:
+        state_result = await self.db.execute(
+            select(EntryReviewState)
+            .where(
+                EntryReviewState.id == item_id,
+                EntryReviewState.user_id == user_id,
+                EntryReviewState.is_suspended.is_(False),
+            )
+            .with_for_update()
+        )
+        state = state_result.scalar_one_or_none()
+        if state is None:
+            raise ValueError(f"Queue item {item_id} not found")
+
+        resolved_interval_days, resolved_next_review, _ = self._derive_interval_from_override(
+            original_interval_days=int(round(state.stability or 0)),
+            override_value=schedule_override,
+            base_next_review=state.next_due_at,
+        )
+        state.stability = max(0.15, float(resolved_interval_days))
+        state.next_due_at = resolved_next_review
+        state.last_reviewed_at = datetime.now(timezone.utc)
+        if schedule_override == "10m":
+            state.relearning = True
+            state.relearning_trigger = state.relearning_trigger or "manual_reschedule"
+            state.recheck_due_at = resolved_next_review
+        else:
+            state.relearning = False
+            state.relearning_trigger = None
+            state.recheck_due_at = None
+        await self.db.commit()
+        self._invalidate_queue_stats_cache(user_id)
+        return self._build_current_schedule_payload(state)
 
     async def add_to_queue(self, user_id: uuid.UUID, meaning_id: uuid.UUID) -> Any:
         """Add a meaning to a user's queue in an idempotent way."""
-        if self.uses_legacy_queue:
-            return await self._add_to_legacy_queue(user_id, meaning_id)
-
-        result = await self.db.execute(
-            select(self.queue_model).where(
-                self.queue_model.user_id == user_id,
-                self.queue_model.meaning_id == meaning_id,
-            )
-        )
-        existing_item = result.scalar_one_or_none()
-        if existing_item is not None:
-            return existing_item
 
         meaning_result = await self.db.execute(
             select(Meaning).where(Meaning.id == meaning_id)
@@ -2134,114 +2599,27 @@ class ReviewService:
         if meaning is None:
             raise ValueError(f"Meaning {meaning_id} not found")
 
-        new_item = self._build_model_instance(
-            self.queue_model,
-            {
-                "user_id": user_id,
-                "meaning_id": meaning_id,
-                "word_id": meaning.word_id,
-                "card_type": "flashcard",
-                "priority": 0,
-                "review_count": 0,
-                "correct_count": 0,
-                "next_review": None,
-            },
+        target_state = await self._ensure_target_review_state(
+            user_id=user_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            entry_type="word",
+            entry_id=meaning.word_id,
         )
-        if new_item is None:
-            raise ValueError("Queue model is missing required fields for queue creation")
-
-        # Keep API responses consistent across schemas that may not persist these fields.
-        if getattr(new_item, "card_type", None) is None:
-            setattr(new_item, "card_type", "flashcard")
-        if getattr(new_item, "word_id", None) is None:
-            setattr(new_item, "word_id", meaning.word_id)
-        if not hasattr(new_item, "next_review"):
-            setattr(new_item, "next_review", None)
-
-        self.db.add(new_item)
         await self.db.commit()
         self._invalidate_queue_stats_cache(user_id)
+        target_state.meaning_id = meaning_id
+        target_state.word_id = meaning.word_id
+        target_state.card_type = "flashcard"
+        target_state.next_review = target_state.next_due_at
 
         logger.info(
             "Queue item created",
             user_id=str(user_id),
             meaning_id=str(meaning_id),
-            queue_item_id=str(getattr(new_item, "id", "")),
+            queue_item_id=str(target_state.id),
         )
-        return new_item
-
-    async def _add_to_legacy_queue(
-        self, user_id: uuid.UUID, meaning_id: uuid.UUID
-    ) -> ReviewCard:
-        result = await self.db.execute(
-            select(ReviewCard)
-            .join(ReviewSession)
-            .where(ReviewSession.user_id == user_id, ReviewCard.meaning_id == meaning_id)
-        )
-        existing_item = result.scalar_one_or_none()
-        if existing_item is not None:
-            return existing_item
-
-        meaning_result = await self.db.execute(
-            select(Meaning).where(Meaning.id == meaning_id)
-        )
-        meaning = meaning_result.scalar_one_or_none()
-        if meaning is None:
-            raise ValueError(f"Meaning {meaning_id} not found")
-
-        session_result = await self.db.execute(
-            select(ReviewSession)
-            .where(ReviewSession.user_id == user_id, ReviewSession.completed_at.is_(None))
-            .order_by(ReviewSession.started_at.desc())
-        )
-        session = session_result.scalar_one_or_none()
-        if session is None:
-            session = ReviewSession(id=uuid.uuid4(), user_id=user_id)
-            self.db.add(session)
-
-        card = ReviewCard(
-            session_id=session.id,
-            word_id=meaning.word_id,
-            meaning_id=meaning_id,
-            card_type="flashcard",
-            next_review=None,
-        )
-        self.db.add(card)
-        await self.db.commit()
-        self._invalidate_queue_stats_cache(user_id)
-
-        logger.info(
-            "Legacy queue item created",
-            user_id=str(user_id),
-            meaning_id=str(meaning_id),
-            queue_item_id=str(card.id),
-        )
-        return card
-
-    def _build_history_due_query(self, user_id: uuid.UUID, now: datetime):
-        latest_history_subquery = (
-            select(
-                self.history_model.meaning_id.label("meaning_id"),
-                func.max(self.history_model.created_at).label("latest_created_at"),
-            )
-            .where(self.history_model.user_id == user_id)
-            .group_by(self.history_model.meaning_id)
-            .subquery()
-        )
-
-        latest_history = aliased(self.history_model)
-        next_review_expr = (
-            latest_history.created_at
-            + (latest_history.interval_days * literal_column("interval '1 day'"))
-        ).label("next_review")
-
-        due_condition = (
-            (latest_history.id.is_(None))
-            | (latest_history.interval_days.is_(None))
-            | (next_review_expr <= now)
-        )
-
-        return latest_history_subquery, latest_history, next_review_expr, due_condition
+        return target_state
 
     async def get_due_queue_items(
         self,
@@ -2255,8 +2633,17 @@ class ReviewService:
         fetch_limit = 1 if item_id is not None else min(max(limit * 8, limit + 32), 200)
         state_query = (
             select(EntryReviewState)
+            .outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
+                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
+                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
+                ),
+            )
             .where(EntryReviewState.user_id == user_id)
             .where(EntryReviewState.is_suspended.is_(False))
+            .where(or_(LearnerEntryStatus.id.is_(None), LearnerEntryStatus.status == "learning"))
         )
         if item_id is not None:
             state_query = state_query.where(EntryReviewState.id == item_id)
@@ -2275,6 +2662,7 @@ class ReviewService:
             )
             .limit(fetch_limit)
         )
+        due_items: list[dict[str, Any]] = []
         review_states = self._apply_sibling_bury_rule(list(state_result.scalars().all()))[:limit]
         if review_states:
             prefs = await self._get_user_review_preferences(user_id)
@@ -2336,7 +2724,6 @@ class ReviewService:
                     [sense.id for senses in senses_by_phrase_id.values() for sense in senses]
                 )
 
-            due_items: list[dict[str, Any]] = []
             for index, state in enumerate(review_states):
                 should_hydrate = hydrate_limit is None or index < hydrate_limit
                 if state.entry_type == "word":
@@ -2372,7 +2759,8 @@ class ReviewService:
                     prompt = None
                     detail = None
                     if should_hydrate:
-                        review_mode = self._select_review_mode(
+                        forced_prompt_type = self._extract_prompt_type_override(state)
+                        review_mode = self._review_mode_for_prompt_type(forced_prompt_type) or self._select_review_mode(
                             item=state,
                             word=word.word,
                             index=index,
@@ -2398,6 +2786,7 @@ class ReviewService:
                             source_entry_type="word",
                             queue_item_id=state.id,
                             previous_prompt_type=state.last_prompt_type,
+                            forced_prompt_type=forced_prompt_type,
                         )
                         detail = await self._build_word_detail_payload(
                             user_id=user_id,
@@ -2460,7 +2849,8 @@ class ReviewService:
                 prompt = None
                 detail = None
                 if should_hydrate:
-                    review_mode = self._select_review_mode(
+                    forced_prompt_type = self._extract_prompt_type_override(state)
+                    review_mode = self._review_mode_for_prompt_type(forced_prompt_type) or self._select_review_mode(
                         item=state,
                         word=phrase.phrase_text,
                         index=index,
@@ -2486,6 +2876,7 @@ class ReviewService:
                         source_entry_type="phrase",
                         queue_item_id=state.id,
                         previous_prompt_type=state.last_prompt_type,
+                        forced_prompt_type=forced_prompt_type,
                     )
                     detail = await self._build_phrase_detail_payload(
                         user_id=user_id,
@@ -2517,160 +2908,6 @@ class ReviewService:
             if due_items:
                 return due_items
 
-        if self.uses_legacy_queue:
-            query = (
-                select(ReviewCard, Word.word, Meaning.definition)
-                .join(ReviewSession, ReviewCard.session_id == ReviewSession.id)
-                .join(Meaning, ReviewCard.meaning_id == Meaning.id)
-                .join(Word, Meaning.word_id == Word.id)
-                .where(ReviewSession.user_id == user_id)
-                .where(
-                    ReviewCard.id == item_id
-                    if item_id is not None
-                    else ((ReviewCard.next_review.is_(None)) | (ReviewCard.next_review <= now))
-                )
-                .order_by(ReviewCard.next_review.asc().nullsfirst())
-                .limit(limit)
-            )
-            result = await self.db.execute(query)
-            rows = result.all()
-        elif hasattr(self.queue_model, "next_review"):
-            query = (
-                select(self.queue_model, Word.word, Meaning.definition)
-                .join(Meaning, self.queue_model.meaning_id == Meaning.id)
-                .join(Word, Meaning.word_id == Word.id)
-                .where(self.queue_model.user_id == user_id)
-                .where(
-                    self.queue_model.id == item_id
-                    if item_id is not None
-                    else (
-                        (self.queue_model.next_review.is_(None))
-                        | (self.queue_model.next_review <= now)
-                    )
-                )
-                .order_by(self.queue_model.next_review.asc().nullsfirst())
-                .limit(limit)
-            )
-            result = await self.db.execute(query)
-            rows = result.all()
-        elif self._history_supports_schedule():
-            (
-                latest_history_subquery,
-                latest_history,
-                next_review_expr,
-                due_condition,
-            ) = self._build_history_due_query(user_id=user_id, now=now)
-
-            query = (
-                select(self.queue_model, Word.word, Meaning.definition, next_review_expr)
-                .join(Meaning, self.queue_model.meaning_id == Meaning.id)
-                .join(Word, Meaning.word_id == Word.id)
-                .outerjoin(
-                    latest_history_subquery,
-                    latest_history_subquery.c.meaning_id == self.queue_model.meaning_id,
-                )
-                .outerjoin(
-                    latest_history,
-                    and_(
-                        latest_history.meaning_id == latest_history_subquery.c.meaning_id,
-                        latest_history.created_at
-                        == latest_history_subquery.c.latest_created_at,
-                        latest_history.user_id == user_id,
-                    ),
-                )
-                .where(self.queue_model.user_id == user_id)
-                .where(self.queue_model.id == item_id if item_id is not None else due_condition)
-                .order_by(next_review_expr.asc().nullsfirst(), self.queue_model.created_at.asc())
-                .limit(limit)
-            )
-            result = await self.db.execute(query)
-            rows = result.all()
-        else:
-            query = (
-                select(self.queue_model, Word.word, Meaning.definition)
-                .join(Meaning, self.queue_model.meaning_id == Meaning.id)
-                .join(Word, Meaning.word_id == Word.id)
-                .where(self.queue_model.user_id == user_id)
-                .where(self.queue_model.id == item_id if item_id is not None else literal(True))
-                .limit(limit)
-            )
-            result = await self.db.execute(query)
-            rows = result.all()
-
-        due_items: list[dict[str, Any]] = []
-        prefs = await self._get_user_review_preferences(user_id)
-        allow_confidence = bool(getattr(prefs, "enable_confidence_check", True))
-        for row in rows:
-            should_hydrate = hydrate_limit is None or len(due_items) < hydrate_limit
-            if len(row) == 4:
-                item, word, definition, next_review = row
-            else:
-                item, word, definition = row
-                next_review = getattr(item, "next_review", None)
-
-            if next_review is not None:
-                setattr(item, "next_review", next_review)
-
-            meaning_id = getattr(item, "meaning_id", None)
-            source_word_id = getattr(item, "word_id", None)
-            source_sentence = None
-            review_mode = None
-            prompt = None
-            detail = None
-            if should_hydrate:
-                if meaning_id is not None:
-                    source_sentence = await self._fetch_first_meaning_sentence(meaning_id)
-                review_mode = self._select_review_mode(
-                    item=item,
-                    word=self._normalize_prompt_text(word),
-                    index=len(due_items),
-                    sentence=source_sentence,
-                    allow_confidence=allow_confidence,
-                )
-
-                prompt = await self._build_card_prompt(
-                    review_mode=review_mode,
-                    source_text=self._normalize_prompt_text(word) or "Unavailable",
-                    definition=self._normalize_prompt_text(definition) or "No definition available.",
-                    sentence=source_sentence,
-                    is_phrase_entry=False,
-                    distractor_seed=str(getattr(item, "meaning_id", "")),
-                    meaning_id=meaning_id or uuid.uuid4(),
-                    index=len(due_items),
-                    user_id=user_id,
-                    source_entry_id=source_word_id,
-                    source_entry_type="word",
-                    queue_item_id=getattr(item, "id", None),
-                    previous_prompt_type=getattr(item, "last_prompt_type", None),
-                )
-                if source_word_id is not None:
-                    detail = await self._build_detail_payload_for_word_id(
-                        user_id=user_id,
-                        word_id=source_word_id,
-                    )
-
-            due_items.append(
-                {
-                    "id": item.id,
-                    "item": item,
-                    "word": word,
-                    "definition": definition,
-                    "target_type": "meaning",
-                    "target_id": str(meaning_id) if meaning_id else None,
-                    "next_review": next_review,
-                    "review_mode": review_mode,
-                    "source_entry_type": "word",
-                    "source_entry_id": str(source_word_id) if source_word_id else None,
-                    "prompt": prompt,
-                    "detail": detail,
-                    "schedule_options": self._build_schedule_options(
-                        self._resolve_interval_days_or_zero(getattr(item, "interval_days", None))
-                    ),
-                    "source_word_id": str(source_word_id) if source_word_id else None,
-                    "source_meaning_id": str(meaning_id) if meaning_id else None,
-                }
-            )
-
         return due_items
 
     async def get_queue_item(self, user_id: uuid.UUID, item_id: uuid.UUID) -> dict[str, Any]:
@@ -2683,29 +2920,6 @@ class ReviewService:
         if not due_items:
             raise ValueError(f"Queue item {item_id} not found")
         return due_items[0]
-
-    async def _get_latest_history_for_meaning(
-        self, user_id: uuid.UUID, meaning_id: uuid.UUID
-    ) -> Any | None:
-        if self.history_model is None:
-            return None
-        if not hasattr(self.history_model, "meaning_id"):
-            return None
-        if not hasattr(self.history_model, "user_id"):
-            return None
-        if not hasattr(self.history_model, "created_at"):
-            return None
-
-        result = await self.db.execute(
-            select(self.history_model)
-            .where(
-                self.history_model.user_id == user_id,
-                self.history_model.meaning_id == meaning_id,
-            )
-            .order_by(self.history_model.created_at.desc())
-            .limit(1)
-        )
-        return result.scalars().first()
 
     async def _build_learning_cards_for_word(
         self,
@@ -2890,6 +3104,24 @@ class ReviewService:
         entry_id: uuid.UUID,
     ) -> dict[str, Any]:
         normalized_entry_type = self._normalize_entry_type(entry_type)
+        status_result = await self.db.execute(
+            select(LearnerEntryStatus).where(
+                LearnerEntryStatus.user_id == user_id,
+                LearnerEntryStatus.entry_type == normalized_entry_type,
+                LearnerEntryStatus.entry_id == entry_id,
+            )
+        )
+        learner_status = status_result.scalar_one_or_none()
+        if learner_status is None:
+            learner_status = LearnerEntryStatus(
+                user_id=user_id,
+                entry_type=normalized_entry_type,
+                entry_id=entry_id,
+                status="learning",
+            )
+            self.db.add(learner_status)
+        else:
+            learner_status.status = "learning"
 
         if normalized_entry_type == "word":
             result = await self.db.execute(select(Word).where(Word.id == entry_id))
@@ -2908,6 +3140,7 @@ class ReviewService:
                 word=word,
                 meanings=meanings,
             )
+            await self.db.commit()
 
             return {
                 "entry_type": "word",
@@ -2942,6 +3175,7 @@ class ReviewService:
             phrase=phrase,
             senses=senses,
         )
+        await self.db.commit()
 
         return {
             "entry_type": "phrase",
@@ -2963,6 +3197,7 @@ class ReviewService:
         quality: int,
         time_spent_ms: int,
         user_id: uuid.UUID,
+        confirm: bool = False,
         card_type: str | None = None,
         prompt_token: str | None = None,
         review_mode: str | None = None,
@@ -2979,6 +3214,7 @@ class ReviewService:
             quality=quality,
             time_spent_ms=time_spent_ms,
             user_id=user_id,
+            confirm=confirm,
             card_type=card_type,
             prompt_token=prompt_token,
             review_mode=review_mode,
@@ -2999,6 +3235,7 @@ class ReviewService:
         quality: int,
         time_spent_ms: int,
         user_id: uuid.UUID,
+        confirm: bool,
         review_mode: str | None,
         outcome: str | None,
         selected_option_id: str | None,
@@ -3013,6 +3250,7 @@ class ReviewService:
             quality=quality,
             time_spent_ms=time_spent_ms,
             user_id=user_id,
+            confirm=confirm,
             review_mode=review_mode,
             outcome=outcome,
             selected_option_id=selected_option_id,
@@ -3054,198 +3292,66 @@ class ReviewService:
             entry_state=entry_state,
         )
 
-    async def _submit_legacy_queue_review(
-        self,
-        *,
-        item: Any,
-        quality: int,
-        time_spent_ms: int,
-        user_id: uuid.UUID,
-        card_type: str | None,
-        review_mode: str | None,
-        outcome: str | None,
-        selected_option_id: str | None,
-        typed_answer: str | None,
-        prompt: dict[str, Any] | None,
-        schedule_override: str | None,
-    ) -> Any:
-        return await submit_legacy_queue_review_impl(
-            self,
-            item=item,
-            quality=quality,
-            time_spent_ms=time_spent_ms,
-            user_id=user_id,
-            card_type=card_type,
-            review_mode=review_mode,
-            outcome=outcome,
-            selected_option_id=selected_option_id,
-            typed_answer=typed_answer,
-            prompt=prompt,
-            schedule_override=schedule_override,
-        )
-
-    def _build_history_record(
-        self,
-        item: Any,
-        user_id: uuid.UUID,
-        quality: int,
-        time_spent_ms: int,
-        card_type: str,
-        previous_ease_factor: float,
-        previous_interval_days: int,
-        previous_repetitions: int,
-    ) -> Any | None:
-        if self.history_model is None:
-            return None
-
-        payload = {
-            "user_id": user_id,
-            "queue_item_id": getattr(item, "id", None),
-            "item_id": getattr(item, "id", None),
-            "review_card_id": getattr(item, "id", None),
-            "meaning_id": getattr(item, "meaning_id", None),
-            "quality": quality,
-            "quality_rating": quality,
-            "time_spent_ms": time_spent_ms,
-            "card_type": card_type,
-            "reviewed_at": datetime.now(timezone.utc),
-            "is_correct": quality >= 3,
-            "ease_factor_before": previous_ease_factor,
-            "ease_factor_after": getattr(item, "ease_factor", None),
-            "ease_factor": getattr(item, "ease_factor", None),
-            "interval_days_before": previous_interval_days,
-            "interval_days_after": getattr(item, "interval_days", None),
-            "interval_days": getattr(item, "interval_days", None),
-            "repetitions_before": previous_repetitions,
-            "repetitions_after": getattr(item, "repetitions", None),
-            "repetitions": getattr(item, "repetitions", None),
-            "next_review": getattr(item, "next_review", None),
-        }
-        return self._build_model_instance(self.history_model, payload)
-
     async def get_queue_stats(self, user_id: uuid.UUID) -> dict[str, Any]:
         """Get queue totals, due counts, and aggregate performance stats."""
         cached = self._get_cached_queue_stats(user_id)
         if cached is not None:
             return cached
         now = datetime.now(timezone.utc)
-
-        if self.uses_legacy_queue:
-            total_result = await self.db.execute(
-                select(func.count(ReviewCard.id))
-                .join(ReviewSession, ReviewCard.session_id == ReviewSession.id)
-                .where(ReviewSession.user_id == user_id)
+        queue_visibility_filters = (
+            EntryReviewState.user_id == user_id,
+            EntryReviewState.is_suspended.is_(False),
+            or_(
+                LearnerEntryStatus.status.is_(None),
+                LearnerEntryStatus.status == "learning",
+            ),
+        )
+        total_result = await self.db.execute(
+            select(func.count(EntryReviewState.id))
+            .select_from(EntryReviewState)
+            .outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
+                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
+                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
+                ),
             )
-            total_items = int(total_result.scalar_one() or 0)
+            .where(*queue_visibility_filters)
+        )
+        total_items = int(total_result.scalar_one() or 0)
 
-            due_result = await self.db.execute(
-                select(func.count(ReviewCard.id))
-                .join(ReviewSession, ReviewCard.session_id == ReviewSession.id)
-                .where(ReviewSession.user_id == user_id)
-                .where((ReviewCard.next_review.is_(None)) | (ReviewCard.next_review <= now))
+        due_result = await self.db.execute(
+            select(func.count(EntryReviewState.id))
+            .select_from(EntryReviewState)
+            .outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
+                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
+                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
+                ),
             )
-            due_items = int(due_result.scalar_one() or 0)
-
-            aggregate_result = await self.db.execute(
-                select(
-                    func.count(ReviewCard.id).filter(ReviewCard.quality_rating.is_not(None)),
-                    func.count(ReviewCard.id).filter(ReviewCard.quality_rating >= 3),
-                )
-                .join(ReviewSession, ReviewCard.session_id == ReviewSession.id)
-                .where(ReviewSession.user_id == user_id)
-            )
-            review_count, correct_count = aggregate_result.one()
-        else:
-            total_result = await self.db.execute(
-                select(func.count(self.queue_model.id)).where(
-                    self.queue_model.user_id == user_id
-                )
-            )
-            total_items = int(total_result.scalar_one() or 0)
-
-            if hasattr(self.queue_model, "next_review"):
-                due_result = await self.db.execute(
-                    select(func.count(self.queue_model.id))
-                    .where(self.queue_model.user_id == user_id)
-                    .where(
-                        (self.queue_model.next_review.is_(None))
-                        | (self.queue_model.next_review <= now)
-                    )
-                )
-            elif self._history_supports_schedule():
+            .where(
+                *queue_visibility_filters,
                 (
-                    latest_history_subquery,
-                    latest_history,
-                    next_review_expr,
-                    due_condition,
-                ) = self._build_history_due_query(user_id=user_id, now=now)
+                    (EntryReviewState.recheck_due_at.is_not(None) & (EntryReviewState.recheck_due_at <= now))
+                    | (EntryReviewState.next_due_at.is_(None))
+                    | (EntryReviewState.next_due_at <= now)
+                ),
+            )
+        )
+        due_items = int(due_result.scalar_one() or 0)
 
-                due_result = await self.db.execute(
-                    select(func.count(self.queue_model.id))
-                    .outerjoin(
-                        latest_history_subquery,
-                        latest_history_subquery.c.meaning_id == self.queue_model.meaning_id,
-                    )
-                    .outerjoin(
-                        latest_history,
-                        and_(
-                            latest_history.meaning_id == latest_history_subquery.c.meaning_id,
-                            latest_history.created_at
-                            == latest_history_subquery.c.latest_created_at,
-                            latest_history.user_id == user_id,
-                        ),
-                    )
-                    .where(self.queue_model.user_id == user_id)
-                    .where(due_condition)
-                )
-            else:
-                due_result = await self.db.execute(
-                    select(func.count(self.queue_model.id)).where(
-                        self.queue_model.user_id == user_id
-                    )
-                )
-
-            due_items = int(due_result.scalar_one() or 0)
-
-            if self.history_model is not None and hasattr(self.history_model, "user_id"):
-                if hasattr(self.history_model, "quality_rating"):
-                    aggregate_result = await self.db.execute(
-                        select(
-                            func.count(self.history_model.id),
-                            func.count(self.history_model.id).filter(
-                                self.history_model.quality_rating >= 3
-                            ),
-                        ).where(self.history_model.user_id == user_id)
-                    )
-                elif hasattr(self.history_model, "quality"):
-                    aggregate_result = await self.db.execute(
-                        select(
-                            func.count(self.history_model.id),
-                            func.count(self.history_model.id).filter(
-                                self.history_model.quality >= 3
-                            ),
-                        ).where(self.history_model.user_id == user_id)
-                    )
-                else:
-                    aggregate_result = await self.db.execute(select(literal(0), literal(0)))
-            elif hasattr(self.queue_model, "review_count") and hasattr(
-                self.queue_model, "correct_count"
-            ):
-                aggregate_result = await self.db.execute(
-                    select(
-                        func.coalesce(func.sum(self.queue_model.review_count), 0),
-                        func.coalesce(func.sum(self.queue_model.correct_count), 0),
-                    ).where(self.queue_model.user_id == user_id)
-                )
-            elif hasattr(self.queue_model, "review_count"):
-                aggregate_result = await self.db.execute(
-                    select(func.coalesce(func.sum(self.queue_model.review_count), 0), literal(0))
-                    .where(self.queue_model.user_id == user_id)
-                )
-            else:
-                aggregate_result = await self.db.execute(select(literal(0), literal(0)))
-
-            review_count, correct_count = aggregate_result.one()
+        aggregate_result = await self.db.execute(
+            select(
+                func.count(EntryReviewEvent.id),
+                func.count(EntryReviewEvent.id).filter(
+                    EntryReviewEvent.outcome.in_(["correct_tested", "remember"])
+                ),
+            ).where(EntryReviewEvent.user_id == user_id)
+        )
+        review_count, correct_count = aggregate_result.one()
 
         review_count = int(review_count or 0)
         correct_count = int(correct_count or 0)
@@ -3374,79 +3480,3 @@ class ReviewService:
                 for row in input_mode_result.all()
             ],
         }
-
-    async def submit_review(
-        self,
-        card_id: uuid.UUID,
-        quality: int,
-        time_spent_ms: int,
-        user_id: uuid.UUID,
-    ) -> ReviewCard:
-        """Submit a review for a card and update SM-2 parameters."""
-        result = await self.db.execute(
-            select(ReviewCard)
-            .join(ReviewSession)
-            .where(ReviewCard.id == card_id, ReviewSession.user_id == user_id)
-        )
-        card = result.scalar_one_or_none()
-        if card is None:
-            raise ValueError(f"Review card {card_id} not found")
-
-        previous_ease = float(card.ease_factor or 2.5)
-        previous_interval = int(card.interval_days or 0)
-        previous_repetitions = int(card.repetitions or 0)
-
-        if quality >= 3:
-            if previous_repetitions == 0:
-                next_interval = 1
-            elif previous_repetitions == 1:
-                next_interval = 6
-            else:
-                next_interval = max(1, round(previous_interval * previous_ease))
-            next_repetitions = previous_repetitions + 1
-            next_ease = previous_ease + (
-                0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02)
-            )
-        else:
-            next_interval = 1
-            next_repetitions = 0
-            next_ease = max(1.3, previous_ease - 0.2)
-
-        card.quality_rating = quality
-        card.time_spent_ms = time_spent_ms
-        card.ease_factor = max(1.3, round(next_ease, 2))
-        card.interval_days = next_interval
-        card.repetitions = next_repetitions
-        card.next_review = datetime.now(timezone.utc) + timedelta(days=next_interval)
-
-        await self.db.commit()
-        self._invalidate_queue_stats_cache(user_id)
-
-        logger.info(
-            "Review submitted",
-            card_id=str(card_id),
-            quality=quality,
-            new_interval=next_interval,
-            new_ease_factor=card.ease_factor,
-        )
-
-        return card
-
-    async def complete_session(
-        self, session_id: uuid.UUID, user_id: uuid.UUID
-    ) -> ReviewSession:
-        """Mark a review session as completed."""
-        result = await self.db.execute(
-            select(ReviewSession).where(
-                ReviewSession.id == session_id, ReviewSession.user_id == user_id
-            )
-        )
-        session = result.scalar_one_or_none()
-        if session is None:
-            raise ValueError(f"Review session {session_id} not found")
-
-        session.completed_at = datetime.now(timezone.utc)
-        await self.db.commit()
-
-        logger.info("Review session completed", session_id=str(session_id))
-        return session

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
 import type { KnowledgeEntryType, KnowledgeStatus } from "@/lib/knowledge-map-client";
+import { getKnowledgeStatusSelectOptions } from "@/lib/knowledge-status-policy";
 
 const ROW_STATUS_LABELS: Record<KnowledgeStatus, string> = {
   undecided: "New",
@@ -31,6 +32,14 @@ function normalizePrimaryDefinition(value: string | null | undefined): string | 
   return trimmed || null;
 }
 
+function normalizePrimaryExample(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
 function rowImageStyle(seed: string): string {
   const styles = [
     "bg-[linear-gradient(145deg,#3f3b4e,#809fcc)]",
@@ -46,9 +55,12 @@ export type LearnerListRowItem = {
   entry_type: KnowledgeEntryType;
   entry_id: string;
   display_text: string;
+  browse_rank?: number | null;
   status: KnowledgeStatus;
   translation?: string | null;
   primary_definition?: string | null;
+  primary_example?: string | null;
+  primary_example_translation?: string | null;
 };
 
 type LearnerListRowsProps<TItem extends LearnerListRowItem> = {
@@ -79,7 +91,7 @@ export function LearnerListRows<TItem extends LearnerListRowItem>({
   }
 
   return (
-    <section className="space-y-1.5" data-testid={listTestId}>
+    <section className="max-h-[34rem] space-y-1.5 overflow-y-auto pr-1" data-testid={listTestId}>
       {items.map((item) => (
         <div
           key={`${item.entry_type}-${item.entry_id}`}
@@ -92,7 +104,14 @@ export function LearnerListRows<TItem extends LearnerListRowItem>({
           <div className="space-y-1 py-0.5">
             <Link href={getKnowledgeEntryHref(item.entry_type, item.entry_id)} className="block">
               <div className="flex items-start justify-between gap-3">
-                <p className="text-[1.1rem] font-semibold leading-none text-[#35204e]">{item.display_text}</p>
+                <div className="space-y-1">
+                  <p className="text-[1.1rem] font-semibold leading-none text-[#35204e]">{item.display_text}</p>
+                  {typeof item.browse_rank === "number" ? (
+                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[#8f82a1]">
+                      #{item.browse_rank}
+                    </p>
+                  ) : null}
+                </div>
               </div>
               {normalizePrimaryDefinition(item.primary_definition) ? (
                 <p className="mt-1 text-[0.82rem] font-semibold leading-5 text-[#6b5b86]">
@@ -102,6 +121,16 @@ export function LearnerListRows<TItem extends LearnerListRowItem>({
               {showTranslations && normalizeRowTranslation(item.translation) ? (
                 <p className="mt-0.5 text-[0.78rem] leading-5 text-[#8b78a5]">
                   {normalizeRowTranslation(item.translation)}
+                </p>
+              ) : null}
+              {normalizePrimaryExample(item.primary_example) ? (
+                <p className="mt-1 text-[0.78rem] italic leading-5 text-[#5f5674]">
+                  {normalizePrimaryExample(item.primary_example)}
+                </p>
+              ) : null}
+              {showTranslations && normalizeRowTranslation(item.primary_example_translation) ? (
+                <p className="mt-0.5 text-[0.76rem] leading-5 text-[#9b8cb2]">
+                  {normalizeRowTranslation(item.primary_example_translation)}
                 </p>
               ) : null}
             </Link>
@@ -124,10 +153,11 @@ export function LearnerListRows<TItem extends LearnerListRowItem>({
                     onChange={(event) => void onStatusChange(item, event.target.value as KnowledgeStatus)}
                     className="max-w-[8.2rem] rounded-[0.35rem] border border-[#dce0ee] bg-[#f8fbff] px-2 py-1.5 text-[0.72rem] font-semibold text-[#4bc5db] outline-none"
                   >
-                    <option value="undecided">New</option>
-                    <option value="to_learn">To Learn</option>
-                    <option value="learning">Learning</option>
-                    <option value="known">Already knew</option>
+                    {getKnowledgeStatusSelectOptions(item.status).map((option) => (
+                      <option key={option.status} value={option.status}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </>
               ) : null}

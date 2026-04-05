@@ -16,7 +16,6 @@ from app.models.meaning import Meaning
 from app.models.lexicon_voice_asset import LexiconVoiceAsset
 from app.models.phrase_entry import PhraseEntry
 from app.models.search_history import SearchHistory
-from app.models.translation import Translation
 from app.models.user import User
 from app.models.word import Word
 from app.services.knowledge_map import (
@@ -40,8 +39,8 @@ from app.services.knowledge_map import (
     load_phrase_detail_rows,
     load_phrase_summary_map,
     load_range_catalog_items,
+    load_word_summary_map,
     load_word_detail_relations,
-    load_word_primary_definitions,
     normalize_confusable_words,
     normalize_meaning_metadata,
     normalize_translation_examples,
@@ -51,6 +50,7 @@ from app.services.knowledge_map import (
     resolve_exact_match_target,
     select_pronunciation,
 )
+from app.services.review import ReviewService
 from app.services.voice_assets import (
     build_voice_asset_playback_url,
     load_phrase_voice_assets,
@@ -112,6 +112,8 @@ class KnowledgeMapEntrySummary(BaseModel):
     pronunciations: dict[str, str] = {}
     translation: str | None
     primary_definition: str | None
+    primary_example: str | None = None
+    primary_example_translation: str | None = None
     part_of_speech: str | None
     phrase_kind: str | None
     voice_assets: list["LearnerVoiceAssetResponse"] = []
@@ -266,6 +268,20 @@ class AdjacentEntryResponse(BaseModel):
     display_text: str
 
 
+class ReviewScheduleOptionResponse(BaseModel):
+    value: str
+    label: str
+    is_default: bool = False
+
+
+class EntryReviewQueueResponse(BaseModel):
+    queue_item_id: str
+    next_review_at: str | None = None
+    current_schedule_value: str
+    current_schedule_label: str
+    schedule_options: list[ReviewScheduleOptionResponse] = []
+
+
 class KnowledgeMapDetailResponse(BaseModel):
     entry_type: str
     entry_id: str
@@ -285,6 +301,7 @@ class KnowledgeMapDetailResponse(BaseModel):
     senses: list[PhraseSenseResponse] = []
     relation_groups: list[RelationGroupResponse] = []
     confusable_words: list[ConfusableWordResponse] = []
+    review_queue: EntryReviewQueueResponse | None = None
     previous_entry: AdjacentEntryResponse | None = None
     next_entry: AdjacentEntryResponse | None = None
 
@@ -351,6 +368,8 @@ def _summary_from_item(item: dict) -> KnowledgeMapEntrySummary:
         pronunciations=item.get("pronunciations", {}),
         translation=item["translation"],
         primary_definition=item["primary_definition"],
+        primary_example=item.get("primary_example"),
+        primary_example_translation=item.get("primary_example_translation"),
         part_of_speech=item["part_of_speech"],
         phrase_kind=item["phrase_kind"],
         voice_assets=item.get("voice_assets", []),
@@ -485,32 +504,19 @@ async def _hydrate_summary_items(
 
     preferences = await get_preferences(db, user_id)
     if word_ids:
-        primary_meanings = await load_word_primary_definitions(db, word_ids)
-        meaning_ids = [meaning.id for meaning in primary_meanings.values()]
-
-        translations = []
-        if meaning_ids:
-            translations_result = await db.execute(
-                select(Translation)
-                .where(Translation.meaning_id.in_(meaning_ids))
-                .order_by(Translation.meaning_id.asc(), Translation.language.asc())
-            )
-            translations = translations_result.scalars().all()
-
-        translation_map = build_word_translation_map(
-            translations,
-            preferences.translation_locale,
-        )
+        word_summary_map = await load_word_summary_map(db, word_ids, preferences.translation_locale)
         words_result = await db.execute(select(Word).where(Word.id.in_(word_ids)))
         words_by_id = {word.id: word for word in words_result.scalars().all()}
 
         for item in items:
             if item["entry_type"] != "word":
                 continue
-            meaning = primary_meanings.get(item["entry_id"])
             word = words_by_id.get(item["entry_id"])
-            item["primary_definition"] = meaning.definition if meaning is not None else item.get("primary_definition")
-            item["translation"] = translation_map.get(meaning.id) if meaning is not None else item.get("translation")
+            summary_row = word_summary_map.get(item["entry_id"], {})
+            item["primary_definition"] = summary_row.get("primary_definition", item.get("primary_definition"))
+            item["translation"] = summary_row.get("translation", item.get("translation"))
+            item["primary_example"] = summary_row.get("primary_example")
+            item["primary_example_translation"] = summary_row.get("primary_example_translation")
             item["pronunciation"] = (
                 select_pronunciation(word, preferences.accent_preference)
                 if word is not None
@@ -532,6 +538,8 @@ async def _hydrate_summary_items(
                 continue
             item["translation"] = summary_row["translation"]
             item["primary_definition"] = summary_row["primary_definition"]
+            item["primary_example"] = summary_row.get("primary_example")
+            item["primary_example_translation"] = summary_row.get("primary_example_translation")
             item["voice_assets"] = [
                 asset.model_dump()
                 for asset in voice_assets_by_entry.get(("phrase", item["entry_id"]), [])
@@ -741,6 +749,11 @@ async def get_knowledge_map_entry_detail(
                 break
 
         primary_definition = meanings[0].definition if meanings else None
+        review_queue = await ReviewService(db).get_entry_queue_schedule(
+            user_id=current_user.id,
+            entry_type="word",
+            entry_id=word.id,
+        )
         detail_response = KnowledgeMapDetailResponse(
             entry_type="word",
             entry_id=str(word.id),
@@ -871,6 +884,20 @@ async def get_knowledge_map_entry_detail(
                     )
                     for item in normalize_confusable_words(word)
             ],
+            review_queue=(
+                EntryReviewQueueResponse(
+                    queue_item_id=review_queue["queue_item_id"],
+                    next_review_at=review_queue["next_review_at"],
+                    current_schedule_value=review_queue["current_schedule_value"],
+                    current_schedule_label=review_queue["current_schedule_label"],
+                    schedule_options=[
+                        ReviewScheduleOptionResponse(**option)
+                        for option in review_queue["schedule_options"]
+                    ],
+                )
+                if review_queue
+                else None
+            ),
             previous_entry=_adjacent_entry(previous_entry),
             next_entry=_adjacent_entry(next_entry),
         )
@@ -1005,6 +1032,11 @@ async def get_knowledge_map_entry_detail(
         first_localized = localized_by_sense.get(senses_by_phrase[0].id)
         if first_localized is not None:
             translation = first_localized.localized_definition
+    review_queue = await ReviewService(db).get_entry_queue_schedule(
+        user_id=current_user.id,
+        entry_type="phrase",
+        entry_id=phrase.id,
+    )
 
     detail_response = KnowledgeMapDetailResponse(
         entry_type="phrase",
@@ -1024,6 +1056,20 @@ async def get_knowledge_map_entry_detail(
         senses=senses,
         relation_groups=[],
         confusable_words=[],
+        review_queue=(
+            EntryReviewQueueResponse(
+                queue_item_id=review_queue["queue_item_id"],
+                next_review_at=review_queue["next_review_at"],
+                current_schedule_value=review_queue["current_schedule_value"],
+                current_schedule_label=review_queue["current_schedule_label"],
+                schedule_options=[
+                    ReviewScheduleOptionResponse(**option)
+                    for option in review_queue["schedule_options"]
+                ],
+            )
+            if review_queue
+            else None
+        ),
         previous_entry=_adjacent_entry(previous_entry),
         next_entry=_adjacent_entry(next_entry),
     )
@@ -1068,6 +1114,12 @@ async def put_knowledge_map_status(
         db.add(row)
     else:
         row.status = payload.status
+    if payload.status == "learning":
+        await ReviewService(db)._ensure_learning_entry_has_review_state(
+            user_id=current_user.id,
+            entry_type=entry_type,
+            entry_id=entry_id,
+        )
     await db.commit()
     _finalize_knowledge_map_metrics(
         response,

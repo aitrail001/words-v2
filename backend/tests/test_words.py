@@ -640,6 +640,51 @@ class TestVoiceAssetContent:
         assert response.headers["content-type"].startswith("audio/mpeg")
 
     @pytest.mark.asyncio
+    async def test_get_voice_asset_content_falls_back_to_equivalent_local_asset_when_selected_row_is_stale(
+        self, client, mock_db, auth_token, tmp_path
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        phrase_entry_id = uuid.uuid4()
+
+        stale_asset = make_voice_asset(phrase_entry_id=phrase_entry_id)
+        stale_asset.relative_path = str(Path("old_phrase_take_off") / "word" / "en_us" / "female-word-123.mp3")
+        stale_asset.source_text_hash = "samehash"
+        stale_asset.locale = "en_us"
+        stale_asset.voice_role = "female"
+        stale_asset.profile_key = "word"
+        stale_asset.storage_policy.primary_storage_base = str(tmp_path / "voice")
+
+        good_audio_path = tmp_path / "voice" / "phrase_take_off" / "word" / "en_us" / "female-word-123.mp3"
+        good_audio_path.parent.mkdir(parents=True, exist_ok=True)
+        good_audio_path.write_bytes(b"fallback-phrase-mp3")
+
+        fallback_asset = make_voice_asset(phrase_entry_id=phrase_entry_id)
+        fallback_asset.relative_path = str(Path("phrase_take_off") / "word" / "en_us" / "female-word-123.mp3")
+        fallback_asset.source_text_hash = "samehash"
+        fallback_asset.locale = "en_us"
+        fallback_asset.voice_role = "female"
+        fallback_asset.profile_key = "word"
+        fallback_asset.storage_policy.primary_storage_base = str(tmp_path / "voice")
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        asset_result = MagicMock()
+        asset_result.scalar_one_or_none.return_value = stale_asset
+        fallback_result = MagicMock()
+        fallback_result.scalars.return_value.all.return_value = [fallback_asset]
+        mock_db.execute.side_effect = [user_result, asset_result, fallback_result]
+
+        response = await client.get(
+            f"/api/words/voice-assets/{stale_asset.id}/content",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.content == b"fallback-phrase-mp3"
+        assert response.headers["content-type"].startswith("audio/mpeg")
+
+    @pytest.mark.asyncio
     async def test_get_voice_asset_content_redirects_remote_storage(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)

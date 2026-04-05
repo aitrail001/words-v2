@@ -81,25 +81,74 @@ test("@smoke typed review normalization uses reveal follow-up submit and accepts
     });
   });
 
+  await page.route("**/api/knowledge-map/entries/phrase/phrase-look-up", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        entry_type: "phrase",
+        entry_id: "phrase-look-up",
+        display_text: "look up",
+        normalized_form: "look up",
+        browse_rank: 10,
+        status: "learning",
+        cefr_level: "B1",
+        pronunciation: null,
+        translation: null,
+        primary_definition: "To search for information.",
+        primary_example: "Look up the address before you leave.",
+        review_queue: {
+          queue_item_id: "state-typed",
+          next_review_at: "2026-04-06T09:00:00+00:00",
+          current_schedule_value: "1d",
+          current_schedule_label: "Tomorrow",
+          schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
+        },
+        meanings: [],
+        senses: [
+          {
+            sense_id: "phrase-sense-look-up",
+            definition: "To search for information.",
+            localized_definition: null,
+            part_of_speech: "phrasal verb",
+            usage_note: null,
+            localized_usage_note: null,
+            register: "neutral",
+            primary_domain: "general",
+            secondary_domains: [],
+            grammar_patterns: [],
+            synonyms: [],
+            antonyms: [],
+            collocations: [],
+            examples: [
+              {
+                example_id: "phrase-example-look-up",
+                sentence: "Look up the address before you leave.",
+                localized_sentence: null,
+                difficulty: "B1",
+              },
+            ],
+          },
+        ],
+        relation_groups: [],
+        confusable_words: [],
+        previous_entry: null,
+        next_entry: null,
+      }),
+    });
+  });
+
   await page.goto("/review");
-  await page.getByRole("button", { name: /start review/i }).click();
+  await expect(page.getByTestId("review-active-state")).toBeVisible();
   await page.getByPlaceholder(/type the word or phrase/i).fill("  Look, up!! ");
   await page.getByRole("button", { name: /check answer/i }).click();
 
-  await expect(page.getByTestId("review-reveal-state")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "look up" })).toBeVisible();
-  await page.getByRole("button", { name: /continue/i }).click();
-  await expect(page.getByTestId("review-complete-state")).toBeVisible();
+  await expect(page).toHaveURL(/\/phrase\/phrase-look-up\?return_to=review&resume=1$/);
 
-  expect(submitPayloads).toHaveLength(2);
+  expect(submitPayloads).toHaveLength(1);
   expect(submitPayloads[0]).toMatchObject({
     typed_answer: "  Look, up!! ",
     prompt_token: "prompt-state-typed",
   });
-  expect(submitPayloads[1]).toMatchObject({
-    outcome: "correct_tested",
-    typed_answer: "  Look, up!! ",
-    prompt_token: "prompt-state-typed",
-  });
-  expect(submitPayloads[1]).not.toHaveProperty("schedule_override");
+  expect(submitPayloads[0]).not.toHaveProperty("schedule_override");
 });

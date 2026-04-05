@@ -1,5 +1,25 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { injectToken, registerViaApi } from "../helpers/auth";
+
+const waitForReviewPrompt = async (page: Page) => {
+  await expect(page.getByTestId("review-active-state")).toBeVisible();
+};
+
+const returnToReviewFlow = async (page: Page) => {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (await page.getByRole("button", { name: /continue review/i }).count()) {
+      await page.getByRole("button", { name: /continue review/i }).click({ force: true });
+    }
+    if (await page.getByTestId("review-active-state").count()) {
+      return;
+    }
+    if (await page.getByTestId("review-complete-state").count()) {
+      return;
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error("Review detail did not hand back to the review flow.");
+};
 
 test("@smoke learner audio covers range cards and review replay", async ({
   page,
@@ -8,6 +28,8 @@ test("@smoke learner audio covers range cards and review replay", async ({
   const user = await registerViaApi(request, "learner-audio");
   const requestedAudioUrls: string[] = [];
   const submitPayloads: Record<string, unknown>[] = [];
+
+  page.on("dialog", (dialog) => dialog.accept());
 
   await page.addInitScript(() => {
     HTMLMediaElement.prototype.play = async () => undefined;
@@ -330,18 +352,25 @@ test("@smoke learner audio covers range cards and review replay", async ({
   await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
 
   await page.goto("/review");
-  await page.getByRole("button", { name: /start review/i }).click();
-  await expect(page.getByRole("button", { name: /play audio/i })).toBeVisible();
-  await page.getByRole("button", { name: /play audio/i }).click();
-  await expect(page.getByRole("button", { name: /play again/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /replay audio/i }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /exit review/i })).toBeVisible();
+  await expect
+    .poll(() =>
+      requestedAudioUrls.filter((url) => url.includes("/api/words/voice-assets/review-audio/content")).length)
+    .toBeGreaterThan(0);
+  await page.getByRole("button", { name: /replay audio/i }).click();
+  await expect(page.getByRole("button", { name: /replay audio/i })).toBeVisible();
   await page.getByRole("button", { name: /the capacity to recover quickly from difficulties/i }).click();
-  await expect(page.getByTestId("review-reveal-state")).toBeVisible();
-  await page.getByRole("button", { name: /continue/i }).click();
-
+  await expect(page).toHaveURL(/\/word\/word-audio\?return_to=review&resume=1$/);
+  await returnToReviewFlow(page);
   await expect(page.getByTestId("review-situation-prompt")).toBeVisible();
   await page.getByRole("button", { name: /overreaction/i }).click();
   await expect(page.getByTestId("review-relearn-state")).toBeVisible();
   await expect(page.getByRole("heading", { name: "resilience" })).toBeVisible();
+  await page.getByRole("button", { name: /finish learning/i }).click();
+  await expect(page.getByTestId("review-complete-state")).toBeVisible();
+  await page.getByRole("button", { name: /back to home/i }).click();
+  await expect(page).toHaveURL(/\/$/);
 
   expect(submitPayloads).toEqual(
     expect.arrayContaining([

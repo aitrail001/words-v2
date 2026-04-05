@@ -1,5 +1,6 @@
 import {
   createKnowledgeMapSearchHistory,
+  getAdminGroupedReviewQueue,
   getKnowledgeMapDashboard,
   getKnowledgeMapEntryDetail,
   getKnowledgeMapList,
@@ -180,5 +181,16 @@ describe("knowledge-map-client", () => {
       ),
     ).toBe("/api/words/voice-assets/voice-au/content");
     expect(resolveLearnerVoicePlaybackUrl(null, "us")).toBeNull();
+  });
+
+  it("loads the admin grouped review queue with an effective time override", async () => {
+    mockApiClient.get.mockResolvedValueOnce({ groups: [] });
+
+    const result = await getAdminGroupedReviewQueue("2026-10-05T09:00:00+00:00");
+
+    expect(result).toEqual({ groups: [] });
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      "/reviews/admin/queue/grouped?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00",
+    );
   });
 });

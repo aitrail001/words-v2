@@ -7,8 +7,8 @@ from sqlalchemy.exc import IntegrityError
 
 import app.services.review as review_module
 from app.services.review import ReviewService
-from app.models.review import ReviewSession, ReviewCard, ReviewHistory
-from app.models.entry_review import EntryReviewState
+from app.models.entry_review import EntryReviewEvent, EntryReviewState
+from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.word import Word
 from app.models.meaning import Meaning
 from app.spaced_repetition import calculate_next_review
@@ -36,214 +36,331 @@ def review_service(mock_db):
     return ReviewService(mock_db)
 
 
-class TestCreateSession:
-    @pytest.mark.asyncio
-    async def test_create_session(self, review_service, mock_db):
-        user_id = uuid.uuid4()
-        session = await review_service.create_session(user_id)
-
-        assert session.user_id == user_id
-        assert session.started_at is not None
-        assert session.completed_at is None
-        assert session.cards_reviewed == 0
-        mock_db.add.assert_called_once()
-
-
-class TestGetDueCards:
-    @pytest.mark.asyncio
-    async def test_get_due_cards_returns_overdue(self, review_service, mock_db):
-        user_id = uuid.uuid4()
-        word = Word(id=uuid.uuid4(), word="test", language="en")
-        meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="A test")
-
-        # Mock: card is overdue (next_review in the past)
-        overdue_card = ReviewCard(
-            id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=word.id,
-            meaning_id=meaning.id,
-            card_type="flashcard",
-            next_review=datetime.now(timezone.utc) - timedelta(days=1),
-        )
-
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = [overdue_card]
-        mock_db.execute.return_value = result
-
-        cards = await review_service.get_due_cards(user_id, limit=10)
-        assert len(cards) == 1
-        assert cards[0].id == overdue_card.id
-
-    @pytest.mark.asyncio
-    async def test_get_due_cards_excludes_future(self, review_service, mock_db):
-        user_id = uuid.uuid4()
-
-        # Mock: no cards due
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = []
-        mock_db.execute.return_value = result
-
-        cards = await review_service.get_due_cards(user_id, limit=10)
-        assert len(cards) == 0
-
-
-class TestSubmitReview:
-    @pytest.mark.asyncio
-    async def test_submit_review_updates_card(self, review_service, mock_db):
-        card_id = uuid.uuid4()
-        user_id = uuid.uuid4()
-        card = ReviewCard(
-            id=card_id,
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            ease_factor=2.5,
-            interval_days=1,
-            repetitions=1,  # Second review
-        )
-
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = card
-        mock_db.execute.return_value = result
-
-        updated = await review_service.submit_review(
-            card_id=card_id,
-            quality=5,  # Perfect recall increases ease factor
-            time_spent_ms=5000,
-            user_id=user_id,
-        )
-
-        assert updated.quality_rating == 5
-        assert updated.time_spent_ms == 5000
-        assert updated.ease_factor > 2.5  # SM-2 increases ease for quality 5
-        assert updated.interval_days > 1
-        assert updated.next_review is not None
-
-        executed_query = mock_db.execute.await_args_list[0].args[0]
-        assert "review_sessions.user_id" in str(executed_query)
-        assert user_id in executed_query.compile().params.values()
-
-    @pytest.mark.asyncio
-    async def test_submit_review_quality_0_resets(self, review_service, mock_db):
-        card = ReviewCard(
-            id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            ease_factor=2.5,
-            interval_days=10,
-        )
-
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = card
-        mock_db.execute.return_value = result
-
-        updated = await review_service.submit_review(
-            card_id=card.id,
-            quality=0,
-            time_spent_ms=3000,
-            user_id=uuid.uuid4(),
-        )
-
-        assert updated.quality_rating == 0
-        assert updated.interval_days == 1  # SM-2 resets to 1 day for quality < 3
-
-    @pytest.mark.asyncio
-    async def test_submit_review_raises_when_card_not_found_for_user_scope(
-        self, review_service, mock_db
-    ):
-        card_id = uuid.uuid4()
-        user_id = uuid.uuid4()
-
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = None
-        mock_db.execute.return_value = result
-
-        with pytest.raises(ValueError, match=f"Review card {card_id} not found"):
-            await review_service.submit_review(
-                card_id=card_id,
-                quality=4,
-                time_spent_ms=2500,
-                user_id=user_id,
-            )
-
-
 class TestQueueAdd:
     @pytest.mark.asyncio
     async def test_add_to_queue_is_idempotent_per_user_and_meaning(
         self, review_service, mock_db
     ):
         user_id = uuid.uuid4()
-        existing_card = ReviewCard(
+        word_id = uuid.uuid4()
+        meaning = Meaning(
             id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
+            word_id=word_id,
+            definition="queue meaning",
         )
+        existing_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning.id,
+            stability=0.3,
+            difficulty=0.5,
+        )
+        existing_state.next_due_at = datetime.now(timezone.utc) + timedelta(days=1)
 
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = existing_card
-        mock_db.execute.return_value = result
+        meaning_result = MagicMock()
+        meaning_result.scalar_one_or_none.return_value = meaning
 
-        created = await review_service.add_to_queue(user_id, existing_card.meaning_id)
+        mock_db.execute.side_effect = [meaning_result]
+        review_service._ensure_target_review_state = AsyncMock(return_value=existing_state)
 
-        assert created.id == existing_card.id
+        created = await review_service.add_to_queue(user_id, meaning.id)
+
+        assert created.id == existing_state.id
+        assert created.meaning_id == meaning.id
+        assert created.word_id == word_id
+        assert created.card_type == "flashcard"
         mock_db.add.assert_not_called()
-        mock_db.commit.assert_not_awaited()
+        mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_add_to_queue_creates_item_when_missing(self, review_service, mock_db):
         user_id = uuid.uuid4()
         word_id = uuid.uuid4()
         meaning = Meaning(id=uuid.uuid4(), word_id=word_id, definition="queue meaning")
-        session = ReviewSession(id=uuid.uuid4(), user_id=user_id)
-
-        existing_result = MagicMock()
-        existing_result.scalar_one_or_none.return_value = None
         meaning_result = MagicMock()
         meaning_result.scalar_one_or_none.return_value = meaning
-        session_result = MagicMock()
-        session_result.scalar_one_or_none.return_value = session
-        mock_db.execute.side_effect = [existing_result, meaning_result, session_result]
+        created_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning.id,
+            stability=0.3,
+            difficulty=0.5,
+        )
+        mock_db.execute.side_effect = [meaning_result]
+        review_service._ensure_target_review_state = AsyncMock(return_value=created_state)
 
         created = await review_service.add_to_queue(user_id, meaning.id)
 
         assert created.meaning_id == meaning.id
-        if hasattr(created, "word_id"):
-            assert created.word_id == word_id
+        assert created.word_id == word_id
         assert created.card_type == "flashcard"
-        mock_db.add.assert_called_once()
+        mock_db.add.assert_not_called()
         mock_db.commit.assert_awaited_once()
 
 
+class TestEntryQueueSchedule:
+    @pytest.mark.asyncio
+    async def test_get_entry_queue_schedule_creates_state_for_learning_entry_without_schedule(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        empty_state_result = MagicMock()
+        empty_state_result.scalar_one_or_none.return_value = None
+        learner_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            status="learning",
+        )
+        learner_status_result = MagicMock()
+        learner_status_result.scalar_one_or_none.return_value = learner_status
+        created_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            stability=0.3,
+            difficulty=0.5,
+        )
+        created_state.next_due_at = None
+        created_state.recheck_due_at = None
+        mock_db.execute.side_effect = [learner_status_result, empty_state_result]
+        review_service._ensure_entry_review_state = AsyncMock(return_value=created_state)
+
+        payload = await review_service.get_entry_queue_schedule(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+        )
+
+        assert payload == {
+            "queue_item_id": str(created_state.id),
+            "next_review_at": None,
+            "current_schedule_value": "1d",
+            "current_schedule_label": "Tomorrow",
+            "current_schedule_source": "scheduled_timestamp",
+            "schedule_options": [
+                {"value": "10m", "label": "Later today", "is_default": False},
+                {"value": "1d", "label": "Tomorrow", "is_default": True},
+                {"value": "3d", "label": "In 3 days", "is_default": False},
+                {"value": "7d", "label": "In a week", "is_default": False},
+                {"value": "14d", "label": "In 2 weeks", "is_default": False},
+                {"value": "1m", "label": "In a month", "is_default": False},
+                {"value": "3m", "label": "In 3 months", "is_default": False},
+                {"value": "6m", "label": "In 6 months", "is_default": False},
+                {"value": "never_for_now", "label": "Pause review", "is_default": False},
+            ],
+        }
+        review_service._ensure_entry_review_state.assert_awaited_once_with(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+        )
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_entry_queue_schedule_hides_controls_for_to_learn_entries(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            stability=3,
+            difficulty=0.5,
+        )
+        state_result = MagicMock()
+        state_result.scalar_one_or_none.return_value = state
+        learner_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            status="to_learn",
+        )
+        learner_status_result = MagicMock()
+        learner_status_result.scalar_one_or_none.return_value = learner_status
+        mock_db.execute.side_effect = [learner_status_result, state_result]
+
+        payload = await review_service.get_entry_queue_schedule(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+        )
+
+        assert payload is None
+
+
 class TestQueueDue:
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_excludes_to_learn_entries(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [state_result]
+
+        due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
+
+        assert due_items == []
+
     @pytest.mark.asyncio
     async def test_get_due_queue_items_includes_prompt_metadata(
         self, review_service, mock_db
     ):
         user_id = uuid.uuid4()
-        card = ReviewCard(
+        word_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        state = EntryReviewState(
             id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            next_review=datetime.now(timezone.utc) - timedelta(hours=1),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.5,
         )
+        state.next_due_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        word = Word(id=word_id, word="serendipity", language="en")
+        meanings = [Meaning(id=meaning_id, word_id=word_id, definition="lucky chance")]
 
-        result = MagicMock()
-        result.all.return_value = [(card, "serendipity", "lucky chance")]
-        mock_db.execute.return_value = result
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = [state]
+        prefs_result = MagicMock()
+        prefs_result.scalar_one_or_none.return_value = None
+        accent_result = MagicMock()
+        accent_result.scalar_one_or_none.return_value = "us"
+        word_result = MagicMock()
+        word_result.scalars.return_value.all.return_value = [word]
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = meanings
+        history_result = MagicMock()
+        history_result.scalar_one.return_value = 0
+        mock_db.execute.side_effect = [
+            state_result,
+            prefs_result,
+            accent_result,
+            word_result,
+            meanings_result,
+            history_result,
+        ]
+        review_service._fetch_first_meaning_sentence_map = AsyncMock(return_value={meaning_id: None})
+        review_service._build_card_prompt = AsyncMock(return_value={"prompt_type": "definition_to_entry"})
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "serendipity"}
+        )
 
         due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
 
         assert len(due_items) == 1
-        assert due_items[0]["id"] == card.id
+        assert due_items[0]["id"] == state.id
         assert due_items[0]["word"] == "serendipity"
         assert due_items[0]["definition"] == "lucky chance"
+
+
+class TestGroupedReviewQueue:
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_bucket_detail_includes_progress_and_history(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+            success_streak=3,
+            lapse_count=1,
+            exposure_count=5,
+            times_remembered=4,
+        )
+        state.next_due_at = datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc)
+        state.last_reviewed_at = datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc)
+        state.created_at = datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc)
+
+        state_result = MagicMock()
+        state_result.all.return_value = [(state, "learning")]
+        word_result = MagicMock()
+        word_result.all.return_value = [(entry_id, "candidate")]
+        event_one = EntryReviewEvent(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            review_state_id=state.id,
+            entry_type="word",
+            entry_id=entry_id,
+            prompt_type="confidence_check",
+            prompt_family="recognition",
+            outcome="correct_tested",
+            scheduled_interval_days=30,
+            scheduled_by="recommended",
+        )
+        event_one.created_at = datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc)
+        event_two = EntryReviewEvent(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            review_state_id=state.id,
+            entry_type="word",
+            entry_id=entry_id,
+            prompt_type="typed_recall",
+            prompt_family="production",
+            outcome="failed",
+            scheduled_interval_days=1,
+            scheduled_by="manual_override",
+        )
+        event_two.created_at = datetime(2026, 4, 2, 8, 0, tzinfo=timezone.utc)
+        event_result = MagicMock()
+        event_result.scalars.return_value.all.return_value = [event_one, event_two]
+        mock_db.execute.side_effect = [state_result, word_result, event_result]
+
+        payload = await review_service.get_grouped_review_queue_bucket_detail(
+            user_id=user_id,
+            now=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+            bucket="later_today",
+        )
+
+        assert payload["count"] == 1
+        item = payload["items"][0]
+        assert item["text"] == "candidate"
+        assert item["success_streak"] == 3
+        assert item["lapse_count"] == 1
+        assert item["times_remembered"] == 4
+        assert item["exposure_count"] == 5
+        assert item["history"] == [
+            {
+                "id": str(event_one.id),
+                "reviewed_at": "2026-04-04T09:00:00+00:00",
+                "outcome": "correct_tested",
+                "prompt_type": "confidence_check",
+                "prompt_family": "recognition",
+                "scheduled_by": "recommended",
+                "scheduled_interval_days": 30,
+            },
+            {
+                "id": str(event_two.id),
+                "reviewed_at": "2026-04-02T08:00:00+00:00",
+                "outcome": "failed",
+                "prompt_type": "typed_recall",
+                "prompt_family": "production",
+                "scheduled_by": "manual_override",
+                "scheduled_interval_days": 1,
+            },
+        ]
 
     @pytest.mark.asyncio
     async def test_get_due_queue_items_prefers_entry_review_state(
@@ -306,6 +423,7 @@ class TestQueueDue:
         assert due_items[0]["source_entry_id"] == str(word_id)
         assert due_items[0]["detail"]["display_text"] == "jump the gun"
         assert due_items[0]["prompt"]["prompt_type"] in {
+            "confidence_check",
             "definition_to_entry",
             "entry_to_definition",
             "audio_to_definition",
@@ -315,23 +433,565 @@ class TestQueueDue:
             "meaning_discrimination",
         }
 
-
-class TestHistoryLookup:
     @pytest.mark.asyncio
-    async def test_get_latest_history_for_meaning_limits_to_first_row(self, review_service, mock_db):
+    async def test_get_due_queue_items_honors_manual_prompt_type_override(
+        self, review_service, mock_db
+    ):
         user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
         meaning_id = uuid.uuid4()
-        latest_history = MagicMock()
-        result = MagicMock()
-        result.scalars.return_value.first.return_value = latest_history
-        mock_db.execute.return_value = result
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.5,
+            last_submission_prompt_id="manual_prompt_type:speak_recall",
+        )
+        state.next_due_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        word = Word(id=word_id, word="candidate", language="en")
+        meanings = [Meaning(id=meaning_id, word_id=word_id, definition="A person who applies for a role.")]
 
-        history = await review_service._get_latest_history_for_meaning(user_id, meaning_id)
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = [state]
+        prefs = MagicMock()
+        prefs.enable_confidence_check = True
+        prefs.review_depth_preset = "balanced"
+        prefs_result = MagicMock()
+        prefs_result.scalar_one_or_none.return_value = prefs
+        accent_result = MagicMock()
+        accent_result.scalar_one_or_none.return_value = "us"
+        word_result = MagicMock()
+        word_result.scalars.return_value.all.return_value = [word]
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = meanings
+        history_result = MagicMock()
+        history_result.scalar_one.return_value = 0
+        mock_db.execute.side_effect = [
+            state_result,
+            prefs_result,
+            accent_result,
+            word_result,
+            meanings_result,
+            history_result,
+        ]
+        review_service._fetch_first_meaning_sentence_map = AsyncMock(return_value={meaning_id: None})
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "candidate"}
+        )
+        review_service._build_card_prompt = AsyncMock(
+            return_value={"prompt_type": "speak_recall", "audio_state": "ready"}
+        )
 
-        assert history is latest_history
-        result.scalars.return_value.first.assert_called_once()
-        executed_query = mock_db.execute.await_args_list[0].args[0]
-        assert executed_query._limit_clause is not None
+        due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
+
+        assert len(due_items) == 1
+        assert due_items[0]["review_mode"] == "mcq"
+        review_service._build_card_prompt.assert_awaited_once()
+        kwargs = review_service._build_card_prompt.await_args.kwargs
+        assert kwargs["forced_prompt_type"] == "speak_recall"
+
+
+class TestGroupedQueue:
+    @pytest.mark.asyncio
+    async def test_group_queue_items_buckets_states_by_due_window(self, review_service):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        overdue = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        overdue.next_due_at = now - timedelta(hours=2)
+        overdue.last_reviewed_at = now - timedelta(days=1)
+        overdue.entry_text = "alpha"
+        overdue.learner_status = "learning"
+
+        tomorrow = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=uuid.uuid4(),
+            target_type="phrase_sense",
+            target_id=uuid.uuid4(),
+            stability=14,
+            difficulty=0.5,
+        )
+        tomorrow.next_due_at = now + timedelta(days=1, hours=1)
+        tomorrow.last_reviewed_at = None
+        tomorrow.entry_text = "break down"
+        tomorrow.learner_status = "learning"
+
+        review_service._list_active_queue_states = AsyncMock(return_value=[overdue, tomorrow])
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload == {
+            "generated_at": now.isoformat(),
+            "total_count": 2,
+            "groups": [
+                {
+                    "bucket": "overdue",
+                    "count": 1,
+                    "items": [
+                        {
+                            "queue_item_id": str(overdue.id),
+                            "entry_id": str(overdue.entry_id),
+                            "entry_type": "word",
+                            "text": "alpha",
+                            "status": "learning",
+                            "next_review_at": overdue.next_due_at.isoformat(),
+                            "last_reviewed_at": overdue.last_reviewed_at.isoformat(),
+                        }
+                    ],
+                },
+                {
+                    "bucket": "tomorrow",
+                    "count": 1,
+                    "items": [
+                        {
+                            "queue_item_id": str(tomorrow.id),
+                            "entry_id": str(tomorrow.entry_id),
+                            "entry_type": "phrase",
+                            "text": "break down",
+                            "status": "learning",
+                            "next_review_at": tomorrow.next_due_at.isoformat(),
+                            "last_reviewed_at": None,
+                        }
+                    ],
+                },
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_group_queue_items_excludes_known_and_to_learn_entries(
+        self, review_service, mock_db
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        learning_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        learning_state.next_due_at = now + timedelta(hours=3)
+        learning_state.last_reviewed_at = now - timedelta(days=1)
+
+        known_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        known_state.next_due_at = now + timedelta(days=1)
+
+        to_learn_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        to_learn_state.next_due_at = now + timedelta(days=2)
+
+        learning_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=learning_state.entry_id,
+            status="learning",
+        )
+        known_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=known_state.entry_id,
+            status="known",
+        )
+        to_learn_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=to_learn_state.entry_id,
+            status="to_learn",
+        )
+
+        state_result = MagicMock()
+        state_result.all.return_value = [
+            (learning_state, learning_status.status),
+            (known_state, known_status.status),
+            (to_learn_state, to_learn_status.status),
+        ]
+        state_result.scalars.return_value.all.return_value = [
+            learning_state,
+            known_state,
+            to_learn_state,
+        ]
+        word_result = MagicMock()
+        word_result.all.return_value = [
+            (learning_state.entry_id, "alpha"),
+            (known_state.entry_id, "bravo"),
+            (to_learn_state.entry_id, "charlie"),
+        ]
+        mock_db.execute.side_effect = [state_result, word_result]
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload["generated_at"] == now.isoformat()
+        assert payload["total_count"] == 1
+        assert payload["groups"] == [
+            {
+                "bucket": "later_today",
+                "count": 1,
+                "items": [
+                    {
+                        "queue_item_id": str(learning_state.id),
+                        "entry_id": str(learning_state.entry_id),
+                        "entry_type": "word",
+                        "text": "alpha",
+                        "status": "learning",
+                        "next_review_at": learning_state.next_due_at.isoformat(),
+                        "last_reviewed_at": learning_state.last_reviewed_at.isoformat(),
+                    }
+                ],
+            }
+        ]
+        included_ids = {
+            item["queue_item_id"]
+            for group in payload["groups"]
+            for item in group["items"]
+        }
+        assert str(learning_state.id) in included_ids
+        assert str(known_state.id) not in included_ids
+        assert str(to_learn_state.id) not in included_ids
+
+    @pytest.mark.asyncio
+    async def test_group_queue_items_buries_sibling_targets_for_same_entry(
+        self, review_service, mock_db
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+        shared_entry_id = uuid.uuid4()
+
+        first_sibling = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=shared_entry_id,
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        first_sibling.next_due_at = now + timedelta(hours=1)
+
+        second_sibling = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=shared_entry_id,
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        second_sibling.next_due_at = now + timedelta(hours=2)
+
+        other_entry = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        other_entry.next_due_at = now + timedelta(days=1)
+
+        state_result = MagicMock()
+        state_result.all.return_value = [
+            (first_sibling, "learning"),
+            (second_sibling, "learning"),
+            (other_entry, "learning"),
+        ]
+        word_result = MagicMock()
+        word_result.all.return_value = [
+            (shared_entry_id, "alpha"),
+            (other_entry.entry_id, "bravo"),
+        ]
+        mock_db.execute.side_effect = [state_result, word_result]
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload["total_count"] == 2
+        item_ids = [
+            item["queue_item_id"]
+            for group in payload["groups"]
+            for item in group["items"]
+        ]
+        assert str(first_sibling.id) in item_ids
+        assert str(second_sibling.id) not in item_ids
+        assert str(other_entry.id) in item_ids
+
+    @pytest.mark.asyncio
+    async def test_group_queue_items_skips_states_without_source_entry(
+        self, review_service, mock_db
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        valid_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        valid_state.next_due_at = now + timedelta(hours=1)
+
+        missing_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        missing_state.next_due_at = now + timedelta(hours=2)
+
+        state_result = MagicMock()
+        state_result.all.return_value = [
+            (valid_state, "learning"),
+            (missing_state, "learning"),
+        ]
+        word_result = MagicMock()
+        word_result.all.return_value = [
+            (valid_state.entry_id, "alpha"),
+        ]
+        mock_db.execute.side_effect = [state_result, word_result]
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload["total_count"] == 1
+        assert payload["groups"] == [
+            {
+                "bucket": "later_today",
+                "count": 1,
+                "items": [
+                    {
+                        "queue_item_id": str(valid_state.id),
+                        "entry_id": str(valid_state.entry_id),
+                        "entry_type": "word",
+                        "text": "alpha",
+                        "status": "learning",
+                        "next_review_at": valid_state.next_due_at.isoformat(),
+                        "last_reviewed_at": None,
+                    }
+                ],
+            }
+        ]
+
+    @pytest.mark.parametrize(
+        ("due_at", "expected_bucket"),
+        [
+            (datetime(2026, 4, 5, 8, 59, 59, tzinfo=timezone.utc), "overdue"),
+            (datetime(2026, 4, 5, 9, 0, 0, tzinfo=timezone.utc), "due_now"),
+            (datetime(2026, 4, 5, 9, 0, 1, tzinfo=timezone.utc), "later_today"),
+            (datetime(2026, 4, 6, 9, 0, 0, tzinfo=timezone.utc), "tomorrow"),
+            (datetime(2026, 4, 12, 9, 0, 0, tzinfo=timezone.utc), "this_week"),
+            (datetime(2026, 5, 6, 9, 0, 0, tzinfo=timezone.utc), "this_month"),
+            (datetime(2026, 7, 6, 9, 0, 0, tzinfo=timezone.utc), "one_to_three_months"),
+            (datetime(2026, 7, 9, 9, 0, 0, tzinfo=timezone.utc), "three_to_six_months"),
+            (datetime(2026, 10, 6, 9, 0, 0, tzinfo=timezone.utc), "six_plus_months"),
+        ],
+    )
+    def test_classify_review_bucket_handles_exact_boundaries(self, due_at, expected_bucket):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+
+        assert ReviewService.classify_review_bucket(due_at, now) == expected_bucket
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_summary_returns_bucket_cards(self, review_service):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        overdue = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        overdue.next_due_at = now - timedelta(hours=2)
+        overdue.entry_text = "alpha"
+        overdue.learner_status = "learning"
+
+        tomorrow = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=uuid.uuid4(),
+            target_type="phrase_sense",
+            target_id=uuid.uuid4(),
+            stability=14,
+            difficulty=0.5,
+        )
+        tomorrow.next_due_at = now + timedelta(days=1, hours=1)
+        tomorrow.entry_text = "break down"
+        tomorrow.learner_status = "learning"
+
+        review_service._list_active_queue_states = AsyncMock(return_value=[overdue, tomorrow])
+
+        payload = await review_service.get_grouped_review_queue_summary(user_id=user_id, now=now)
+
+        assert payload == {
+            "generated_at": now.isoformat(),
+            "total_count": 2,
+            "groups": [
+                {"bucket": "overdue", "count": 1},
+                {"bucket": "tomorrow", "count": 1},
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_bucket_detail_sorts_by_requested_order(
+        self, review_service
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        earliest = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        earliest.next_due_at = now + timedelta(minutes=15)
+        earliest.last_reviewed_at = now - timedelta(days=3)
+        earliest.entry_text = "gamma"
+        earliest.learner_status = "learning"
+
+        latest = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        latest.next_due_at = now + timedelta(hours=4)
+        latest.last_reviewed_at = now - timedelta(days=1)
+        latest.entry_text = "alpha"
+        latest.learner_status = "learning"
+
+        middle = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=uuid.uuid4(),
+            target_type="phrase_sense",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        middle.next_due_at = now + timedelta(hours=2)
+        middle.last_reviewed_at = now - timedelta(days=2)
+        middle.entry_text = "beta"
+        middle.learner_status = "learning"
+
+        review_service._list_active_queue_states = AsyncMock(return_value=[latest, middle, earliest])
+
+        payload = await review_service.get_grouped_review_queue_bucket_detail(
+            user_id=user_id,
+            now=now,
+            bucket="later_today",
+            sort="next_review_at",
+            order="asc",
+        )
+
+        assert payload["bucket"] == "later_today"
+        assert payload["count"] == 3
+        assert payload["sort"] == "next_review_at"
+        assert payload["order"] == "asc"
+        assert [item["text"] for item in payload["items"]] == ["gamma", "beta", "alpha"]
+
+    def test_build_current_schedule_payload_uses_actual_due_time_for_display(self):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=7,
+            difficulty=0.5,
+        )
+        state.next_due_at = now + timedelta(days=3)
+        state.recheck_due_at = None
+
+        payload = ReviewService._build_current_schedule_payload(state, now=now)
+
+        assert payload["queue_item_id"] == str(state.id)
+        assert payload["next_review_at"] == state.next_due_at.isoformat()
+        assert payload["current_schedule_value"] == "3d"
+        assert payload["current_schedule_label"] == "In 3 days"
+        assert payload["current_schedule_source"] == "scheduled_timestamp"
+        assert next(
+            option for option in payload["schedule_options"] if option["value"] == "3d"
+        )["is_default"] is True
+
+    def test_long_horizon_success_sequence_reaches_multi_month_bucket(self):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        due_at = now
+        stability = 3.0
+        difficulty = 0.5
+
+        for _ in range(7):
+            result = calculate_next_review(
+                outcome="correct_tested",
+                prompt_type="typed_recall",
+                stability=stability,
+                difficulty=difficulty,
+                grade="easy_pass",
+            )
+            due_at = due_at + timedelta(days=result.interval_days)
+            stability = result.stability
+            difficulty = result.difficulty
+
+        assert ReviewService.classify_review_bucket(due_at, now) == "three_to_six_months"
 
 
 class TestQueueSubmit:
@@ -340,62 +1000,131 @@ class TestQueueSubmit:
         self, review_service, mock_db
     ):
         user_id = uuid.uuid4()
-        card = ReviewCard(
+        word_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        state = EntryReviewState(
             id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
-            word_id=uuid.uuid4(),
-            meaning_id=uuid.uuid4(),
-            card_type="flashcard",
-            ease_factor=2.5,
-            interval_days=1,
-            repetitions=1,
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=1,
+            difficulty=0.5,
+            success_streak=1,
         )
-        card.review_count = 2
-        card.correct_count = 1
-
-        class FakeHistory:
-            def __init__(self, **kwargs):
-                self.payload = kwargs
-
-        review_service.history_model = FakeHistory
-
-        card_result = MagicMock()
-        card_result.scalar_one_or_none.return_value = card
-        mock_db.execute.return_value = card_result
+        state.interval_days = 1
+        locked_result = MagicMock()
+        locked_result.scalar_one_or_none.return_value = state
+        history_result = MagicMock()
+        history_result.scalar_one.return_value = 1
+        mock_db.execute.side_effect = [locked_result, history_result]
+        review_service._build_detail_payload_for_word_id = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "resilience"}
+        )
         prompt_token = review_service._encode_prompt_token(
             {
                 "prompt_id": str(uuid.uuid4()),
                 "user_id": str(user_id),
-                "queue_item_id": str(card.id),
+                "queue_item_id": str(state.id),
                 "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
                 "review_mode": ReviewService.REVIEW_MODE_MCQ,
                 "source_entry_type": "word",
-                "source_entry_id": str(card.word_id),
-                "source_meaning_id": str(card.meaning_id),
+                "source_entry_id": str(word_id),
+                "source_meaning_id": str(meaning_id),
                 "correct_option_id": "A",
             }
         )
 
         updated = await review_service.submit_queue_review(
-            item_id=card.id,
+            item_id=state.id,
             quality=5,
             time_spent_ms=1500,
             user_id=user_id,
-            card_type="listening",
+            prompt_token=prompt_token,
+            selected_option_id="A",
+            confirm=True,
+        )
+
+        assert updated.stability >= 1
+        assert updated.interval_days >= 1
+        assert updated.success_streak == 2
+        assert updated.times_remembered == 1
+        assert updated.outcome == "correct_tested"
+        mock_db.commit.assert_awaited_once()
+        assert any(
+            isinstance(call.args[0], EntryReviewEvent) for call in mock_db.add.call_args_list
+        )
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_returns_success_preview_without_committing_until_confirmed(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.4,
+        )
+        state_lookup_result = MagicMock()
+        state_lookup_result.scalar_one_or_none.return_value = state
+        mock_db.execute.side_effect = [state_lookup_result]
+        review_service._build_detail_payload_for_word_id = AsyncMock(
+            return_value={
+                "entry_type": "word",
+                "entry_id": str(word_id),
+                "display_text": "barely",
+                "meaning_count": 1,
+                "remembered_count": 0,
+                "compare_with": [],
+                "meanings": [],
+            }
+        )
+
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": str(uuid.uuid4()),
+                "user_id": str(user_id),
+                "queue_item_id": str(state.id),
+                "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(word_id),
+                "source_meaning_id": str(meaning_id),
+                "correct_option_id": "A",
+            }
+        )
+
+        updated = await review_service.submit_queue_review(
+            item_id=state.id,
+            quality=5,
+            time_spent_ms=1500,
+            user_id=user_id,
             prompt_token=prompt_token,
             selected_option_id="A",
         )
 
-        assert updated.ease_factor > 2.5
-        assert updated.interval_days > 1
-        assert updated.repetitions == 2
-        assert updated.review_count == 3
-        assert updated.correct_count == 2
-        assert updated.card_type == "listening"
-        mock_db.commit.assert_awaited_once()
-        assert any(
-            isinstance(call.args[0], FakeHistory) for call in mock_db.add.call_args_list
-        )
+        assert updated is state
+        assert updated.outcome == "correct_tested"
+        assert updated.detail == {
+            "entry_type": "word",
+            "entry_id": str(word_id),
+            "display_text": "barely",
+            "meaning_count": 1,
+            "remembered_count": 0,
+            "compare_with": [],
+            "meanings": [],
+        }
+        assert updated.last_submission_prompt_id is None
+        mock_db.add.assert_not_called()
+        mock_db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_submit_queue_review_updates_entry_review_state_and_sets_recheck(
@@ -524,6 +1253,7 @@ class TestQueueSubmit:
             user_id=user_id,
             prompt_token=prompt_token,
             typed_answer="resilience",
+            confirm=True,
         )
 
         event = next(
@@ -751,8 +1481,32 @@ class TestPromptFamilies:
 
     @pytest.mark.asyncio
     async def test_build_card_prompt_supports_speak_recall_placeholder(
-        self, review_service, mock_db
+        self, review_service, mock_db, monkeypatch
     ):
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_audio_spelling=True,
+                enable_confidence_check=True,
+            )
+        )
+        monkeypatch.setattr(
+            review_service,
+            "_select_prompt_type",
+            MagicMock(return_value=ReviewService.PROMPT_TYPE_SPEAK_RECALL),
+        )
+        review_service._load_prompt_audio_assets = AsyncMock(
+            return_value=[
+                MagicMock(
+                    locale="en_us",
+                    content_scope="word",
+                    relative_path="review/word/en_us/word.mp3",
+                    storage_policy=MagicMock(primary_storage_base="/tmp/voice", primary_storage_kind="local"),
+                    id=uuid.uuid4(),
+                )
+            ]
+        )
+        review_service._get_user_accent_preference = AsyncMock(return_value="us")
         prompt = await review_service._build_card_prompt(
             review_mode=ReviewService.REVIEW_MODE_MCQ,
             source_text="resilience",
@@ -767,12 +1521,16 @@ class TestPromptFamilies:
                 "A tendency to overreact.",
                 "A refusal to listen.",
             ],
+            user_id=uuid.uuid4(),
+            source_entry_id=uuid.uuid4(),
+            source_entry_type="word",
         )
 
         assert prompt["prompt_type"] == "speak_recall"
         assert prompt["input_mode"] == "speech_placeholder"
         assert prompt["voice_placeholder_text"] is not None
-        assert prompt["audio_state"] == "placeholder"
+        assert prompt["audio_state"] == "ready"
+        assert prompt["audio"]["preferred_playback_url"].endswith("/content")
         assert prompt["expected_input"] is None
         assert prompt["prompt_token"]
 
@@ -1068,6 +1826,8 @@ class TestPromptFamilies:
         assert prompt["prompt_type"] == "collocation_check"
         assert prompt["sentence_masked"] is not None
         assert "common expression" in prompt["stem"].lower()
+        assert prompt["question"] == "They ___ whenever a draft appears."
+        assert "jump the gun" not in prompt["question"].lower()
         assert len(prompt["options"]) == 4
 
     @pytest.mark.asyncio
@@ -1100,8 +1860,190 @@ class TestPromptFamilies:
 
         assert prompt["prompt_type"] == "situation_matching"
         assert "situation" in prompt["stem"].lower()
-        assert prompt["question"] == "Resilience helps teams adapt after major setbacks."
+        assert prompt["question"] == "___ helps teams adapt after major setbacks."
+        assert "resilience" not in prompt["question"].lower()
         assert len(prompt["options"]) == 4
+
+    @pytest.mark.asyncio
+    async def test_build_card_prompt_supports_confidence_check(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        source_entry_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        prefs = MagicMock()
+        prefs.review_depth_preset = "balanced"
+        prefs.enable_audio_spelling = False
+        prefs.enable_word_spelling = True
+        prefs.enable_confidence_check = True
+        prefs.show_pictures_in_questions = False
+
+        monkeypatch.setattr(
+            review_service,
+            "_get_user_review_preferences",
+            AsyncMock(return_value=prefs),
+        )
+        monkeypatch.setattr(
+            review_service,
+            "_get_user_accent_preference",
+            AsyncMock(return_value="us"),
+        )
+        review_service._load_prompt_audio_assets = AsyncMock(
+            return_value=[
+                MagicMock(
+                    locale="en_us",
+                    relative_path="review/word/en_us/word.mp3",
+                    storage_policy=MagicMock(primary_storage_base="/tmp/voice", primary_storage_kind="local"),
+                    id=uuid.uuid4(),
+                )
+            ]
+        )
+
+        prompt = await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_CONFIDENCE,
+            source_text="persistence",
+            definition="The ability to keep going despite difficulties.",
+            sentence="Persistence kept the project moving through repeated delays.",
+            is_phrase_entry=False,
+            distractor_seed="seed",
+            meaning_id=meaning_id,
+            index=0,
+            alternative_definitions=None,
+            user_id=user_id,
+            source_entry_id=source_entry_id,
+            source_entry_type="word",
+        )
+
+        assert prompt["prompt_type"] == "confidence_check"
+        assert prompt["question"] == "Persistence kept the project moving through repeated delays."
+        assert [option["label"] for option in prompt["options"]] == ["I remember it", "Not sure"]
+        assert prompt["audio_state"] == "ready"
+        assert prompt["audio"]["preferred_playback_url"].endswith("/content")
+
+    @pytest.mark.asyncio
+    async def test_prompt_audio_selection_prefers_word_scope_assets(
+        self, review_service, mock_db
+    ):
+        word_asset = MagicMock(
+            content_scope="word",
+            locale="en_us",
+            profile_key="female-word",
+            word_id=uuid.uuid4(),
+            meaning_id=None,
+            meaning_example_id=None,
+        )
+        definition_asset = MagicMock(
+            content_scope="definition",
+            locale="en_us",
+            profile_key="female-definition",
+            word_id=word_asset.word_id,
+            meaning_id=uuid.uuid4(),
+            meaning_example_id=None,
+        )
+        ranked_assets = review_service._select_prompt_audio_assets(
+            assets=[definition_asset, word_asset],
+            target_entry_type="word",
+            target_id=None,
+            example_id=None,
+        )
+
+        assert ranked_assets[0] is word_asset
+
+    @pytest.mark.asyncio
+    async def test_build_card_prompt_audio_to_definition_hides_answer_word(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        source_entry_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        prefs = MagicMock()
+        prefs.review_depth_preset = "deep"
+        prefs.enable_audio_spelling = True
+        prefs.enable_word_spelling = True
+        prefs.enable_confidence_check = False
+        prefs.show_pictures_in_questions = False
+
+        monkeypatch.setattr(
+            review_service,
+            "_get_user_review_preferences",
+            AsyncMock(return_value=prefs),
+        )
+        monkeypatch.setattr(
+            review_service,
+            "_select_prompt_type",
+            MagicMock(return_value=ReviewService.PROMPT_TYPE_AUDIO_TO_DEFINITION),
+        )
+        monkeypatch.setattr(
+            review_service,
+            "_get_user_accent_preference",
+            AsyncMock(return_value="us"),
+        )
+        review_service._fetch_same_day_definition_distractors = AsyncMock(return_value=[])
+        review_service._fetch_adjacent_definition_distractors = AsyncMock(return_value=[])
+        review_service._load_prompt_audio_assets = AsyncMock(
+            return_value=[
+                MagicMock(
+                    locale="en_us",
+                    relative_path="review/word/en_us/word.mp3",
+                    storage_policy=MagicMock(primary_storage_base="/tmp/voice", primary_storage_kind="local"),
+                    id=uuid.uuid4(),
+                )
+            ]
+        )
+
+        prompt = await review_service._build_card_prompt(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            source_text="tranquil",
+            definition="Calm and peaceful.",
+            sentence=None,
+            is_phrase_entry=False,
+            distractor_seed="seed",
+            meaning_id=meaning_id,
+            index=0,
+            alternative_definitions=None,
+            user_id=user_id,
+            source_entry_id=source_entry_id,
+            source_entry_type="word",
+        )
+
+        assert prompt["prompt_type"] == "audio_to_definition"
+        assert prompt["question"] == "Which definition matches the audio?"
+        assert prompt["question"] != "tranquil"
+
+    @pytest.mark.parametrize(
+        ("index", "sentence", "expected_prompt_type"),
+        [
+            (0, "Persistence kept the project moving through repeated delays.", ReviewService.PROMPT_TYPE_SENTENCE_GAP),
+            (1, "They jump the gun whenever a draft appears.", ReviewService.PROMPT_TYPE_COLLOCATION_CHECK),
+            (2, "Resilience helps teams adapt after major setbacks.", ReviewService.PROMPT_TYPE_SITUATION_MATCHING),
+            (3, None, ReviewService.PROMPT_TYPE_ENTRY_TO_DEFINITION),
+            (4, None, ReviewService.PROMPT_TYPE_AUDIO_TO_DEFINITION),
+            (5, None, ReviewService.PROMPT_TYPE_TYPED_RECALL),
+            (6, None, ReviewService.PROMPT_TYPE_SPEAK_RECALL),
+            (7, None, ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY),
+        ],
+    )
+    def test_seeded_review_scenario_order_selects_expected_prompt_family(
+        self,
+        review_service,
+        index,
+        sentence,
+        expected_prompt_type,
+    ):
+        candidates = review_service._build_available_prompt_types(
+            review_mode=ReviewService.REVIEW_MODE_MCQ,
+            sentence=sentence,
+            alternative_definitions=None,
+            review_depth_preset="balanced",
+            allow_typed_recall=True,
+            allow_audio_spelling=True,
+            allow_confidence=False,
+            active_target_count=1,
+        )
+
+        selected = review_service._select_prompt_type(candidates, index=index)
+
+        assert selected == expected_prompt_type
 
     @pytest.mark.asyncio
     async def test_build_card_prompt_gentle_preset_skips_typed_and_audio_spelling(
@@ -1240,6 +2182,18 @@ class TestPromptFamilies:
         assert typed.stability > 3
 
     @pytest.mark.asyncio
+    async def test_scheduler_accepts_confidence_check_prompt_type(self):
+        confidence = calculate_next_review(
+            outcome="correct_tested",
+            prompt_type="confidence_check",
+            stability=3,
+            difficulty=0.5,
+        )
+
+        assert confidence.interval_days > 0
+        assert confidence.stability > 0
+
+    @pytest.mark.asyncio
     async def test_scheduler_distinguishes_grade_buckets(self):
         hard = calculate_next_review(
             outcome="correct_tested",
@@ -1306,6 +2260,13 @@ class TestQueueStats:
         assert stats["correct_count"] == 7
         assert stats["accuracy"] == 0.7
 
+        total_statement = mock_db.execute.await_args_list[0].args[0]
+        due_statement = mock_db.execute.await_args_list[1].args[0]
+        assert "learner_entry_statuses.status IS NULL" in str(total_statement)
+        assert "learner_entry_statuses.status = :status_1" in str(total_statement)
+        assert "learner_entry_statuses.status IS NULL" in str(due_statement)
+        assert "learner_entry_statuses.status = :status_1" in str(due_statement)
+
     @pytest.mark.asyncio
     async def test_get_queue_stats_uses_short_lived_cache(self, review_service, mock_db):
         user_id = uuid.uuid4()
@@ -1365,6 +2326,82 @@ class TestQueueStats:
 
 class TestLearningStart:
     @pytest.mark.asyncio
+    async def test_start_learning_entry_for_word_commits_created_target_states(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        word = Word(id=word_id, word="resilience", language="en")
+        meaning = Meaning(
+            id=meaning_id,
+            word_id=word_id,
+            definition="The capacity to recover quickly from difficulties.",
+            order_index=0,
+        )
+
+        status_result = MagicMock()
+        status_result.scalar_one_or_none.return_value = None
+        word_result = MagicMock()
+        word_result.scalar_one_or_none.return_value = word
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = [meaning]
+        mock_db.execute.side_effect = [status_result, word_result, meanings_result]
+
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_confidence_check=True,
+                enable_audio_spelling=False,
+            )
+        )
+        review_service._get_user_accent_preference = AsyncMock(return_value="us")
+        review_service._fetch_first_meaning_sentence_map = AsyncMock(return_value={meaning_id: None})
+        review_service._fetch_history_count_by_word_id = AsyncMock(return_value={word_id: 0})
+        review_service._ensure_target_review_state = AsyncMock(
+            return_value=EntryReviewState(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                entry_type="word",
+                entry_id=word_id,
+                target_type="meaning",
+                target_id=meaning_id,
+                stability=0.3,
+                difficulty=0.5,
+            )
+        )
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={
+                "entry_type": "word",
+                "entry_id": str(word_id),
+                "display_text": "resilience",
+                "meaning_count": 1,
+                "remembered_count": 0,
+                "compare_with": [],
+                "meanings": [],
+            }
+        )
+        review_service._build_card_prompt = AsyncMock(
+            return_value={
+                "mode": "mcq",
+                "prompt_type": "definition_to_entry",
+                "question": "The capacity to recover quickly from difficulties.",
+                "options": [],
+            }
+        )
+
+        await review_service.start_learning_entry(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+        )
+
+        created_status = mock_db.add.call_args_list[0].args[0]
+        assert isinstance(created_status, LearnerEntryStatus)
+        assert created_status.status == "learning"
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_start_learning_entry_for_phrase_uses_phrase_target_state_as_queue_item_id(
         self, review_service, mock_db
     ):
@@ -1391,6 +2428,8 @@ class TestLearningStart:
         sense.definition = "To do something too soon."
         sense.order_index = 0
 
+        status_result = MagicMock()
+        status_result.scalar_one_or_none.return_value = None
         phrase_result = MagicMock()
         phrase_result.scalar_one_or_none.return_value = phrase
         senses_result = MagicMock()
@@ -1426,7 +2465,7 @@ class TestLearningStart:
                 "options": [],
             }
         )
-        mock_db.execute.side_effect = [phrase_result, senses_result]
+        mock_db.execute.side_effect = [status_result, phrase_result, senses_result]
 
         payload = await review_service.start_learning_entry(
             user_id=user_id,
@@ -1436,6 +2475,14 @@ class TestLearningStart:
 
         assert payload["queue_item_ids"] == [str(state_id)]
         assert payload["cards"][0]["queue_item_id"] == str(state_id)
+        created_status = mock_db.add.call_args_list[0].args[0]
+        assert isinstance(created_status, LearnerEntryStatus)
+        assert created_status.status == "learning"
+
+    def test_default_schedule_option_avoids_same_day_as_default_for_newly_fragile_items(
+        self, review_service
+    ):
+        assert review_service._default_schedule_option_value(0) == "1d"
 
 
 class TestReviewRedesignGaps:
@@ -1551,11 +2598,13 @@ class TestReviewRedesignGaps:
             difficulty=0.5,
         )
 
+        status_result = MagicMock()
+        status_result.scalar_one_or_none.return_value = None
         word_result = MagicMock()
         word_result.scalar_one_or_none.return_value = word
         meaning_result = MagicMock()
         meaning_result.scalars.return_value.all.return_value = [meaning]
-        mock_db.execute.side_effect = [word_result, meaning_result]
+        mock_db.execute.side_effect = [status_result, word_result, meaning_result]
 
         review_service._ensure_entry_review_state = AsyncMock(
             side_effect=AssertionError("parent entry state helper should not be used")
@@ -1599,6 +2648,9 @@ class TestReviewRedesignGaps:
 
         assert payload["queue_item_ids"] == [str(target_state_id)]
         assert payload["cards"][0]["queue_item_id"] == str(target_state_id)
+        created_status = mock_db.add.call_args_list[0].args[0]
+        assert isinstance(created_status, LearnerEntryStatus)
+        assert created_status.status == "learning"
 
     def test_bury_sibling_targets_keeps_only_one_due_target_per_parent(self, review_service):
         parent_entry_id = uuid.uuid4()
@@ -1843,35 +2895,6 @@ class TestReviewRedesignGaps:
         assert mock_db.execute.await_count == 1
 
 
-class TestCompleteSession:
-    @pytest.mark.asyncio
-    async def test_complete_session(self, review_service, mock_db):
-        session_id = uuid.uuid4()
-        session = ReviewSession(id=session_id, user_id=uuid.uuid4())
-
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = session
-        mock_db.execute.return_value = result
-
-        completed = await review_service.complete_session(session_id, session.user_id)
-
-        assert completed.completed_at is not None
-        mock_db.commit.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_complete_session_raises_when_session_not_found_for_user_scope(
-        self, review_service, mock_db
-    ):
-        session_id = uuid.uuid4()
-        user_id = uuid.uuid4()
-
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = None
-        mock_db.execute.return_value = result
-
-        with pytest.raises(ValueError, match=f"Review session {session_id} not found"):
-            await review_service.complete_session(session_id, user_id)
-
 
 class TestEntryReviewStateConcurrency:
     @pytest.mark.asyncio
@@ -1961,6 +2984,76 @@ class TestEntryReviewStateConcurrency:
         )
 
         assert updated is entry_state
+        mock_db.add.assert_not_called()
+        mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_rehydrates_idempotent_entry_state_response(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        state_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        prompt_id = str(uuid.uuid4())
+        entry_state = EntryReviewState(
+            id=state_id,
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.4,
+        )
+        entry_state.interval_days = 1
+        entry_state.last_submission_prompt_id = prompt_id
+
+        locked_result = MagicMock()
+        locked_result.scalar_one_or_none.return_value = entry_state
+        mock_db.execute.return_value = locked_result
+        review_service._build_detail_payload_for_word_id = AsyncMock(
+            return_value={
+                "entry_type": "word",
+                "entry_id": str(entry_id),
+                "display_text": "resilience",
+            }
+        )
+
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": prompt_id,
+                "user_id": str(user_id),
+                "queue_item_id": str(state_id),
+                "prompt_type": ReviewService.PROMPT_TYPE_TYPED_RECALL,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(entry_id),
+                "source_meaning_id": str(meaning_id),
+                "expected_input": "resilience",
+            }
+        )
+
+        updated = await review_service.submit_queue_review(
+            item_id=state_id,
+            quality=4,
+            time_spent_ms=5000,
+            user_id=user_id,
+            typed_answer="resilience",
+            prompt_token=prompt_token,
+            outcome="correct_tested",
+        )
+
+        assert updated is entry_state
+        assert updated.detail == {
+            "entry_type": "word",
+            "entry_id": str(entry_id),
+            "display_text": "resilience",
+        }
+        assert any(
+            option["value"] == "1d" and option["is_default"]
+            for option in updated.schedule_options or []
+        )
         mock_db.add.assert_not_called()
         mock_db.commit.assert_not_awaited()
 
@@ -2085,71 +3178,6 @@ class TestEntryReviewStateConcurrency:
 
         updated = await review_service.submit_queue_review(
             item_id=state_id,
-            quality=4,
-            time_spent_ms=5000,
-            user_id=user_id,
-            selected_option_id="B",
-            outcome="remember",
-            prompt_token=prompt_token,
-        )
-
-        assert updated.outcome == "wrong"
-        assert updated.needs_relearn is True
-
-
-class TestLegacyQueueSubmitHardening:
-    @pytest.mark.asyncio
-    async def test_legacy_submit_ignores_client_outcome_for_objective_prompts(
-        self, review_service, mock_db
-    ):
-        user_id = uuid.uuid4()
-        item_id = uuid.uuid4()
-        session_id = uuid.uuid4()
-        meaning_id = uuid.uuid4()
-        word_id = uuid.uuid4()
-
-        review_service.queue_model = ReviewCard
-        review_service.history_model = ReviewHistory
-        review_service.uses_legacy_queue = True
-
-        missing_state_result = MagicMock()
-        missing_state_result.scalar_one_or_none.return_value = None
-        legacy_item = ReviewCard(
-            id=item_id,
-            session_id=session_id,
-            word_id=word_id,
-            meaning_id=meaning_id,
-            card_type="flashcard",
-            ease_factor=2.5,
-            interval_days=3,
-            repetitions=1,
-        )
-        legacy_result = MagicMock()
-        legacy_result.scalar_one_or_none.return_value = legacy_item
-        mock_db.execute.side_effect = [
-            missing_state_result,
-            legacy_result,
-        ]
-        review_service._build_detail_payload_for_word_id = AsyncMock(
-            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "drum"}
-        )
-
-        prompt_token = review_service._encode_prompt_token(
-            {
-                "prompt_id": str(uuid.uuid4()),
-                "user_id": str(user_id),
-                "queue_item_id": str(item_id),
-                "prompt_type": ReviewService.PROMPT_TYPE_DEFINITION_TO_ENTRY,
-                "review_mode": ReviewService.REVIEW_MODE_MCQ,
-                "source_entry_type": "word",
-                "source_entry_id": str(word_id),
-                "source_meaning_id": str(meaning_id),
-                "correct_option_id": "A",
-            }
-        )
-
-        updated = await review_service.submit_queue_review(
-            item_id=item_id,
             quality=4,
             time_spent_ms=5000,
             user_id=user_id,

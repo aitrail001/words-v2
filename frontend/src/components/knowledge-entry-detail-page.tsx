@@ -2,15 +2,27 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { startTransition, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { apiClient } from "@/lib/api-client";
 import {
   getKnowledgeMapEntryDetail,
   normalizeLearnerTranslation,
+  updateReviewQueueSchedule,
   type KnowledgeEntryType,
   type KnowledgeMapEntryDetail,
   type KnowledgeStatus,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
+import {
+  getKnowledgeStatusActions,
+  shouldOpenLearningFlow,
+} from "@/lib/knowledge-status-policy";
+import {
+  advanceStoredReviewSession,
+  loadStoredReviewSession,
+  persistReviewSession,
+  type StoredReviewSession,
+} from "@/lib/review-session-storage";
 import {
   DEFAULT_USER_PREFERENCES,
   getUserPreferences,
@@ -32,21 +44,6 @@ const STATUS_LABELS: Record<KnowledgeStatus, string> = {
   learning: "Learning",
   known: "Known",
 };
-
-const PRIMARY_STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "to_learn", label: "Should Learn" },
-  { status: "known", label: "Already Know" },
-];
-
-const ALL_STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "learning", label: "Learning" },
-  { status: "known", label: "Known" },
-];
-
-const LEARN_NOW_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "learning", label: "Learn Now" },
-  { status: "known", label: "Already Know" },
-];
 
 const ACCENT_LABELS: Record<UserPreferences["accent_preference"], string> = {
   us: "US",
@@ -74,6 +71,91 @@ function actionButtonClass(status: KnowledgeStatus, activeStatus: KnowledgeStatu
   }
 
   return "bg-white text-[#684f85]";
+}
+
+const reviewScheduleTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+function startOfLocalDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function formatScheduledReviewTime(value: string | null | undefined): string {
+  if (!value) {
+    return "Scheduled time not set yet";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Time unavailable";
+  }
+
+  return reviewScheduleTimeFormatter.format(parsed);
+}
+
+function formatApproximateScheduledReviewTime(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const target = new Date(value);
+  if (Number.isNaN(target.getTime())) {
+    return null;
+  }
+
+  const now = new Date();
+  const dayDelta = Math.round(
+    (startOfLocalDay(target).getTime() - startOfLocalDay(now).getTime()) / (24 * 60 * 60 * 1000),
+  );
+
+  if (dayDelta < 0) {
+    return "Overdue";
+  }
+  if (dayDelta === 0) {
+    return target.getTime() <= now.getTime() ? "Due now" : "Later today";
+  }
+  if (dayDelta === 1) {
+    return "Tomorrow";
+  }
+  if (dayDelta < 7) {
+    return `In ${dayDelta} days`;
+  }
+  if (dayDelta < 14) {
+    return "In a week";
+  }
+  if (dayDelta < 21) {
+    return "In 2 weeks";
+  }
+  if (dayDelta < 45) {
+    return "In a month";
+  }
+
+  const monthDelta = Math.max(2, Math.round(dayDelta / 30));
+  return `In ${monthDelta} months`;
+}
+
+function findScheduleLabel(
+  options: Array<{ value: string; label: string }>,
+  value: string | null | undefined,
+): string | null {
+  if (!value) {
+    return null;
+  }
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function isManualScheduleOverride(
+  options: Array<{ value: string; is_default?: boolean }>,
+  value: string | null | undefined,
+): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const defaultValue = options.find((option) => option.is_default)?.value ?? null;
+  return defaultValue !== null && value !== defaultValue;
 }
 
 function buildHeroStyle(seed: string): CSSProperties {
@@ -224,6 +306,12 @@ export function KnowledgeEntryDetailPage({
   const [overlayDetail, setOverlayDetail] = useState<KnowledgeMapEntryDetail | null>(null);
   const [overlayState, setOverlayState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [overlayCache, setOverlayCache] = useState<Record<string, KnowledgeMapEntryDetail>>({});
+  const [reviewSession, setReviewSession] = useState<StoredReviewSession | null>(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [queueScheduleSaving, setQueueScheduleSaving] = useState(false);
+  const [isScheduleSheetOpen, setIsScheduleSheetOpen] = useState(false);
+  const [scheduleDraftValue, setScheduleDraftValue] = useState("");
+  const autoPlayedReviewAudioRef = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -242,6 +330,7 @@ export function KnowledgeEntryDetailPage({
         setPreferences(preferencesResponse);
         setShowTranslations(preferencesResponse.show_translations_by_default);
         setDetail(detailResponse);
+        setReviewSession(loadStoredReviewSession());
         setLoadState("ready");
       })
       .catch(() => {
@@ -353,14 +442,69 @@ export function KnowledgeEntryDetailPage({
     if (!detail) {
       return;
     }
+    const previousStatus = detail.status;
+    if (
+      previousStatus === "learning"
+      && status === "known"
+      && typeof window !== "undefined"
+      && !window.confirm("Mark this learning entry as Already Knew? Review history will be kept, but it will leave the review queue.")
+    ) {
+      return;
+    }
     const response = await updateKnowledgeEntryStatus(detail.entry_type, detail.entry_id, status);
     startTransition(() => {
-      setDetail((current) => (current ? { ...current, status: response.status } : current));
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              status: response.status,
+              review_queue: response.status === "learning" ? current.review_queue : null,
+            }
+          : current,
+      );
     });
-    if (detail.status === "to_learn" && status === "learning") {
+    if (shouldOpenLearningFlow(previousStatus, status)) {
       router.push(`/review?entry_type=${detail.entry_type}&entry_id=${detail.entry_id}`);
     }
   };
+
+  useEffect(() => {
+    if (!detail) {
+      return;
+    }
+    const launchedFromReviewContext =
+      typeof window !== "undefined"
+        && new URLSearchParams(window.location.search).get("return_to") === "review";
+    const reviewVoiceAssets = getEntryLevelVoiceAssets(detail.voice_assets);
+    const canAutoPlayReviewAudio = getPlayableLearnerAccents(reviewVoiceAssets).length > 0;
+    if (
+      !launchedFromReviewContext ||
+      !canAutoPlayReviewAudio ||
+      autoPlayedReviewAudioRef.current === detail.entry_id
+    ) {
+      return;
+    }
+    autoPlayedReviewAudioRef.current = detail.entry_id;
+    void playLearnerEntryAudio(reviewVoiceAssets, preferences.accent_preference, {
+      contentScope: "word",
+    }).catch(() => undefined);
+  }, [detail, preferences.accent_preference]);
+
+  useEffect(() => {
+    const launchedFromReviewContext =
+      typeof window !== "undefined"
+        && new URLSearchParams(window.location.search).get("return_to") === "review";
+    const matchingRevealSchedule =
+      launchedFromReviewContext
+      && detail
+      && reviewSession?.phase === "reveal"
+      && reviewSession.revealState
+      && reviewSession.revealState.detail?.entry_type === detail.entry_type
+      && reviewSession.revealState.detail?.entry_id === detail.entry_id
+        ? reviewSession.revealState.selectedSchedule
+        : null;
+    setScheduleDraftValue(matchingRevealSchedule ?? detail?.review_queue?.current_schedule_value ?? "");
+  }, [detail, reviewSession]);
 
   if (loadState === "loading") {
     return <p className="text-sm text-slate-500">Loading learner detail...</p>;
@@ -414,12 +558,7 @@ export function KnowledgeEntryDetailPage({
   const accentLabel = displayedPronunciation ? `${ACCENT_LABELS[preferences.accent_preference]} Accent` : null;
   const entryLevelVoiceAssets = getEntryLevelVoiceAssets(detail.voice_assets);
   const playableAccents = getPlayableLearnerAccents(entryLevelVoiceAssets);
-  const statusActions =
-    detail.status === "undecided"
-      ? PRIMARY_STATUS_ACTIONS
-      : detail.status === "to_learn"
-        ? LEARN_NOW_ACTIONS
-        : ALL_STATUS_ACTIONS;
+  const statusActions = getKnowledgeStatusActions(detail.status, "detail");
   const overlayContentItems = overlayDetail
     ? overlayDetail.entry_type === "word"
       ? overlayDetail.meanings
@@ -450,6 +589,32 @@ export function KnowledgeEntryDetailPage({
     typeof window !== "undefined"
       && new URLSearchParams(window.location.search).get("return_to") === "review";
   const reviewReturnHref = "/review?resume=1";
+  const matchingReviewReveal =
+    launchedFromReview &&
+    reviewSession?.phase === "reveal" &&
+    reviewSession.revealState &&
+    reviewSession.revealState.detail?.entry_type === detail.entry_type &&
+    reviewSession.revealState.detail?.entry_id === detail.entry_id
+      ? reviewSession.revealState
+      : null;
+  const detailReviewQueue = detail.review_queue ?? null;
+  const activeReviewScheduleOptions =
+    matchingReviewReveal?.scheduleOptions ?? detailReviewQueue?.schedule_options ?? [];
+  const activeReviewScheduleValue =
+    matchingReviewReveal?.selectedSchedule ?? detailReviewQueue?.current_schedule_value ?? "";
+  const activeReviewScheduleLabel = findScheduleLabel(activeReviewScheduleOptions, activeReviewScheduleValue);
+  const hasManualScheduleOverride = isManualScheduleOverride(
+    activeReviewScheduleOptions,
+    activeReviewScheduleValue,
+  );
+  const approximateScheduledReview = matchingReviewReveal
+    ? null
+    : formatApproximateScheduledReviewTime(detailReviewQueue?.next_review_at);
+  const scheduleSheetApproximateReview =
+    approximateScheduledReview ?? activeReviewScheduleLabel;
+  const scheduledReviewMessage = matchingReviewReveal
+    ? "Next review scheduled: Scheduled time will be set when you continue review."
+    : `Next review scheduled: ${formatScheduledReviewTime(detailReviewQueue?.next_review_at)}`;
 
   const updateAccentPreference = (accent: UserPreferences["accent_preference"]) => {
     setPreferences((current) => {
@@ -482,6 +647,95 @@ export function KnowledgeEntryDetailPage({
       meaningExampleId: detail.entry_type === "word" ? exampleId : undefined,
       phraseSenseExampleId: detail.entry_type === "phrase" ? exampleId : undefined,
     }).catch(() => undefined);
+  };
+
+  const handleContinueReview = async () => {
+    if (!reviewSession || !matchingReviewReveal) {
+      return;
+    }
+    const activeReviewCard = reviewSession.cards[reviewSession.currentIndex];
+    if (!activeReviewCard) {
+      router.push(reviewReturnHref);
+      return;
+    }
+    setReviewSaving(true);
+    try {
+      if (
+        activeReviewCard.queue_item_id &&
+        !matchingReviewReveal.persisted &&
+        matchingReviewReveal.outcome !== "wrong" &&
+        matchingReviewReveal.outcome !== "lookup"
+      ) {
+        const defaultSchedule =
+          matchingReviewReveal.scheduleOptions.find((option) => option.is_default)?.value ?? "";
+        await apiClient.post(`/reviews/queue/${activeReviewCard.queue_item_id}/submit`, {
+          confirm: true,
+          quality: 4,
+          time_spent_ms: 0,
+          audio_replay_count: 0,
+          card_type: activeReviewCard.card_type,
+          prompt_token: activeReviewCard.prompt?.prompt_token,
+          review_mode: activeReviewCard.review_mode,
+          outcome: matchingReviewReveal.outcome,
+          selected_option_id: matchingReviewReveal.selectedOptionId,
+          typed_answer: matchingReviewReveal.typedResponseValue,
+          schedule_override:
+            matchingReviewReveal.selectedSchedule !== defaultSchedule
+              ? matchingReviewReveal.selectedSchedule
+              : undefined,
+        });
+      }
+
+      const nextSession = advanceStoredReviewSession(reviewSession);
+      persistReviewSession(nextSession);
+      router.push(reviewReturnHref);
+    } finally {
+      setReviewSaving(false);
+    }
+  };
+
+  const handleUpdateDetailReviewSchedule = async (scheduleValue: string) => {
+    if (!detailReviewQueue?.queue_item_id) {
+      return;
+    }
+    setQueueScheduleSaving(true);
+    try {
+      const updatedQueue = await updateReviewQueueSchedule(detailReviewQueue.queue_item_id, scheduleValue);
+      setDetail((current) => (current ? { ...current, review_queue: updatedQueue } : current));
+    } finally {
+      setQueueScheduleSaving(false);
+    }
+  };
+
+  const handleConfirmScheduleDraft = async () => {
+    if (!scheduleDraftValue) {
+      setIsScheduleSheetOpen(false);
+      return;
+    }
+
+    if (matchingReviewReveal) {
+      setReviewSession((current) => {
+        if (!current?.revealState) {
+          return current;
+        }
+        const next = {
+          ...current,
+          revealState: { ...current.revealState, selectedSchedule: scheduleDraftValue },
+        };
+        persistReviewSession(next);
+        return next;
+      });
+      setIsScheduleSheetOpen(false);
+      return;
+    }
+
+    if (!detailReviewQueue || scheduleDraftValue === detailReviewQueue.current_schedule_value) {
+      setIsScheduleSheetOpen(false);
+      return;
+    }
+
+    await handleUpdateDetailReviewSchedule(scheduleDraftValue);
+    setIsScheduleSheetOpen(false);
   };
 
   return (
@@ -518,23 +772,35 @@ export function KnowledgeEntryDetailPage({
               •••
             </button>
           </div>
-          {launchedFromReview ? (
-            <div className="absolute inset-x-0 top-14 flex justify-center">
-              <button
-                type="button"
-                onClick={() => router.push(reviewReturnHref)}
-                className="rounded-full bg-white/75 px-4 py-2 text-sm font-semibold text-[#62368f] backdrop-blur"
-              >
-                Back to review
-              </button>
-            </div>
-          ) : null}
-
           <div className="absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(180deg,transparent,rgba(34,12,66,0.32))]" />
         </section>
 
         <section>
           <div className="space-y-3 rounded-[0.55rem] bg-white px-4 py-4 shadow-[0_8px_20px_rgba(85,48,139,0.08)]">
+            {matchingReviewReveal ? (
+              <div className="rounded-[0.65rem] border border-[#e6dcf3] bg-[#faf7ff] px-3 py-3">
+                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-[#8e38f2]">
+                  Review Decision
+                </p>
+                <p className="mt-2 text-sm font-semibold text-[#5a357b]">
+                  Scheduled time will be set when you continue review.
+                </p>
+                <p className="mt-1 text-sm text-[#6e5a86]">
+                  Use the override control below to keep the default next-review window or choose a different one.
+                </p>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleContinueReview()}
+                    disabled={reviewSaving}
+                    className="w-full rounded-[0.8rem] bg-[#45c5dd] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {reviewSaving ? "Saving..." : "Continue review"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h1 className="text-[1.55rem] font-semibold leading-none text-[#572c80]">
@@ -902,20 +1168,116 @@ export function KnowledgeEntryDetailPage({
           data-testid="knowledge-detail-bottom-bar"
           className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.85rem)] left-1/2 z-30 flex w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 flex-col gap-2 rounded-[0.65rem] bg-[rgba(245,240,252,0.96)] p-2.5 shadow-[0_12px_26px_rgba(84,46,135,0.14)] backdrop-blur"
         >
-          <div className={`grid gap-3 ${statusActions.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
-            {statusActions.map((action) => (
-              <button
-                key={action.status}
-                type="button"
-                onClick={() => void updateStatus(action.status)}
-                className={`rounded-[0.95rem] px-3 py-3 text-sm font-semibold ${actionButtonClass(action.status, detail.status)}`}
-              >
-                {action.label}
-              </button>
-            ))}
+          <div className="flex items-stretch gap-3">
+            <div className={`grid flex-1 gap-3 ${statusActions.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+              {statusActions.map((action) => (
+                <button
+                  key={action.status}
+                  type="button"
+                  onClick={() => void updateStatus(action.status)}
+                  className={`rounded-[0.95rem] px-3 py-3 text-sm font-semibold ${actionButtonClass(action.status, detail.status)}`}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+            {activeReviewScheduleOptions.length > 0 ? (
+              <div className="w-[11.5rem] shrink-0 rounded-[0.95rem] border border-[#d9dcec] bg-white px-3 py-2.5">
+                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]">
+                  Next Review
+                </p>
+                <p className="mt-2 text-sm font-semibold text-[#53287c]">{scheduledReviewMessage}</p>
+                {approximateScheduledReview ? (
+                  <p className="mt-2 text-[0.72rem] text-[#6e5a86]">
+                    Approximately: {approximateScheduledReview}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScheduleDraftValue(activeReviewScheduleValue);
+                    setIsScheduleSheetOpen(true);
+                  }}
+                  disabled={queueScheduleSaving || reviewSaving}
+                  className="mt-2 w-full rounded-[0.6rem] border border-[#d9dcec] px-3 py-2 text-sm font-semibold text-[#684f85] disabled:opacity-50"
+                >
+                  Override{hasManualScheduleOverride ? " (manual override)" : ""}
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
+
+      {isScheduleSheetOpen && activeReviewScheduleOptions.length > 0 ? (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(16,10,34,0.38)] px-4 pb-6 sm:items-center">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Override next review"
+            className="w-full max-w-[24rem] rounded-[1rem] bg-white p-4 text-[#43235f] shadow-[0_20px_42px_rgba(21,12,46,0.35)]"
+          >
+            <p className="text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-[#8e38f2]">
+              Override next review
+            </p>
+            <p className="mt-2 text-sm font-semibold text-[#53287c]">
+              {matchingReviewReveal
+                ? "Next review scheduled: Scheduled time will be set when you continue review."
+                : `Next review scheduled: ${formatScheduledReviewTime(detailReviewQueue?.next_review_at)}`}
+            </p>
+            {scheduleSheetApproximateReview ? (
+              <p className="mt-1 text-sm text-[#6e5a86]">
+                Approximately: {scheduleSheetApproximateReview}
+              </p>
+            ) : null}
+            <p className="mt-2 text-sm leading-6 text-[#6e5a86]">
+              {matchingReviewReveal
+                ? "Choose a manual override for this review result before you continue."
+                : "Choose a manual override or keep the current scheduled time."}
+            </p>
+            <label
+              htmlFor="detail-review-override"
+              className="mt-4 block text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]"
+            >
+              Choose next review timing
+            </label>
+            <select
+              id="detail-review-override"
+              value={scheduleDraftValue}
+              onChange={(event) => setScheduleDraftValue(event.target.value)}
+              disabled={queueScheduleSaving || reviewSaving}
+              className="mt-2 w-full rounded-[0.6rem] border border-[#d9dcec] bg-white px-3 py-2 text-sm text-[#43235f] disabled:opacity-50"
+              aria-label="Choose next review timing"
+            >
+              {activeReviewScheduleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setScheduleDraftValue(activeReviewScheduleValue);
+                  setIsScheduleSheetOpen(false);
+                }}
+                className="rounded-[0.8rem] border border-[#d9dcec] px-3 py-2 text-sm font-semibold text-[#684f85]"
+              >
+                Leave current schedule
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmScheduleDraft()}
+                disabled={queueScheduleSaving || reviewSaving}
+                className="rounded-[0.8rem] bg-[#45c5dd] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {queueScheduleSaving ? "Saving..." : "Confirm next review change"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {overlayTarget && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(16,10,34,0.52)] px-4">

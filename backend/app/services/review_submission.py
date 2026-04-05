@@ -9,7 +9,6 @@ from sqlalchemy import select
 from app.models.entry_review import EntryReviewState
 from app.models.phrase_entry import PhraseEntry
 from app.models.phrase_sense import PhraseSense
-from app.models.review import ReviewCard, ReviewSession
 from app.spaced_repetition import calculate_next_review
 
 if TYPE_CHECKING:
@@ -85,6 +84,7 @@ async def submit_entry_state_review(
     quality: int,
     time_spent_ms: int,
     user_id: uuid.UUID,
+    confirm: bool,
     prompt_token: str | None,
     review_mode: str | None,
     outcome: str | None,
@@ -125,12 +125,12 @@ async def submit_entry_state_review(
                     resolved_interval_days
                 )
                 await service.db.commit()
-        entry_state.detail = entry_state.detail or await build_entry_state_detail(
+        entry_state.detail = getattr(entry_state, "detail", None) or await build_entry_state_detail(
             service,
             user_id=user_id,
             entry_state=entry_state,
         )
-        entry_state.schedule_options = entry_state.schedule_options or service._build_schedule_options(
+        entry_state.schedule_options = getattr(entry_state, "schedule_options", None) or service._build_schedule_options(
             int(getattr(entry_state, "interval_days", 0) or 0)
         )
         return entry_state
@@ -160,6 +160,19 @@ async def submit_entry_state_review(
             time_spent_ms=time_spent_ms,
         ),
     )
+    if resolved_outcome in {"correct_tested", "remember"} and not confirm:
+        detail = await build_entry_state_detail(
+            service,
+            user_id=user_id,
+            entry_state=entry_state,
+        )
+        entry_state.outcome = resolved_outcome
+        entry_state.needs_relearn = False
+        entry_state.recheck_planned = False
+        entry_state.detail = detail
+        entry_state.schedule_options = service._build_schedule_options(review_result.interval_days)
+        return entry_state
+
     scheduled_by = "manual_override" if schedule_override else "recommended"
     resolved_interval_days, resolved_next_review, _ = service._derive_interval_from_override(
         original_interval_days=review_result.interval_days,
@@ -236,174 +249,6 @@ async def submit_entry_state_review(
     await service.db.commit()
     return entry_state
 
-
-async def submit_legacy_queue_review(
-    service: "ReviewService",
-    *,
-    item: Any,
-    quality: int,
-    time_spent_ms: int,
-    user_id: uuid.UUID,
-    card_type: str | None,
-    prompt_token: str | None,
-    review_mode: str | None,
-    outcome: str | None,
-    selected_option_id: str | None,
-    typed_answer: str | None,
-    prompt: dict[str, Any] | None,
-    schedule_override: str | None,
-) -> Any:
-    prompt_token_payload = service._decode_prompt_token(prompt_token)
-    if prompt_token_payload is None:
-        raise ValueError("Invalid prompt token")
-    if prompt_token_payload.get("queue_item_id") not in {None, str(getattr(item, "id", None))}:
-        raise ValueError("Prompt token does not match queue item")
-    if prompt_token_payload.get("user_id") not in {None, str(user_id)}:
-        raise ValueError("Prompt token does not match user")
-
-    normalized_review_mode = service._resolve_submit_review_mode_from_prompt_token(
-        prompt_token_payload=prompt_token_payload
-    )
-    resolved_outcome = service._resolve_submit_outcome_from_prompt_token(
-        prompt_token_payload=prompt_token_payload,
-        outcome=outcome,
-        selected_option_id=selected_option_id,
-        typed_answer=typed_answer,
-    )
-    resolved_quality = service._derive_quality(
-        review_mode=normalized_review_mode,
-        quality=quality,
-        prompt={
-            "prompt_type": prompt_token_payload.get("prompt_type"),
-            "expected_input": prompt_token_payload.get("expected_input"),
-            "source_entry_type": prompt_token_payload.get("source_entry_type"),
-            "options": [
-                {
-                    "option_id": prompt_token_payload.get("correct_option_id"),
-                    "is_correct": True,
-                }
-            ]
-            if prompt_token_payload.get("correct_option_id")
-            else [],
-        },
-        selected_option_id=selected_option_id,
-        typed_answer=typed_answer,
-    )
-    latest_history = None
-    if (
-        not service.uses_legacy_queue
-        and not hasattr(service.queue_model, "next_review")
-        and service._history_supports_schedule()
-    ):
-        latest_history = await service._get_latest_history_for_meaning(
-            user_id=user_id,
-            meaning_id=item.meaning_id,
-        )
-
-    previous_difficulty = float(
-        getattr(latest_history, "ease_factor", None)
-        or getattr(item, "ease_factor", None)
-        or 0.5
-    )
-    previous_stability = float(
-        getattr(latest_history, "interval_days", None)
-        or getattr(item, "interval_days", None)
-        or 0.3
-    )
-    previous_repetitions = int(
-        getattr(latest_history, "repetitions", None)
-        or getattr(item, "repetitions", None)
-        or 0
-    )
-
-    review_result = calculate_next_review(
-        outcome=resolved_outcome,
-        prompt_type=str(
-            prompt_token_payload.get("prompt_type") or service.PROMPT_TYPE_DEFINITION_TO_ENTRY
-        ),
-        stability=previous_stability,
-        difficulty=previous_difficulty,
-        grade=service._derive_review_grade(
-            outcome=resolved_outcome,
-            prompt={"prompt_type": prompt_token_payload.get("prompt_type")},
-            quality=resolved_quality,
-            time_spent_ms=time_spent_ms,
-        ),
-    )
-    compatibility_interval_days = review_result.interval_days
-    if resolved_outcome in {"correct_tested", "remember"}:
-        if previous_repetitions == 0:
-            compatibility_interval_days = max(1, compatibility_interval_days)
-        elif previous_repetitions == 1:
-            compatibility_interval_days = max(6, compatibility_interval_days)
-        else:
-            compatibility_interval_days = max(
-                max(1, round(previous_stability * max(previous_difficulty, 1.3))),
-                compatibility_interval_days,
-            )
-    legacy_ease_factor = previous_difficulty
-    if resolved_outcome in {"correct_tested", "remember"}:
-        legacy_ease_factor = round(max(1.3, previous_difficulty + 0.1), 2)
-    elif resolved_outcome in {"lookup", "wrong"}:
-        legacy_ease_factor = round(max(1.3, previous_difficulty - 0.2), 2)
-    resolved_interval_days, resolved_next_review, _ = service._derive_interval_from_override(
-        original_interval_days=compatibility_interval_days,
-        override_value=schedule_override,
-        base_next_review=datetime.now(timezone.utc) + timedelta(days=compatibility_interval_days),
-    )
-
-    effective_card_type = card_type or getattr(item, "card_type", None) or "flashcard"
-
-    item.quality_rating = resolved_quality
-    item.time_spent_ms = time_spent_ms
-    item.ease_factor = legacy_ease_factor
-    item.review_difficulty = review_result.difficulty
-    item.interval_days = resolved_interval_days
-    item.repetitions = previous_repetitions + (
-        1 if resolved_outcome in {"correct_tested", "remember"} else 0
-    )
-    item.next_review = resolved_next_review
-    item.card_type = effective_card_type
-    item.outcome = resolved_outcome
-    item.needs_relearn = resolved_outcome in {"lookup", "wrong"}
-    item.recheck_planned = resolved_outcome in {"lookup", "wrong"}
-    item.schedule_options = service._build_schedule_options(resolved_interval_days)
-
-    if hasattr(type(item), "last_reviewed_at") or hasattr(item, "last_reviewed_at"):
-        item.last_reviewed_at = datetime.now(timezone.utc)
-    if hasattr(type(item), "review_count") or hasattr(item, "review_count"):
-        item.review_count = int(getattr(item, "review_count", 0) or 0) + 1
-    if resolved_outcome in {"correct_tested", "remember"} and (
-        hasattr(type(item), "correct_count") or hasattr(item, "correct_count")
-    ):
-        item.correct_count = int(getattr(item, "correct_count", 0) or 0) + 1
-
-    source_word_id = getattr(item, "word_id", None)
-    if source_word_id is not None:
-        item.detail = await service._build_detail_payload_for_word_id(
-            user_id=user_id,
-            word_id=source_word_id,
-        )
-    else:
-        item.detail = None
-
-    history_record = service._build_history_record(
-        item=item,
-        user_id=user_id,
-        quality=resolved_quality,
-        time_spent_ms=time_spent_ms,
-        card_type=effective_card_type,
-        previous_ease_factor=previous_difficulty,
-        previous_interval_days=int(round(previous_stability)),
-        previous_repetitions=previous_repetitions,
-    )
-    if history_record is not None:
-        service.db.add(history_record)
-
-    await service.db.commit()
-    return item
-
-
 async def submit_queue_review(
     service: "ReviewService",
     *,
@@ -411,6 +256,7 @@ async def submit_queue_review(
     quality: int,
     time_spent_ms: int,
     user_id: uuid.UUID,
+    confirm: bool = False,
     card_type: str | None = None,
     prompt_token: str | None = None,
     review_mode: str | None = None,
@@ -435,6 +281,7 @@ async def submit_queue_review(
             quality=quality,
             time_spent_ms=time_spent_ms,
             user_id=user_id,
+            confirm=confirm,
             prompt_token=prompt_token,
             review_mode=review_mode,
             outcome=outcome,
@@ -445,36 +292,4 @@ async def submit_queue_review(
             schedule_override=schedule_override,
         )
 
-    if service.uses_legacy_queue:
-        result = await service.db.execute(
-            select(ReviewCard)
-            .join(ReviewSession)
-            .where(ReviewCard.id == item_id, ReviewSession.user_id == user_id)
-        )
-    else:
-        result = await service.db.execute(
-            select(service.queue_model).where(
-                service.queue_model.id == item_id,
-                service.queue_model.user_id == user_id,
-            )
-        )
-
-    item = result.scalar_one_or_none()
-    if item is None:
-        raise ValueError(f"Queue item {item_id} not found")
-
-    return await submit_legacy_queue_review(
-        service,
-        item=item,
-        quality=quality,
-        time_spent_ms=time_spent_ms,
-        user_id=user_id,
-        card_type=card_type,
-        prompt_token=prompt_token,
-        review_mode=review_mode,
-        outcome=outcome,
-        selected_option_id=selected_option_id,
-        typed_answer=typed_answer,
-        prompt=prompt,
-        schedule_override=schedule_override,
-    )
+    raise ValueError(f"Queue item {item_id} not found")

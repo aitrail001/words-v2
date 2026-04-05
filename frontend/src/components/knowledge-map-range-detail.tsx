@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getKnowledgeEntryHref } from "@/components/knowledge-entry-detail-page";
+import { LearnerListRows } from "@/components/learner-list-rows";
 import {
   getKnowledgeMapEntryDetail,
   getKnowledgeMapRange,
@@ -14,6 +15,10 @@ import {
   type KnowledgeStatus,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
+import {
+  getKnowledgeStatusActions,
+  shouldOpenLearningFlow,
+} from "@/lib/knowledge-status-policy";
 import {
   getEntryLevelVoiceAssets,
   getPlayableLearnerAccents,
@@ -48,31 +53,6 @@ const VIEW_OPTIONS: Array<{ mode: ViewMode; label: string }> = [
   { mode: "tags", label: "Tags view" },
   { mode: "list", label: "List view" },
 ];
-
-const PRIMARY_STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "to_learn", label: "Should Learn" },
-  { status: "known", label: "Already Know" },
-];
-
-const READY_TO_LEARN_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "learning", label: "Learn Now" },
-  { status: "known", label: "Already Know" },
-];
-
-const SECONDARY_STATUS_ACTIONS: Array<{ status: KnowledgeStatus; label: string }> = [
-  { status: "learning", label: "Learning" },
-  { status: "known", label: "Known" },
-];
-
-function getCardActions(status: KnowledgeStatus): Array<{ status: KnowledgeStatus; label: string }> {
-  if (status === "undecided") {
-    return PRIMARY_STATUS_ACTIONS;
-  }
-  if (status === "to_learn") {
-    return READY_TO_LEARN_ACTIONS;
-  }
-  return SECONDARY_STATUS_ACTIONS;
-}
 
 function buildHeroStyle(seed: string): CSSProperties {
   const palettes = [
@@ -401,6 +381,11 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
     () => normalizeLearnerTranslation(activeCardTranslation),
     [activeCardTranslation],
   );
+  const activeCardExample = activeCardContent?.examples?.[0] ?? null;
+  const normalizedActiveCardExampleTranslation = useMemo(
+    () => normalizeLearnerTranslation(activeCardExample?.translation),
+    [activeCardExample?.translation],
+  );
 
   const moveMeaning = (direction: -1 | 1) => {
     if (activeContentCount <= 1) {
@@ -428,6 +413,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
   };
 
   const updateStatus = async (entry: KnowledgeMapEntrySummary, status: KnowledgeStatus) => {
+    const previousStatus = entry.status;
     const response = await updateKnowledgeEntryStatus(entry.entry_type, entry.entry_id, status);
 
     startTransition(() => {
@@ -445,6 +431,10 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
         };
       });
     });
+
+    if (shouldOpenLearningFlow(previousStatus, status)) {
+      router.push(`/review?entry_type=${entry.entry_type}&entry_id=${entry.entry_id}`);
+    }
   };
 
   const activeRangeLabel = selectedRange
@@ -452,7 +442,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
     : "Pick a tile to begin";
   const canGoPreviousEntry = activeIndex > 0;
   const canGoNextEntry = selectedRange ? activeIndex < selectedRange.items.length - 1 : false;
-  const activeCardActions = activeEntry ? getCardActions(activeEntry.status) : [];
+  const activeCardActions = activeEntry ? getKnowledgeStatusActions(activeEntry.status, "range") : [];
   const activeEntryVoiceAssets = getEntryLevelVoiceAssets(
     selectedEntryDetail?.voice_assets ?? activeEntry?.voice_assets ?? [],
   );
@@ -483,6 +473,30 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
       knowledge_view_preference: viewMode,
       show_translations_by_default: showTranslations,
     }).catch(() => undefined);
+  };
+
+  const persistRangePreferences = (nextViewMode: ViewMode, nextShowTranslations: boolean, nextAccent: UserPreferences["accent_preference"]) => {
+    void updateUserPreferences({
+      ...DEFAULT_USER_PREFERENCES,
+      accent_preference: nextAccent,
+      translation_locale: translationLocale,
+      knowledge_view_preference: nextViewMode,
+      show_translations_by_default: nextShowTranslations,
+    }).catch(() => undefined);
+  };
+
+  const toggleTranslations = () => {
+    const nextValue = !showTranslations;
+    setShowTranslations(nextValue);
+    persistRangePreferences(viewMode, nextValue, accentPreference);
+  };
+
+  const updateViewPreference = (nextViewMode: ViewMode) => {
+    if (nextViewMode === viewMode) {
+      return;
+    }
+    setViewMode(nextViewMode);
+    persistRangePreferences(nextViewMode, showTranslations, accentPreference);
   };
 
   const handlePlayAudio = (voiceAssets: KnowledgeMapEntrySummary["voice_assets"] | undefined) => {
@@ -519,7 +533,7 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
             <button
               key={option.mode}
               type="button"
-              onClick={() => setViewMode(option.mode)}
+              onClick={() => updateViewPreference(option.mode)}
               className={`rounded-full px-2.5 py-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] transition ${
                 viewMode === option.mode
                   ? "bg-[#5b238c] text-white"
@@ -529,6 +543,16 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
               {option.label}
             </button>
           ))}
+          {viewMode !== "tags" ? (
+            <button
+              type="button"
+              onClick={toggleTranslations}
+              aria-label={showTranslations ? "Hide translation" : "Show translation"}
+              className="rounded-full bg-white px-2.5 py-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[#5c3d84] shadow-sm"
+            >
+              {showTranslations ? "Hide translation" : "Show translation"}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -626,6 +650,18 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
                     Definition {activeMeaningIndex + 1} of {activeContentCount}
                   </p>
                 )}
+                {activeCardExample ? (
+                  <div className="rounded-[0.3rem] bg-[#fcfbfe] px-3 py-2">
+                    <p className="text-[0.78rem] italic leading-5 text-[#5f5674]">
+                      {activeCardExample.sentence}
+                    </p>
+                    {showTranslations && normalizedActiveCardExampleTranslation ? (
+                      <p className="mt-1 text-[0.76rem] leading-5 text-[#9b8cb2]">
+                        {normalizedActiveCardExampleTranslation}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               <div className="pt-0.5 text-right">
@@ -681,50 +717,37 @@ export function KnowledgeMapRangeDetail({ initialRangeStart }: { initialRangeSta
       )}
 
       {!loadingRange && selectedRange && viewMode === "list" && (
-        <div data-testid="knowledge-list-view" className="space-y-2">
-          {normalizedRangeItems.map((item) => (
-            <div
-              key={`${item.entry_type}-${item.entry_id}`}
-              className="grid grid-cols-[4.2rem_1fr] gap-2 overflow-hidden rounded-[0.25rem] border border-[#dce0ee] bg-white px-2 py-2"
-            >
-              <div className="min-h-[4.4rem] rounded-[0.15rem]" style={buildHeroStyle(item.display_text)} />
-              <div className="space-y-1 py-0.5 pr-1">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[1.02rem] font-semibold text-[#562c7f]">{item.display_text}</p>
-                    <p className="text-[0.8rem] font-semibold leading-5 text-[#a141ef]">
-                      {item.primary_definition ?? "No summary yet"}
-                    </p>
-                    {item.normalizedTranslation && (
-                      <p className="text-[0.8rem] font-semibold leading-5 text-[#a141ef]">
-                        {item.normalizedTranslation}
-                      </p>
-                    )}
-                  </div>
-                  <span className={`rounded-[0.25rem] px-2 py-1 text-[0.68rem] font-semibold ${statusChipClass(item.status)}`}>
-                    {STATUS_LABELS[item.status]}
-                  </span>
-                </div>
-                <Link
-                  href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
-                  className="inline-flex rounded-[0.25rem] bg-[#f1ddff] px-2.5 py-1 text-[0.7rem] font-semibold text-[#7c2cff]"
+        <LearnerListRows
+          items={normalizedRangeItems.map((item) => ({
+            ...item,
+            translation: item.normalizedTranslation,
+          }))}
+          showTranslations={showTranslations}
+          emptyMessage="No entries in this range yet."
+          listTestId="knowledge-list-view"
+          emptyTestId="knowledge-list-empty"
+          onStatusChange={updateStatus}
+          renderActions={(item) => (
+            <>
+              <Link
+                href={getKnowledgeEntryHref(item.entry_type, item.entry_id)}
+                className="inline-flex rounded-[0.25rem] bg-[#f1ddff] px-2.5 py-1 text-[0.7rem] font-semibold text-[#7c2cff]"
+              >
+                Open
+              </Link>
+              {getEntryLevelVoiceAssets((item as KnowledgeMapEntrySummary).voice_assets).length > 0 ? (
+                <button
+                  type="button"
+                  aria-label={`Play audio for ${item.display_text}`}
+                  onClick={() => handlePlayAudio((item as KnowledgeMapEntrySummary).voice_assets)}
+                  className="inline-flex rounded-[0.25rem] bg-[#eef8ff] px-2.5 py-1 text-[0.7rem] font-semibold text-[#1687a6]"
                 >
-                  Open
-                </Link>
-                {getEntryLevelVoiceAssets(item.voice_assets).length > 0 && (
-                  <button
-                    type="button"
-                    aria-label={`Play audio for ${item.display_text}`}
-                    onClick={() => handlePlayAudio(item.voice_assets)}
-                    className="ml-2 inline-flex rounded-[0.25rem] bg-[#eef8ff] px-2.5 py-1 text-[0.7rem] font-semibold text-[#1687a6]"
-                  >
-                    Play
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+                  Play
+                </button>
+              ) : null}
+            </>
+          )}
+        />
       )}
 
       {!loadingRange && !rangeError && (

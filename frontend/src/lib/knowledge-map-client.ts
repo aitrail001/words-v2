@@ -59,6 +59,8 @@ export type KnowledgeMapEntrySummary = {
   pronunciations?: LearnerPronunciations;
   translation: string | null;
   primary_definition: string | null;
+  primary_example?: string | null;
+  primary_example_translation?: string | null;
   part_of_speech: string | null;
   phrase_kind: string | null;
   voice_assets?: LearnerVoiceAsset[];
@@ -95,6 +97,143 @@ export type KnowledgeMapDashboard = {
     browse_rank: number;
     status: KnowledgeStatus;
   } | null;
+};
+
+export type ReviewQueueStats = {
+  total_items: number;
+  due_items: number;
+  review_count: number;
+  correct_count: number;
+  accuracy: number;
+};
+
+export type AuthUserProfile = {
+  id: string;
+  email: string;
+  role: string;
+  tier: string;
+  is_active: boolean;
+};
+
+export type ReviewQueueBucket =
+  | "overdue"
+  | "due_now"
+  | "later_today"
+  | "tomorrow"
+  | "this_week"
+  | "this_month"
+  | "one_to_three_months"
+  | "three_to_six_months"
+  | "six_plus_months";
+
+export type ReviewQueueBucketSort = "next_review_at" | "last_reviewed_at" | "text";
+export type ReviewQueueBucketOrder = "asc" | "desc";
+
+export type ReviewQueueSummaryBucket = {
+  bucket: ReviewQueueBucket;
+  count: number;
+};
+
+export type ReviewQueueSummaryResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: ReviewQueueSummaryBucket[];
+};
+
+export type ReviewQueueItem = {
+  queue_item_id: string;
+  entry_id: string;
+  entry_type: KnowledgeEntryType;
+  text: string;
+  status: KnowledgeStatus;
+  next_review_at: string | null;
+  last_reviewed_at: string | null;
+  success_streak: number;
+  lapse_count: number;
+  times_remembered: number;
+  exposure_count: number;
+  history: ReviewQueueHistoryEvent[];
+};
+
+export type ReviewQueueHistoryEvent = {
+  id: string;
+  reviewed_at: string;
+  outcome: string;
+  prompt_type: string;
+  prompt_family?: string | null;
+  scheduled_by?: string | null;
+  scheduled_interval_days?: number | null;
+};
+
+export type ReviewQueueBucketDetailResponse = {
+  generated_at: string;
+  bucket: ReviewQueueBucket;
+  count: number;
+  sort: ReviewQueueBucketSort;
+  order: ReviewQueueBucketOrder;
+  items: ReviewQueueItem[];
+};
+
+export type GroupedReviewQueueItem = ReviewQueueItem;
+
+export type GroupedReviewQueueGroup = {
+  bucket: ReviewQueueBucket;
+  count: number;
+  items: GroupedReviewQueueItem[];
+};
+
+export type GroupedReviewQueueResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: GroupedReviewQueueGroup[];
+};
+
+export type AdminReviewQueueItem = ReviewQueueItem & {
+  target_type: string | null;
+  target_id: string | null;
+  recheck_due_at: string | null;
+  next_due_at: string | null;
+  last_outcome: string | null;
+  relearning: boolean | null;
+  relearning_trigger: string | null;
+};
+
+export type AdminReviewQueueSummaryResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: ReviewQueueSummaryBucket[];
+  debug: {
+    effective_now: string;
+  };
+};
+
+export type AdminReviewQueueBucketDetailResponse = {
+  generated_at: string;
+  bucket: ReviewQueueBucket;
+  count: number;
+  sort: ReviewQueueBucketSort;
+  order: ReviewQueueBucketOrder;
+  items: AdminReviewQueueItem[];
+  debug: {
+    effective_now: string;
+  };
+};
+
+export type AdminGroupedReviewQueueItem = AdminReviewQueueItem;
+
+export type AdminGroupedReviewQueueGroup = {
+  bucket: ReviewQueueBucket;
+  count: number;
+  items: AdminGroupedReviewQueueItem[];
+};
+
+export type AdminGroupedReviewQueueResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: AdminGroupedReviewQueueGroup[];
+  debug: {
+    effective_now: string;
+  };
 };
 
 export type KnowledgeMapRange = {
@@ -158,6 +297,15 @@ export type ReviewScheduleOption = {
   value: string;
   label: string;
   is_default: boolean;
+};
+
+export type EntryReviewQueue = {
+  queue_item_id: string;
+  next_review_at: string | null;
+  current_schedule_value: string;
+  current_schedule_label: string;
+  current_schedule_source?: string;
+  schedule_options: ReviewScheduleOption[];
 };
 
 export type LearningStartCard = {
@@ -280,6 +428,7 @@ export type KnowledgeMapEntryDetail = {
     note: string | null;
     target?: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
   }>;
+  review_queue?: EntryReviewQueue | null;
   previous_entry: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
   next_entry: { entry_type: KnowledgeEntryType; entry_id: string; display_text: string } | null;
 };
@@ -339,6 +488,83 @@ export const getKnowledgeMapOverview = (): Promise<KnowledgeMapOverview> =>
 export const getKnowledgeMapDashboard = (): Promise<KnowledgeMapDashboard> =>
   apiClient.get<KnowledgeMapDashboard>("/knowledge-map/dashboard");
 
+export const getReviewQueueStats = (): Promise<ReviewQueueStats> =>
+  apiClient.get<ReviewQueueStats>("/reviews/queue/stats");
+
+export const getAuthUserProfile = (): Promise<AuthUserProfile> =>
+  apiClient.get<AuthUserProfile>("/auth/me");
+
+export const getReviewQueueSummary = (): Promise<ReviewQueueSummaryResponse> =>
+  apiClient.get<ReviewQueueSummaryResponse>("/reviews/queue/summary");
+
+export const getReviewQueueBucketDetail = (
+  bucket: ReviewQueueBucket,
+  sort: ReviewQueueBucketSort = "next_review_at",
+  order: ReviewQueueBucketOrder = "asc",
+): Promise<ReviewQueueBucketDetailResponse> => {
+  const searchParams = new URLSearchParams();
+  searchParams.set("sort", sort);
+  searchParams.set("order", order);
+  const query = searchParams.toString();
+  return apiClient.get<ReviewQueueBucketDetailResponse>(
+    `/reviews/queue/buckets/${bucket}${query ? `?${query}` : ""}`,
+  );
+};
+
+export const getGroupedReviewQueue = (): Promise<GroupedReviewQueueResponse> =>
+  apiClient.get<GroupedReviewQueueResponse>("/reviews/queue/grouped");
+
+export const getAdminReviewQueueSummary = (
+  effectiveNow?: string,
+): Promise<AdminReviewQueueSummaryResponse> => {
+  const searchParams = new URLSearchParams();
+  if (effectiveNow) {
+    searchParams.set("effective_now", effectiveNow);
+  }
+  const query = searchParams.toString();
+  return apiClient.get<AdminReviewQueueSummaryResponse>(
+    `/reviews/admin/queue/summary${query ? `?${query}` : ""}`,
+  );
+};
+
+export const getAdminReviewQueueBucketDetail = (
+  bucket: ReviewQueueBucket,
+  options?: {
+    effectiveNow?: string;
+    sort?: "next_review_at" | "last_reviewed_at" | "text";
+    order?: "asc" | "desc";
+  },
+): Promise<AdminReviewQueueBucketDetailResponse> => {
+  const searchParams = new URLSearchParams();
+  if (options?.effectiveNow) {
+    searchParams.set("effective_now", options.effectiveNow);
+  }
+  if (options?.sort) {
+    searchParams.set("sort", options.sort);
+  }
+  if (options?.order) {
+    searchParams.set("order", options.order);
+  }
+  const query = searchParams.toString();
+  return apiClient.get<AdminReviewQueueBucketDetailResponse>(
+    `/reviews/admin/queue/buckets/${bucket}${query ? `?${query}` : ""}`,
+  );
+};
+
+export const getAdminGroupedReviewQueue = (
+  effectiveNow?: string,
+): Promise<AdminGroupedReviewQueueResponse> => {
+  const searchParams = new URLSearchParams();
+  if (effectiveNow) {
+    searchParams.set("effective_now", effectiveNow);
+  }
+
+  const query = searchParams.toString();
+  return apiClient.get<AdminGroupedReviewQueueResponse>(
+    `/reviews/admin/queue/grouped${query ? `?${query}` : ""}`,
+  );
+};
+
 export const getKnowledgeMapRange = (rangeStart: number): Promise<KnowledgeMapRange> =>
   apiClient.get<KnowledgeMapRange>(`/knowledge-map/ranges/${rangeStart}`);
 
@@ -347,6 +573,14 @@ export const getKnowledgeMapEntryDetail = (
   entryId: string,
 ): Promise<KnowledgeMapEntryDetail> =>
   apiClient.get<KnowledgeMapEntryDetail>(`/knowledge-map/entries/${entryType}/${entryId}`);
+
+export const updateReviewQueueSchedule = (
+  queueItemId: string,
+  scheduleOverride: string,
+): Promise<EntryReviewQueue> =>
+  apiClient.put<EntryReviewQueue>(`/reviews/queue/${queueItemId}/schedule`, {
+    schedule_override: scheduleOverride,
+  });
 
 export const updateKnowledgeEntryStatus = (
   entryType: KnowledgeEntryType,

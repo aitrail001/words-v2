@@ -27,7 +27,6 @@ from app.models.meaning_metadata import MeaningMetadata
 from app.models.meaning_example import MeaningExample
 from app.models.reference_entry import ReferenceEntry
 from app.models.reference_localization import ReferenceLocalization
-from app.models.review import LearningQueueItem, ReviewCard, ReviewHistory, ReviewSession
 from app.models.search_history import SearchHistory
 from app.models.translation import Translation
 from app.models.translation_example import TranslationExample
@@ -67,10 +66,6 @@ __all__ = [
     "LexiconArtifactReviewItem",
     "LexiconArtifactReviewItemEvent",
     "LexiconJob",
-    "ReviewSession",
-    "ReviewCard",
-    "LearningQueueItem",
-    "ReviewHistory",
     "LexiconRegenerationRequest",
     "LexiconReviewBatch",
     "LexiconReviewItem",

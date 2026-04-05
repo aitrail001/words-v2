@@ -1,12 +1,156 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { injectToken, registerViaApi } from "../helpers/auth";
+import {
+  REVIEW_SCENARIO_DEFINITIONS,
+  seedReviewScenarioQueue,
+} from "../helpers/review-scenario-fixture";
 
-test("@smoke review prompt families render, replay audio, and submit mixed flows", async ({
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const clickOptionByLabel = async (page: Page, label: string) => {
+  const exactEndMatch = page
+    .getByRole("button")
+    .filter({ hasText: new RegExp(`${escapeRegExp(label)}$`, "i") });
+  const exactEndCount = await exactEndMatch.count();
+  if (exactEndCount === 1) {
+    await exactEndMatch.first().click();
+    return;
+  }
+  if (exactEndCount > 1) {
+    for (let index = 0; index < exactEndCount; index += 1) {
+      const candidate = exactEndMatch.nth(index);
+      const text = (await candidate.textContent())?.trim().toLowerCase() ?? "";
+      if (text === label.toLowerCase() || /^[a-d]\s*/i.test(text) && text.replace(/^[a-d]\s*/i, "") === label.toLowerCase()) {
+        await candidate.click();
+        return;
+      }
+    }
+    await exactEndMatch.first().click();
+    return;
+  }
+  await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(label)}$`, "i") }).click();
+};
+
+const answerVisiblePrompt = async (page: Page, scenario: (typeof REVIEW_SCENARIO_DEFINITIONS)[number]) => {
+  const definitionButtons = page.getByRole("button", {
+    name: new RegExp(escapeRegExp(scenario.definition), "i"),
+  });
+
+  if (await page.getByTestId("review-collocation-prompt").count()) {
+    await clickOptionByLabel(page, scenario.displayText);
+    return;
+  }
+  if (await page.getByTestId("review-situation-prompt").count()) {
+    await clickOptionByLabel(page, scenario.displayText);
+    return;
+  }
+  if (await page.getByTestId("review-confidence-prompt").count()) {
+    await page.getByRole("button", { name: /i remember it/i }).click();
+    return;
+  }
+  if (await page.getByTestId("review-speech-placeholder").count()) {
+    await page.getByPlaceholder(/type the word or phrase/i).fill(scenario.displayText);
+    await page.getByRole("button", { name: /check answer/i }).click();
+    return;
+  }
+  if (await page.getByPlaceholder(/type the word or phrase/i).count()) {
+    await page.getByPlaceholder(/type the word or phrase/i).fill(scenario.displayText);
+    await page.getByRole("button", { name: /check answer/i }).click();
+    return;
+  }
+  if (await page.getByRole("button", { name: /replay audio/i }).count()) {
+    await expect(page.getByRole("button", { name: /replay audio/i })).toBeVisible();
+    await page.getByRole("button", { name: /replay audio/i }).first().click();
+    if (await definitionButtons.count()) {
+      await definitionButtons.first().click();
+      return;
+    }
+    if (await page.getByPlaceholder(/type the word or phrase/i).count()) {
+      await page.getByPlaceholder(/type the word or phrase/i).fill(scenario.displayText);
+      await page.getByRole("button", { name: /check answer/i }).click();
+      return;
+    }
+    await clickOptionByLabel(page, scenario.displayText);
+    return;
+  }
+  if (await page.getByText(new RegExp(`^${escapeRegExp(scenario.displayText)}$`, "i")).count()) {
+    if (await definitionButtons.count()) {
+      await definitionButtons.first().click();
+      return;
+    }
+    await clickOptionByLabel(page, scenario.displayText);
+    return;
+  }
+  await expect(page.getByText(new RegExp(escapeRegExp(scenario.definition), "i"))).toBeVisible();
+  if (await definitionButtons.count()) {
+    await definitionButtons.first().click();
+    return;
+  }
+  await clickOptionByLabel(page, scenario.displayText);
+};
+
+const finishGuidedLearningPass = async (page: Page) => {
+  for (let step = 0; step < 10; step += 1) {
+    const nextMeaning = page.getByRole("button", { name: /next meaning/i });
+    if (await nextMeaning.count()) {
+      await nextMeaning.click();
+      continue;
+    }
+    const finishLearning = page.getByRole("button", { name: /finish learning/i });
+    if (await finishLearning.count()) {
+      await finishLearning.click();
+    }
+    return;
+  }
+  throw new Error("Guided relearn did not finish within 10 steps.");
+};
+
+const resolveReviewHandoff = async (page: Page) => {
+  const waitForReviewReturn = async () => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (await page.getByTestId("review-active-state").count()) {
+        return;
+      }
+      if (await page.getByTestId("review-complete-state").count()) {
+        return;
+      }
+      await page.waitForTimeout(250);
+    }
+    throw new Error("Review handoff did not return to the active review flow.");
+  };
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (await page.getByRole("button", { name: /continue review/i }).count()) {
+      await page.getByRole("button", { name: /continue review/i }).click({ force: true });
+      await waitForReviewReturn();
+      return;
+    }
+    if (await page.getByRole("button", { name: /back to review/i }).count()) {
+      await page.getByRole("button", { name: /back to review/i }).first().click({ force: true });
+      await waitForReviewReturn();
+      return;
+    }
+    if (await page.getByTestId("review-relearn-state").count()) {
+      await finishGuidedLearningPass(page);
+      await waitForReviewReturn();
+      return;
+    }
+    if (await page.getByTestId("review-complete-state").count()) {
+      return;
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error("No review handoff control rendered after prompt submission.");
+};
+
+test("@smoke review prompt families run against the real DB-backed queue", async ({
   page,
   request,
 }) => {
+  test.setTimeout(90_000);
+  page.on("dialog", (dialog) => dialog.accept());
   const user = await registerViaApi(request, "review-families");
-  const submitPayloads: Record<string, unknown>[] = [];
+  await seedReviewScenarioQueue(user.id);
 
   await page.addInitScript(() => {
     HTMLMediaElement.prototype.play = async () => undefined;
@@ -22,623 +166,37 @@ test("@smoke review prompt families render, replay audio, and submit mixed flows
     });
   });
 
-  await page.route("**/api/knowledge-map/entries/word/word-situation*", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        entry_type: "word",
-        entry_id: "word-situation",
-        display_text: "resilience",
-        normalized_form: "resilience",
-        browse_rank: 20,
-        status: "learning",
-        cefr_level: "B2",
-        pronunciation: "/rɪˈzɪliəns/",
-        translation: "resiliencia",
-        primary_definition: "The capacity to recover quickly from difficulties.",
-        voice_assets: [
-          {
-            id: "voice-resilience-us",
-            content_scope: "word",
-            locale: "en_us",
-            playback_url: "/api/words/voice-assets/voice-resilience-us/content",
-          },
-          {
-            id: "voice-resilience-definition-us",
-            content_scope: "definition",
-            locale: "en_us",
-            meaning_id: "meaning-situation",
-            playback_url: "/api/words/voice-assets/voice-resilience-definition-us/content",
-          },
-          {
-            id: "voice-resilience-example-us",
-            content_scope: "example",
-            locale: "en_us",
-            meaning_example_id: "example-situation",
-            playback_url: "/api/words/voice-assets/voice-resilience-example-us/content",
-          },
-        ],
-        meanings: [
-          {
-            id: "meaning-situation",
-            definition: "The capacity to recover quickly from difficulties.",
-            localized_definition: "resiliencia",
-            part_of_speech: "noun",
-            usage_note: null,
-            localized_usage_note: null,
-            register: null,
-            primary_domain: null,
-            secondary_domains: [],
-            grammar_patterns: [],
-            synonyms: [],
-            antonyms: [],
-            collocations: [],
-            examples: [
-              {
-                id: "example-situation",
-                sentence: "Resilience helps teams adapt after major setbacks.",
-                difficulty: "B2",
-                translation: "La resiliencia ayuda a los equipos a adaptarse tras grandes contratiempos.",
-              },
-            ],
-            translations: [{ id: "translation-situation", language: "es", translation: "resiliencia" }],
-            relations: [],
-          },
-        ],
-        senses: [],
-        relation_groups: [],
-        confusable_words: [],
-        previous_entry: null,
-        next_entry: null,
-      }),
-    });
-  });
-
-  await page.route("**/api/reviews/queue/due**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify([
-        {
-          id: "state-audio",
-          queue_item_id: "state-audio",
-          word: "resilience",
-          definition: "The capacity to recover quickly from difficulties.",
-          review_mode: "mcq",
-          prompt: {
-            mode: "mcq",
-            prompt_type: "audio_to_definition",
-            prompt_token: "prompt-state-audio",
-            stem: "Listen and choose the matching meaning.",
-            question: "Which definition matches the audio?",
-            options: [
-              { option_id: "A", label: "The capacity to recover quickly from difficulties." },
-              { option_id: "B", label: "A severe reaction to small changes." },
-              { option_id: "C", label: "A habit of avoiding effort." },
-              { option_id: "D", label: "A formal request for help." },
-            ],
-            audio_state: "ready",
-            audio: {
-              preferred_locale: "us",
-              preferred_playback_url: "/api/words/voice-assets/review-audio/content",
-              locales: {
-                us: {
-                  playback_url: "/api/words/voice-assets/review-audio/content",
-                  locale: "en_us",
-                  relative_path: "learner/resilience/word/en_us.mp3",
-                },
-              },
-            },
-          },
-          detail: {
-            entry_type: "word",
-            entry_id: "word-audio",
-            display_text: "resilience",
-            primary_definition: "The capacity to recover quickly from difficulties.",
-            primary_example: "Resilience helps teams adapt after major setbacks.",
-            meaning_count: 1,
-            remembered_count: 1,
-            compare_with: [],
-            meanings: [],
-            audio_state: "ready",
-          },
-          schedule_options: [{ value: "2d", label: "In 2 days", is_default: true }],
-        },
-        {
-          id: "state-collocation",
-          queue_item_id: "state-collocation",
-          word: "jump the gun",
-          definition: "To do something too soon.",
-          review_mode: "mcq",
-          prompt: {
-            mode: "mcq",
-            prompt_type: "collocation_check",
-            prompt_token: "prompt-state-collocation",
-            stem: "Choose the common expression that best fits the sentence.",
-            question: "They ___ and announced it early.",
-            sentence_masked: "They ___ and announced it early.",
-            options: [
-              { option_id: "A", label: "jump the gun" },
-              { option_id: "B", label: "miss the boat" },
-              { option_id: "C", label: "cut corners" },
-              { option_id: "D", label: "take over" },
-            ],
-            audio_state: "not_available",
-          },
-          detail: {
-            entry_type: "phrase",
-            entry_id: "phrase-collocation",
-            display_text: "jump the gun",
-            primary_definition: "To do something too soon.",
-            primary_example: "They jumped the gun and announced it early.",
-            meaning_count: 1,
-            remembered_count: 2,
-            compare_with: ["move too fast"],
-            meanings: [],
-            audio_state: "not_available",
-          },
-          schedule_options: [{ value: "3d", label: "In 3 days", is_default: true }],
-        },
-        {
-          id: "state-situation",
-          queue_item_id: "state-situation",
-          word: "resilience",
-          definition: "The capacity to recover quickly from difficulties.",
-          review_mode: "mcq",
-          prompt: {
-            mode: "mcq",
-            prompt_type: "situation_matching",
-            prompt_token: "prompt-state-situation",
-            stem: "Which word or phrase best fits this situation?",
-            question: "A team keeps adapting after repeated setbacks.",
-            options: [
-              { option_id: "A", label: "overreaction" },
-              { option_id: "B", label: "resilience" },
-              { option_id: "C", label: "avoidance" },
-              { option_id: "D", label: "confusion" },
-            ],
-            audio_state: "not_available",
-          },
-          detail: {
-            entry_type: "word",
-            entry_id: "word-situation",
-            display_text: "resilience",
-            primary_definition: "The capacity to recover quickly from difficulties.",
-            primary_example: "Resilience helps teams adapt after major setbacks.",
-            meaning_count: 1,
-            remembered_count: 3,
-            compare_with: [],
-            meanings: [
-              {
-                id: "meaning-situation",
-                definition: "The capacity to recover quickly from difficulties.",
-                example: "Resilience helps teams adapt after major setbacks.",
-              },
-            ],
-            audio_state: "not_available",
-          },
-          schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
-        },
-        {
-          id: "state-speak",
-          queue_item_id: "state-speak",
-          word: "resilience",
-          definition: "The capacity to recover quickly from difficulties.",
-          review_mode: "mcq",
-          prompt: {
-            mode: "mcq",
-            prompt_type: "speak_recall",
-            prompt_token: "prompt-state-speak",
-            stem: "Say or type the word or phrase that matches this definition.",
-            question: "The capacity to recover quickly from difficulties.",
-            options: null,
-            input_mode: "speech_placeholder",
-            voice_placeholder_text: "Voice capture is not live yet. Type the answer for now.",
-            audio_state: "placeholder",
-          },
-          detail: {
-            entry_type: "word",
-            entry_id: "word-speak",
-            display_text: "resilience",
-            primary_definition: "The capacity to recover quickly from difficulties.",
-            primary_example: "Resilience helps teams adapt to change.",
-            meaning_count: 1,
-            remembered_count: 4,
-            compare_with: [],
-            meanings: [],
-            audio_state: "placeholder",
-          },
-          schedule_options: [{ value: "7d", label: "In a week", is_default: true }],
-        },
-      ]),
-    });
-  });
-
-  await page.route("**/api/reviews/queue/*/submit", async (route) => {
-    const payload = route.request().postDataJSON() as Record<string, unknown>;
-    submitPayloads.push(payload);
-
-    const urlSegments = route.request().url().split("/");
-    const itemId = urlSegments[urlSegments.length - 2] ?? "";
-    if (itemId === "state-audio" && payload.selected_option_id === "A") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          outcome: "correct_tested",
-          detail: {
-            entry_type: "word",
-            entry_id: "word-audio",
-            display_text: "resilience",
-            primary_definition: "The capacity to recover quickly from difficulties.",
-            primary_example: "Resilience helps teams adapt after major setbacks.",
-            meaning_count: 1,
-            remembered_count: 1,
-            compare_with: [],
-            meanings: [],
-            audio_state: "ready",
-          },
-          schedule_options: [{ value: "2d", label: "In 2 days", is_default: true }],
-        }),
-      });
-      return;
-    }
-    if (itemId === "state-collocation" && payload.selected_option_id === "A") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          outcome: "correct_tested",
-          detail: {
-            entry_type: "phrase",
-            entry_id: "phrase-collocation",
-            display_text: "jump the gun",
-            primary_definition: "To do something too soon.",
-            primary_example: "They jumped the gun and announced it early.",
-            meaning_count: 1,
-            remembered_count: 2,
-            compare_with: ["move too fast"],
-            meanings: [],
-            audio_state: "not_available",
-          },
-          schedule_options: [{ value: "3d", label: "In 3 days", is_default: true }],
-        }),
-      });
-      return;
-    }
-    if (itemId === "state-speak" && payload.typed_answer) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          outcome: "correct_tested",
-          detail: {
-            entry_type: "word",
-            entry_id: "word-speak",
-            display_text: "resilience",
-            primary_definition: "The capacity to recover quickly from difficulties.",
-            primary_example: "Resilience helps teams adapt to change.",
-            meaning_count: 1,
-            remembered_count: 4,
-            compare_with: [],
-            meanings: [],
-            audio_state: "placeholder",
-          },
-          schedule_options: [{ value: "7d", label: "In a week", is_default: true }],
-        }),
-      });
-      return;
-    }
-    if (itemId === "state-situation" && payload.selected_option_id === "A") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          outcome: "wrong",
-          detail: {
-            entry_type: "word",
-            entry_id: "word-situation",
-            display_text: "resilience",
-            primary_definition: "The capacity to recover quickly from difficulties.",
-            primary_example: "Resilience helps teams adapt after major setbacks.",
-            meaning_count: 1,
-            remembered_count: 3,
-            compare_with: [],
-            meanings: [
-              {
-                id: "meaning-situation",
-                definition: "The capacity to recover quickly from difficulties.",
-                example: "Resilience helps teams adapt after major setbacks.",
-              },
-            ],
-            audio_state: "not_available",
-          },
-          schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
-        }),
-      });
-      return;
-    }
-
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({}),
-    });
-  });
-
   await page.goto("/review");
-  await page.getByRole("button", { name: /start review/i }).click();
+  await expect(page.getByTestId("review-active-state")).toBeVisible();
 
-  await expect(page.getByRole("button", { name: /play audio/i })).toBeVisible();
-  await page.getByRole("button", { name: /play audio/i }).click();
-  await expect(page.getByRole("button", { name: /play again/i })).toBeVisible();
-  await page.getByRole("button", { name: /the capacity to recover quickly from difficulties/i }).click();
-  await expect(page.getByTestId("review-reveal-state")).toBeVisible();
-  await page.getByRole("button", { name: /continue/i }).click();
+  for (const [index, scenario] of REVIEW_SCENARIO_DEFINITIONS.entries()) {
+    const reviewCount = `Review ${index + 1}/${REVIEW_SCENARIO_DEFINITIONS.length}`;
+    await expect(page.getByText(reviewCount)).toBeVisible();
 
-  await expect(page.getByTestId("review-collocation-prompt")).toBeVisible();
-  await expect(page.getByTestId("review-collocation-prompt").getByText(/common expression/i)).toBeVisible();
-  await page.getByRole("button", { name: /jump the gun/i }).click();
-  await expect(page.getByTestId("review-reveal-state")).toBeVisible();
-  await page.getByRole("button", { name: /continue/i }).click();
+    if (scenario.expectedPromptType === "sentence_gap") {
+      await expect(page.getByRole("button", { name: /show meaning/i })).toBeVisible();
+      await page.getByRole("button", { name: /show meaning/i }).click();
+      await expect(page.getByTestId("review-relearn-state")).toBeVisible();
+      await finishGuidedLearningPass(page);
+      if (index + 1 < REVIEW_SCENARIO_DEFINITIONS.length) {
+        await expect(page.getByTestId("review-active-state")).toBeVisible();
+      }
+      continue;
+    }
 
-  await expect(page.getByTestId("review-situation-prompt")).toBeVisible();
-  await expect(
-    page.getByTestId("review-situation-prompt").getByText(
-      /a team keeps adapting after repeated setbacks/i,
-    ),
-  ).toBeVisible();
-  await page.getByRole("button", { name: /overreaction/i }).click();
-  await expect(page.getByTestId("review-relearn-state")).toBeVisible();
-  await expect(page.getByRole("link", { name: /open full word details/i })).toBeVisible();
-  await page.getByRole("button", { name: /continue/i }).click();
+    await answerVisiblePrompt(page, scenario);
 
-  await expect(page.getByTestId("review-speech-placeholder")).toBeVisible();
-  await expect(page.getByText(/voice capture is not live yet/i)).toBeVisible();
-  await page.getByPlaceholder(/type the word or phrase/i).fill("resilience");
-  await page.getByRole("button", { name: /check answer/i }).click();
-  await expect(page.getByTestId("review-reveal-state")).toBeVisible();
-  await page.getByRole("button", { name: /continue/i }).click();
+    await resolveReviewHandoff(page);
+
+    if (index + 1 < REVIEW_SCENARIO_DEFINITIONS.length) {
+      const nextReviewCount = `Review ${index + 2}/${REVIEW_SCENARIO_DEFINITIONS.length}`;
+      await expect(page.getByText(nextReviewCount)).toBeVisible();
+    }
+
+    if (index + 1 < REVIEW_SCENARIO_DEFINITIONS.length) {
+      await expect(page.getByTestId("review-active-state")).toBeVisible();
+    }
+  }
 
   await expect(page.getByTestId("review-complete-state")).toBeVisible();
-  await expect(page.getByText(/you reviewed 4 entries/i)).toBeVisible();
-
-  expect(submitPayloads).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        selected_option_id: "A",
-        prompt_token: "prompt-state-audio",
-      }),
-      expect.objectContaining({
-        outcome: "correct_tested",
-        selected_option_id: "A",
-        prompt_token: "prompt-state-audio",
-      }),
-      expect.objectContaining({
-        selected_option_id: "A",
-        prompt_token: "prompt-state-collocation",
-      }),
-      expect.objectContaining({
-        outcome: "correct_tested",
-        selected_option_id: "A",
-        prompt_token: "prompt-state-collocation",
-      }),
-      expect.objectContaining({
-        selected_option_id: "A",
-        prompt_token: "prompt-state-situation",
-      }),
-      expect.objectContaining({
-        typed_answer: "resilience",
-        prompt_token: "prompt-state-speak",
-      }),
-      expect.objectContaining({
-        outcome: "correct_tested",
-        typed_answer: "resilience",
-        prompt_token: "prompt-state-speak",
-      }),
-    ]),
-  );
-
-  expect(submitPayloads).toHaveLength(7);
-  expect(submitPayloads[0]).not.toHaveProperty("schedule_override");
-  expect(submitPayloads[2]).not.toHaveProperty("schedule_override");
-  expect(submitPayloads[4]).not.toHaveProperty("outcome");
-  expect(submitPayloads[5]).not.toHaveProperty("outcome");
-  expect(submitPayloads[5]).not.toHaveProperty("schedule_override");
-  expect(submitPayloads[6]).toEqual(
-    expect.objectContaining({
-      outcome: "correct_tested",
-      typed_answer: "resilience",
-      prompt_token: "prompt-state-speak",
-    }),
-  );
-  expect(submitPayloads[6]).not.toHaveProperty("schedule_override");
-});
-
-test("@smoke review relearn opens the full detail page with learner audio controls", async ({
-  page,
-  request,
-}) => {
-  const user = await registerViaApi(request, "review-relearn-detail");
-
-  await page.addInitScript(() => {
-    HTMLMediaElement.prototype.play = async () => undefined;
-  });
-
-  await injectToken(page, user.token);
-
-  await page.route("**/api/words/voice-assets/*/content", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "audio/mpeg",
-      body: "fixture-audio",
-    });
-  });
-
-  await page.route("**/api/knowledge-map/entries/word/word-situation*", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        entry_type: "word",
-        entry_id: "word-situation",
-        display_text: "resilience",
-        normalized_form: "resilience",
-        browse_rank: 20,
-        status: "learning",
-        cefr_level: "B2",
-        pronunciation: "/rɪˈzɪliəns/",
-        translation: "resiliencia",
-        primary_definition: "The capacity to recover quickly from difficulties.",
-        voice_assets: [
-          {
-            id: "voice-resilience-us",
-            content_scope: "word",
-            locale: "en_us",
-            playback_url: "/api/words/voice-assets/voice-resilience-us/content",
-          },
-          {
-            id: "voice-resilience-definition-us",
-            content_scope: "definition",
-            locale: "en_us",
-            meaning_id: "meaning-situation",
-            playback_url: "/api/words/voice-assets/voice-resilience-definition-us/content",
-          },
-          {
-            id: "voice-resilience-example-us",
-            content_scope: "example",
-            locale: "en_us",
-            meaning_example_id: "example-situation",
-            playback_url: "/api/words/voice-assets/voice-resilience-example-us/content",
-          },
-        ],
-        meanings: [
-          {
-            id: "meaning-situation",
-            definition: "The capacity to recover quickly from difficulties.",
-            localized_definition: "resiliencia",
-            part_of_speech: "noun",
-            usage_note: null,
-            localized_usage_note: null,
-            register: null,
-            primary_domain: null,
-            secondary_domains: [],
-            grammar_patterns: [],
-            synonyms: [],
-            antonyms: [],
-            collocations: [],
-            examples: [
-              {
-                id: "example-situation",
-                sentence: "Resilience helps teams adapt after major setbacks.",
-                difficulty: "B2",
-                translation: "La resiliencia ayuda a los equipos a adaptarse tras grandes contratiempos.",
-              },
-            ],
-            translations: [{ id: "translation-situation", language: "es", translation: "resiliencia" }],
-            relations: [],
-          },
-        ],
-        senses: [],
-        relation_groups: [],
-        confusable_words: [],
-        previous_entry: null,
-        next_entry: null,
-      }),
-    });
-  });
-
-  await page.route("**/api/reviews/queue/due**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify([
-        {
-          id: "state-situation",
-          queue_item_id: "state-situation",
-          word: "resilience",
-          definition: "The capacity to recover quickly from difficulties.",
-          review_mode: "mcq",
-          prompt: {
-            mode: "mcq",
-            prompt_type: "situation_matching",
-            prompt_token: "prompt-state-situation",
-            stem: "Which word or phrase best fits this situation?",
-            question: "A team keeps adapting after repeated setbacks.",
-            options: [
-              { option_id: "A", label: "overreaction" },
-              { option_id: "B", label: "resilience" },
-              { option_id: "C", label: "avoidance" },
-              { option_id: "D", label: "confusion" },
-            ],
-            audio_state: "not_available",
-          },
-          detail: {
-            entry_type: "word",
-            entry_id: "word-situation",
-            display_text: "resilience",
-            primary_definition: "The capacity to recover quickly from difficulties.",
-            primary_example: "Resilience helps teams adapt after major setbacks.",
-            meaning_count: 1,
-            remembered_count: 3,
-            compare_with: [],
-            meanings: [
-              {
-                id: "meaning-situation",
-                definition: "The capacity to recover quickly from difficulties.",
-                example: "Resilience helps teams adapt after major setbacks.",
-              },
-            ],
-            audio_state: "not_available",
-          },
-          schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
-        },
-      ]),
-    });
-  });
-
-  await page.route("**/api/reviews/queue/*/submit", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        outcome: "wrong",
-        detail: {
-          entry_type: "word",
-          entry_id: "word-situation",
-          display_text: "resilience",
-          primary_definition: "The capacity to recover quickly from difficulties.",
-          primary_example: "Resilience helps teams adapt after major setbacks.",
-          meaning_count: 1,
-          remembered_count: 3,
-          compare_with: [],
-          meanings: [
-            {
-              id: "meaning-situation",
-              definition: "The capacity to recover quickly from difficulties.",
-              example: "Resilience helps teams adapt after major setbacks.",
-            },
-          ],
-          audio_state: "not_available",
-        },
-        schedule_options: [{ value: "1d", label: "Tomorrow", is_default: true }],
-      }),
-    });
-  });
-
-  await page.goto("/review");
-  await page.getByRole("button", { name: /start review/i }).click();
-  await page.getByRole("button", { name: /overreaction/i }).click();
-  await expect(page.getByTestId("review-relearn-state")).toBeVisible();
-  await page.getByRole("link", { name: /open full word details/i }).click();
-
-  await expect(page).toHaveURL(/\/word\/word-situation\?return_to=review&resume=1$/);
-  await expect(page.getByRole("button", { name: /back to review/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /play audio for resilience/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /play definition audio for resilience/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /play example audio for resilience/i })).toBeVisible();
-  await page.getByRole("button", { name: /back to review/i }).click();
-  await expect(page.getByTestId("review-relearn-state")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "resilience" })).toBeVisible();
 });
