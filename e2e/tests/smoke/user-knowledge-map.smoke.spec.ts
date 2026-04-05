@@ -124,7 +124,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await page.getByRole("link", { name: /started/i }).click();
   await expect(page).toHaveURL(/\/knowledge-list\/learning$/);
   await expect(page.getByRole("heading", { name: "Learning Words" })).toBeVisible();
-  await expect(page.getByText(KNOWLEDGE_PHRASE, { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: new RegExp(`^${KNOWLEDGE_PHRASE}\\b`, "i") })).toBeVisible();
   await expect(page.getByRole("button", { name: "Alphabetic" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Asc" })).toBeVisible();
   await page.getByRole("button", { name: "Alphabetic" }).click();
