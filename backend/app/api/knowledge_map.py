@@ -16,7 +16,6 @@ from app.models.meaning import Meaning
 from app.models.lexicon_voice_asset import LexiconVoiceAsset
 from app.models.phrase_entry import PhraseEntry
 from app.models.search_history import SearchHistory
-from app.models.translation import Translation
 from app.models.user import User
 from app.models.word import Word
 from app.services.knowledge_map import (
@@ -42,7 +41,6 @@ from app.services.knowledge_map import (
     load_range_catalog_items,
     load_word_summary_map,
     load_word_detail_relations,
-    load_word_primary_definitions,
     normalize_confusable_words,
     normalize_meaning_metadata,
     normalize_translation_examples,
@@ -1117,7 +1115,7 @@ async def put_knowledge_map_status(
     else:
         row.status = payload.status
     if payload.status == "learning":
-        await ReviewService(db)._ensure_entry_review_state(
+        await ReviewService(db)._ensure_learning_entry_has_review_state(
             user_id=current_user.id,
             entry_type=entry_type,
             entry_id=entry_id,

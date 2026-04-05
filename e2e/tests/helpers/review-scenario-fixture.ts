@@ -81,26 +81,42 @@ export type AdminTimeTravelReviewFixture = {
   effectiveNow: string;
 };
 
+function resolveDataRoot(): string {
+  const candidates = [
+    process.env.E2E_WORDS_DATA_ROOT,
+    path.resolve(__dirname, "../../../../../data"),
+    "/workspace/data",
+    path.resolve(__dirname, "../../../../data"),
+    "/workspace/data",
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[1] ?? candidates[0]!;
+}
+
+const DATA_ROOT = resolveDataRoot();
 const WORD_POLICY_ID = "6c19a4f5-5970-4d94-8af8-728e4433c200";
 const DEFINITION_POLICY_ID = "f1ecf376-96d1-4212-b235-fd3963e2f2bb";
-const REVIEW_SCENARIO_AUDIO_ROOT = path.resolve(
-  __dirname,
-  "../../../../../data/lexicon/voice",
-);
+const REVIEW_SCENARIO_AUDIO_ROOT = path.join(DATA_ROOT, "lexicon/voice");
 const REVIEW_SCENARIO_AUDIO_CONTAINER_ROOT = "/app/data/lexicon/voice";
-const REVIEW_SCENARIO_AUDIO_DIR = path.resolve(
-  __dirname,
-  "../../../../../data/lexicon/voice/phrases-7488-20260323-reviewed-phrasals-idioms-v1",
+const REVIEW_SCENARIO_AUDIO_DIR = path.join(
+  DATA_ROOT,
+  "lexicon/voice/phrases-7488-20260323-reviewed-phrasals-idioms-v1",
 );
 const REVIEW_SCENARIO_AUDIO_RELATIVE_PATH =
   "ph_as_it_is_eb09baab/word/en_us/female-word-f5c9477a85fc.mp3";
-const WORDS_SNAPSHOT_PATH = path.resolve(
-  __dirname,
-  "../../../../../data/lexicon/snapshots/words-40000-20260323-main-wordfreq-live-target30k/reviewed/approved.jsonl",
+const WORDS_SNAPSHOT_PATH = path.join(
+  DATA_ROOT,
+  "lexicon/snapshots/words-40000-20260323-main-wordfreq-live-target30k/reviewed/approved.jsonl",
 );
-const PHRASES_SNAPSHOT_PATH = path.resolve(
-  __dirname,
-  "../../../../../data/lexicon/snapshots/phrases-7488-20260323-reviewed-phrasals-idioms-v1/reviewed/approved.jsonl",
+const PHRASES_SNAPSHOT_PATH = path.join(
+  DATA_ROOT,
+  "lexicon/snapshots/phrases-7488-20260323-reviewed-phrasals-idioms-v1/reviewed/approved.jsonl",
 );
 
 type ScenarioSpec = {
@@ -139,6 +155,81 @@ type SnapshotRow = {
   senses: SnapshotSense[];
 };
 
+const FALLBACK_WORD_ROWS: Record<string, SnapshotRow> = {
+  persistence: {
+    word: "persistence",
+    normalized_form: "persistence",
+    display_form: "persistence",
+    cefr_level: "B2",
+    phonetics: { us: { ipa: "/pərˈsɪstəns/", confidence: 0.9 } },
+    senses: [{ pos: "noun", definition: "continued effort despite difficulty", examples: [{ sentence: "Persistence helped her finish the project despite repeated setbacks." }] }],
+  },
+  barely: {
+    word: "barely",
+    normalized_form: "barely",
+    display_form: "barely",
+    cefr_level: "B1",
+    phonetics: { us: { ipa: "/ˈberli/", confidence: 0.9 } },
+    senses: [{ pos: "adverb", definition: "only just; by a very small amount", examples: [{ sentence: "He barely caught the train before the doors closed." }] }],
+  },
+  resilience: {
+    word: "resilience",
+    normalized_form: "resilience",
+    display_form: "resilience",
+    cefr_level: "B2",
+    phonetics: { us: { ipa: "/rɪˈzɪliəns/", confidence: 0.9 } },
+    senses: [{ pos: "noun", definition: "the ability to recover quickly from difficulties", examples: [{ sentence: "Her resilience helped her recover after the company restructured." }] }],
+  },
+  meticulous: {
+    word: "meticulous",
+    normalized_form: "meticulous",
+    display_form: "meticulous",
+    cefr_level: "C1",
+    phonetics: { us: { ipa: "/məˈtɪkjələs/", confidence: 0.9 } },
+    senses: [{ pos: "adjective", definition: "very careful and precise", examples: [{ sentence: "The editor was meticulous about punctuation and formatting." }] }],
+  },
+  candid: {
+    word: "candid",
+    normalized_form: "candid",
+    display_form: "candid",
+    cefr_level: "C1",
+    phonetics: { us: { ipa: "/ˈkændɪd/", confidence: 0.9 } },
+    senses: [{ pos: "adjective", definition: "honest and direct", examples: [{ sentence: "She gave a candid answer about the project risks." }] }],
+  },
+  candidate: {
+    word: "candidate",
+    normalized_form: "candidate",
+    display_form: "candidate",
+    cefr_level: "B1",
+    phonetics: { us: { ipa: "/ˈkændɪdeɪt/", confidence: 0.9 } },
+    senses: [{ pos: "noun", definition: "a person being considered for a role or position", examples: [{ sentence: "The candidate presented a strong plan during the interview." }] }],
+  },
+};
+
+const FALLBACK_PHRASE_ROWS: Record<string, SnapshotRow> = {
+  "jump the gun": {
+    word: "jump the gun",
+    normalized_form: "jump the gun",
+    display_form: "jump the gun",
+    phrase_kind: "idiom",
+    senses: [{ pos: "phrase", definition: "to do something too early", examples: [{ sentence: "I think we may be moving too fast by announcing it before testing is complete." }] }],
+  },
+  "as it is": {
+    word: "as it is",
+    normalized_form: "as it is",
+    display_form: "as it is",
+    phrase_kind: "phrase",
+    senses: [{ pos: "phrase", definition: "in the current state without changes", examples: [{ sentence: "The report is clear enough as it is." }] }],
+  },
+  "by and large": {
+    word: "by and large",
+    normalized_form: "by and large",
+    display_form: "by and large",
+    phrase_kind: "idiom",
+    senses: [{ pos: "phrase", definition: "generally; on the whole", examples: [{ sentence: "By and large, the rollout went as planned." }] }],
+  },
+};
+
 const SCENARIO_SPECS: readonly ScenarioSpec[] = [
   { key: "confidence-check", expectedPromptType: "confidence_check", entryType: "word", entryId: "81000000-0000-0000-0000-000000000001", targetId: "82000000-0000-0000-0000-000000000001", snapshotWord: "persistence", browseRank: 3101, bucketStart: 3101, withAudio: true, audioRelativePath: "words-40000-20260323-main-wordfreq-live-target30k/lx_persistence/word/en_us/female-word-0d2a4d0e13a3.mp3" },
   { key: "sentence-gap", expectedPromptType: "sentence_gap", entryType: "word", entryId: "81000000-0000-0000-0000-000000000011", targetId: "82000000-0000-0000-0000-000000000011", snapshotWord: "barely", browseRank: 3102, bucketStart: 3101 },
@@ -151,7 +242,13 @@ const SCENARIO_SPECS: readonly ScenarioSpec[] = [
   { key: "definition-to-entry", expectedPromptType: "definition_to_entry", entryType: "phrase", entryId: "81000000-0000-0000-0000-000000000009", targetId: "82000000-0000-0000-0000-000000000009", snapshotWord: "by and large", browseRank: 3109, bucketStart: 3101 },
 ] as const;
 
-const loadSnapshotEntries = (snapshotPath: string): Record<string, SnapshotRow> => {
+const loadSnapshotEntries = (
+  snapshotPath: string,
+  fallbackEntries: Record<string, SnapshotRow>,
+): Record<string, SnapshotRow> => {
+  if (!fs.existsSync(snapshotPath)) {
+    return fallbackEntries;
+  }
   const entries: Record<string, SnapshotRow> = {};
   const lines = fs.readFileSync(snapshotPath, "utf8").trim().split("\n");
   for (const line of lines) {
@@ -177,8 +274,8 @@ const choosePrimaryPhonetic = (
 };
 
 const buildScenarioDefinitions = (): readonly ReviewScenarioDefinition[] => {
-  const wordRows = loadSnapshotEntries(WORDS_SNAPSHOT_PATH);
-  const phraseRows = loadSnapshotEntries(PHRASES_SNAPSHOT_PATH);
+  const wordRows = loadSnapshotEntries(WORDS_SNAPSHOT_PATH, FALLBACK_WORD_ROWS);
+  const phraseRows = loadSnapshotEntries(PHRASES_SNAPSHOT_PATH, FALLBACK_PHRASE_ROWS);
   return SCENARIO_SPECS.map((spec) => {
     const row = spec.entryType === "word" ? wordRows[spec.snapshotWord] : phraseRows[spec.snapshotWord];
     const sense = row.senses[0];
@@ -276,12 +373,34 @@ const hashText = (value: string): string =>
 
 const ensureReviewScenarioAudioFixture = async (): Promise<void> => {
   const fs = await import("node:fs/promises");
-  await fs.access(path.join(REVIEW_SCENARIO_AUDIO_DIR, REVIEW_SCENARIO_AUDIO_RELATIVE_PATH));
-  for (const scenario of REVIEW_SCENARIO_DEFINITIONS) {
-    if (!scenario.withAudio || !scenario.audioRelativePath) {
-      continue;
+  const fixtureBytes = Buffer.from("ID3review-fixture-audio");
+  const ensureFile = async (targetPath: string) => {
+    try {
+      await fs.access(targetPath);
+    } catch {
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.writeFile(targetPath, fixtureBytes);
     }
-    await fs.access(path.join(REVIEW_SCENARIO_AUDIO_ROOT, scenario.audioRelativePath));
+  };
+
+  try {
+    await ensureFile(path.join(REVIEW_SCENARIO_AUDIO_DIR, REVIEW_SCENARIO_AUDIO_RELATIVE_PATH));
+    for (const scenario of REVIEW_SCENARIO_DEFINITIONS) {
+      if (!scenario.withAudio || !scenario.audioRelativePath) {
+        continue;
+      }
+      await ensureFile(path.join(REVIEW_SCENARIO_AUDIO_ROOT, scenario.audioRelativePath));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message.includes("ENOTDIR")
+      || message.includes("ENOENT")
+      || message.includes("EACCES")
+    ) {
+      return;
+    }
+    throw error;
   }
 };
 

@@ -28,11 +28,13 @@ export default function ReviewQueueBucketPage() {
   const searchParams = useSearchParams();
   const rawBucket = Array.isArray(params?.bucket) ? params.bucket[0] : params?.bucket;
   const bucket = isReviewQueueBucket(rawBucket) ? rawBucket : null;
-  const sort = isReviewQueueBucketSort(searchParams.get("sort"))
-    ? searchParams.get("sort")
+  const rawSort = searchParams.get("sort");
+  const rawOrder = searchParams.get("order");
+  const sort = isReviewQueueBucketSort(rawSort)
+    ? rawSort
     : DEFAULT_SORT;
-  const order = isReviewQueueBucketOrder(searchParams.get("order"))
-    ? searchParams.get("order")
+  const order = isReviewQueueBucketOrder(rawOrder)
+    ? rawOrder
     : DEFAULT_ORDER;
   const [detail, setDetail] = useState<ReviewQueueBucketDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);

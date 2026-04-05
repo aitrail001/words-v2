@@ -206,7 +206,6 @@ class TestQueueDue:
         self, review_service, mock_db
     ):
         user_id = uuid.uuid4()
-        word_id = uuid.uuid4()
         state_result = MagicMock()
         state_result.scalars.return_value.all.return_value = []
         mock_db.execute.side_effect = [state_result]
@@ -2260,6 +2259,13 @@ class TestQueueStats:
         assert stats["review_count"] == 10
         assert stats["correct_count"] == 7
         assert stats["accuracy"] == 0.7
+
+        total_statement = mock_db.execute.await_args_list[0].args[0]
+        due_statement = mock_db.execute.await_args_list[1].args[0]
+        assert "learner_entry_statuses.status IS NULL" in str(total_statement)
+        assert "learner_entry_statuses.status = :status_1" in str(total_statement)
+        assert "learner_entry_statuses.status IS NULL" in str(due_statement)
+        assert "learner_entry_statuses.status = :status_1" in str(due_statement)
 
     @pytest.mark.asyncio
     async def test_get_queue_stats_uses_short_lived_cache(self, review_service, mock_db):

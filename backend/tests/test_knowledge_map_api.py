@@ -922,7 +922,6 @@ class TestKnowledgeMapDetail:
             language="en",
             frequency_rank=400,
         )
-        ensured_state = MagicMock()
 
         mock_db.execute.side_effect = [
             scalar_one_or_none_result(user),
@@ -930,9 +929,9 @@ class TestKnowledgeMapDetail:
             scalar_one_or_none_result(None),
         ]
 
-        ensure_state = AsyncMock(return_value=ensured_state)
+        ensure_state = AsyncMock(return_value=None)
         monkeypatch.setattr(
-            "app.api.knowledge_map.ReviewService._ensure_entry_review_state",
+            "app.api.knowledge_map.ReviewService._ensure_learning_entry_has_review_state",
             ensure_state,
         )
 

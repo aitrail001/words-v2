@@ -10,10 +10,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import and_, func, literal, literal_column, or_, select
+from sqlalchemy import and_, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -1413,6 +1413,31 @@ class ReviewService:
         self.db.add(state)
         await self.db.flush()
         return state
+
+    async def _ensure_learning_entry_has_review_state(
+        self,
+        *,
+        user_id: uuid.UUID,
+        entry_type: str,
+        entry_id: uuid.UUID,
+    ) -> None:
+        existing_result = await self.db.execute(
+            select(EntryReviewState.id)
+            .where(
+                EntryReviewState.user_id == user_id,
+                EntryReviewState.entry_type == entry_type,
+                EntryReviewState.entry_id == entry_id,
+                EntryReviewState.is_suspended.is_(False),
+            )
+            .limit(1)
+        )
+        if existing_result.scalar_one_or_none() is not None:
+            return
+        await self._ensure_entry_review_state(
+            user_id=user_id,
+            entry_type=entry_type,
+            entry_id=entry_id,
+        )
 
     async def _ensure_target_review_state(
         self,
@@ -3273,18 +3298,42 @@ class ReviewService:
         if cached is not None:
             return cached
         now = datetime.now(timezone.utc)
+        queue_visibility_filters = (
+            EntryReviewState.user_id == user_id,
+            EntryReviewState.is_suspended.is_(False),
+            or_(
+                LearnerEntryStatus.status.is_(None),
+                LearnerEntryStatus.status == "learning",
+            ),
+        )
         total_result = await self.db.execute(
-            select(func.count(EntryReviewState.id)).where(
-                EntryReviewState.user_id == user_id,
-                EntryReviewState.is_suspended.is_(False),
+            select(func.count(EntryReviewState.id))
+            .select_from(EntryReviewState)
+            .outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
+                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
+                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
+                ),
             )
+            .where(*queue_visibility_filters)
         )
         total_items = int(total_result.scalar_one() or 0)
 
         due_result = await self.db.execute(
-            select(func.count(EntryReviewState.id)).where(
-                EntryReviewState.user_id == user_id,
-                EntryReviewState.is_suspended.is_(False),
+            select(func.count(EntryReviewState.id))
+            .select_from(EntryReviewState)
+            .outerjoin(
+                LearnerEntryStatus,
+                and_(
+                    LearnerEntryStatus.user_id == EntryReviewState.user_id,
+                    LearnerEntryStatus.entry_type == EntryReviewState.entry_type,
+                    LearnerEntryStatus.entry_id == EntryReviewState.entry_id,
+                ),
+            )
+            .where(
+                *queue_visibility_filters,
                 (
                     (EntryReviewState.recheck_due_at.is_not(None) & (EntryReviewState.recheck_due_at <= now))
                     | (EntryReviewState.next_due_at.is_(None))

@@ -5,8 +5,10 @@ import HomePage from "@/app/page";
 import WordEntryPage from "@/app/word/[entryId]/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
 import {
+  getAuthUserProfile,
   getKnowledgeMapDashboard,
   getKnowledgeMapEntryDetail,
+  getReviewQueueStats,
   updateKnowledgeEntryStatus,
 } from "@/lib/knowledge-map-client";
 import { getUserPreferences } from "@/lib/user-preferences-client";
@@ -28,8 +30,10 @@ jest.mock("@/lib/user-preferences-client", () => {
 describe("WordEntryPage", () => {
   const mockUseParams = useParams as jest.MockedFunction<typeof useParams>;
   const mockUseRouter = useRouter as jest.MockedFunction<typeof useRouter>;
+  const mockGetAuthUserProfile = getAuthUserProfile as jest.MockedFunction<typeof getAuthUserProfile>;
   const mockGetKnowledgeMapDashboard = getKnowledgeMapDashboard as jest.MockedFunction<typeof getKnowledgeMapDashboard>;
   const mockGetKnowledgeMapEntryDetail = getKnowledgeMapEntryDetail as jest.MockedFunction<typeof getKnowledgeMapEntryDetail>;
+  const mockGetReviewQueueStats = getReviewQueueStats as jest.MockedFunction<typeof getReviewQueueStats>;
   const mockUpdateKnowledgeEntryStatus = updateKnowledgeEntryStatus as jest.MockedFunction<typeof updateKnowledgeEntryStatus>;
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
 
@@ -38,6 +42,13 @@ describe("WordEntryPage", () => {
     jest.spyOn(window, "confirm").mockReturnValue(true);
     mockUseParams.mockReturnValue({ entryId: "word-1" } as never);
     mockUseRouter.mockReturnValue({ push: jest.fn() } as never);
+    mockGetAuthUserProfile.mockResolvedValue({
+      id: "user-1",
+      email: "user@user.com",
+      role: "user",
+      tier: "free",
+      is_active: true,
+    });
     mockGetKnowledgeMapDashboard.mockResolvedValue({
       total_entries: 13760,
       counts: {
@@ -62,6 +73,13 @@ describe("WordEntryPage", () => {
         browse_rank: 2616,
         status: "to_learn",
       },
+    });
+    mockGetReviewQueueStats.mockResolvedValue({
+      total_items: 0,
+      due_items: 0,
+      review_count: 0,
+      correct_count: 0,
+      accuracy: 0,
     });
     mockGetUserPreferences.mockResolvedValue({
       accent_preference: "uk",
