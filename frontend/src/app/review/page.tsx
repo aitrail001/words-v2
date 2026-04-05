@@ -72,7 +72,10 @@ const formatPromptQuestion = (card: ReviewQueueCard): string => {
   if (!prompt) {
     return card.definition ?? card.word ?? "Review item";
   }
-  if (prompt.prompt_type === "sentence_gap" && prompt.sentence_masked) {
+  if (
+    ["sentence_gap", "collocation_check", "situation_matching"].includes(prompt.prompt_type ?? "")
+    && prompt.sentence_masked
+  ) {
     return prompt.sentence_masked;
   }
   return prompt.question || card.definition || card.word || "Review item";
@@ -924,12 +927,6 @@ export default function ReviewPage() {
           </button>
         ) : null}
       </div>
-
-      {scheduleOptions.length > 0 ? (
-        <p className="text-center text-xs text-slate-500">
-          Default next review: {scheduleOptions.find((option) => option.is_default)?.label}
-        </p>
-      ) : null}
     </div>
   );
 }

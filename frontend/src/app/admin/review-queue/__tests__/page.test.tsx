@@ -6,13 +6,12 @@ jest.mock("next/headers", () => ({
   cookies: jest.fn(),
 }));
 
-function makeQueueResponse(overrides?: {
+function makeQueueSummaryResponse(overrides?: {
   effectiveNow?: string;
   totalCount?: number;
   groups?: Array<{
     bucket: string;
     count: number;
-    items: Array<Record<string, unknown>>;
   }>;
 }) {
   return {
@@ -47,98 +46,52 @@ describe("AdminReviewQueuePage", () => {
     global.fetch = originalFetch;
   });
 
-  it("renders admin-only queue metadata and debug-only fields from the grouped admin API", async () => {
+  it("renders the admin queue summary cards from the shared summary endpoint", async () => {
     mockFetchJson(
-      makeQueueResponse({
+      makeQueueSummaryResponse({
         effectiveNow: "2026-10-05T09:00:00+00:00",
-        totalCount: 1,
+        totalCount: 3,
         groups: [
-          {
-            bucket: "due_now",
-            count: 1,
-            items: [
-              {
-                queue_item_id: "queue-1",
-                entry_id: "word-1",
-                entry_type: "word",
-                text: "persistence",
-                status: "learning",
-                next_review_at: "2026-10-05T09:00:00+00:00",
-                last_reviewed_at: "2026-10-04T09:00:00+00:00",
-                target_type: "meaning",
-                target_id: "meaning-1",
-                recheck_due_at: "2026-10-05T08:30:00+00:00",
-                next_due_at: "2026-10-05T09:00:00+00:00",
-                last_outcome: "passed",
-                relearning: false,
-                relearning_trigger: null,
-              },
-            ],
-          },
+          { bucket: "due_now", count: 2 },
+          { bucket: "tomorrow", count: 1 },
         ],
       }),
     );
 
     render(await AdminReviewQueuePage({}));
 
-    expect(await screen.findByRole("heading", { name: /srs queue debug/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /admin review queue/i })).toBeInTheDocument();
     await waitFor(() =>
       expect(global.fetch).toHaveBeenCalledWith(
-        "http://localhost:8000/api/reviews/admin/queue/grouped",
+        "http://localhost:8000/api/reviews/admin/queue/summary",
         expect.objectContaining({
           cache: "no-store",
           headers: { Authorization: "Bearer admin-token" },
         }),
       ),
     );
-    expect(screen.getByText(/admin-only queue inspection/i)).toBeInTheDocument();
-    expect(screen.getByText(/effective time in use/i)).toBeInTheDocument();
+    expect(screen.getByText(/request-scoped effective-time overrides/i)).toBeInTheDocument();
     expect(screen.getByText("2026-10-05T09:00:00+00:00")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /due now/i })).toBeInTheDocument();
-    expect(screen.getByText("persistence")).toBeInTheDocument();
-    expect(screen.getByText(/target_type: meaning/i)).toBeInTheDocument();
-    expect(screen.getByText(/target_id: meaning-1/i)).toBeInTheDocument();
-    expect(screen.getByText(/recheck_due_at: 2026-10-05T08:30:00\+00:00/i)).toBeInTheDocument();
-    expect(screen.getByText(/next_due_at: 2026-10-05T09:00:00\+00:00/i)).toBeInTheDocument();
-    expect(screen.getByText(/last_outcome: passed/i)).toBeInTheDocument();
-    expect(screen.getByText(/relearning: no/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open detail for persistence/i })).toHaveAttribute("href", "/word/word-1");
-    expect(screen.getByRole("link", { name: /start review for persistence/i })).toHaveAttribute(
+    expect(screen.getByRole("heading", { name: /tomorrow/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open due now bucket/i })).toHaveAttribute(
       "href",
-      "/review?queue_item_id=queue-1",
+      "/admin/review-queue/due_now",
     );
-    expect(screen.queryByText(/prompt_family:/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /start review from due now/i })).toHaveAttribute(
+      "href",
+      "/review",
+    );
+    expect(screen.queryByRole("link", { name: /start review from tomorrow/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/target_type:/i)).not.toBeInTheDocument();
   });
 
   it("renders the effective time override controls for request-scoped inspection", async () => {
     mockFetchJson(
-      makeQueueResponse({
+      makeQueueSummaryResponse({
         effectiveNow: "2026-10-05T09:00:00+00:00",
         totalCount: 1,
-        groups: [
-          {
-            bucket: "due_now",
-            count: 1,
-            items: [
-              {
-                queue_item_id: "queue-2",
-                entry_id: "word-2",
-                entry_type: "word",
-                text: "candidate",
-                status: "learning",
-                next_review_at: "2026-10-05T09:00:00+00:00",
-                last_reviewed_at: null,
-                target_type: "meaning",
-                target_id: "meaning-2",
-                recheck_due_at: null,
-                next_due_at: "2026-10-05T09:00:00+00:00",
-                last_outcome: null,
-                relearning: true,
-                relearning_trigger: "failed_review",
-              },
-            ],
-          },
-        ],
+        groups: [{ bucket: "due_now", count: 1 }],
       }),
     );
 
@@ -150,7 +103,7 @@ describe("AdminReviewQueuePage", () => {
   });
 
   it("shows an admin-oriented empty state when no queue items match the selected time", async () => {
-    mockFetchJson(makeQueueResponse());
+    mockFetchJson(makeQueueSummaryResponse());
 
     render(await AdminReviewQueuePage({}));
 
@@ -160,8 +113,9 @@ describe("AdminReviewQueuePage", () => {
 
   it("uses the initial effective_now search param on first render", async () => {
     mockFetchJson(
-      makeQueueResponse({
+      makeQueueSummaryResponse({
         effectiveNow: "2026-10-05T09:00:00+00:00",
+        groups: [{ bucket: "due_now", count: 1 }],
       }),
     );
 
@@ -173,13 +127,29 @@ describe("AdminReviewQueuePage", () => {
 
     await waitFor(() =>
       expect(global.fetch).toHaveBeenCalledWith(
-        "http://localhost:8000/api/reviews/admin/queue/grouped?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00",
+        "http://localhost:8000/api/reviews/admin/queue/summary?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00",
         expect.objectContaining({
           headers: { Authorization: "Bearer admin-token" },
         }),
       ),
     );
     expect(screen.getByDisplayValue("2026-10-05T09:00:00+00:00")).toBeInTheDocument();
-    expect(screen.getByText("2026-10-05T09:00:00+00:00")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open due now bucket/i })).toHaveAttribute(
+      "href",
+      "/admin/review-queue/due_now?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00",
+    );
+  });
+
+  it("shows an explicit admin-access message when the backend returns 401", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+    } as Response);
+
+    render(await AdminReviewQueuePage({}));
+
+    expect(
+      await screen.findByText(/admin access required\. sign in as an admin account/i),
+    ).toBeInTheDocument();
   });
 });

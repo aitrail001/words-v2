@@ -145,6 +145,7 @@ class TestEntryQueueSchedule:
             "next_review_at": None,
             "current_schedule_value": "1d",
             "current_schedule_label": "Tomorrow",
+            "current_schedule_source": "scheduled_timestamp",
             "schedule_options": [
                 {"value": "10m", "label": "Later today", "is_default": False},
                 {"value": "1d", "label": "Tomorrow", "is_default": True},
@@ -268,6 +269,100 @@ class TestQueueDue:
         assert due_items[0]["word"] == "serendipity"
         assert due_items[0]["definition"] == "lucky chance"
 
+
+class TestGroupedReviewQueue:
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_bucket_detail_includes_progress_and_history(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+            success_streak=3,
+            lapse_count=1,
+            exposure_count=5,
+            times_remembered=4,
+        )
+        state.next_due_at = datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc)
+        state.last_reviewed_at = datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc)
+        state.created_at = datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc)
+
+        state_result = MagicMock()
+        state_result.all.return_value = [(state, "learning")]
+        word_result = MagicMock()
+        word_result.all.return_value = [(entry_id, "candidate")]
+        event_one = EntryReviewEvent(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            review_state_id=state.id,
+            entry_type="word",
+            entry_id=entry_id,
+            prompt_type="confidence_check",
+            prompt_family="recognition",
+            outcome="correct_tested",
+            scheduled_interval_days=30,
+            scheduled_by="recommended",
+        )
+        event_one.created_at = datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc)
+        event_two = EntryReviewEvent(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            review_state_id=state.id,
+            entry_type="word",
+            entry_id=entry_id,
+            prompt_type="typed_recall",
+            prompt_family="production",
+            outcome="failed",
+            scheduled_interval_days=1,
+            scheduled_by="manual_override",
+        )
+        event_two.created_at = datetime(2026, 4, 2, 8, 0, tzinfo=timezone.utc)
+        event_result = MagicMock()
+        event_result.scalars.return_value.all.return_value = [event_one, event_two]
+        mock_db.execute.side_effect = [state_result, word_result, event_result]
+
+        payload = await review_service.get_grouped_review_queue_bucket_detail(
+            user_id=user_id,
+            now=datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc),
+            bucket="later_today",
+        )
+
+        assert payload["count"] == 1
+        item = payload["items"][0]
+        assert item["text"] == "candidate"
+        assert item["success_streak"] == 3
+        assert item["lapse_count"] == 1
+        assert item["times_remembered"] == 4
+        assert item["exposure_count"] == 5
+        assert item["history"] == [
+            {
+                "id": str(event_one.id),
+                "reviewed_at": "2026-04-04T09:00:00+00:00",
+                "outcome": "correct_tested",
+                "prompt_type": "confidence_check",
+                "prompt_family": "recognition",
+                "scheduled_by": "recommended",
+                "scheduled_interval_days": 30,
+            },
+            {
+                "id": str(event_two.id),
+                "reviewed_at": "2026-04-02T08:00:00+00:00",
+                "outcome": "failed",
+                "prompt_type": "typed_recall",
+                "prompt_family": "production",
+                "scheduled_by": "manual_override",
+                "scheduled_interval_days": 1,
+            },
+        ]
+
     @pytest.mark.asyncio
     async def test_get_due_queue_items_prefers_entry_review_state(
         self, review_service, mock_db
@@ -329,6 +424,7 @@ class TestQueueDue:
         assert due_items[0]["source_entry_id"] == str(word_id)
         assert due_items[0]["detail"]["display_text"] == "jump the gun"
         assert due_items[0]["prompt"]["prompt_type"] in {
+            "confidence_check",
             "definition_to_entry",
             "entry_to_definition",
             "audio_to_definition",
@@ -739,6 +835,164 @@ class TestGroupedQueue:
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
 
         assert ReviewService.classify_review_bucket(due_at, now) == expected_bucket
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_summary_returns_bucket_cards(self, review_service):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        overdue = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        overdue.next_due_at = now - timedelta(hours=2)
+        overdue.entry_text = "alpha"
+        overdue.learner_status = "learning"
+
+        tomorrow = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=uuid.uuid4(),
+            target_type="phrase_sense",
+            target_id=uuid.uuid4(),
+            stability=14,
+            difficulty=0.5,
+        )
+        tomorrow.next_due_at = now + timedelta(days=1, hours=1)
+        tomorrow.entry_text = "break down"
+        tomorrow.learner_status = "learning"
+
+        review_service._list_active_queue_states = AsyncMock(return_value=[overdue, tomorrow])
+
+        payload = await review_service.get_grouped_review_queue_summary(user_id=user_id, now=now)
+
+        assert payload == {
+            "generated_at": now.isoformat(),
+            "total_count": 2,
+            "groups": [
+                {"bucket": "overdue", "count": 1},
+                {"bucket": "tomorrow", "count": 1},
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_bucket_detail_sorts_by_requested_order(
+        self, review_service
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        earliest = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        earliest.next_due_at = now + timedelta(minutes=15)
+        earliest.last_reviewed_at = now - timedelta(days=3)
+        earliest.entry_text = "gamma"
+        earliest.learner_status = "learning"
+
+        latest = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        latest.next_due_at = now + timedelta(hours=4)
+        latest.last_reviewed_at = now - timedelta(days=1)
+        latest.entry_text = "alpha"
+        latest.learner_status = "learning"
+
+        middle = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="phrase",
+            entry_id=uuid.uuid4(),
+            target_type="phrase_sense",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        middle.next_due_at = now + timedelta(hours=2)
+        middle.last_reviewed_at = now - timedelta(days=2)
+        middle.entry_text = "beta"
+        middle.learner_status = "learning"
+
+        review_service._list_active_queue_states = AsyncMock(return_value=[latest, middle, earliest])
+
+        payload = await review_service.get_grouped_review_queue_bucket_detail(
+            user_id=user_id,
+            now=now,
+            bucket="later_today",
+            sort="next_review_at",
+            order="asc",
+        )
+
+        assert payload["bucket"] == "later_today"
+        assert payload["count"] == 3
+        assert payload["sort"] == "next_review_at"
+        assert payload["order"] == "asc"
+        assert [item["text"] for item in payload["items"]] == ["gamma", "beta", "alpha"]
+
+    def test_build_current_schedule_payload_uses_actual_due_time_for_display(self):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=7,
+            difficulty=0.5,
+        )
+        state.next_due_at = now + timedelta(days=3)
+        state.recheck_due_at = None
+
+        payload = ReviewService._build_current_schedule_payload(state, now=now)
+
+        assert payload["queue_item_id"] == str(state.id)
+        assert payload["next_review_at"] == state.next_due_at.isoformat()
+        assert payload["current_schedule_value"] == "3d"
+        assert payload["current_schedule_label"] == "In 3 days"
+        assert payload["current_schedule_source"] == "scheduled_timestamp"
+        assert next(
+            option for option in payload["schedule_options"] if option["value"] == "3d"
+        )["is_default"] is True
+
+    def test_long_horizon_success_sequence_reaches_multi_month_bucket(self):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        due_at = now
+        stability = 3.0
+        difficulty = 0.5
+
+        for _ in range(7):
+            result = calculate_next_review(
+                outcome="correct_tested",
+                prompt_type="typed_recall",
+                stability=stability,
+                difficulty=difficulty,
+                grade="easy_pass",
+            )
+            due_at = due_at + timedelta(days=result.interval_days)
+            stability = result.stability
+            difficulty = result.difficulty
+
+        assert ReviewService.classify_review_bucket(due_at, now) == "three_to_six_months"
 
 
 class TestQueueSubmit:
@@ -1573,6 +1827,8 @@ class TestPromptFamilies:
         assert prompt["prompt_type"] == "collocation_check"
         assert prompt["sentence_masked"] is not None
         assert "common expression" in prompt["stem"].lower()
+        assert prompt["question"] == "They ___ whenever a draft appears."
+        assert "jump the gun" not in prompt["question"].lower()
         assert len(prompt["options"]) == 4
 
     @pytest.mark.asyncio
@@ -1606,6 +1862,7 @@ class TestPromptFamilies:
         assert prompt["prompt_type"] == "situation_matching"
         assert "situation" in prompt["stem"].lower()
         assert prompt["question"] == "___ helps teams adapt after major setbacks."
+        assert "resilience" not in prompt["question"].lower()
         assert len(prompt["options"]) == 4
 
     @pytest.mark.asyncio

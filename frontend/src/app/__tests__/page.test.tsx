@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import HomePage from "@/app/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
-import { getKnowledgeMapDashboard, getReviewQueueStats } from "@/lib/knowledge-map-client";
+import { getAuthUserProfile, getKnowledgeMapDashboard, getReviewQueueStats } from "@/lib/knowledge-map-client";
 import { getUserPreferences } from "@/lib/user-preferences-client";
 
 jest.mock("next/navigation", () => ({
@@ -15,6 +15,7 @@ jest.mock("../globals.css", () => ({}));
 describe("HomePage (Knowledge Map)", () => {
   const mockGetKnowledgeMapDashboard = getKnowledgeMapDashboard as jest.MockedFunction<typeof getKnowledgeMapDashboard>;
   const mockGetReviewQueueStats = getReviewQueueStats as jest.MockedFunction<typeof getReviewQueueStats>;
+  const mockGetAuthUserProfile = getAuthUserProfile as jest.MockedFunction<typeof getAuthUserProfile>;
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
 
   beforeEach(() => {
@@ -51,6 +52,13 @@ describe("HomePage (Knowledge Map)", () => {
       correct_count: 10,
       accuracy: 10 / 12,
     });
+    mockGetAuthUserProfile.mockResolvedValue({
+      id: "user-1",
+      email: "user@user.com",
+      role: "user",
+      tier: "free",
+      is_active: true,
+    });
     mockGetUserPreferences.mockResolvedValue({
       accent_preference: "uk",
       translation_locale: "zh-Hans",
@@ -70,10 +78,12 @@ describe("HomePage (Knowledge Map)", () => {
     expect(await screen.findByRole("link", { name: "Started 7,082" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "To Learn 4,293" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: /review/i })).toBeInTheDocument();
-    expect(screen.getByText("3 words to review")).toBeInTheDocument();
+    expect(screen.getByText(/keep your spaced repetition queue moving/i)).toBeInTheDocument();
+    expect(screen.getByText("3 due today")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /start review/i })).toHaveAttribute("href", "/review");
     expect(screen.getByRole("link", { name: /view review queue/i })).toHaveAttribute("href", "/review/queue");
-    expect(screen.getByRole("link", { name: /queue debug/i })).toHaveAttribute("href", "/review/debug");
+    expect(screen.queryByRole("link", { name: /admin review queue/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /queue debug/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /discover/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /learn next: drum/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /import epub/i })).toBeInTheDocument();
@@ -106,7 +116,27 @@ describe("HomePage (Knowledge Map)", () => {
     expect(screen.getByRole("heading", { name: /review/i })).toBeInTheDocument();
     expect(screen.getByText("8 scheduled review items")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /start review/i })).not.toBeInTheDocument();
+    expect(screen.getByText("8 items waiting in your queue")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /view review queue/i })).toHaveAttribute("href", "/review/queue");
+  });
+
+  it("shows the admin review queue link on the homepage for admin users", async () => {
+    mockGetAuthUserProfile.mockResolvedValueOnce({
+      id: "admin-1",
+      email: "admin@admin.com",
+      role: "admin",
+      tier: "pro",
+      is_active: true,
+    });
+
+    render(<HomePage />);
+
+    expect(await screen.findByRole("link", { name: /admin review queue/i })).toHaveAttribute(
+      "href",
+      "/admin/review-queue",
+    );
+    expect(screen.getByText(/internal queue inspection and qa tools/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /queue debug/i })).toHaveAttribute("href", "/review/debug");
   });
 
   it("keeps the main dashboard navigation visible", async () => {
@@ -142,6 +172,7 @@ describe("RootLayout learner shell", () => {
 
       expect(learnerShellNav.getByRole("link", { name: /home/i })).toHaveAttribute("href", "/");
       expect(learnerShellNav.getByRole("link", { name: /knowledge/i })).toHaveAttribute("href", "/knowledge-map");
+      expect(learnerShellNav.getByRole("link", { name: /view review queue/i })).toHaveAttribute("href", "/review/queue");
       expect(learnerShellNav.getByRole("link", { name: /imports/i })).toHaveAttribute("href", "/imports");
       expect(learnerShellNav.getByRole("link", { name: /imports/i })).toHaveAttribute("href", "/imports");
       expect(learnerShellNav.getByRole("link", { name: /search/i })).toHaveAttribute("href", "/search");

@@ -890,6 +890,38 @@ describe("ReviewPage", () => {
     expect(prompt).toBeInTheDocument();
     expect(prompt).toHaveTextContent(/common expression/i);
     expect(prompt).toHaveTextContent("They ___ whenever a draft appears.");
+    expect(prompt).not.toHaveTextContent("jump the gun");
+  });
+
+  it("does not show stale default next-review copy on the active review card", async () => {
+    mockGet.mockResolvedValue([
+      {
+        id: "state-1",
+        queue_item_id: "state-1",
+        word: "barely",
+        definition: "Only just, by a very small margin.",
+        review_mode: "mcq",
+        prompt: {
+          mode: "mcq",
+          prompt_type: "definition_to_entry",
+          prompt_token: "prompt-state-1",
+          stem: "Choose the word or phrase that matches this definition.",
+          question: "Only just, by a very small margin.",
+          options: [
+            { option_id: "A", label: "Barely" },
+            { option_id: "B", label: "Bravely" },
+          ],
+          audio_state: "not_available",
+        },
+        detail: null,
+        schedule_options: [{ value: "3d", label: "In 3 days", is_default: true }],
+      },
+    ] as never);
+
+    await renderPage();
+
+    expect(await screen.findByTestId("review-active-state")).toBeInTheDocument();
+    expect(screen.queryByText(/default next review/i)).not.toBeInTheDocument();
   });
 
   it("renders the situation prompt treatment", async () => {

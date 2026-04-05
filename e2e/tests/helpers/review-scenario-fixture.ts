@@ -72,6 +72,15 @@ export type FailedReviewQueueFixture = {
   futureText: string;
 };
 
+export type LongHorizonReviewFixture = {
+  reviewText: string;
+};
+
+export type AdminTimeTravelReviewFixture = {
+  futureText: string;
+  effectiveNow: string;
+};
+
 const WORD_POLICY_ID = "6c19a4f5-5970-4d94-8af8-728e4433c200";
 const DEFINITION_POLICY_ID = "f1ecf376-96d1-4212-b235-fd3963e2f2bb";
 const REVIEW_SCENARIO_AUDIO_ROOT = path.resolve(
@@ -1154,7 +1163,7 @@ export const seedGroupedReviewQueueFixture = async (
     tomorrowText: scenarios["definition-to-entry"].displayText,
     hiddenKnownText: scenarios["typed-recall"].displayText,
     hiddenToLearnText: scenarios["sentence-gap"].displayText,
-    effectiveNow: tomorrowAt.toISOString(),
+    effectiveNow: new Date(tomorrowAt.getTime() + 60_000).toISOString(),
   };
 };
 
@@ -1194,4 +1203,110 @@ export const seedFailedReviewQueueFixture = async (
     failedText: scenarios["sentence-gap"].displayText,
     futureText: scenarios["definition-to-entry"].displayText,
   };
+};
+
+export const seedLongHorizonReviewFixture = async (
+  userId: string,
+): Promise<LongHorizonReviewFixture> => {
+  const now = new Date();
+  const longHorizonAt = new Date(now.getTime() + 120 * 24 * 60 * 60 * 1000);
+
+  const scenarios = await seedCustomReviewQueue(userId, [
+    {
+      scenarioKey: "typed-recall",
+      status: "learning",
+      dueAt: longHorizonAt,
+      lastReviewedAt: now,
+    },
+  ]);
+
+  return {
+    reviewText: scenarios["typed-recall"].displayText,
+  };
+};
+
+export const seedAdminTimeTravelReviewFixture = async (
+  userId: string,
+): Promise<AdminTimeTravelReviewFixture> => {
+  const now = new Date();
+  const tomorrowAt = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+      9,
+      0,
+      0,
+      0,
+    ),
+  );
+  const laterAt = new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000);
+
+  const scenarios = await seedCustomReviewQueue(userId, [
+    {
+      scenarioKey: "definition-to-entry",
+      status: "learning",
+      dueAt: tomorrowAt,
+      lastReviewedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+    },
+    {
+      scenarioKey: "situation",
+      status: "learning",
+      dueAt: laterAt,
+      lastReviewedAt: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000),
+    },
+  ]);
+
+  return {
+    futureText: scenarios["definition-to-entry"].displayText,
+    effectiveNow: new Date(tomorrowAt.getTime() + 60_000).toISOString(),
+  };
+};
+
+export const forceScenarioDueNow = async (
+  userId: string,
+  scenarioKey: string,
+): Promise<void> => {
+  const resolvedScenarios = await ensureScenarioCatalog();
+  const scenario = resolvedScenarios.find((item) => item.key === scenarioKey);
+
+  if (!scenario) {
+    throw new Error(`Missing review scenario definition for ${scenarioKey}`);
+  }
+
+  const client = await connectClient();
+
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `
+      UPDATE entry_review_states
+      SET
+        next_due_at = now() - interval '1 minute',
+        recheck_due_at = NULL,
+        relearning = false,
+        relearning_trigger = NULL,
+        is_suspended = false,
+        last_prompt_type = $4,
+        last_submission_prompt_id = $5,
+        updated_at = now()
+      WHERE user_id = $1::uuid
+        AND entry_type = $2
+        AND entry_id = $3::uuid
+      `,
+      [
+        userId,
+        scenario.entryType,
+        scenario.resolvedEntryId,
+        scenario.expectedPromptType,
+        `manual_prompt_type:${scenario.expectedPromptType}`,
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    await client.end();
+  }
 };

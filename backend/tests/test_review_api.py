@@ -351,6 +351,240 @@ class TestQueueDue:
 
         assert response.status_code == 403
 
+    @pytest.mark.asyncio
+    async def test_get_review_queue_summary_success(self, client, mock_db, auth_token, monkeypatch):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_grouped_review_queue_summary(self, *, user_id, now):
+            assert user_id == user.id
+            assert isinstance(now, datetime)
+            return {
+                "generated_at": "2026-04-05T09:00:00+00:00",
+                "total_count": 3,
+                "groups": [
+                    {"bucket": "overdue", "count": 2},
+                    {"bucket": "tomorrow", "count": 1},
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_grouped_review_queue_summary",
+            fake_get_grouped_review_queue_summary,
+            raising=False,
+        )
+
+        response = await client.get(
+            "/api/reviews/queue/summary",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_count"] == 3
+        assert data["groups"] == [
+            {"bucket": "overdue", "count": 2},
+            {"bucket": "tomorrow", "count": 1},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_get_admin_review_queue_summary_applies_effective_now(
+        self, client, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        admin_user = User(
+            id=user_id,
+            email="admin@example.com",
+            password_hash="hashed",
+            role="admin",
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = admin_user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_grouped_review_queue_summary(self, *, user_id, now):
+            assert user_id == admin_user.id
+            assert now == datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+            return {
+                "generated_at": "2026-10-05T09:00:00+00:00",
+                "total_count": 1,
+                "groups": [
+                    {"bucket": "due_now", "count": 1},
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_grouped_review_queue_summary",
+            fake_get_grouped_review_queue_summary,
+            raising=False,
+        )
+
+        response = await client.get(
+            "/api/reviews/admin/queue/summary?effective_now=2026-10-05T09:00:00%2B00:00",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["debug"]["effective_now"] == "2026-10-05T09:00:00+00:00"
+        assert data["total_count"] == 1
+        assert data["groups"] == [{"bucket": "due_now", "count": 1}]
+
+    @pytest.mark.asyncio
+    async def test_get_review_queue_bucket_detail_supports_sort_and_order(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_grouped_review_queue_bucket_detail(
+            self,
+            *,
+            user_id,
+            now,
+            bucket,
+            sort,
+            order,
+            include_debug_fields=False,
+        ):
+            assert user_id == user.id
+            assert isinstance(now, datetime)
+            assert bucket == "later_today"
+            assert sort == "text"
+            assert order == "desc"
+            assert include_debug_fields is False
+            return {
+                "generated_at": "2026-04-05T09:00:00+00:00",
+                "bucket": "later_today",
+                "count": 2,
+                "sort": "text",
+                "order": "desc",
+                "items": [
+                    {
+                        "queue_item_id": str(uuid.uuid4()),
+                        "entry_id": str(uuid.uuid4()),
+                        "entry_type": "word",
+                        "text": "zeta",
+                        "status": "learning",
+                        "next_review_at": "2026-04-05T12:00:00+00:00",
+                        "last_reviewed_at": "2026-04-04T09:00:00+00:00",
+                    },
+                    {
+                        "queue_item_id": str(uuid.uuid4()),
+                        "entry_id": str(uuid.uuid4()),
+                        "entry_type": "word",
+                        "text": "alpha",
+                        "status": "learning",
+                        "next_review_at": "2026-04-05T10:00:00+00:00",
+                        "last_reviewed_at": None,
+                    },
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_grouped_review_queue_bucket_detail",
+            fake_get_grouped_review_queue_bucket_detail,
+            raising=False,
+        )
+
+        response = await client.get(
+            "/api/reviews/queue/buckets/later_today?sort=text&order=desc",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["bucket"] == "later_today"
+        assert data["sort"] == "text"
+        assert data["order"] == "desc"
+        assert [item["text"] for item in data["items"]] == ["zeta", "alpha"]
+
+    @pytest.mark.asyncio
+    async def test_get_admin_review_queue_bucket_detail_applies_effective_now(
+        self, client, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        admin_user = User(
+            id=user_id,
+            email="admin@example.com",
+            password_hash="hashed",
+            role="admin",
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = admin_user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_grouped_review_queue_bucket_detail(
+            self,
+            *,
+            user_id,
+            now,
+            bucket,
+            sort,
+            order,
+            include_debug_fields=False,
+        ):
+            assert user_id == admin_user.id
+            assert now == datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+            assert bucket == "due_now"
+            assert sort == "next_review_at"
+            assert order == "asc"
+            assert include_debug_fields is True
+            return {
+                "generated_at": "2026-10-05T09:00:00+00:00",
+                "bucket": "due_now",
+                "count": 1,
+                "sort": "next_review_at",
+                "order": "asc",
+                "items": [
+                    {
+                        "queue_item_id": str(uuid.uuid4()),
+                        "entry_id": str(uuid.uuid4()),
+                        "entry_type": "word",
+                        "text": "candidate",
+                        "status": "learning",
+                        "next_review_at": "2026-10-05T09:00:00+00:00",
+                        "last_reviewed_at": "2026-10-04T09:00:00+00:00",
+                        "target_type": "meaning",
+                        "target_id": str(uuid.uuid4()),
+                        "recheck_due_at": None,
+                        "next_due_at": "2026-10-05T09:00:00+00:00",
+                        "last_outcome": "correct_tested",
+                        "relearning": False,
+                        "relearning_trigger": None,
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_grouped_review_queue_bucket_detail",
+            fake_get_grouped_review_queue_bucket_detail,
+            raising=False,
+        )
+
+        response = await client.get(
+            "/api/reviews/admin/queue/buckets/due_now?effective_now=2026-10-05T09:00:00%2B00:00",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["debug"]["effective_now"] == "2026-10-05T09:00:00+00:00"
+        assert data["bucket"] == "due_now"
+        assert data["items"][0]["target_type"] == "meaning"
+
 
 class TestQueueScheduleUpdate:
     @pytest.mark.asyncio
@@ -369,6 +603,7 @@ class TestQueueScheduleUpdate:
                 "next_review_at": "2026-04-11T00:00:00+00:00",
                 "current_schedule_value": "7d",
                 "current_schedule_label": "In a week",
+                "current_schedule_source": "scheduled_timestamp",
                 "schedule_options": [
                     {"value": "1d", "label": "Tomorrow", "is_default": True},
                     {"value": "7d", "label": "In a week", "is_default": False},
@@ -392,6 +627,7 @@ class TestQueueScheduleUpdate:
         assert data["queue_item_id"] == str(item_id)
         assert data["current_schedule_value"] == "7d"
         assert data["current_schedule_label"] == "In a week"
+        assert data["current_schedule_source"] == "scheduled_timestamp"
 
     @pytest.mark.asyncio
     async def test_update_queue_schedule_rejects_invalid_override(self, client, mock_db, auth_token):

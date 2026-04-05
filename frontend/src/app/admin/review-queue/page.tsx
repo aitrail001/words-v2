@@ -1,69 +1,31 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import {
-  type AdminGroupedReviewQueueItem,
-  type AdminGroupedReviewQueueResponse,
-  type KnowledgeEntryType,
-  type KnowledgeStatus,
-  type ReviewQueueBucket,
-} from "@/lib/knowledge-map-client";
+import { ReviewQueueSummaryCard } from "@/components/review-queue/review-queue-shared";
 import { ACCESS_TOKEN_COOKIE_KEY } from "@/lib/auth-session";
-
-const BUCKET_LABELS: Record<ReviewQueueBucket, string> = {
-  overdue: "Overdue",
-  due_now: "Due now",
-  later_today: "Later today",
-  tomorrow: "Tomorrow",
-  this_week: "This week",
-  this_month: "This month",
-  one_to_three_months: "1-3 months",
-  three_to_six_months: "3-6 months",
-  six_plus_months: "6+ months",
-};
-
-const ENTRY_TYPE_LABELS: Record<KnowledgeEntryType, string> = {
-  word: "Word",
-  phrase: "Phrase",
-};
-
-const STATUS_LABELS: Record<KnowledgeStatus, string> = {
-  undecided: "Undecided",
-  to_learn: "To learn",
-  learning: "Learning",
-  known: "Known",
-};
-
-const REVIEWABLE_BUCKETS: ReviewQueueBucket[] = ["overdue", "due_now"];
+import type { AdminReviewQueueSummaryResponse } from "@/lib/knowledge-map-client";
 
 const API_BASE_URL = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
-function formatBucketLabel(bucket: ReviewQueueBucket): string {
-  return BUCKET_LABELS[bucket] ?? bucket.replaceAll("_", " ");
+class AdminQueuePageError extends Error {
+  status: number | null;
+
+  constructor(message: string, status: number | null = null) {
+    super(message);
+    this.status = status;
+  }
 }
 
-function formatStatusLabel(status: KnowledgeStatus): string {
-  return STATUS_LABELS[status] ?? status.replaceAll("_", " ");
-}
-
-function getKnowledgeEntryHref(entryType: KnowledgeEntryType, entryId: string): string {
-  return entryType === "phrase" ? `/phrase/${entryId}` : `/word/${entryId}`;
-}
-
-function getKnowledgeEntryPath(entryType: KnowledgeEntryType, entryId: string): string {
-  return entryType === "phrase" ? `/phrase/${entryId}` : `/word/${entryId}`;
-}
-
-async function fetchAdminGroupedReviewQueue(
+async function fetchAdminReviewQueueSummary(
   effectiveNow?: string,
-): Promise<AdminGroupedReviewQueueResponse> {
+): Promise<AdminReviewQueueSummaryResponse> {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE_KEY)?.value;
   if (!accessToken) {
-    throw new Error("Missing admin access token.");
+    throw new AdminQueuePageError("Missing admin access token.", 401);
   }
 
   const baseUrl = API_BASE_URL.endsWith("/") ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
-  const url = new URL(`${baseUrl}/reviews/admin/queue/grouped`);
+  const url = new URL(`${baseUrl}/reviews/admin/queue/summary`);
   if (effectiveNow) {
     url.searchParams.set("effective_now", effectiveNow);
   }
@@ -76,91 +38,10 @@ async function fetchAdminGroupedReviewQueue(
   });
 
   if (!response.ok) {
-    throw new Error(`Unable to load admin grouped review queue: ${response.status}`);
+    throw new AdminQueuePageError(`Unable to load admin review queue summary: ${response.status}`, response.status);
   }
 
-  return (await response.json()) as AdminGroupedReviewQueueResponse;
-}
-
-function formatDebugValue(value: boolean | string | null | undefined): string {
-  if (typeof value === "boolean") {
-    return value ? "yes" : "no";
-  }
-  if (value === null || value === undefined || value === "") {
-    return "none";
-  }
-  return value;
-}
-
-function DebugField({
-  label,
-  value,
-}: {
-  label: string;
-  value: boolean | string | null | undefined;
-}) {
-  return (
-    <p className="text-sm text-[#6e5a86]">
-      {label}: {formatDebugValue(value)}
-    </p>
-  );
-}
-
-function QueueItemCard({
-  item,
-  canStartReview,
-}: {
-  item: AdminGroupedReviewQueueItem;
-  canStartReview: boolean;
-}) {
-  return (
-    <li className="rounded-[0.8rem] border border-[#ece1f7] bg-[#faf7ff] px-3 py-3">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-base font-semibold text-[#5a357b]">{item.text}</p>
-            <span className="rounded-full bg-[#ede3fb] px-2 py-1 text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-[#7b32d3]">
-              {ENTRY_TYPE_LABELS[item.entry_type]}
-            </span>
-            <span className="rounded-full bg-[#dff7fb] px-2 py-1 text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-[#1e8aa2]">
-              {formatStatusLabel(item.status)}
-            </span>
-          </div>
-
-          <div className="mt-3 space-y-1">
-            <DebugField label="next_review_at" value={item.next_review_at} />
-            <DebugField label="last_reviewed_at" value={item.last_reviewed_at} />
-            <DebugField label="target_type" value={item.target_type} />
-            <DebugField label="target_id" value={item.target_id} />
-            <DebugField label="recheck_due_at" value={item.recheck_due_at} />
-            <DebugField label="next_due_at" value={item.next_due_at} />
-            <DebugField label="last_outcome" value={item.last_outcome} />
-            <DebugField label="relearning" value={item.relearning} />
-            <DebugField label="relearning_trigger" value={item.relearning_trigger} />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href={getKnowledgeEntryPath(item.entry_type, item.entry_id)}
-            aria-label={`Open detail for ${item.text}`}
-            className="rounded-full border border-[#d8caec] px-3 py-2 text-sm font-semibold text-[#684f85]"
-          >
-            Open detail
-          </Link>
-          {canStartReview ? (
-            <Link
-              href={`/review?queue_item_id=${encodeURIComponent(item.queue_item_id)}`}
-              aria-label={`Start review for ${item.text}`}
-              className="rounded-full bg-[#7b32d3] px-3 py-2 text-sm font-semibold text-white"
-            >
-              Start review
-            </Link>
-          ) : null}
-        </div>
-      </div>
-    </li>
-  );
+  return (await response.json()) as AdminReviewQueueSummaryResponse;
 }
 
 export default async function AdminReviewQueuePage({
@@ -171,14 +52,22 @@ export default async function AdminReviewQueuePage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const effectiveNow = resolvedSearchParams.effective_now?.trim() || undefined;
 
-  let queue: AdminGroupedReviewQueueResponse | null = null;
+  let queue: AdminReviewQueueSummaryResponse | null = null;
   let error: string | null = null;
 
   try {
-    queue = await fetchAdminGroupedReviewQueue(effectiveNow);
-  } catch {
-    error = "Unable to load the admin review queue.";
+    queue = await fetchAdminReviewQueueSummary(effectiveNow);
+  } catch (caught) {
+    if (caught instanceof AdminQueuePageError && caught.status === 401) {
+      error = "Admin access required. Sign in as an admin account to view the admin review queue.";
+    } else {
+      error = "Unable to load the admin review queue.";
+    }
   }
+
+  const summaryQuery = effectiveNow
+    ? { effective_now: effectiveNow }
+    : undefined;
 
   return (
     <main className="mx-auto max-w-[56rem] space-y-4 pb-10 text-[#472164]">
@@ -186,9 +75,9 @@ export default async function AdminReviewQueuePage({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-[#8e38f2]">
-              Admin SRS Queue
+              Admin Review Queue
             </p>
-            <h1 className="mt-1 text-[1.4rem] font-semibold text-[#5b2590]">SRS Queue Debug</h1>
+            <h1 className="mt-1 text-[1.4rem] font-semibold text-[#5b2590]">Admin Review Queue</h1>
             <p className="mt-2 text-sm text-[#7b6795]">
               Admin-only queue inspection for raw SRS queue state and request-scoped effective-time overrides.
             </p>
@@ -263,29 +152,12 @@ export default async function AdminReviewQueuePage({
 
       {!error && queue
         ? queue.groups.map((group) => (
-            <section
+            <ReviewQueueSummaryCard
               key={group.bucket}
-              className="rounded-[0.9rem] bg-white px-4 py-4 shadow-[0_8px_18px_rgba(95,53,177,0.08)]"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-[1.2rem] font-semibold text-[#5b2590]">
-                  {formatBucketLabel(group.bucket)}
-                </h2>
-                <p className="text-sm font-semibold text-[#7b6795]">
-                  {group.count} {group.count === 1 ? "item" : "items"}
-                </p>
-              </div>
-
-              <ul className="mt-4 space-y-3">
-                {group.items.map((item) => (
-                  <QueueItemCard
-                    key={item.queue_item_id}
-                    item={item}
-                    canStartReview={REVIEWABLE_BUCKETS.includes(group.bucket)}
-                  />
-                ))}
-              </ul>
-            </section>
+              group={group}
+              hrefPrefix="/admin/review-queue"
+              queryParams={summaryQuery}
+            />
           ))
         : null}
     </main>

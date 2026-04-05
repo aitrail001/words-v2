@@ -107,6 +107,14 @@ export type ReviewQueueStats = {
   accuracy: number;
 };
 
+export type AuthUserProfile = {
+  id: string;
+  email: string;
+  role: string;
+  tier: string;
+  is_active: boolean;
+};
+
 export type ReviewQueueBucket =
   | "overdue"
   | "due_now"
@@ -118,7 +126,21 @@ export type ReviewQueueBucket =
   | "three_to_six_months"
   | "six_plus_months";
 
-export type GroupedReviewQueueItem = {
+export type ReviewQueueBucketSort = "next_review_at" | "last_reviewed_at" | "text";
+export type ReviewQueueBucketOrder = "asc" | "desc";
+
+export type ReviewQueueSummaryBucket = {
+  bucket: ReviewQueueBucket;
+  count: number;
+};
+
+export type ReviewQueueSummaryResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: ReviewQueueSummaryBucket[];
+};
+
+export type ReviewQueueItem = {
   queue_item_id: string;
   entry_id: string;
   entry_type: KnowledgeEntryType;
@@ -126,7 +148,33 @@ export type GroupedReviewQueueItem = {
   status: KnowledgeStatus;
   next_review_at: string | null;
   last_reviewed_at: string | null;
+  success_streak: number;
+  lapse_count: number;
+  times_remembered: number;
+  exposure_count: number;
+  history: ReviewQueueHistoryEvent[];
 };
+
+export type ReviewQueueHistoryEvent = {
+  id: string;
+  reviewed_at: string;
+  outcome: string;
+  prompt_type: string;
+  prompt_family?: string | null;
+  scheduled_by?: string | null;
+  scheduled_interval_days?: number | null;
+};
+
+export type ReviewQueueBucketDetailResponse = {
+  generated_at: string;
+  bucket: ReviewQueueBucket;
+  count: number;
+  sort: ReviewQueueBucketSort;
+  order: ReviewQueueBucketOrder;
+  items: ReviewQueueItem[];
+};
+
+export type GroupedReviewQueueItem = ReviewQueueItem;
 
 export type GroupedReviewQueueGroup = {
   bucket: ReviewQueueBucket;
@@ -140,7 +188,7 @@ export type GroupedReviewQueueResponse = {
   groups: GroupedReviewQueueGroup[];
 };
 
-export type AdminGroupedReviewQueueItem = GroupedReviewQueueItem & {
+export type AdminReviewQueueItem = ReviewQueueItem & {
   target_type: string | null;
   target_id: string | null;
   recheck_due_at: string | null;
@@ -149,6 +197,29 @@ export type AdminGroupedReviewQueueItem = GroupedReviewQueueItem & {
   relearning: boolean | null;
   relearning_trigger: string | null;
 };
+
+export type AdminReviewQueueSummaryResponse = {
+  generated_at: string;
+  total_count: number;
+  groups: ReviewQueueSummaryBucket[];
+  debug: {
+    effective_now: string;
+  };
+};
+
+export type AdminReviewQueueBucketDetailResponse = {
+  generated_at: string;
+  bucket: ReviewQueueBucket;
+  count: number;
+  sort: ReviewQueueBucketSort;
+  order: ReviewQueueBucketOrder;
+  items: AdminReviewQueueItem[];
+  debug: {
+    effective_now: string;
+  };
+};
+
+export type AdminGroupedReviewQueueItem = AdminReviewQueueItem;
 
 export type AdminGroupedReviewQueueGroup = {
   bucket: ReviewQueueBucket;
@@ -233,6 +304,7 @@ export type EntryReviewQueue = {
   next_review_at: string | null;
   current_schedule_value: string;
   current_schedule_label: string;
+  current_schedule_source?: string;
   schedule_options: ReviewScheduleOption[];
 };
 
@@ -419,8 +491,65 @@ export const getKnowledgeMapDashboard = (): Promise<KnowledgeMapDashboard> =>
 export const getReviewQueueStats = (): Promise<ReviewQueueStats> =>
   apiClient.get<ReviewQueueStats>("/reviews/queue/stats");
 
+export const getAuthUserProfile = (): Promise<AuthUserProfile> =>
+  apiClient.get<AuthUserProfile>("/auth/me");
+
+export const getReviewQueueSummary = (): Promise<ReviewQueueSummaryResponse> =>
+  apiClient.get<ReviewQueueSummaryResponse>("/reviews/queue/summary");
+
+export const getReviewQueueBucketDetail = (
+  bucket: ReviewQueueBucket,
+  sort: ReviewQueueBucketSort = "next_review_at",
+  order: ReviewQueueBucketOrder = "asc",
+): Promise<ReviewQueueBucketDetailResponse> => {
+  const searchParams = new URLSearchParams();
+  searchParams.set("sort", sort);
+  searchParams.set("order", order);
+  const query = searchParams.toString();
+  return apiClient.get<ReviewQueueBucketDetailResponse>(
+    `/reviews/queue/buckets/${bucket}${query ? `?${query}` : ""}`,
+  );
+};
+
 export const getGroupedReviewQueue = (): Promise<GroupedReviewQueueResponse> =>
   apiClient.get<GroupedReviewQueueResponse>("/reviews/queue/grouped");
+
+export const getAdminReviewQueueSummary = (
+  effectiveNow?: string,
+): Promise<AdminReviewQueueSummaryResponse> => {
+  const searchParams = new URLSearchParams();
+  if (effectiveNow) {
+    searchParams.set("effective_now", effectiveNow);
+  }
+  const query = searchParams.toString();
+  return apiClient.get<AdminReviewQueueSummaryResponse>(
+    `/reviews/admin/queue/summary${query ? `?${query}` : ""}`,
+  );
+};
+
+export const getAdminReviewQueueBucketDetail = (
+  bucket: ReviewQueueBucket,
+  options?: {
+    effectiveNow?: string;
+    sort?: "next_review_at" | "last_reviewed_at" | "text";
+    order?: "asc" | "desc";
+  },
+): Promise<AdminReviewQueueBucketDetailResponse> => {
+  const searchParams = new URLSearchParams();
+  if (options?.effectiveNow) {
+    searchParams.set("effective_now", options.effectiveNow);
+  }
+  if (options?.sort) {
+    searchParams.set("sort", options.sort);
+  }
+  if (options?.order) {
+    searchParams.set("order", options.order);
+  }
+  const query = searchParams.toString();
+  return apiClient.get<AdminReviewQueueBucketDetailResponse>(
+    `/reviews/admin/queue/buckets/${bucket}${query ? `?${query}` : ""}`,
+  );
+};
 
 export const getAdminGroupedReviewQueue = (
   effectiveNow?: string,

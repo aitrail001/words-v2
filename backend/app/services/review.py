@@ -4,6 +4,7 @@ import json
 import uuid
 import re
 import random
+from inspect import isawaitable
 from time import monotonic
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -117,6 +118,8 @@ class ReviewService:
     }
     SAME_DAY_DISTRACTOR_POOL_LIMIT = 256
     QUEUE_STATS_CACHE_TTL_SECONDS = 5.0
+    ALLOWED_QUEUE_SORTS = {"next_review_at", "last_reviewed_at", "text"}
+    ALLOWED_QUEUE_ORDERS = {"asc", "desc"}
 
     def __init__(
         self,
@@ -618,7 +621,41 @@ class ReviewService:
         ]
 
     @staticmethod
-    def _mask_sentence(sentence: str, target: str) -> str | None:
+    def _phrase_variants(token: str) -> list[str]:
+        normalized = token.strip()
+        if not normalized:
+            return []
+
+        variants = {normalized}
+        lowered = normalized.lower()
+        variants.add(f"{lowered}s")
+        variants.add(f"{lowered}ed")
+        variants.add(f"{lowered}ing")
+
+        if lowered.endswith("e") and len(lowered) > 1:
+            variants.add(f"{lowered[:-1]}ing")
+            variants.add(f"{lowered[:-1]}ed")
+        if lowered.endswith("y") and len(lowered) > 1:
+            variants.add(f"{lowered[:-1]}ies")
+            variants.add(f"{lowered[:-1]}ied")
+
+        return sorted(variants, key=len, reverse=True)
+
+    @classmethod
+    def _mask_phrase_variant(cls, sentence: str, target: str) -> str | None:
+        parts = [part for part in target.split() if part]
+        if len(parts) < 2:
+            return None
+
+        first_token, remainder = parts[0], parts[1:]
+        first_token_pattern = "|".join(re.escape(item) for item in cls._phrase_variants(first_token))
+        remainder_pattern = r"\s+".join(re.escape(part) for part in remainder)
+        pattern = rf"\b(?:{first_token_pattern})\s+{remainder_pattern}\b"
+        masked, count = re.subn(pattern, "___", sentence, count=1, flags=re.IGNORECASE)
+        return masked if count else None
+
+    @classmethod
+    def _mask_sentence(cls, sentence: str, target: str) -> str | None:
         if not sentence or not target:
             return None
 
@@ -632,6 +669,10 @@ class ReviewService:
         )
         if count:
             return masked
+
+        phrase_masked = cls._mask_phrase_variant(sentence, target)
+        if phrase_masked:
+            return phrase_masked
 
         return sentence.replace(target, "___", 1) if target in sentence else None
 
@@ -2027,9 +2068,8 @@ class ReviewService:
         return "never_for_now"
 
     @classmethod
-    def _build_schedule_options(cls, interval_days: int) -> list[dict[str, Any]]:
-        default_value = cls._default_schedule_option_value(interval_days)
-        labels = {
+    def _schedule_option_labels(cls) -> dict[str, str]:
+        return {
             "10m": "Later today",
             "1d": "Tomorrow",
             "3d": "In 3 days",
@@ -2040,28 +2080,58 @@ class ReviewService:
             "6m": "In 6 months",
             "never_for_now": "Pause review",
         }
+
+    @classmethod
+    def _build_schedule_options_for_value(cls, current_value: str) -> list[dict[str, Any]]:
+        labels = cls._schedule_option_labels()
         order = ["10m", "1d", "3d", "7d", "14d", "1m", "3m", "6m", "never_for_now"]
         return [
-            {"value": value, "label": labels[value], "is_default": value == default_value}
+            {"value": value, "label": labels[value], "is_default": value == current_value}
             for value in order
         ]
 
     @classmethod
-    def _build_current_schedule_payload(cls, state: EntryReviewState) -> dict[str, Any]:
-        interval_days = int(round(state.stability or 0))
-        schedule_options = cls._build_schedule_options(interval_days)
-        current_value = "10m" if state.recheck_due_at is not None else cls._default_schedule_option_value(interval_days)
-        current_label = next(
-            (option["label"] for option in schedule_options if option["value"] == current_value),
+    def _build_schedule_options(cls, interval_days: int) -> list[dict[str, Any]]:
+        return cls._build_schedule_options_for_value(cls._default_schedule_option_value(interval_days))
+
+    @classmethod
+    def _resolve_schedule_value_from_due_at(
+        cls,
+        *,
+        due_at: datetime | None,
+        now: datetime | None = None,
+    ) -> str:
+        resolved_due_at = cls._normalize_bucket_datetime(due_at)
+        if resolved_due_at is None:
+            return "1d"
+
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        delta_days = max((resolved_due_at - resolved_now).total_seconds(), 0.0) / 86400.0
+        return min(
+            cls.SCHEDULE_OVERRIDE_DAYS.items(),
+            key=lambda item: (abs(item[1] - delta_days), item[1]),
+        )[0]
+
+    @classmethod
+    def _build_current_schedule_payload(
+        cls,
+        state: EntryReviewState,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        due_at = state.recheck_due_at or state.next_due_at
+        current_value = cls._resolve_schedule_value_from_due_at(due_at=due_at, now=now)
+        schedule_options = cls._build_schedule_options_for_value(current_value)
+        current_label = cls._schedule_option_labels().get(
+            current_value,
             "Later today" if current_value == "10m" else "Tomorrow",
         )
         return {
             "queue_item_id": str(state.id),
-            "next_review_at": (state.recheck_due_at or state.next_due_at).isoformat()
-            if (state.recheck_due_at or state.next_due_at) is not None
-            else None,
+            "next_review_at": due_at.isoformat() if due_at is not None else None,
             "current_schedule_value": current_value,
             "current_schedule_label": current_label,
+            "current_schedule_source": "scheduled_timestamp",
             "schedule_options": schedule_options,
         }
 
@@ -2099,6 +2169,24 @@ class ReviewService:
     @staticmethod
     def _resolve_grouped_queue_due_at(state: EntryReviewState) -> datetime | None:
         return state.recheck_due_at or state.next_due_at
+
+    @classmethod
+    def _validate_review_queue_bucket(cls, bucket: str) -> str:
+        if bucket not in REVIEW_BUCKET_ORDER:
+            raise ValueError(f"Unknown review queue bucket: {bucket}")
+        return bucket
+
+    @classmethod
+    def _validate_review_queue_sort(cls, sort: str) -> str:
+        if sort not in cls.ALLOWED_QUEUE_SORTS:
+            raise ValueError(f"Unsupported review queue sort: {sort}")
+        return sort
+
+    @classmethod
+    def _validate_review_queue_order(cls, order: str) -> str:
+        if order not in cls.ALLOWED_QUEUE_ORDERS:
+            raise ValueError(f"Unsupported review queue order: {order}")
+        return order
 
     async def _list_active_queue_states(
         self,
@@ -2218,6 +2306,78 @@ class ReviewService:
             )
         return payload
 
+    @staticmethod
+    def _serialize_review_history_event(event: EntryReviewEvent) -> dict[str, Any]:
+        return {
+            "id": str(event.id),
+            "reviewed_at": event.created_at.isoformat(),
+            "outcome": event.outcome,
+            "prompt_type": event.prompt_type,
+            "prompt_family": event.prompt_family,
+            "scheduled_by": event.scheduled_by,
+            "scheduled_interval_days": event.scheduled_interval_days,
+        }
+
+    async def _list_review_history_by_state_ids(
+        self,
+        state_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, list[dict[str, Any]]]:
+        if not state_ids:
+            return {}
+
+        event_result = await self.db.execute(
+            select(EntryReviewEvent)
+            .where(EntryReviewEvent.review_state_id.in_(state_ids))
+            .order_by(EntryReviewEvent.created_at.desc(), EntryReviewEvent.id.desc())
+        )
+        scalars_result = event_result.scalars()
+        if isawaitable(scalars_result):
+            scalars_result = await scalars_result
+        events = scalars_result.all()
+        if isawaitable(events):
+            events = await events
+        events = list(events)
+        history_by_state_id: dict[uuid.UUID, list[dict[str, Any]]] = {
+            state_id: [] for state_id in state_ids
+        }
+        for event in events:
+            if event.review_state_id is None:
+                continue
+            history_by_state_id.setdefault(event.review_state_id, []).append(
+                self._serialize_review_history_event(event)
+            )
+        return history_by_state_id
+
+    def _group_review_queue_rows(
+        self,
+        *,
+        states: list[EntryReviewState],
+        now: datetime,
+        include_debug_fields: bool = False,
+    ) -> dict[str, list[dict[str, Any]]]:
+        groups: dict[str, list[dict[str, Any]]] = {bucket: [] for bucket in REVIEW_BUCKET_ORDER}
+        for state in states:
+            bucket = self.classify_review_bucket(self._resolve_grouped_queue_due_at(state), now)
+            groups[bucket].append(
+                self._serialize_grouped_queue_row(
+                    state,
+                    include_debug_fields=include_debug_fields,
+                )
+            )
+        return groups
+
+    @classmethod
+    def _review_queue_sort_key(cls, item: dict[str, Any], sort: str) -> tuple[Any, ...]:
+        text_key = (item.get("text") or "").casefold()
+        next_review_key = item.get("next_review_at") or ""
+        last_reviewed_key = item.get("last_reviewed_at") or ""
+        queue_item_key = item.get("queue_item_id") or ""
+        if sort == "text":
+            return (text_key, next_review_key, queue_item_key)
+        if sort == "last_reviewed_at":
+            return (last_reviewed_key, text_key, queue_item_key)
+        return (next_review_key, text_key, queue_item_key)
+
     async def get_grouped_review_queue(
         self,
         *,
@@ -2227,16 +2387,11 @@ class ReviewService:
     ) -> dict[str, Any]:
         resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
         states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
-        groups: dict[str, list[dict[str, Any]]] = {bucket: [] for bucket in REVIEW_BUCKET_ORDER}
-
-        for state in states:
-            bucket = self.classify_review_bucket(self._resolve_grouped_queue_due_at(state), resolved_now)
-            groups[bucket].append(
-                self._serialize_grouped_queue_row(
-                    state,
-                    include_debug_fields=include_debug_fields,
-                )
-            )
+        groups = self._group_review_queue_rows(
+            states=states,
+            now=resolved_now,
+            include_debug_fields=include_debug_fields,
+        )
 
         return {
             "generated_at": resolved_now.isoformat(),
@@ -2246,6 +2401,76 @@ class ReviewService:
                 for bucket in REVIEW_BUCKET_ORDER
                 if groups[bucket]
             ],
+        }
+
+    async def get_grouped_review_queue_summary(
+        self,
+        *,
+        user_id: uuid.UUID,
+        now: datetime,
+    ) -> dict[str, Any]:
+        resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        groups = self._group_review_queue_rows(states=states, now=resolved_now)
+        return {
+            "generated_at": resolved_now.isoformat(),
+            "total_count": sum(len(items) for items in groups.values()),
+            "groups": [
+                {"bucket": bucket, "count": len(groups[bucket])}
+                for bucket in REVIEW_BUCKET_ORDER
+                if groups[bucket]
+            ],
+        }
+
+    async def get_grouped_review_queue_bucket_detail(
+        self,
+        *,
+        user_id: uuid.UUID,
+        now: datetime,
+        bucket: str,
+        sort: str = "next_review_at",
+        order: str = "asc",
+        include_debug_fields: bool = False,
+    ) -> dict[str, Any]:
+        resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        resolved_bucket = self._validate_review_queue_bucket(bucket)
+        resolved_sort = self._validate_review_queue_sort(sort)
+        resolved_order = self._validate_review_queue_order(order)
+        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        bucket_states = [
+            state
+            for state in states
+            if self.classify_review_bucket(self._resolve_grouped_queue_due_at(state), resolved_now)
+            == resolved_bucket
+        ]
+        history_by_state_id = await self._list_review_history_by_state_ids(
+            [state.id for state in bucket_states]
+        )
+        items = sorted(
+            [
+                {
+                    **self._serialize_grouped_queue_row(
+                        state,
+                        include_debug_fields=include_debug_fields,
+                    ),
+                    "success_streak": int(state.success_streak or 0),
+                    "lapse_count": int(state.lapse_count or 0),
+                    "times_remembered": int(state.times_remembered or 0),
+                    "exposure_count": int(state.exposure_count or 0),
+                    "history": history_by_state_id.get(state.id, []),
+                }
+                for state in bucket_states
+            ],
+            key=lambda item: self._review_queue_sort_key(item, resolved_sort),
+            reverse=resolved_order == "desc",
+        )
+        return {
+            "generated_at": resolved_now.isoformat(),
+            "bucket": resolved_bucket,
+            "count": len(items),
+            "sort": resolved_sort,
+            "order": resolved_order,
+            "items": items,
         }
 
     async def get_entry_queue_schedule(

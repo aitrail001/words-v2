@@ -96,6 +96,15 @@ jest.mock("@/lib/learner-audio", () => ({
 }));
 jest.mock("@/lib/user-preferences-client");
 
+const reviewTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+function formatReviewTime(value: string): string {
+  return reviewTimeFormatter.format(new Date(value));
+}
+
 describe("KnowledgeEntryDetailPage", () => {
   const mockUseRouter = useRouter as jest.MockedFunction<typeof useRouter>;
   const mockGetKnowledgeMapEntryDetail = getKnowledgeMapEntryDetail as jest.MockedFunction<
@@ -112,6 +121,8 @@ describe("KnowledgeEntryDetailPage", () => {
   >;
 
   beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-04-03T12:00:00Z"));
     jest.clearAllMocks();
     mockUseRouter.mockReturnValue({ push: jest.fn() } as never);
     mockGetUserPreferences.mockResolvedValue({
@@ -132,6 +143,10 @@ describe("KnowledgeEntryDetailPage", () => {
     jest.spyOn(window, "confirm").mockReturnValue(true);
     window.sessionStorage.clear();
     window.history.pushState({}, "", "/word/word-1");
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   afterEach(() => {
@@ -771,7 +786,10 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
 
-    expect(await screen.findByText(/suggested next review: tomorrow/i)).toBeInTheDocument();
+    expect((await screen.findAllByText(/next review scheduled/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/scheduled time will be set when you continue review/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/approximately:/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^override$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /back to review/i })).not.toBeInTheDocument();
     expect(mockPlayLearnerEntryAudio).toHaveBeenCalledWith(
       [
@@ -786,10 +804,12 @@ describe("KnowledgeEntryDetailPage", () => {
       { contentScope: "word" },
     );
 
-    fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "7d" } });
+    fireEvent.click(screen.getByRole("button", { name: /^override$/i }));
+    expect(screen.getByText(/approximately: tomorrow/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/choose next review timing/i), { target: { value: "7d" } });
+    fireEvent.click(screen.getByRole("button", { name: /confirm next review change/i }));
     fireEvent.click(screen.getByRole("button", { name: /continue review/i }));
 
-    expect(window.confirm).toHaveBeenCalledWith("Change the next review to In a week?");
     await waitFor(() =>
       expect(mockPost).toHaveBeenCalledWith(
         "/reviews/queue/state-1/submit",
@@ -813,7 +833,7 @@ describe("KnowledgeEntryDetailPage", () => {
   it("persists next-review changes from the detail bottom bar for queued entries", async () => {
     mockPut.mockResolvedValue({
       queue_item_id: "queue-1",
-      next_review_at: "2026-04-05T00:00:00+00:00",
+      next_review_at: "2026-04-10T00:00:00+00:00",
       current_schedule_value: "7d",
       current_schedule_label: "In a week",
       schedule_options: [
@@ -872,20 +892,24 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
 
-    expect(await screen.findByLabelText(/review in/i)).toHaveValue("1d");
-    fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "7d" } });
+    expect(await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`)).toBeInTheDocument();
+    expect(screen.getByText(/approximately: tomorrow/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^override$/i }));
+    expect(screen.getByLabelText(/choose next review timing/i)).toHaveValue("1d");
+    fireEvent.change(screen.getByLabelText(/choose next review timing/i), { target: { value: "7d" } });
+    fireEvent.click(screen.getByRole("button", { name: /confirm next review change/i }));
 
-    expect(window.confirm).toHaveBeenCalledWith("Change the next review to In a week?");
     await waitFor(() =>
       expect(mockPut).toHaveBeenCalledWith("/reviews/queue/queue-1/schedule", {
         schedule_override: "7d",
       }),
     );
-    expect(await screen.findByLabelText(/review in/i)).toHaveValue("7d");
+    expect(await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-10T00:00:00+00:00")}`)).toBeInTheDocument();
+    expect(screen.getByText(/approximately: in a week/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /override \(manual override\)/i })).toBeInTheDocument();
   });
 
-  it("does not update the queued next review when confirmation is cancelled", async () => {
-    (window.confirm as jest.Mock).mockReturnValueOnce(false);
+  it("does not update the queued next review when the manual override sheet is dismissed", async () => {
     mockGetKnowledgeMapEntryDetail.mockResolvedValue({
       entry_type: "phrase",
       entry_id: "phrase-1",
@@ -935,12 +959,16 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
 
-    expect(await screen.findByLabelText(/review in/i)).toHaveValue("never_for_now");
-    fireEvent.change(screen.getByLabelText(/review in/i), { target: { value: "1d" } });
+    expect(await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`)).toBeInTheDocument();
+    expect(screen.getByText(/approximately: tomorrow/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /override \(manual override\)/i }));
+    expect(screen.getByLabelText(/choose next review timing/i)).toHaveValue("never_for_now");
+    fireEvent.change(screen.getByLabelText(/choose next review timing/i), { target: { value: "1d" } });
+    fireEvent.click(screen.getByRole("button", { name: /leave current schedule/i }));
 
-    expect(window.confirm).toHaveBeenCalledWith("Change the next review to Tomorrow?");
     expect(mockPut).not.toHaveBeenCalled();
-    expect(screen.getByLabelText(/review in/i)).toHaveValue("never_for_now");
+    expect(screen.queryByLabelText(/choose next review timing/i)).not.toBeInTheDocument();
+    expect(screen.getByText(`Next review scheduled: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`)).toBeInTheDocument();
   });
 
   it("shows next-review controls for learning entries even when no next review date exists yet", async () => {
@@ -995,8 +1023,9 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
 
-    expect(await screen.findByText(/next review/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/review in/i)).toHaveValue("1d");
+    expect(await screen.findByText(/next review scheduled: scheduled time not set yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/approximately:/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^override$/i })).toBeInTheDocument();
   });
 
   it("clears next-review controls immediately when an entry is marked as already knew", async () => {
@@ -1052,10 +1081,10 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
 
-    expect(await screen.findByText(/next review/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Next Review$/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /already knew/i }));
 
-    await waitFor(() => expect(screen.queryByText(/next review/i)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/^Next Review$/i)).not.toBeInTheDocument());
   });
 
   it("clears next-review controls immediately when an entry is moved back to should learn", async () => {
@@ -1111,9 +1140,9 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
 
-    expect(await screen.findByText(/next review/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Next Review$/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /should learn/i }));
 
-    await waitFor(() => expect(screen.queryByText(/next review/i)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/^Next Review$/i)).not.toBeInTheDocument());
   });
 });

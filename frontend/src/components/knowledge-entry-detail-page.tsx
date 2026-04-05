@@ -73,8 +73,89 @@ function actionButtonClass(status: KnowledgeStatus, activeStatus: KnowledgeStatu
   return "bg-white text-[#684f85]";
 }
 
-function buildReviewScheduleConfirmationMessage(label: string): string {
-  return `Change the next review to ${label}?`;
+const reviewScheduleTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+function startOfLocalDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function formatScheduledReviewTime(value: string | null | undefined): string {
+  if (!value) {
+    return "Scheduled time not set yet";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Time unavailable";
+  }
+
+  return reviewScheduleTimeFormatter.format(parsed);
+}
+
+function formatApproximateScheduledReviewTime(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const target = new Date(value);
+  if (Number.isNaN(target.getTime())) {
+    return null;
+  }
+
+  const now = new Date();
+  const dayDelta = Math.round(
+    (startOfLocalDay(target).getTime() - startOfLocalDay(now).getTime()) / (24 * 60 * 60 * 1000),
+  );
+
+  if (dayDelta < 0) {
+    return "Overdue";
+  }
+  if (dayDelta === 0) {
+    return target.getTime() <= now.getTime() ? "Due now" : "Later today";
+  }
+  if (dayDelta === 1) {
+    return "Tomorrow";
+  }
+  if (dayDelta < 7) {
+    return `In ${dayDelta} days`;
+  }
+  if (dayDelta < 14) {
+    return "In a week";
+  }
+  if (dayDelta < 21) {
+    return "In 2 weeks";
+  }
+  if (dayDelta < 45) {
+    return "In a month";
+  }
+
+  const monthDelta = Math.max(2, Math.round(dayDelta / 30));
+  return `In ${monthDelta} months`;
+}
+
+function findScheduleLabel(
+  options: Array<{ value: string; label: string }>,
+  value: string | null | undefined,
+): string | null {
+  if (!value) {
+    return null;
+  }
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function isManualScheduleOverride(
+  options: Array<{ value: string; is_default?: boolean }>,
+  value: string | null | undefined,
+): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const defaultValue = options.find((option) => option.is_default)?.value ?? null;
+  return defaultValue !== null && value !== defaultValue;
 }
 
 function buildHeroStyle(seed: string): CSSProperties {
@@ -228,6 +309,8 @@ export function KnowledgeEntryDetailPage({
   const [reviewSession, setReviewSession] = useState<StoredReviewSession | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
   const [queueScheduleSaving, setQueueScheduleSaving] = useState(false);
+  const [isScheduleSheetOpen, setIsScheduleSheetOpen] = useState(false);
+  const [scheduleDraftValue, setScheduleDraftValue] = useState("");
   const autoPlayedReviewAudioRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -407,6 +490,22 @@ export function KnowledgeEntryDetailPage({
     }).catch(() => undefined);
   }, [detail, preferences.accent_preference]);
 
+  useEffect(() => {
+    const launchedFromReviewContext =
+      typeof window !== "undefined"
+        && new URLSearchParams(window.location.search).get("return_to") === "review";
+    const matchingRevealSchedule =
+      launchedFromReviewContext
+      && detail
+      && reviewSession?.phase === "reveal"
+      && reviewSession.revealState
+      && reviewSession.revealState.detail?.entry_type === detail.entry_type
+      && reviewSession.revealState.detail?.entry_id === detail.entry_id
+        ? reviewSession.revealState.selectedSchedule
+        : null;
+    setScheduleDraftValue(matchingRevealSchedule ?? detail?.review_queue?.current_schedule_value ?? "");
+  }, [detail, reviewSession]);
+
   if (loadState === "loading") {
     return <p className="text-sm text-slate-500">Loading learner detail...</p>;
   }
@@ -503,6 +602,19 @@ export function KnowledgeEntryDetailPage({
     matchingReviewReveal?.scheduleOptions ?? detailReviewQueue?.schedule_options ?? [];
   const activeReviewScheduleValue =
     matchingReviewReveal?.selectedSchedule ?? detailReviewQueue?.current_schedule_value ?? "";
+  const activeReviewScheduleLabel = findScheduleLabel(activeReviewScheduleOptions, activeReviewScheduleValue);
+  const hasManualScheduleOverride = isManualScheduleOverride(
+    activeReviewScheduleOptions,
+    activeReviewScheduleValue,
+  );
+  const approximateScheduledReview = matchingReviewReveal
+    ? null
+    : formatApproximateScheduledReviewTime(detailReviewQueue?.next_review_at);
+  const scheduleSheetApproximateReview =
+    approximateScheduledReview ?? activeReviewScheduleLabel;
+  const scheduledReviewMessage = matchingReviewReveal
+    ? "Next review scheduled: Scheduled time will be set when you continue review."
+    : `Next review scheduled: ${formatScheduledReviewTime(detailReviewQueue?.next_review_at)}`;
 
   const updateAccentPreference = (accent: UserPreferences["accent_preference"]) => {
     setPreferences((current) => {
@@ -546,16 +658,6 @@ export function KnowledgeEntryDetailPage({
       router.push(reviewReturnHref);
       return;
     }
-    const selectedScheduleLabel =
-      matchingReviewReveal.scheduleOptions.find((option) => option.value === matchingReviewReveal.selectedSchedule)?.label
-      ?? matchingReviewReveal.selectedSchedule;
-    if (
-      typeof window !== "undefined"
-      && !window.confirm(buildReviewScheduleConfirmationMessage(selectedScheduleLabel))
-    ) {
-      return;
-    }
-
     setReviewSaving(true);
     try {
       if (
@@ -596,15 +698,6 @@ export function KnowledgeEntryDetailPage({
     if (!detailReviewQueue?.queue_item_id) {
       return;
     }
-    const selectedScheduleLabel =
-      detailReviewQueue.schedule_options.find((option) => option.value === scheduleValue)?.label
-      ?? scheduleValue;
-    if (
-      typeof window !== "undefined"
-      && !window.confirm(buildReviewScheduleConfirmationMessage(selectedScheduleLabel))
-    ) {
-      return;
-    }
     setQueueScheduleSaving(true);
     try {
       const updatedQueue = await updateReviewQueueSchedule(detailReviewQueue.queue_item_id, scheduleValue);
@@ -612,6 +705,37 @@ export function KnowledgeEntryDetailPage({
     } finally {
       setQueueScheduleSaving(false);
     }
+  };
+
+  const handleConfirmScheduleDraft = async () => {
+    if (!scheduleDraftValue) {
+      setIsScheduleSheetOpen(false);
+      return;
+    }
+
+    if (matchingReviewReveal) {
+      setReviewSession((current) => {
+        if (!current?.revealState) {
+          return current;
+        }
+        const next = {
+          ...current,
+          revealState: { ...current.revealState, selectedSchedule: scheduleDraftValue },
+        };
+        persistReviewSession(next);
+        return next;
+      });
+      setIsScheduleSheetOpen(false);
+      return;
+    }
+
+    if (!detailReviewQueue || scheduleDraftValue === detailReviewQueue.current_schedule_value) {
+      setIsScheduleSheetOpen(false);
+      return;
+    }
+
+    await handleUpdateDetailReviewSchedule(scheduleDraftValue);
+    setIsScheduleSheetOpen(false);
   };
 
   return (
@@ -659,7 +783,10 @@ export function KnowledgeEntryDetailPage({
                   Review Decision
                 </p>
                 <p className="mt-2 text-sm font-semibold text-[#5a357b]">
-                  Suggested next review: {matchingReviewReveal.scheduleOptions.find((option) => option.is_default)?.label}
+                  Scheduled time will be set when you continue review.
+                </p>
+                <p className="mt-1 text-sm text-[#6e5a86]">
+                  Use the override control below to keep the default next-review window or choose a different one.
                 </p>
                 <div className="mt-3">
                   <button
@@ -1059,44 +1186,98 @@ export function KnowledgeEntryDetailPage({
                 <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]">
                   Next Review
                 </p>
-                <label htmlFor="detail-review-override" className="sr-only">
-                  Review in
-                </label>
-                <select
-                  id="detail-review-override"
-                  value={activeReviewScheduleValue}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    if (matchingReviewReveal) {
-                      setReviewSession((current) => {
-                        if (!current?.revealState) {
-                          return current;
-                        }
-                        const next = {
-                          ...current,
-                          revealState: { ...current.revealState, selectedSchedule: nextValue },
-                        };
-                        persistReviewSession(next);
-                        return next;
-                      });
-                      return;
-                    }
-                    void handleUpdateDetailReviewSchedule(nextValue);
+                <p className="mt-2 text-sm font-semibold text-[#53287c]">{scheduledReviewMessage}</p>
+                {approximateScheduledReview ? (
+                  <p className="mt-2 text-[0.72rem] text-[#6e5a86]">
+                    Approximately: {approximateScheduledReview}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScheduleDraftValue(activeReviewScheduleValue);
+                    setIsScheduleSheetOpen(true);
                   }}
                   disabled={queueScheduleSaving || reviewSaving}
-                  className="mt-2 w-full rounded-[0.5rem] border border-[#d9dcec] bg-white px-3 py-2 text-sm text-[#43235f] disabled:opacity-50"
+                  className="mt-2 w-full rounded-[0.6rem] border border-[#d9dcec] px-3 py-2 text-sm font-semibold text-[#684f85] disabled:opacity-50"
                 >
-                  {activeReviewScheduleOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  Override{hasManualScheduleOverride ? " (manual override)" : ""}
+                </button>
               </div>
             ) : null}
           </div>
         </div>
       </div>
+
+      {isScheduleSheetOpen && activeReviewScheduleOptions.length > 0 ? (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(16,10,34,0.38)] px-4 pb-6 sm:items-center">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Override next review"
+            className="w-full max-w-[24rem] rounded-[1rem] bg-white p-4 text-[#43235f] shadow-[0_20px_42px_rgba(21,12,46,0.35)]"
+          >
+            <p className="text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-[#8e38f2]">
+              Override next review
+            </p>
+            <p className="mt-2 text-sm font-semibold text-[#53287c]">
+              {matchingReviewReveal
+                ? "Next review scheduled: Scheduled time will be set when you continue review."
+                : `Next review scheduled: ${formatScheduledReviewTime(detailReviewQueue?.next_review_at)}`}
+            </p>
+            {scheduleSheetApproximateReview ? (
+              <p className="mt-1 text-sm text-[#6e5a86]">
+                Approximately: {scheduleSheetApproximateReview}
+              </p>
+            ) : null}
+            <p className="mt-2 text-sm leading-6 text-[#6e5a86]">
+              {matchingReviewReveal
+                ? "Choose a manual override for this review result before you continue."
+                : "Choose a manual override or keep the current scheduled time."}
+            </p>
+            <label
+              htmlFor="detail-review-override"
+              className="mt-4 block text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]"
+            >
+              Choose next review timing
+            </label>
+            <select
+              id="detail-review-override"
+              value={scheduleDraftValue}
+              onChange={(event) => setScheduleDraftValue(event.target.value)}
+              disabled={queueScheduleSaving || reviewSaving}
+              className="mt-2 w-full rounded-[0.6rem] border border-[#d9dcec] bg-white px-3 py-2 text-sm text-[#43235f] disabled:opacity-50"
+              aria-label="Choose next review timing"
+            >
+              {activeReviewScheduleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setScheduleDraftValue(activeReviewScheduleValue);
+                  setIsScheduleSheetOpen(false);
+                }}
+                className="rounded-[0.8rem] border border-[#d9dcec] px-3 py-2 text-sm font-semibold text-[#684f85]"
+              >
+                Leave current schedule
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmScheduleDraft()}
+                disabled={queueScheduleSaving || reviewSaving}
+                className="rounded-[0.8rem] bg-[#45c5dd] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {queueScheduleSaving ? "Saving..." : "Confirm next review change"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {overlayTarget && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(16,10,34,0.52)] px-4">
