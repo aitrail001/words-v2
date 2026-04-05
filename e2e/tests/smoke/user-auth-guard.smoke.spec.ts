@@ -42,7 +42,14 @@ test("@smoke auth guard allows authenticated users on protected routes", async (
 
   await page.goto("/review");
   await expect(page).toHaveURL(/\/review$/);
-  await expect(page.getByTestId("review-start-button")).toBeVisible();
+  await expect(
+    page
+      .getByTestId("review-empty-state")
+      .or(page.getByTestId("review-active-state"))
+      .or(page.getByTestId("review-learning-state"))
+      .or(page.getByTestId("review-relearn-state"))
+      .or(page.getByTestId("review-complete-state")),
+  ).toBeVisible();
 
   await page.goto("/imports");
   await expect(page).toHaveURL(/\/imports$/);
