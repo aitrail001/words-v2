@@ -72,7 +72,7 @@ jobs:
           tests/test_imports_api.py
           tests/test_import_jobs_api.py
           tests/test_source_imports_service.py
-          tests/test_review_models.py
+          tests/test_lexicon_compiled_review_models.py
           tests/test_review_service.py
           tests/test_review_api.py
           tests/test_user_preferences_api.py
