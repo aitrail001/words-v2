@@ -122,28 +122,6 @@ export function isReviewQueueItemDueNow(value: string | null): boolean {
   return parsed.getTime() <= Date.now();
 }
 
-export function formatReviewQueueDueLabel(value: string | null): string {
-  const parsed = normalizeReviewQueueDate(value);
-  if (!parsed) {
-    return "Due now";
-  }
-
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfDueDay = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-  const dayDiff = Math.round(
-    (startOfDueDay.getTime() - startOfToday.getTime()) / (24 * 60 * 60 * 1000),
-  );
-
-  if (dayDiff <= 0) {
-    return "Due now";
-  }
-  if (dayDiff === 1) {
-    return "Tomorrow";
-  }
-  return `In ${dayDiff} days`;
-}
-
 function startOfLocalDay(value: Date): Date {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
