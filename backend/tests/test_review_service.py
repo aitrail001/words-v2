@@ -358,8 +358,100 @@ class TestQueueDue:
         assert due_items[0]["word"] == "serendipity"
         assert due_items[0]["definition"] == "lucky chance"
 
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_does_not_unlock_future_official_schedule_after_eastward_timezone_change(
+        self, review_service, mock_db, monkeypatch
+    ):
+        now = datetime(2026, 4, 10, 10, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.5,
+        )
+        state.next_due_at = now - timedelta(minutes=5)
+        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        state.due_review_date = date(2026, 4, 11)
+        word = Word(id=word_id, word="candidate", language="en")
+        meanings = [Meaning(id=meaning_id, word_id=word_id, definition="A person under consideration.")]
+
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = [state]
+        word_result = MagicMock()
+        word_result.scalars.return_value.all.return_value = [word]
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = meanings
+        mock_db.execute.side_effect = [state_result, word_result, meanings_result]
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_confidence_check=True,
+                timezone="Asia/Tokyo",
+            )
+        )
+        review_service._get_user_accent_preference = AsyncMock(return_value="us")
+        review_service._fetch_first_meaning_sentence_map = AsyncMock(return_value={meaning_id: None})
+        review_service._fetch_history_count_by_word_id = AsyncMock(return_value={word_id: 0})
+        review_service._build_card_prompt = AsyncMock(return_value={"prompt_type": "definition_to_entry"})
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "candidate"}
+        )
+        monkeypatch.setattr(
+            review_module,
+            "datetime",
+            _frozen_datetime_class(now),
+        )
+
+        due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
+
+        assert due_items == []
+
 
 class TestGroupedReviewQueue:
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_summary_keeps_already_due_card_due_after_timezone_change(
+        self, review_service
+    ):
+        now = datetime(2026, 4, 10, 20, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.5,
+        )
+        state.next_due_at = now + timedelta(days=1)
+        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        state.due_review_date = date(2026, 4, 11)
+        state.entry_text = "candidate"
+        state.learner_status = "learning"
+
+        review_service._list_active_queue_states = AsyncMock(return_value=[state])
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(timezone="America/Los_Angeles")
+        )
+
+        payload = await review_service.get_grouped_review_queue_summary(user_id=user_id, now=now)
+
+        assert payload == {
+            "generated_at": now.isoformat(),
+            "total_count": 1,
+            "groups": [
+                {"bucket": "overdue", "count": 1},
+            ],
+        }
+
     @pytest.mark.asyncio
     async def test_get_grouped_review_queue_bucket_detail_includes_progress_and_history(
         self, review_service, mock_db
