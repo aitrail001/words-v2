@@ -4676,7 +4676,12 @@ class TestEntryReviewStateConcurrency:
         assert updated.srs_bucket == "7d"
         assert updated.interval_days == 7
         assert updated.next_due_at is not None
-        assert before + timedelta(hours=20) <= updated.next_due_at <= after + timedelta(days=1, hours=1)
+        assert updated.next_due_at == updated.min_due_at_utc
+        assert updated.due_review_date is not None
+        assert updated.due_review_date in {
+            before.date() + timedelta(days=1),
+            after.date() + timedelta(days=1),
+        }
         assert updated.recheck_due_at is not None
         assert updated.schedule_options == []
 
