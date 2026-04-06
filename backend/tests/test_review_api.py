@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -754,6 +754,7 @@ class TestQueueScheduleUpdate:
         assert response.status_code == 200
         data = response.json()
         assert data["queue_item_id"] == str(item_id)
+        assert data["next_review_at"] == "2026-04-11T00:00:00Z"
         assert data["current_schedule_value"] == "7d"
         assert data["current_schedule_label"] == "In a week"
         assert data["current_schedule_source"] == "scheduled_timestamp"
@@ -1109,6 +1110,10 @@ class TestQueueSubmit:
         state.outcome = "correct_tested"
         state.needs_relearn = False
         state.recheck_planned = False
+        state.due_review_date = date(2026, 4, 13)
+        state.min_due_at_utc = datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc)
+        state.next_due_at = state.min_due_at_utc
+        state.next_review = state.next_due_at
         state.detail = {
             "entry_type": "word",
             "entry_id": str(state.entry_id),
@@ -1142,6 +1147,7 @@ class TestQueueSubmit:
         assert data["id"] == str(state.id)
         assert data["meaning_id"] == ""
         assert data["outcome"] == "correct_tested"
+        assert data["next_review"] == "2026-04-12T18:00:00Z"
         assert data["detail"]["display_text"] == "resilience"
         assert data["schedule_options"][0]["value"] == "3d"
 

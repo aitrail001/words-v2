@@ -15,9 +15,11 @@ from app.services.review import ReviewService
 from app.core.database import Base
 from app.models.entry_review import EntryReviewEvent, EntryReviewState
 from app.models.learner_entry_status import LearnerEntryStatus
+from app.models.user_preference import UserPreference
 from app.models.word import Word
 from app.models.meaning import Meaning
 from app.spaced_repetition import calculate_next_review
+from app.services.review_schedule import due_review_date_for_bucket, min_due_at_for_bucket
 
 
 @pytest.fixture
@@ -54,6 +56,17 @@ def _load_timezone_safe_migration():
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _frozen_datetime_class(fixed_now: datetime):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return fixed_now.replace(tzinfo=None) if fixed_now.tzinfo is not None else fixed_now
+            return fixed_now.astimezone(tz)
+
+    return FrozenDateTime
 
 
 class TestQueueAdd:
@@ -3903,14 +3916,20 @@ class TestEntryReviewStateConcurrency:
 
     @pytest.mark.asyncio
     async def test_submit_queue_review_applies_schedule_override_on_idempotent_resubmit(
-        self, review_service, mock_db
+        self, review_service, mock_db, monkeypatch
     ):
+        original_reviewed_at = datetime(2026, 4, 10, 14, 30, tzinfo=timezone.utc)
+        retried_at = datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc)
         user_id = uuid.uuid4()
         state_id = uuid.uuid4()
         meaning_id = uuid.uuid4()
         entry_id = uuid.uuid4()
         prompt_id = str(uuid.uuid4())
-        original_due_at = datetime.now(timezone.utc) + timedelta(days=1)
+        original_due_at = min_due_at_for_bucket(
+            reviewed_at_utc=original_reviewed_at,
+            user_timezone="Australia/Melbourne",
+            bucket="1d",
+        )
         entry_state = EntryReviewState(
             id=state_id,
             user_id=user_id,
@@ -3923,6 +3942,13 @@ class TestEntryReviewStateConcurrency:
         )
         entry_state.interval_days = 1
         entry_state.next_due_at = original_due_at
+        entry_state.last_reviewed_at = original_reviewed_at
+        entry_state.due_review_date = due_review_date_for_bucket(
+            reviewed_at_utc=original_reviewed_at,
+            user_timezone="Australia/Melbourne",
+            bucket="1d",
+        )
+        entry_state.min_due_at_utc = original_due_at
         entry_state.last_submission_prompt_id = prompt_id
         entry_state.last_outcome = "correct_tested"
         entry_state.detail = {"entry_type": "word", "entry_id": str(entry_id), "display_text": "bank"}
@@ -3930,6 +3956,11 @@ class TestEntryReviewStateConcurrency:
 
         locked_result = MagicMock()
         locked_result.scalar_one_or_none.return_value = entry_state
+        prefs_result = MagicMock()
+        prefs_result.scalar_one_or_none.return_value = UserPreference(
+            user_id=user_id,
+            timezone="Australia/Melbourne",
+        )
         learner_status_result = MagicMock()
         learner_status_result.scalar_one_or_none.return_value = LearnerEntryStatus(
             user_id=user_id,
@@ -3937,7 +3968,12 @@ class TestEntryReviewStateConcurrency:
             entry_id=entry_id,
             status="learning",
         )
-        mock_db.execute.side_effect = [locked_result, learner_status_result]
+        mock_db.execute.side_effect = [locked_result, prefs_result, learner_status_result]
+        monkeypatch.setattr(
+            review_submission_module,
+            "datetime",
+            _frozen_datetime_class(retried_at),
+        )
 
         prompt_token = review_service._encode_prompt_token(
             {
@@ -3965,8 +4001,22 @@ class TestEntryReviewStateConcurrency:
 
         assert updated is entry_state
         assert updated.interval_days == 7
-        assert updated.next_due_at is not None
-        assert updated.next_due_at > original_due_at
+        assert updated.due_review_date == due_review_date_for_bucket(
+            reviewed_at_utc=original_reviewed_at,
+            user_timezone="Australia/Melbourne",
+            bucket="7d",
+        )
+        assert updated.min_due_at_utc == min_due_at_for_bucket(
+            reviewed_at_utc=original_reviewed_at,
+            user_timezone="Australia/Melbourne",
+            bucket="7d",
+        )
+        assert updated.next_due_at == updated.min_due_at_utc
+        assert updated.next_due_at != min_due_at_for_bucket(
+            reviewed_at_utc=retried_at,
+            user_timezone="Australia/Melbourne",
+            bucket="7d",
+        )
         assert updated.srs_bucket == "7d"
         assert updated.cadence_step == 1
         assert any(

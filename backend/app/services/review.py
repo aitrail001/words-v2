@@ -2238,6 +2238,20 @@ class ReviewService:
         )
 
     @classmethod
+    def _schedule_anchor_reviewed_at(
+        cls,
+        *,
+        state: EntryReviewState,
+        fallback_now: datetime | None = None,
+    ) -> datetime:
+        persisted_reviewed_at = cls._normalize_bucket_datetime(
+            getattr(state, "last_reviewed_at", None)
+        )
+        if persisted_reviewed_at is not None:
+            return persisted_reviewed_at
+        return cls._normalize_bucket_datetime(fallback_now) or datetime.now(timezone.utc)
+
+    @classmethod
     def _resolve_schedule_value_from_due_at(
         cls,
         *,
@@ -2802,35 +2816,58 @@ class ReviewService:
         if state is None:
             raise ValueError(f"Queue item {item_id} not found")
 
-        resolved_bucket = schedule_override
-        resolved_interval_days = bucket_to_interval_days(resolved_bucket)
-        resolved_next_review = due_at_for_bucket(resolved_bucket)
-        state.stability = max(0.15, float(resolved_interval_days or 180))
-        state.interval_days = resolved_interval_days
-        state.srs_bucket = resolved_bucket
-        state.cadence_step = cadence_step_for_bucket(resolved_bucket)
-        state.next_due_at = resolved_next_review
-        state.last_reviewed_at = datetime.now(timezone.utc)
-        state.relearning = False
-        state.relearning_trigger = None
-        state.recheck_due_at = None
-        learner_status_result = await self.db.execute(
-            select(LearnerEntryStatus).where(
-                LearnerEntryStatus.user_id == user_id,
-                LearnerEntryStatus.entry_type == state.entry_type,
-                LearnerEntryStatus.entry_id == state.entry_id,
-            )
-        )
-        learner_status = learner_status_result.scalar_one_or_none()
-        if learner_status is None:
-            learner_status = LearnerEntryStatus(
+        if schedule_override == "10m":
+            resolved_now = datetime.now(timezone.utc)
+            resolved_next_review = resolved_now + timedelta(minutes=10)
+            state.next_due_at = resolved_next_review
+            state.next_review = resolved_next_review
+            state.last_reviewed_at = resolved_now
+            state.relearning = True
+            state.relearning_trigger = state.relearning_trigger or "manual_reschedule"
+            state.recheck_due_at = resolved_next_review
+        else:
+            resolved_now = datetime.now(timezone.utc)
+            (
+                resolved_interval_days,
+                resolved_due_review_date,
+                resolved_min_due_at_utc,
+                resolved_bucket,
+            ) = await self._resolve_official_review_schedule(
                 user_id=user_id,
-                entry_type=state.entry_type,
-                entry_id=state.entry_id,
-                status="learning",
+                reviewed_at=resolved_now,
+                interval_days=int(getattr(state, "interval_days", round(state.stability or 0)) or 0),
+                resolved_outcome=getattr(state, "last_outcome", None),
+                schedule_override=schedule_override,
             )
-            self.db.add(learner_status)
-        learner_status.status = "known" if resolved_bucket == "known" else "learning"
+            state.interval_days = resolved_interval_days
+            state.stability = max(0.15, float(resolved_interval_days))
+            state.srs_bucket = resolved_bucket
+            state.cadence_step = cadence_step_for_bucket(resolved_bucket)
+            state.due_review_date = resolved_due_review_date
+            state.min_due_at_utc = resolved_min_due_at_utc
+            state.next_due_at = resolved_min_due_at_utc
+            state.next_review = resolved_min_due_at_utc
+            state.last_reviewed_at = resolved_now
+            state.relearning = False
+            state.relearning_trigger = None
+            state.recheck_due_at = None
+            learner_status_result = await self.db.execute(
+                select(LearnerEntryStatus).where(
+                    LearnerEntryStatus.user_id == user_id,
+                    LearnerEntryStatus.entry_type == state.entry_type,
+                    LearnerEntryStatus.entry_id == state.entry_id,
+                )
+            )
+            learner_status = learner_status_result.scalar_one_or_none()
+            if learner_status is None:
+                learner_status = LearnerEntryStatus(
+                    user_id=user_id,
+                    entry_type=state.entry_type,
+                    entry_id=state.entry_id,
+                    status="learning",
+                )
+                self.db.add(learner_status)
+            learner_status.status = "known" if resolved_bucket == "known" else "learning"
         await self.db.commit()
         self._invalidate_queue_stats_cache(user_id)
         return self._build_current_schedule_payload(state)

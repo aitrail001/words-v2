@@ -177,7 +177,10 @@ async def submit_entry_state_review(
                     raise ValueError("Prompt submission is stale")
     if prompt_id and getattr(entry_state, "last_submission_prompt_id", None) == prompt_id:
         if schedule_override:
-            reviewed_at = datetime.now(timezone.utc)
+            reviewed_at = service._schedule_anchor_reviewed_at(
+                state=entry_state,
+                fallback_now=datetime.now(timezone.utc),
+            )
             current_interval_days = int(getattr(entry_state, "interval_days", 0) or 0)
             current_due_review_date = getattr(entry_state, "due_review_date", None)
             current_min_due_at_utc = getattr(entry_state, "min_due_at_utc", None)
@@ -218,6 +221,7 @@ async def submit_entry_state_review(
                 entry_state.due_review_date = resolved_due_review_date
                 entry_state.min_due_at_utc = resolved_min_due_at_utc
                 entry_state.next_due_at = resolved_min_due_at_utc
+                entry_state.next_review = resolved_min_due_at_utc
                 entry_state.srs_bucket = resolved_bucket
                 entry_state.cadence_step = cadence_step_for_bucket(resolved_bucket)
                 entry_state.schedule_options = build_schedule_options(resolved_bucket)
