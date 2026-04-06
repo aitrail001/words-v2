@@ -913,6 +913,21 @@ class TestGroupedQueue:
 
         assert ReviewService.classify_review_bucket(due_at, now) == expected_bucket
 
+    def test_classify_review_bucket_uses_review_day_before_local_release_cutoff(self):
+        now = datetime(2026, 4, 10, 14, 30, tzinfo=timezone.utc)
+        due_at = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+
+        assert (
+            ReviewService.classify_review_bucket(
+                due_at,
+                now,
+                due_review_date=date(2026, 4, 11),
+                min_due_at_utc=due_at,
+                user_timezone="Australia/Melbourne",
+            )
+            == "tomorrow"
+        )
+
     @pytest.mark.asyncio
     async def test_get_grouped_review_queue_summary_returns_bucket_cards(self, review_service):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
@@ -1168,6 +1183,31 @@ class TestGroupedQueue:
         assert next(
             option for option in payload["schedule_options"] if option["value"] == "3d"
         )["is_default"] is True
+
+    def test_build_current_schedule_payload_uses_review_day_for_pre_release_next_day_schedule(self):
+        now = datetime(2026, 4, 10, 14, 30, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        state.due_review_date = date(2026, 4, 11)
+        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        state.next_due_at = state.min_due_at_utc
+        state.recheck_due_at = None
+
+        payload = ReviewService._build_current_schedule_payload(
+            state,
+            now=now,
+            user_timezone="Australia/Melbourne",
+        )
+
+        assert payload["current_schedule_value"] == "1d"
+        assert payload["current_schedule_label"] == "Tomorrow"
+        assert payload["next_review_at"] == state.next_due_at.isoformat()
 
     def test_long_horizon_success_sequence_reaches_multi_month_bucket(self):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
