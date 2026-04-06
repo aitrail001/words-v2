@@ -1032,6 +1032,123 @@ describe("KnowledgeEntryDetailPage", () => {
     expect(screen.getByRole("button", { name: /^override$/i })).toBeInTheDocument();
   });
 
+  it("renders detail next-review timing from min_due_at_utc when next_review_at is absent", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      display_text: "bank on",
+      normalized_form: "bank on",
+      browse_rank: 141,
+      status: "learning",
+      cefr_level: "B1",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "依赖",
+      primary_definition: "To depend on someone.",
+      review_queue: {
+        queue_item_id: "queue-1",
+        next_review_at: null,
+        due_review_date: "2026-04-11",
+        min_due_at_utc: "2026-04-10T18:00:00Z",
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+      meanings: [],
+      senses: [
+        {
+          sense_id: "sense-1",
+          definition: "To depend on someone.",
+          localized_definition: "依赖",
+          part_of_speech: "phrasal_verb",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+        },
+      ],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
+
+    expect(
+      await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-10T18:00:00Z")}`),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/approximately: in a week/i)).toBeInTheDocument();
+  });
+
+  it("does not mislabel next-local-review-day detail items as later today before the 04:00 cutoff", async () => {
+    jest.setSystemTime(new Date("2026-04-10T16:30:00Z"));
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "resilience",
+      normalized_form: "resilience",
+      browse_rank: 20,
+      status: "learning",
+      cefr_level: "B2",
+      pronunciation: "/rɪˈzɪljəns/",
+      pronunciations: {},
+      translation: "韧性",
+      primary_definition: "The ability to recover quickly from setbacks.",
+      review_queue: {
+        queue_item_id: "queue-1",
+        next_review_at: "2026-04-10T18:00:00Z",
+        due_review_date: "2026-04-11",
+        min_due_at_utc: "2026-04-10T18:00:00Z",
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "The ability to recover quickly from setbacks.",
+          localized_definition: "韧性",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    expect(await screen.findByText(/approximately: tomorrow/i)).toBeInTheDocument();
+    expect(screen.queryByText(/approximately: later today/i)).not.toBeInTheDocument();
+  });
+
   it("clears next-review controls immediately when an entry is marked as already knew", async () => {
     mockGetKnowledgeMapEntryDetail.mockResolvedValue({
       entry_type: "word",

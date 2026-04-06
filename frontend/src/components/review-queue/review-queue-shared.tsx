@@ -299,14 +299,15 @@ export function ReviewQueueItemCard({
   renderSupplementalFields?: (item: ReviewQueueItem | AdminReviewQueueItem) => ReactNode;
 }) {
   const resolvedBucket = bucket ?? item.bucket ?? null;
-  const isDueNow = isReviewQueueItemDueNow(item.next_review_at);
+  const exactDueAt = item.min_due_at_utc ?? item.next_review_at;
+  const isDueNow = isReviewQueueItemDueNow(exactDueAt);
   const canStartReview =
     allowStartReview &&
     resolvedBucket !== null &&
     REVIEWABLE_BUCKETS.includes(resolvedBucket) &&
     isDueNow;
   const [historyOpen, setHistoryOpen] = useState(false);
-  const dueLabel = formatReviewQueueDueLabel(item.next_review_at);
+  const dueLabel = formatReviewQueueDueLabel(item) ?? "Due now";
   const history = item.history ?? [];
   const successStreak = item.success_streak ?? 0;
   const lapseCount = item.lapse_count ?? 0;
@@ -328,7 +329,7 @@ export function ReviewQueueItemCard({
           </div>
           <p className="mt-2 text-sm text-[#7b6795]">
             <span className="font-semibold text-[#5a357b]">{dueLabel}</span>
-            {!isDueNow ? ` · ${formatReviewQueueTime(item.next_review_at)}` : ""}
+            {!isDueNow ? ` · ${formatReviewQueueTime(exactDueAt)}` : ""}
           </p>
           {showStageLabel && resolvedBucket ? (
             <p className="mt-1 text-sm text-[#8f7ba8]">SRS stage {formatReviewQueueBucketLabel(resolvedBucket)}</p>

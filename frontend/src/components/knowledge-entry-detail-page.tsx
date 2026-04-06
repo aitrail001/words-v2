@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ApiError, apiClient } from "@/lib/api-client";
 import {
+  formatReviewQueueDueLabel,
+  formatReviewQueueTime,
+} from "@/components/review-queue/review-queue-utils";
+import {
   getKnowledgeMapEntryDetail,
   normalizeLearnerTranslation,
   updateReviewQueueSchedule,
@@ -51,6 +55,8 @@ const ACCENT_LABELS: Record<UserPreferences["accent_preference"], string> = {
   au: "AU",
 };
 
+type DetailReviewQueue = NonNullable<KnowledgeMapEntryDetail["review_queue"]>;
+
 type LinkedEntryTarget = {
   entry_type: KnowledgeEntryType;
   entry_id: string;
@@ -73,40 +79,29 @@ function actionButtonClass(status: KnowledgeStatus, activeStatus: KnowledgeStatu
   return "bg-white text-[#684f85]";
 }
 
-const reviewScheduleTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-function startOfLocalDay(value: Date): Date {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+function resolveScheduledReviewInstant(reviewQueue: DetailReviewQueue | null | undefined): string | null {
+  return reviewQueue?.min_due_at_utc ?? reviewQueue?.next_review_at ?? null;
 }
 
-function formatScheduledReviewTime(value: string | null | undefined): string {
-  if (!value) {
-    return "Scheduled time not set yet";
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return "Time unavailable";
-  }
-
-  return reviewScheduleTimeFormatter.format(parsed);
+function formatScheduledReviewTime(reviewQueue: DetailReviewQueue | null | undefined): string {
+  return formatReviewQueueTime(resolveScheduledReviewInstant(reviewQueue), {
+    emptyLabel: "Scheduled time not set yet",
+    invalidLabel: "Time unavailable",
+  });
 }
 
 function buildScheduledReviewMessage(
-  nextReviewAt: string | null | undefined,
+  reviewQueue: DetailReviewQueue | null | undefined,
   fallbackLabel: string | null | undefined,
 ): string {
-  const formattedTime = formatScheduledReviewTime(nextReviewAt);
-  if ((!nextReviewAt || formattedTime === "Scheduled time not set yet") && fallbackLabel) {
+  const formattedTime = formatScheduledReviewTime(reviewQueue);
+  if ((!resolveScheduledReviewInstant(reviewQueue) || formattedTime === "Scheduled time not set yet") && fallbackLabel) {
     return fallbackLabel;
   }
   return formattedTime;
 }
 
-function formatApproximateScheduledReviewTime(value: string | null | undefined): string | null {
+function formatLegacyApproximateScheduledReviewTime(value: string | null | undefined): string | null {
   if (!value) {
     return null;
   }
@@ -117,8 +112,10 @@ function formatApproximateScheduledReviewTime(value: string | null | undefined):
   }
 
   const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTargetDay = new Date(target.getFullYear(), target.getMonth(), target.getDate());
   const dayDelta = Math.round(
-    (startOfLocalDay(target).getTime() - startOfLocalDay(now).getTime()) / (24 * 60 * 60 * 1000),
+    (startOfTargetDay.getTime() - startOfToday.getTime()) / (24 * 60 * 60 * 1000),
   );
 
   if (dayDelta < 0) {
@@ -143,8 +140,24 @@ function formatApproximateScheduledReviewTime(value: string | null | undefined):
     return "In a month";
   }
 
-  const monthDelta = Math.max(2, Math.round(dayDelta / 30));
-  return `In ${monthDelta} months`;
+  return `In ${Math.max(2, Math.round(dayDelta / 30))} months`;
+}
+
+function formatApproximateScheduledReviewTime(reviewQueue: DetailReviewQueue | null | undefined): string | null {
+  if (!reviewQueue) {
+    return null;
+  }
+
+  const dueLabel = formatReviewQueueDueLabel({
+    next_review_at: reviewQueue.next_review_at,
+    due_review_date: reviewQueue.due_review_date,
+    min_due_at_utc: reviewQueue.min_due_at_utc,
+  });
+  if (dueLabel) {
+    return dueLabel;
+  }
+
+  return formatLegacyApproximateScheduledReviewTime(resolveScheduledReviewInstant(reviewQueue));
 }
 
 function getStatusActionErrorMessage(error: unknown): string {
@@ -640,13 +653,13 @@ export function KnowledgeEntryDetailPage({
   );
   const approximateScheduledReview = matchingReviewReveal
     ? null
-    : formatApproximateScheduledReviewTime(detailReviewQueue?.next_review_at);
+    : formatApproximateScheduledReviewTime(detailReviewQueue);
   const scheduleSheetApproximateReview =
     approximateScheduledReview ?? activeReviewScheduleLabel;
   const scheduledReviewMessage = matchingReviewReveal
     ? "Next review scheduled: Scheduled time will be set when you continue review."
     : `Next review scheduled: ${buildScheduledReviewMessage(
-        detailReviewQueue?.next_review_at,
+        detailReviewQueue,
         detailReviewQueue?.current_schedule_label ?? activeReviewScheduleLabel,
       )}`;
 
@@ -1264,7 +1277,7 @@ export function KnowledgeEntryDetailPage({
               {matchingReviewReveal
                 ? "Next review scheduled: Scheduled time will be set when you continue review."
                 : `Next review scheduled: ${buildScheduledReviewMessage(
-                    detailReviewQueue?.next_review_at,
+                    detailReviewQueue,
                     detailReviewQueue?.current_schedule_label ?? activeReviewScheduleLabel,
                   )}`}
             </p>

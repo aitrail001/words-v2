@@ -148,6 +148,8 @@ export type ReviewQueueItem = {
   text: string;
   status: KnowledgeStatus;
   next_review_at: string | null;
+  due_review_date?: string | null;
+  min_due_at_utc?: string | null;
   last_reviewed_at: string | null;
   bucket?: ReviewQueueBucket;
   success_streak: number;
@@ -318,6 +320,8 @@ export type ReviewScheduleOption = {
 export type EntryReviewQueue = {
   queue_item_id: string;
   next_review_at: string | null;
+  due_review_date?: string | null;
+  min_due_at_utc?: string | null;
   current_schedule_value: string;
   current_schedule_label: string;
   current_schedule_source?: string;

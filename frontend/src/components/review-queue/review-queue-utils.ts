@@ -4,6 +4,7 @@ import type {
   ReviewQueueBucket,
   ReviewQueueBucketOrder,
   ReviewQueueBucketSort,
+  ReviewQueueItem,
 } from "@/lib/knowledge-map-client";
 
 export const REVIEW_QUEUE_BUCKET_LABELS: Record<ReviewQueueBucket, string> = {
@@ -57,6 +58,9 @@ const reviewTimeFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
 });
+
+const REVIEW_DAY_RELEASE_HOUR_LOCAL = 4;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 export function isReviewQueueBucket(value: string | null | undefined): value is ReviewQueueBucket {
   if (!value) {
@@ -138,6 +142,111 @@ export function formatReviewQueueDueLabel(value: string | null): string {
     return "Tomorrow";
   }
   return `In ${dayDiff} days`;
+}
+
+function startOfLocalDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function parseReviewDate(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day] = match;
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+  if (
+    parsed.getFullYear() !== Number(year)
+    || parsed.getMonth() !== Number(month) - 1
+    || parsed.getDate() !== Number(day)
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function parseReviewInstant(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function effectiveLocalReviewDay(value: Date): Date {
+  const effectiveDay = startOfLocalDay(value);
+  if (value.getHours() < REVIEW_DAY_RELEASE_HOUR_LOCAL) {
+    effectiveDay.setDate(effectiveDay.getDate() - 1);
+  }
+  return effectiveDay;
+}
+
+export function formatReviewQueueDueLabel(
+  item: Pick<ReviewQueueItem, "due_review_date" | "min_due_at_utc" | "next_review_at">,
+  now: Date = new Date(),
+): string | null {
+  const dueReviewDate = parseReviewDate(item.due_review_date);
+  if (!dueReviewDate) {
+    return null;
+  }
+
+  const exactDueAt = parseReviewInstant(item.min_due_at_utc ?? item.next_review_at);
+  const effectiveToday = effectiveLocalReviewDay(now);
+  const dayDelta = Math.round(
+    (startOfLocalDay(dueReviewDate).getTime() - effectiveToday.getTime()) / DAY_IN_MS,
+  );
+
+  if (dayDelta < 0) {
+    return "Overdue";
+  }
+  if (dayDelta === 0) {
+    if (exactDueAt && exactDueAt.getTime() <= now.getTime()) {
+      return "Due now";
+    }
+    return "Later today";
+  }
+  if (dayDelta === 1) {
+    return "Tomorrow";
+  }
+  if (dayDelta < 7) {
+    return `In ${dayDelta} days`;
+  }
+  if (dayDelta < 14) {
+    return "In a week";
+  }
+  if (dayDelta < 21) {
+    return "In 2 weeks";
+  }
+  if (dayDelta < 45) {
+    return "In a month";
+  }
+
+  return `In ${Math.max(2, Math.round(dayDelta / 30))} months`;
+}
+
+export function formatReviewQueueSchedule(
+  item: Pick<ReviewQueueItem, "due_review_date" | "min_due_at_utc" | "next_review_at">,
+): string {
+  const dueLabel = formatReviewQueueDueLabel(item);
+  const exactDueAt = item.min_due_at_utc ?? item.next_review_at;
+  const exactTime = formatReviewQueueTime(exactDueAt, {
+    emptyLabel: dueLabel ? "" : "Time to be scheduled",
+  }).trim();
+
+  if (dueLabel && exactTime) {
+    return `${dueLabel} · ${exactTime}`;
+  }
+  if (dueLabel) {
+    return dueLabel;
+  }
+  return exactTime || "Time to be scheduled";
 }
 
 export function formatReviewQueueStatus(status: KnowledgeStatus): string {
