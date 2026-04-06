@@ -1444,6 +1444,49 @@ class TestGroupedQueue:
         assert payload["current_schedule_label"] == "Later today"
         assert payload["next_review_at"] == state.min_due_at_utc.isoformat()
 
+    def test_effective_due_at_prefers_official_review_day_fields_over_legacy_next_due_at(self):
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        state.recheck_due_at = None
+        state.due_review_date = date(2026, 4, 11)
+        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        state.next_due_at = datetime(2026, 4, 10, 23, 0, tzinfo=timezone.utc)
+
+        assert ReviewService._effective_due_at(state) == state.min_due_at_utc
+
+    def test_build_current_schedule_payload_ignores_stale_legacy_next_due_at_when_official_fields_exist(
+        self,
+    ):
+        now = datetime(2026, 4, 10, 14, 30, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        state.recheck_due_at = None
+        state.due_review_date = date(2026, 4, 11)
+        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        state.next_due_at = datetime(2026, 4, 10, 23, 0, tzinfo=timezone.utc)
+
+        payload = ReviewService._build_current_schedule_payload(
+            state,
+            now=now,
+            user_timezone="Australia/Melbourne",
+        )
+
+        assert payload["current_schedule_value"] == "1d"
+        assert payload["current_schedule_label"] == "Tomorrow"
+        assert payload["next_review_at"] == state.min_due_at_utc.isoformat()
+
     def test_long_horizon_success_sequence_reaches_multi_month_bucket(self):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
         due_at = now

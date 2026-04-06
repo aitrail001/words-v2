@@ -2127,39 +2127,6 @@ class ReviewService:
             else "wrong"
         )
 
-    @staticmethod
-    def _derive_interval_from_override(
-        original_interval_days: int | None,
-        override_value: str | None,
-        base_next_review: datetime | None = None,
-    ) -> tuple[int, datetime, int | None]:
-        if override_value is None:
-            resolved_interval_days = ReviewService._resolve_interval_days_or_zero(original_interval_days)
-            return (
-                resolved_interval_days,
-                base_next_review
-                if base_next_review is not None
-                else due_at_for_bucket(bucket_for_interval_days(resolved_interval_days)),
-                None,
-            )
-
-        mapped_days = ReviewService.SCHEDULE_OVERRIDE_DAYS.get(override_value)
-        if mapped_days is None:
-            resolved_interval_days = ReviewService._resolve_interval_days_or_zero(original_interval_days)
-            return (
-                resolved_interval_days,
-                base_next_review
-                if base_next_review is not None
-                else due_at_for_bucket(bucket_for_interval_days(resolved_interval_days)),
-                None,
-            )
-
-        return (
-            int(mapped_days),
-            due_at_for_bucket(override_value),
-            original_interval_days,
-        )
-
     @classmethod
     def _default_schedule_option_value(cls, interval_days: int) -> str:
         return bucket_for_interval_days(interval_days)
