@@ -1637,8 +1637,18 @@ export const seedLegacyDuplicateReviewQueueFixture = async (
     await client.query(`DELETE FROM entry_review_states WHERE user_id = $1::uuid`, [userId]);
     await upsertLearnerStatus(client, userId, firstScenario, "learning");
     await upsertLearnerStatus(client, userId, secondScenario, "learning");
-    await insertReviewQueueState(client, userId, firstScenario, now, reviewedAt, "1d");
-    await insertReviewQueueState(client, userId, secondScenario, now, reviewedAt, "1d");
+    await insertReviewQueueState(client, userId, firstScenario, {
+      scenarioKey: firstScenario.key,
+      nextDueAt: now,
+      lastReviewedAt: reviewedAt,
+      srsBucket: "1d",
+    });
+    await insertReviewQueueState(client, userId, secondScenario, {
+      scenarioKey: secondScenario.key,
+      nextDueAt: now,
+      lastReviewedAt: reviewedAt,
+      srsBucket: "1d",
+    });
 
     for (const scenario of [firstScenario, secondScenario]) {
       await client.query(
