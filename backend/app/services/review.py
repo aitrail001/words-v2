@@ -56,6 +56,11 @@ from app.services.voice_assets import (
     load_phrase_voice_assets,
     load_word_voice_assets,
 )
+from app.services.review_schedule import (
+    bucket_days as schedule_bucket_days,
+    due_review_date_for_bucket,
+    min_due_at_for_bucket,
+)
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -2176,6 +2181,62 @@ class ReviewService:
     def _build_schedule_options(cls, interval_days: int) -> list[dict[str, Any]]:
         return cls._build_schedule_options_for_value(cls._default_schedule_option_value(interval_days))
 
+    @staticmethod
+    def _interval_days_for_schedule_value(schedule_value: str) -> int:
+        resolved_days = schedule_bucket_days(schedule_value)
+        return 0 if resolved_days is None else int(resolved_days)
+
+    @classmethod
+    def _resolve_official_schedule_value(
+        cls,
+        *,
+        interval_days: int | None,
+        resolved_outcome: str | None,
+        schedule_override: str | None,
+    ) -> str:
+        if (
+            schedule_override
+            and schedule_override in cls.SCHEDULE_OVERRIDE_VALUES
+            and schedule_override != "10m"
+        ):
+            return schedule_override
+        if resolved_outcome in {"lookup", "wrong"}:
+            return "1d"
+        return cls._default_schedule_option_value(
+            cls._resolve_interval_days_or_zero(interval_days)
+        )
+
+    async def _resolve_official_review_schedule(
+        self,
+        *,
+        user_id: uuid.UUID,
+        reviewed_at: datetime,
+        interval_days: int | None,
+        resolved_outcome: str | None,
+        schedule_override: str | None,
+    ) -> tuple[int, Any, datetime | None, str]:
+        prefs = await self._get_user_review_preferences(user_id)
+        user_timezone = getattr(prefs, "timezone", None) or "UTC"
+        schedule_value = self._resolve_official_schedule_value(
+            interval_days=interval_days,
+            resolved_outcome=resolved_outcome,
+            schedule_override=schedule_override,
+        )
+        return (
+            self._interval_days_for_schedule_value(schedule_value),
+            due_review_date_for_bucket(
+                reviewed_at_utc=reviewed_at,
+                user_timezone=user_timezone,
+                bucket=schedule_value,
+            ),
+            min_due_at_for_bucket(
+                reviewed_at_utc=reviewed_at,
+                user_timezone=user_timezone,
+                bucket=schedule_value,
+            ),
+            schedule_value,
+        )
+
     @classmethod
     def _resolve_schedule_value_from_due_at(
         cls,
@@ -3354,6 +3415,9 @@ class ReviewService:
         prompt: dict[str, Any] | None,
         resolved_interval_days: int,
         resolved_next_review: datetime,
+        reviewed_at: datetime,
+        due_review_date: Any,
+        min_due_at_utc: datetime | None,
     ) -> None:
         return apply_entry_state_review_result_impl(
             self,
@@ -3363,6 +3427,9 @@ class ReviewService:
             prompt=prompt,
             resolved_interval_days=resolved_interval_days,
             resolved_next_review=resolved_next_review,
+            reviewed_at=reviewed_at,
+            due_review_date=due_review_date,
+            min_due_at_utc=min_due_at_utc,
         )
 
     async def _build_entry_state_detail(

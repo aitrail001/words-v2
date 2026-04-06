@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -99,22 +99,27 @@ def apply_entry_state_review_result(
     service: "ReviewService",
     *,
     entry_state: EntryReviewState,
+    review_result: Any,
     resolved_outcome: str,
     prompt: dict[str, Any] | None,
     resolved_bucket: str,
     resolved_interval_days: int | None,
     resolved_next_review: datetime,
+    reviewed_at: datetime,
+    due_review_date: date | None,
+    min_due_at_utc: datetime | None,
 ) -> None:
-    now = datetime.now(timezone.utc)
-    target_interval_days = interval_days_for_bucket(resolved_bucket)
-    entry_state.stability = max(0.15, float(target_interval_days or resolved_interval_days or 180))
+    entry_state.stability = max(0.15, float(resolved_interval_days or review_result.stability))
+    entry_state.difficulty = review_result.difficulty
     entry_state.last_prompt_type = (prompt or {}).get("prompt_type")
     entry_state.last_outcome = resolved_outcome
-    entry_state.is_fragile = resolved_outcome in {"lookup", "wrong"}
-    entry_state.last_reviewed_at = now
+    entry_state.is_fragile = review_result.is_fragile
+    entry_state.last_reviewed_at = reviewed_at
     entry_state.next_due_at = resolved_next_review
     entry_state.srs_bucket = resolved_bucket
     entry_state.cadence_step = cadence_step_for_bucket(resolved_bucket)
+    entry_state.due_review_date = due_review_date
+    entry_state.min_due_at_utc = min_due_at_utc
     entry_state.exposure_count = int(entry_state.exposure_count or 0) + 1
     if resolved_outcome in {"correct_tested", "remember"}:
         entry_state.success_streak = int(entry_state.success_streak or 0) + 1
@@ -129,7 +134,7 @@ def apply_entry_state_review_result(
         entry_state.lapse_count = int(entry_state.lapse_count or 0) + 1
     entry_state.relearning = True
     entry_state.relearning_trigger = resolved_outcome
-    entry_state.recheck_due_at = now + timedelta(minutes=10)
+    entry_state.recheck_due_at = reviewed_at + timedelta(minutes=10)
 
 
 async def submit_entry_state_review(
@@ -172,6 +177,10 @@ async def submit_entry_state_review(
                     raise ValueError("Prompt submission is stale")
     if prompt_id and getattr(entry_state, "last_submission_prompt_id", None) == prompt_id:
         if schedule_override:
+            reviewed_at = datetime.now(timezone.utc)
+            current_interval_days = int(getattr(entry_state, "interval_days", 0) or 0)
+            current_due_review_date = getattr(entry_state, "due_review_date", None)
+            current_min_due_at_utc = getattr(entry_state, "min_due_at_utc", None)
             last_outcome = getattr(entry_state, "last_outcome", None)
             if last_outcome is not None and last_outcome not in {"correct_tested", "remember"}:
                 raise ValueError("schedule_override is only allowed after success")
@@ -188,15 +197,27 @@ async def submit_entry_state_review(
                 )
             ):
                 raise ValueError("known override requires objective success at 180d")
-            resolved_bucket = schedule_override
-            resolved_interval_days = interval_days_for_bucket(resolved_bucket)
-            resolved_next_review = next_due_at_for_bucket(resolved_bucket)
+            (
+                resolved_interval_days,
+                resolved_due_review_date,
+                resolved_min_due_at_utc,
+                resolved_bucket,
+            ) = await service._resolve_official_review_schedule(
+                user_id=user_id,
+                reviewed_at=reviewed_at,
+                interval_days=current_interval_days,
+                resolved_outcome=getattr(entry_state, "last_outcome", None),
+                schedule_override=schedule_override,
+            )
             if (
-                resolved_bucket != current_bucket
-                or resolved_next_review != getattr(entry_state, "next_due_at", None)
+                resolved_interval_days != current_interval_days
+                or resolved_due_review_date != current_due_review_date
+                or resolved_min_due_at_utc != current_min_due_at_utc
             ):
                 entry_state.interval_days = resolved_interval_days
-                entry_state.next_due_at = resolved_next_review
+                entry_state.due_review_date = resolved_due_review_date
+                entry_state.min_due_at_utc = resolved_min_due_at_utc
+                entry_state.next_due_at = resolved_min_due_at_utc
                 entry_state.srs_bucket = resolved_bucket
                 entry_state.cadence_step = cadence_step_for_bucket(resolved_bucket)
                 entry_state.schedule_options = build_schedule_options(resolved_bucket)
@@ -273,24 +294,34 @@ async def submit_entry_state_review(
         entry_state.schedule_options = build_schedule_options(preview_bucket)
         return entry_state
 
+    reviewed_at = datetime.now(timezone.utc)
     scheduled_by = "manual_override" if schedule_override else "recommended"
-    resolved_bucket = schedule_override or recommended_bucket
-    resolved_interval_days = interval_days_for_bucket(resolved_bucket)
-    if resolved_outcome in {"lookup", "wrong"}:
-        resolved_next_review = next_due_at_for_bucket("1d")
-    else:
-        resolved_next_review = next_due_at_for_bucket(resolved_bucket)
+    (
+        resolved_interval_days,
+        resolved_due_review_date,
+        resolved_min_due_at_utc,
+        resolved_bucket,
+    ) = await service._resolve_official_review_schedule(
+        user_id=user_id,
+        reviewed_at=reviewed_at,
+        interval_days=review_result.interval_days,
+        resolved_outcome=resolved_outcome,
+        schedule_override=schedule_override,
+    )
 
     apply_entry_state_review_result(
         service,
         entry_state=entry_state,
+        review_result=review_result,
         resolved_outcome=resolved_outcome,
         prompt={"prompt_type": prompt_type},
         resolved_bucket=resolved_bucket,
         resolved_interval_days=resolved_interval_days,
-        resolved_next_review=resolved_next_review,
+        resolved_next_review=resolved_min_due_at_utc or reviewed_at,
+        reviewed_at=reviewed_at,
+        due_review_date=resolved_due_review_date,
+        min_due_at_utc=resolved_min_due_at_utc,
     )
-    entry_state.difficulty = review_result.difficulty
     detail = await build_entry_state_detail(
         service,
         user_id=user_id,
