@@ -68,6 +68,11 @@ def scalar_one_or_none_result(value):
 
 
 class TestUserPreferencesApi:
+    def test_user_preference_constructor_leaves_timezone_unset(self):
+        model = UserPreference(user_id=uuid.uuid4())
+
+        assert model.timezone is None
+
     @pytest.mark.asyncio
     async def test_get_returns_defaults_when_missing_including_timezone(
         self, client, mock_db, auth_token

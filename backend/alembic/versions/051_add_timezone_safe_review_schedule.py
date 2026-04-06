@@ -46,7 +46,7 @@ def _effective_review_date(*, instant_utc: datetime, user_timezone: str, release
 def upgrade() -> None:
     op.add_column(
         "user_preferences",
-        sa.Column("timezone", sa.String(length=64), nullable=False, server_default="UTC"),
+        sa.Column("timezone", sa.String(length=64), nullable=True),
     )
     op.add_column("entry_review_states", sa.Column("due_review_date", sa.Date(), nullable=True))
     op.add_column("entry_review_states", sa.Column("min_due_at_utc", sa.DateTime(timezone=True), nullable=True))
@@ -64,6 +64,15 @@ def upgrade() -> None:
     )
 
     conn = op.get_bind()
+    conn.execute(
+        sa.text(
+            """
+            UPDATE user_preferences
+            SET timezone = 'UTC'
+            WHERE timezone IS NULL
+            """
+        )
+    )
     rows = conn.execute(
         sa.text(
             """
@@ -107,6 +116,8 @@ def upgrade() -> None:
                 "due_review_date": due_review_date,
             },
         )
+
+    op.alter_column("user_preferences", "timezone", nullable=False)
 
 
 def downgrade() -> None:
