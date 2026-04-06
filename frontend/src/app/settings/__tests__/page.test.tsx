@@ -1,29 +1,42 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SettingsPage from "@/app/settings/page";
-import { getUserPreferences, updateUserPreferences } from "@/lib/user-preferences-client";
+import {
+  getUserPreferences,
+  syncDetectedDeviceTimezone,
+  updateUserPreferences,
+} from "@/lib/user-preferences-client";
 
 jest.mock("@/lib/user-preferences-client", () => {
   const actual = jest.requireActual("@/lib/user-preferences-client");
   return {
     ...actual,
     getUserPreferences: jest.fn(),
+    syncDetectedDeviceTimezone: jest.fn(),
     updateUserPreferences: jest.fn(),
   };
 });
 
 describe("SettingsPage", () => {
   const mockGetUserPreferences = getUserPreferences as jest.MockedFunction<typeof getUserPreferences>;
+  const mockSyncDetectedDeviceTimezone = syncDetectedDeviceTimezone as jest.MockedFunction<
+    typeof syncDetectedDeviceTimezone
+  >;
   const mockUpdateUserPreferences = updateUserPreferences as jest.MockedFunction<typeof updateUserPreferences>;
+  const detectedTimezone = "Australia/Melbourne";
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest
+      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValue({ timeZone: detectedTimezone } as Intl.ResolvedDateTimeFormatOptions);
     mockGetUserPreferences.mockResolvedValue({
       accent_preference: "uk",
       translation_locale: "zh-Hans",
       knowledge_view_preference: "cards",
       show_translations_by_default: true,
       review_depth_preset: "balanced",
+      timezone: "UTC",
       enable_confidence_check: true,
       enable_word_spelling: true,
       enable_audio_spelling: false,
@@ -35,11 +48,20 @@ describe("SettingsPage", () => {
       knowledge_view_preference: "cards",
       show_translations_by_default: false,
       review_depth_preset: "deep",
+      timezone: detectedTimezone,
       enable_confidence_check: false,
       enable_word_spelling: false,
       enable_audio_spelling: true,
       show_pictures_in_questions: true,
     });
+    mockSyncDetectedDeviceTimezone.mockImplementation(async (preferences) => ({
+      ...preferences,
+      timezone: detectedTimezone,
+    }));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it("renders the learner settings sections", async () => {
@@ -91,6 +113,7 @@ describe("SettingsPage", () => {
         knowledge_view_preference: "cards",
         show_translations_by_default: false,
         review_depth_preset: "balanced",
+        timezone: detectedTimezone,
         enable_confidence_check: true,
         enable_word_spelling: true,
         enable_audio_spelling: false,
@@ -113,6 +136,65 @@ describe("SettingsPage", () => {
           review_depth_preset: "deep",
         }),
       );
+    });
+  });
+
+  it("does not let mount-time timezone sync clobber a newer setting change", async () => {
+    const user = userEvent.setup();
+    let resolveSyncRequest: (value: Awaited<ReturnType<typeof syncDetectedDeviceTimezone>>) => void = () =>
+      undefined;
+    const syncResolution = new Promise<Awaited<ReturnType<typeof syncDetectedDeviceTimezone>>>(
+      (resolve) => {
+        resolveSyncRequest = resolve;
+      },
+    );
+    const initialServerState = {
+      accent_preference: "uk" as const,
+      translation_locale: "zh-Hans" as const,
+      knowledge_view_preference: "cards" as const,
+      show_translations_by_default: true,
+      review_depth_preset: "balanced" as const,
+      timezone: "UTC",
+      enable_confidence_check: true,
+      enable_word_spelling: true,
+      enable_audio_spelling: false,
+      show_pictures_in_questions: false,
+    };
+    let persistedServerState = { ...initialServerState };
+
+    mockGetUserPreferences.mockResolvedValue(initialServerState);
+    mockSyncDetectedDeviceTimezone.mockImplementation(() => syncResolution);
+    mockUpdateUserPreferences.mockImplementation((payload) => {
+      persistedServerState = { ...persistedServerState, ...payload };
+      return Promise.resolve(persistedServerState);
+    });
+
+    render(<SettingsPage />);
+
+    const toggle = await screen.findByRole("button", { name: /show translations by default/i });
+    await user.click(toggle);
+
+    await waitFor(() => {
+      expect(mockSyncDetectedDeviceTimezone).toHaveBeenCalledWith(initialServerState, detectedTimezone);
+      expect(mockUpdateUserPreferences).toHaveBeenCalledWith({
+        ...initialServerState,
+        show_translations_by_default: false,
+        timezone: detectedTimezone,
+      });
+    });
+
+    resolveSyncRequest({
+      ...persistedServerState,
+      timezone: detectedTimezone,
+    });
+
+    await waitFor(() => {
+      expect(persistedServerState).toEqual({
+        ...initialServerState,
+        show_translations_by_default: false,
+        timezone: detectedTimezone,
+      });
+      expect(toggle).toHaveTextContent("Off");
     });
   });
 });

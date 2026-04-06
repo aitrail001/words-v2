@@ -99,7 +99,6 @@ describe("user-preferences-client", () => {
     await syncDetectedDeviceTimezone(preferences, "Australia/Melbourne");
 
     expect(mockApiClient.put).toHaveBeenCalledWith("/user-preferences", {
-      ...preferences,
       timezone: "Australia/Melbourne",
     });
   });

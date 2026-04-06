@@ -34,41 +34,49 @@ class UserPreferencesResponse(BaseModel):
 
 
 class UserPreferencesUpdateRequest(BaseModel):
-    accent_preference: str
-    translation_locale: str
-    knowledge_view_preference: str
-    show_translations_by_default: bool
-    review_depth_preset: str
+    accent_preference: str | None = None
+    translation_locale: str | None = None
+    knowledge_view_preference: str | None = None
+    show_translations_by_default: bool | None = None
+    review_depth_preset: str | None = None
     timezone: str | None = None
-    enable_confidence_check: bool
-    enable_word_spelling: bool
-    enable_audio_spelling: bool
-    show_pictures_in_questions: bool
+    enable_confidence_check: bool | None = None
+    enable_word_spelling: bool | None = None
+    enable_audio_spelling: bool | None = None
+    show_pictures_in_questions: bool | None = None
 
     @field_validator("accent_preference")
     @classmethod
-    def validate_accent(cls, value: str) -> str:
+    def validate_accent(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         if value not in {"us", "uk", "au"}:
             raise ValueError("Unsupported accent preference")
         return value
 
     @field_validator("translation_locale")
     @classmethod
-    def validate_translation_locale(cls, value: str) -> str:
+    def validate_translation_locale(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         if value not in SUPPORTED_TRANSLATION_LOCALES:
             raise ValueError("Unsupported translation locale")
         return value
 
     @field_validator("knowledge_view_preference")
     @classmethod
-    def validate_view(cls, value: str) -> str:
+    def validate_view(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         if value not in {"cards", "tags", "list"}:
             raise ValueError("Unsupported knowledge view preference")
         return value
 
     @field_validator("review_depth_preset")
     @classmethod
-    def validate_review_depth_preset(cls, value: str) -> str:
+    def validate_review_depth_preset(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         if value not in {"gentle", "balanced", "deep"}:
             raise ValueError("Unsupported review depth preset")
         return value
@@ -130,32 +138,55 @@ async def put_user_preferences(
 ):
     result = await db.execute(select(UserPreference).where(UserPreference.user_id == current_user.id))
     row = result.scalar_one_or_none()
-    resolved_timezone = payload.timezone or (row.timezone if row is not None else "UTC")
     if row is None:
         row = UserPreference(
             user_id=current_user.id,
-            accent_preference=payload.accent_preference,
-            translation_locale=payload.translation_locale,
-            knowledge_view_preference=payload.knowledge_view_preference,
-            show_translations_by_default=payload.show_translations_by_default,
-            review_depth_preset=payload.review_depth_preset,
-            timezone=resolved_timezone,
-            enable_confidence_check=payload.enable_confidence_check,
-            enable_word_spelling=payload.enable_word_spelling,
-            enable_audio_spelling=payload.enable_audio_spelling,
-            show_pictures_in_questions=payload.show_pictures_in_questions,
+            accent_preference=payload.accent_preference or DEFAULT_ACCENT,
+            translation_locale=payload.translation_locale or DEFAULT_TRANSLATION_LOCALE,
+            knowledge_view_preference=payload.knowledge_view_preference or DEFAULT_VIEW,
+            show_translations_by_default=(
+                payload.show_translations_by_default
+                if payload.show_translations_by_default is not None
+                else DEFAULT_SHOW_TRANSLATIONS
+            ),
+            review_depth_preset=payload.review_depth_preset or "balanced",
+            timezone=payload.timezone or "UTC",
+            enable_confidence_check=(
+                payload.enable_confidence_check if payload.enable_confidence_check is not None else True
+            ),
+            enable_word_spelling=(
+                payload.enable_word_spelling if payload.enable_word_spelling is not None else True
+            ),
+            enable_audio_spelling=(
+                payload.enable_audio_spelling if payload.enable_audio_spelling is not None else False
+            ),
+            show_pictures_in_questions=(
+                payload.show_pictures_in_questions
+                if payload.show_pictures_in_questions is not None
+                else False
+            ),
         )
         db.add(row)
     else:
-        row.accent_preference = payload.accent_preference
-        row.translation_locale = payload.translation_locale
-        row.knowledge_view_preference = payload.knowledge_view_preference
-        row.show_translations_by_default = payload.show_translations_by_default
-        row.review_depth_preset = payload.review_depth_preset
-        row.timezone = resolved_timezone
-        row.enable_confidence_check = payload.enable_confidence_check
-        row.enable_word_spelling = payload.enable_word_spelling
-        row.enable_audio_spelling = payload.enable_audio_spelling
-        row.show_pictures_in_questions = payload.show_pictures_in_questions
+        if payload.accent_preference is not None:
+            row.accent_preference = payload.accent_preference
+        if payload.translation_locale is not None:
+            row.translation_locale = payload.translation_locale
+        if payload.knowledge_view_preference is not None:
+            row.knowledge_view_preference = payload.knowledge_view_preference
+        if payload.show_translations_by_default is not None:
+            row.show_translations_by_default = payload.show_translations_by_default
+        if payload.review_depth_preset is not None:
+            row.review_depth_preset = payload.review_depth_preset
+        if payload.timezone is not None:
+            row.timezone = payload.timezone
+        if payload.enable_confidence_check is not None:
+            row.enable_confidence_check = payload.enable_confidence_check
+        if payload.enable_word_spelling is not None:
+            row.enable_word_spelling = payload.enable_word_spelling
+        if payload.enable_audio_spelling is not None:
+            row.enable_audio_spelling = payload.enable_audio_spelling
+        if payload.show_pictures_in_questions is not None:
+            row.show_pictures_in_questions = payload.show_pictures_in_questions
     await db.commit()
     return _response(row)

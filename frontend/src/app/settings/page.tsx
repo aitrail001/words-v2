@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   DEFAULT_USER_PREFERENCES,
+  detectDeviceTimezone,
   syncDetectedDeviceTimezone,
   getUserPreferences,
   SUPPORTED_TRANSLATION_LOCALES,
@@ -40,9 +41,18 @@ export default function SettingsPage() {
           return;
         }
 
-        setPreferences(response);
+        const detectedTimezone = detectDeviceTimezone();
+        const nextPreferences =
+          detectedTimezone && detectedTimezone !== response.timezone
+            ? {
+                ...response,
+                timezone: detectedTimezone,
+              }
+            : response;
 
-        void syncDetectedDeviceTimezone(response)
+        setPreferences(nextPreferences);
+
+        void syncDetectedDeviceTimezone(response, detectedTimezone)
           .then((syncedPreferences) => {
             if (active && syncedPreferences.timezone !== response.timezone) {
               setPreferences((current) => ({

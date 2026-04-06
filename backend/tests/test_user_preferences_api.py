@@ -283,6 +283,48 @@ class TestUserPreferencesApi:
         assert existing.timezone == "Europe/Paris"
 
     @pytest.mark.asyncio
+    async def test_put_timezone_only_payload_preserves_existing_preferences(
+        self, client, mock_db, auth_token
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        existing = UserPreference(
+            user_id=user_id,
+            accent_preference="us",
+            translation_locale="zh-Hans",
+            knowledge_view_preference="cards",
+            show_translations_by_default=False,
+            review_depth_preset="balanced",
+            enable_confidence_check=True,
+            enable_word_spelling=True,
+            enable_audio_spelling=False,
+            show_pictures_in_questions=False,
+            timezone="UTC",
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(existing),
+        ]
+
+        response = await client.put(
+            "/api/user-preferences",
+            json={
+                "timezone": "Australia/Melbourne",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["accent_preference"] == "us"
+        assert data["show_translations_by_default"] is False
+        assert data["timezone"] == "Australia/Melbourne"
+        assert existing.accent_preference == "us"
+        assert existing.show_translations_by_default is False
+        assert existing.timezone == "Australia/Melbourne"
+
+    @pytest.mark.asyncio
     async def test_put_rejects_unknown_timezone(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)

@@ -55,8 +55,7 @@ export const syncDetectedDeviceTimezone = async (
     return preferences;
   }
 
-  return updateUserPreferences({
-    ...preferences,
+  return apiClient.put<UserPreferences>("/user-preferences", {
     timezone: detectedTimezone,
   });
 };
