@@ -11,9 +11,13 @@ _BUCKET_DAY_OFFSETS: dict[str, int | None] = {
     "7d": 7,
     "14d": 14,
     "30d": 30,
+    "1m": 30,
     "90d": 90,
+    "3m": 90,
     "180d": 180,
+    "6m": 180,
     "Known": None,
+    "never_for_now": 365,
 }
 
 

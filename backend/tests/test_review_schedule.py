@@ -7,6 +7,7 @@ from app.services.review_schedule import (
     REVIEW_RELEASE_HOUR_LOCAL,
     bucket_days,
     due_now,
+    due_review_date_for_bucket,
     effective_review_date,
     min_due_at_for_bucket,
     sticky_due,
@@ -56,6 +57,50 @@ def test_min_due_at_for_bucket_aligns_same_day_reviews_to_same_release_instant()
 
 def test_bucket_days_maps_known_bucket_to_none() -> None:
     assert bucket_days("Known") is None
+
+
+@pytest.mark.parametrize(
+    ("bucket", "expected_days"),
+    [
+        ("30d", 30),
+        ("1m", 30),
+        ("90d", 90),
+        ("3m", 90),
+        ("180d", 180),
+        ("6m", 180),
+        ("never_for_now", 365),
+    ],
+)
+def test_bucket_days_accepts_legacy_aliases(bucket: str, expected_days: int) -> None:
+    assert bucket_days(bucket) == expected_days
+
+
+def test_legacy_aliases_align_to_the_same_due_instant_as_canonical_buckets() -> None:
+    reviewed_at_utc = datetime(2026, 4, 10, 12, 30, tzinfo=timezone.utc)
+
+    assert due_review_date_for_bucket(
+        reviewed_at_utc=reviewed_at_utc,
+        user_timezone="UTC",
+        bucket="1m",
+    ) == due_review_date_for_bucket(
+        reviewed_at_utc=reviewed_at_utc,
+        user_timezone="UTC",
+        bucket="30d",
+    )
+    assert min_due_at_for_bucket(
+        reviewed_at_utc=reviewed_at_utc,
+        user_timezone="UTC",
+        bucket="3m",
+    ) == min_due_at_for_bucket(
+        reviewed_at_utc=reviewed_at_utc,
+        user_timezone="UTC",
+        bucket="90d",
+    )
+    assert min_due_at_for_bucket(
+        reviewed_at_utc=reviewed_at_utc,
+        user_timezone="UTC",
+        bucket="never_for_now",
+    ) is not None
 
 
 def test_due_now_requires_both_review_day_and_min_due_at() -> None:
