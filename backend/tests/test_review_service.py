@@ -1317,6 +1317,52 @@ class TestGroupedQueue:
         ]
 
     @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_by_due_keeps_due_now_and_later_today_separate(
+        self, review_service
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+
+        due_now_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        due_now_state.next_due_at = now
+        due_now_state.entry_text = "alpha"
+        due_now_state.learner_status = "learning"
+        due_now_state.srs_bucket = "1d"
+
+        later_today_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        later_today_state.next_due_at = now + timedelta(seconds=1)
+        later_today_state.entry_text = "beta"
+        later_today_state.learner_status = "learning"
+        later_today_state.srs_bucket = "1d"
+
+        review_service._list_active_queue_states = AsyncMock(
+            return_value=[later_today_state, due_now_state]
+        )
+
+        payload = await review_service.get_grouped_review_queue_by_due(user_id=user_id, now=now)
+
+        assert [group["group_key"] for group in payload["groups"]] == ["due_now", "later_today"]
+        assert [group["count"] for group in payload["groups"]] == [1, 1]
+
+    @pytest.mark.asyncio
     async def test_get_grouped_review_queue_bucket_detail_sorts_by_requested_order(
         self, review_service
     ):
@@ -3265,6 +3311,49 @@ class TestQueueStats:
         assert stats["review_count"] == 4
         assert stats["correct_count"] == 2
         assert stats["accuracy"] == 0.5
+
+
+class TestUpdateQueueItemSchedule:
+    @pytest.mark.asyncio
+    async def test_update_queue_item_schedule_uses_bucket_override_for_official_reschedule(
+        self, review_service, mock_db
+    ):
+        user_id = uuid.uuid4()
+        state_id = uuid.uuid4()
+        entry_state = EntryReviewState(
+            id=state_id,
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=3,
+            difficulty=0.4,
+        )
+        entry_state.interval_days = 3
+        entry_state.srs_bucket = "3d"
+        state_lookup = MagicMock()
+        state_lookup.scalar_one_or_none.return_value = entry_state
+        learner_status_lookup = MagicMock()
+        learner_status_lookup.scalar_one_or_none.return_value = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_state.entry_id,
+            status="learning",
+        )
+        mock_db.execute.side_effect = [state_lookup, learner_status_lookup]
+
+        updated = await review_service.update_queue_item_schedule(
+            user_id=user_id,
+            item_id=state_id,
+            schedule_override="7d",
+        )
+
+        assert updated["current_schedule_value"] == "7d"
+        assert entry_state.srs_bucket == "7d"
+        assert entry_state.interval_days == 7
+        assert entry_state.next_due_at is not None
+        mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_submit_queue_review_invalidates_queue_stats_cache(

@@ -2741,7 +2741,7 @@ class ReviewService:
         include_debug_fields: bool = False,
         serialize_row: Callable[[EntryReviewState, bool], dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        grouped: dict[int, dict[str, Any]] = {}
+        grouped: dict[str, dict[str, Any]] = {}
         for state in states:
             bucket = cls._resolve_srs_bucket(state=state)
             if bucket == "known":
@@ -2770,7 +2770,7 @@ class ReviewService:
                 group_key = f"in_{due_in_days}_days"
 
             group = grouped.setdefault(
-                due_in_days,
+                group_key,
                 {
                     "group_key": group_key,
                     "label": label,
@@ -2782,7 +2782,14 @@ class ReviewService:
             group["items"].append(serialize_row(state, include_debug_fields))
             group["count"] += 1
 
-        return [grouped[days] for days in sorted(grouped.keys())]
+        return sorted(
+            grouped.values(),
+            key=lambda group: (
+                int(group["due_in_days"]),
+                0 if group["group_key"] == "due_now" else 1,
+                str(group["group_key"]),
+            ),
+        )
 
     @staticmethod
     def _is_queue_state_due_now(
@@ -3049,12 +3056,15 @@ class ReviewService:
             ) = await self._resolve_official_review_schedule(
                 user_id=user_id,
                 reviewed_at=resolved_now,
-                interval_days=int(getattr(state, "interval_days", round(state.stability or 0)) or 0),
+                resolved_bucket=schedule_override,
                 resolved_outcome=getattr(state, "last_outcome", None),
                 schedule_override=schedule_override,
             )
             state.interval_days = resolved_interval_days
-            state.stability = max(0.15, float(resolved_interval_days))
+            if resolved_interval_days is None:
+                state.stability = max(0.15, float(state.stability or 180))
+            else:
+                state.stability = max(0.15, float(resolved_interval_days))
             state.srs_bucket = resolved_bucket
             state.cadence_step = cadence_step_for_bucket(resolved_bucket)
             state.due_review_date = resolved_due_review_date
