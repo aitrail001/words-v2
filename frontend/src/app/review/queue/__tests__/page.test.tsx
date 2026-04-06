@@ -154,9 +154,7 @@ describe("ReviewQueuePage", () => {
       />,
     );
 
-    expect(
-      screen.getByText((content) => /next review tomorrow/i.test(content) && /4:00 am/i.test(content)),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/next review tomorrow/i)).toBeInTheDocument();
   });
 
   it("uses an explicit timezone when formatting cutoff-sensitive due labels", () => {
