@@ -4953,7 +4953,9 @@ class TestPromptTokenHardening:
             }
         )
 
-        tampered = f"{token[:-1]}A"
+        midpoint = len(token) // 2
+        replacement = "A" if token[midpoint] != "A" else "B"
+        tampered = f"{token[:midpoint]}{replacement}{token[midpoint + 1:]}"
         assert review_service._decode_prompt_token(tampered) is None
 
 

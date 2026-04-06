@@ -258,15 +258,18 @@ test("same-day reviews align to one release instant", async ({ page, request }) 
   await injectToken(page, admin.token);
   await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(beforeRelease)}`);
 
-  await expect(getBucketSection(page, /^tomorrow$/i)).toBeVisible();
-  await expectBucketCount(page, /^tomorrow$/i, 3);
-  await expect(getBucketSection(page, /^due now$/i)).toHaveCount(0);
+  await expect(getBucketSection(page, /^1d$/i)).toBeVisible();
+  await expectBucketCount(page, /^1d$/i, 3);
+  await openBucket(page, "1d");
+  await expect(page.getByText(/^Tomorrow$/).first()).toBeVisible();
+  await expect(page.getByText(/^Tomorrow$/)).toHaveCount(3);
+  await expect(page.getByText(/^Due now$/)).toHaveCount(0);
 
-  await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(releaseInstant)}`);
+  await page.goto(`/admin/review-queue/1d?effective_now=${encodeURIComponent(releaseInstant)}`);
 
-  await expect(getBucketSection(page, /^due now$/i)).toBeVisible();
-  await expectBucketCount(page, /^due now$/i, 3);
-  await expect(getBucketSection(page, /^tomorrow$/i)).toHaveCount(0);
+  await expect(page.getByText(/^Due now$/).first()).toBeVisible();
+  await expect(page.getByText(/^Due now$/)).toHaveCount(3);
+  await expect(page.getByText(/^Tomorrow$/)).toHaveCount(0);
 });
 
 test("eastward travel does not unlock early", async ({ page, request }) => {
