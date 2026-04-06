@@ -1,6 +1,6 @@
 """add timezone-safe review schedule fields
 
-Revision ID: 051_add_timezone_safe_review_schedule
+Revision ID: 051_timezone_safe_review_sched
 Revises: 050_drop_legacy_review_tables
 Create Date: 2026-04-06 11:15:00.000000
 """
@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "051_add_timezone_safe_review_schedule"
+revision = "051_timezone_safe_review_sched"
 down_revision = "050_drop_legacy_review_tables"
 branch_labels = None
 depends_on = None

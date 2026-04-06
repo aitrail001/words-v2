@@ -49,9 +49,9 @@ def _load_timezone_safe_migration():
         Path(__file__).resolve().parents[1]
         / "alembic"
         / "versions"
-        / "051_add_timezone_safe_review_schedule.py"
+        / "051_timezone_safe_review_sched.py"
     )
-    spec = util.spec_from_file_location("migration_051_add_timezone_safe_review_schedule", migration_path)
+    spec = util.spec_from_file_location("migration_051_timezone_safe_review_sched", migration_path)
     assert spec is not None and spec.loader is not None
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
