@@ -978,18 +978,20 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
         translation_locale,
         knowledge_view_preference,
         review_depth_preset,
+        timezone,
         enable_confidence_check,
         enable_word_spelling,
         enable_audio_spelling,
         show_pictures_in_questions
       )
-      VALUES ($1::uuid, $2::uuid, 'uk', 'es', 'cards', 'balanced', true, true, false, false)
+      VALUES ($1::uuid, $2::uuid, 'uk', 'es', 'cards', 'balanced', 'UTC', true, true, false, false)
       ON CONFLICT (user_id)
       DO UPDATE SET
         accent_preference = EXCLUDED.accent_preference,
         translation_locale = EXCLUDED.translation_locale,
         knowledge_view_preference = EXCLUDED.knowledge_view_preference,
         review_depth_preset = EXCLUDED.review_depth_preset,
+        timezone = EXCLUDED.timezone,
         enable_confidence_check = EXCLUDED.enable_confidence_check,
         enable_word_spelling = EXCLUDED.enable_word_spelling,
         enable_audio_spelling = EXCLUDED.enable_audio_spelling,

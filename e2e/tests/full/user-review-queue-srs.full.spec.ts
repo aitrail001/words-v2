@@ -7,10 +7,18 @@ import {
   seedGroupedReviewQueueFixture,
   seedLegacyDuplicateReviewQueueFixture,
   seedLongHorizonReviewFixture,
+  seedCustomReviewQueue,
+  updateReviewScenarioTimezone,
 } from "../helpers/review-scenario-fixture";
 
 const getBucketSection = (page: Page, heading: RegExp) =>
   page.locator("section").filter({ has: page.getByRole("heading", { name: heading }) });
+
+const expectBucketCount = async (page: Page, heading: RegExp, count: number) => {
+  await expect(getBucketSection(page, heading)).toContainText(
+    new RegExp(`${count} scheduled review item${count === 1 ? "" : "s"}`, "i"),
+  );
+};
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -210,4 +218,117 @@ test("legacy duplicate queue rows do not inflate learner-visible counts", async 
   await expect(page.getByText("2 items in this bucket")).toBeVisible();
   await expect(page.getByText(fixture.visibleTexts[0], { exact: true })).toBeVisible();
   await expect(page.getByText(fixture.visibleTexts[1], { exact: true })).toBeVisible();
+});
+
+test("same-day reviews align to one release instant", async ({ page, request }) => {
+  const admin = await registerAdminViaApi(request, "review-queue-alignment");
+  const releaseInstant = "2026-04-12T18:00:00Z";
+  const beforeRelease = "2026-04-12T17:59:59Z";
+  const dueAt = new Date(releaseInstant);
+  await seedCustomReviewQueue(admin.id, {
+    timezone: "Australia/Melbourne",
+    items: [
+      {
+        scenarioKey: "entry-to-definition",
+        status: "learning",
+        nextDueAt: dueAt,
+        dueReviewDate: "2026-04-13",
+        minDueAtUtc: dueAt,
+        lastReviewedAt: new Date("2026-04-10T00:00:00Z"),
+      },
+      {
+        scenarioKey: "definition-to-entry",
+        status: "learning",
+        nextDueAt: dueAt,
+        dueReviewDate: "2026-04-13",
+        minDueAtUtc: dueAt,
+        lastReviewedAt: new Date("2026-04-10T05:00:00Z"),
+      },
+      {
+        scenarioKey: "situation",
+        status: "learning",
+        nextDueAt: dueAt,
+        dueReviewDate: "2026-04-13",
+        minDueAtUtc: dueAt,
+        lastReviewedAt: new Date("2026-04-10T12:30:00Z"),
+      },
+    ],
+  });
+
+  await injectToken(page, admin.token);
+  await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(beforeRelease)}`);
+
+  await expect(getBucketSection(page, /^tomorrow$/i)).toBeVisible();
+  await expectBucketCount(page, /^tomorrow$/i, 3);
+  await expect(getBucketSection(page, /^due now$/i)).toHaveCount(0);
+
+  await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(releaseInstant)}`);
+
+  await expect(getBucketSection(page, /^due now$/i)).toBeVisible();
+  await expectBucketCount(page, /^due now$/i, 3);
+  await expect(getBucketSection(page, /^tomorrow$/i)).toHaveCount(0);
+});
+
+test("eastward travel does not unlock early", async ({ page, request }) => {
+  const admin = await registerAdminViaApi(request, "review-queue-eastward");
+  const effectiveNow = "2026-04-13T10:30:00Z";
+  const dueAt = new Date("2026-04-13T11:00:00Z");
+  await seedCustomReviewQueue(admin.id, {
+    timezone: "America/Los_Angeles",
+    items: [
+      {
+        scenarioKey: "entry-to-definition",
+        status: "learning",
+        nextDueAt: dueAt,
+        dueReviewDate: "2026-04-13",
+        minDueAtUtc: dueAt,
+        lastReviewedAt: new Date("2026-04-12T18:00:00Z"),
+      },
+    ],
+  });
+
+  await injectToken(page, admin.token);
+  await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(effectiveNow)}`);
+
+  await expect(getBucketSection(page, /^tomorrow$/i)).toBeVisible();
+  await expectBucketCount(page, /^tomorrow$/i, 1);
+
+  await updateReviewScenarioTimezone(admin.id, "Pacific/Kiritimati");
+  await page.reload();
+
+  await expect(getBucketSection(page, /^due now$/i)).toHaveCount(0);
+  await expect(getBucketSection(page, /^overdue$/i)).toHaveCount(0);
+  await expect(getBucketSection(page, /^later today$/i)).toBeVisible();
+  await expectBucketCount(page, /^later today$/i, 1);
+});
+
+test("already-due remains due after timezone change", async ({ page, request }) => {
+  const admin = await registerAdminViaApi(request, "review-queue-sticky-due");
+  const effectiveNow = "2026-04-12T18:00:00Z";
+  const dueAt = new Date(effectiveNow);
+  await seedCustomReviewQueue(admin.id, {
+    timezone: "Australia/Melbourne",
+    items: [
+      {
+        scenarioKey: "definition-to-entry",
+        status: "learning",
+        nextDueAt: dueAt,
+        dueReviewDate: "2026-04-13",
+        minDueAtUtc: dueAt,
+        lastReviewedAt: new Date("2026-04-10T04:00:00Z"),
+      },
+    ],
+  });
+
+  await injectToken(page, admin.token);
+  await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(effectiveNow)}`);
+
+  await expect(getBucketSection(page, /^due now$/i)).toBeVisible();
+  await expectBucketCount(page, /^due now$/i, 1);
+
+  await updateReviewScenarioTimezone(admin.id, "America/Los_Angeles");
+  await page.reload();
+
+  await expect(getBucketSection(page, /^due now$/i)).toBeVisible();
+  await expectBucketCount(page, /^due now$/i, 1);
 });
