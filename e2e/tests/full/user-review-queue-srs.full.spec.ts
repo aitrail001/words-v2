@@ -261,15 +261,15 @@ test("same-day reviews align to one release instant", async ({ page, request }) 
   await expect(getBucketSection(page, /^1d$/i)).toBeVisible();
   await expectBucketCount(page, /^1d$/i, 3);
   await openBucket(page, "1d");
-  await expect(page.getByText(/^Tomorrow$/).first()).toBeVisible();
-  await expect(page.getByText(/^Tomorrow$/)).toHaveCount(3);
-  await expect(page.getByText(/^Due now$/)).toHaveCount(0);
+  await expect(page.getByText(/^Tomorrow\b/i).first()).toBeVisible();
+  await expect(page.getByText(/^Tomorrow\b/i)).toHaveCount(3);
+  await expect(page.getByText(/^Due now\b/i)).toHaveCount(0);
 
   await page.goto(`/admin/review-queue/1d?effective_now=${encodeURIComponent(releaseInstant)}`);
 
-  await expect(page.getByText(/^Due now$/).first()).toBeVisible();
-  await expect(page.getByText(/^Due now$/)).toHaveCount(3);
-  await expect(page.getByText(/^Tomorrow$/)).toHaveCount(0);
+  await expect(page.getByText(/^Due now\b/i).first()).toBeVisible();
+  await expect(page.getByText(/^Due now\b/i)).toHaveCount(3);
+  await expect(page.getByText(/^Tomorrow\b/i)).toHaveCount(0);
 });
 
 test("eastward travel does not unlock early", async ({ page, request }) => {
