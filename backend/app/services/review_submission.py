@@ -104,7 +104,7 @@ def apply_entry_state_review_result(
     prompt: dict[str, Any] | None,
     resolved_bucket: str,
     resolved_interval_days: int | None,
-    resolved_next_review: datetime,
+    resolved_next_review: datetime | None,
     reviewed_at: datetime,
     due_review_date: date | None,
     min_due_at_utc: datetime | None,
@@ -195,10 +195,10 @@ async def submit_entry_state_review(
                     and getattr(entry_state, "last_prompt_type", None)
                     in service.PROMPT_TYPE_OPTIONS
                     and getattr(entry_state, "last_outcome", None) == "correct_tested"
-                    and getattr(entry_state, "last_prompt_type", None)
-                    != service.PROMPT_TYPE_CONFIDENCE_CHECK
-                )
-            ):
+                        and getattr(entry_state, "last_prompt_type", None)
+                        != service.PROMPT_TYPE_CONFIDENCE_CHECK
+                    )
+                ):
                 raise ValueError("known override requires objective success at 180d")
             (
                 resolved_interval_days,
@@ -208,7 +208,7 @@ async def submit_entry_state_review(
             ) = await service._resolve_official_review_schedule(
                 user_id=user_id,
                 reviewed_at=reviewed_at,
-                interval_days=current_interval_days,
+                resolved_bucket=schedule_override or current_bucket,
                 resolved_outcome=getattr(entry_state, "last_outcome", None),
                 schedule_override=schedule_override,
             )
@@ -308,7 +308,7 @@ async def submit_entry_state_review(
     ) = await service._resolve_official_review_schedule(
         user_id=user_id,
         reviewed_at=reviewed_at,
-        interval_days=review_result.interval_days,
+        resolved_bucket=preview_bucket,
         resolved_outcome=resolved_outcome,
         schedule_override=schedule_override,
     )
@@ -321,7 +321,7 @@ async def submit_entry_state_review(
         prompt={"prompt_type": prompt_type},
         resolved_bucket=resolved_bucket,
         resolved_interval_days=resolved_interval_days,
-        resolved_next_review=resolved_min_due_at_utc or reviewed_at,
+        resolved_next_review=resolved_min_due_at_utc,
         reviewed_at=reviewed_at,
         due_review_date=resolved_due_review_date,
         min_due_at_utc=resolved_min_due_at_utc,

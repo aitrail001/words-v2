@@ -40,6 +40,7 @@ from app.services.review_prompt_builder import (
 from app.services.review_srs_v1 import (
     REVIEW_SRS_V1_BUCKETS,
     bucket_for_interval_days,
+    interval_days_for_bucket,
     bucket_to_interval_days,
     bucket_to_label,
     cadence_step_for_bucket,
@@ -58,8 +59,11 @@ from app.services.voice_assets import (
 )
 from app.services.review_schedule import (
     bucket_days as schedule_bucket_days,
+    due_now,
     due_review_date_for_bucket,
+    effective_review_date,
     min_due_at_for_bucket,
+    sticky_due,
 )
 
 logger = get_logger(__name__)
@@ -1427,8 +1431,6 @@ class ReviewService:
         state.interval_days = resolved_interval_days
         state.cadence_step = cadence_step_for_bucket(resolved_bucket)
         state.stability = max(0.15, float(resolved_interval_days or state.stability or 1))
-        if state.next_due_at is None:
-            state.next_due_at = due_at_for_bucket(resolved_bucket)
 
     async def _ensure_entry_review_state(
         self,
@@ -2149,48 +2151,45 @@ class ReviewService:
         return cls._build_schedule_options_for_value(cls._default_schedule_option_value(interval_days))
 
     @staticmethod
-    def _interval_days_for_schedule_value(schedule_value: str) -> int:
+    def _interval_days_for_schedule_value(schedule_value: str) -> int | None:
         resolved_days = schedule_bucket_days(schedule_value)
-        return 0 if resolved_days is None else int(resolved_days)
+        return None if resolved_days is None else int(resolved_days)
 
     @classmethod
     def _resolve_official_schedule_value(
         cls,
         *,
-        interval_days: int | None,
+        resolved_bucket: str,
         resolved_outcome: str | None,
         schedule_override: str | None,
     ) -> str:
         if (
             schedule_override
             and schedule_override in cls.SCHEDULE_OVERRIDE_VALUES
-            and schedule_override != "10m"
         ):
             return schedule_override
         if resolved_outcome in {"lookup", "wrong"}:
             return "1d"
-        return cls._default_schedule_option_value(
-            cls._resolve_interval_days_or_zero(interval_days)
-        )
+        return resolved_bucket
 
     async def _resolve_official_review_schedule(
         self,
         *,
         user_id: uuid.UUID,
         reviewed_at: datetime,
-        interval_days: int | None,
+        resolved_bucket: str,
         resolved_outcome: str | None,
         schedule_override: str | None,
-    ) -> tuple[int, Any, datetime | None, str]:
+    ) -> tuple[int | None, Any, datetime | None, str]:
         prefs = await self._get_user_review_preferences(user_id)
         user_timezone = getattr(prefs, "timezone", None) or "UTC"
         schedule_value = self._resolve_official_schedule_value(
-            interval_days=interval_days,
+            resolved_bucket=resolved_bucket,
             resolved_outcome=resolved_outcome,
             schedule_override=schedule_override,
         )
         return (
-            self._interval_days_for_schedule_value(schedule_value),
+            interval_days_for_bucket(resolved_bucket),
             due_review_date_for_bucket(
                 reviewed_at_utc=reviewed_at,
                 user_timezone=user_timezone,
@@ -2201,7 +2200,7 @@ class ReviewService:
                 user_timezone=user_timezone,
                 bucket=schedule_value,
             ),
-            schedule_value,
+            resolved_bucket,
         )
 
     @classmethod
@@ -2234,31 +2233,41 @@ class ReviewService:
         return bucket_for_interval_days(delta_days)
 
     @classmethod
+    def _resolve_schedule_value_from_review_day_delta(cls, day_delta: int) -> str:
+        return min(
+            [
+                item
+                for item in cls.SCHEDULE_OVERRIDE_DAYS.items()
+                if item[0] != "known"
+            ],
+            key=lambda item: (abs(item[1] - day_delta), item[1]),
+        )[0]
+
+    @classmethod
     def _build_current_schedule_payload(
         cls,
         state: EntryReviewState,
         *,
         now: datetime | None = None,
+        user_timezone: str | None = None,
     ) -> dict[str, Any]:
-        explicit_bucket = (getattr(state, "srs_bucket", None) or "").strip().lower()
-        if explicit_bucket in REVIEW_SRS_V1_BUCKETS:
-            current_value = explicit_bucket
-            current_source = "srs_bucket"
-        elif state.next_due_at is not None:
-            current_value = cls._resolve_schedule_value_from_due_at(due_at=state.next_due_at, now=now)
-            current_source = "scheduled_timestamp"
-        else:
-            current_value = cls._resolve_srs_bucket(state=state)
-            current_source = "srs_bucket"
-        due_at = state.next_due_at
+        due_at = cls._effective_due_at(state)
+        current_value = cls._resolve_schedule_value_for_state(
+            state,
+            now=now,
+            user_timezone=user_timezone,
+        )
         schedule_options = cls._build_schedule_options_for_value(current_value)
-        current_label = cls._schedule_option_labels().get(current_value, "Tomorrow")
+        current_label = cls._schedule_option_labels().get(
+            current_value,
+            "Later today" if current_value == "10m" else "Tomorrow",
+        )
         return {
             "queue_item_id": str(state.id),
             "next_review_at": due_at.isoformat() if due_at is not None else None,
             "current_schedule_value": current_value,
             "current_schedule_label": current_label,
-            "current_schedule_source": current_source,
+            "current_schedule_source": "scheduled_timestamp",
             "schedule_options": schedule_options,
         }
 
@@ -2271,9 +2280,205 @@ class ReviewService:
         return value.astimezone(timezone.utc)
 
     @classmethod
-    def classify_review_bucket(cls, due_at: datetime | None, now: datetime) -> str:
+    def _uses_official_review_day_schedule(
+        cls,
+        state: EntryReviewState,
+        *,
+        user_timezone: str | None = None,
+    ) -> bool:
+        return (
+            state.recheck_due_at is None
+            and getattr(state, "due_review_date", None) is not None
+            and getattr(state, "min_due_at_utc", None) is not None
+            and bool(user_timezone)
+        )
+
+    @staticmethod
+    def _state_has_official_review_day_fields(state: EntryReviewState) -> bool:
+        return (
+            state.recheck_due_at is None
+            and getattr(state, "due_review_date", None) is not None
+            and getattr(state, "min_due_at_utc", None) is not None
+        )
+
+    @classmethod
+    def _official_due_at(cls, state: EntryReviewState) -> datetime | None:
+        if not cls._state_has_official_review_day_fields(state):
+            return None
+        return cls._normalize_bucket_datetime(getattr(state, "min_due_at_utc", None))
+
+    @classmethod
+    def _effective_due_at(cls, state: EntryReviewState) -> datetime | None:
+        return (
+            cls._normalize_bucket_datetime(getattr(state, "recheck_due_at", None))
+            or cls._official_due_at(state)
+            or cls._normalize_bucket_datetime(getattr(state, "next_due_at", None))
+        )
+
+    @classmethod
+    def _has_state_become_due_before(
+        cls,
+        state: EntryReviewState,
+        *,
+        now: datetime,
+    ) -> bool:
+        official_due_at = cls._official_due_at(state)
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        return official_due_at is not None and official_due_at <= resolved_now
+
+    @classmethod
+    def _is_state_officially_due(
+        cls,
+        state: EntryReviewState,
+        *,
+        now: datetime,
+        user_timezone: str | None = None,
+    ) -> bool:
+        if not cls._uses_official_review_day_schedule(state, user_timezone=user_timezone):
+            return False
+
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        dynamically_due = due_now(
+            now_utc=resolved_now,
+            user_timezone=user_timezone or "UTC",
+            due_review_date=getattr(state, "due_review_date", None),
+            min_due_at_utc=getattr(state, "min_due_at_utc", None),
+        )
+        return sticky_due(
+            already_due=cls._has_state_become_due_before(state, now=resolved_now),
+            dynamically_due=dynamically_due,
+        )
+
+    @classmethod
+    def _is_state_due(
+        cls,
+        state: EntryReviewState,
+        *,
+        now: datetime,
+        user_timezone: str | None = None,
+    ) -> bool:
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        recheck_due_at = cls._normalize_bucket_datetime(getattr(state, "recheck_due_at", None))
+        if recheck_due_at is not None:
+            return recheck_due_at <= resolved_now
+        if cls._uses_official_review_day_schedule(state, user_timezone=user_timezone):
+            return cls._is_state_officially_due(
+                state,
+                now=resolved_now,
+                user_timezone=user_timezone,
+            )
+        due_at = cls._normalize_bucket_datetime(getattr(state, "next_due_at", None))
+        return due_at is None or due_at <= resolved_now
+
+    @classmethod
+    def _due_queue_filter(cls, now: datetime):
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        return or_(
+            and_(
+                EntryReviewState.recheck_due_at.is_not(None),
+                EntryReviewState.recheck_due_at <= resolved_now,
+            ),
+            and_(
+                EntryReviewState.recheck_due_at.is_(None),
+                EntryReviewState.due_review_date.is_not(None),
+                EntryReviewState.min_due_at_utc.is_not(None),
+                EntryReviewState.min_due_at_utc <= resolved_now,
+            ),
+            and_(
+                EntryReviewState.recheck_due_at.is_(None),
+                or_(
+                    EntryReviewState.due_review_date.is_(None),
+                    EntryReviewState.min_due_at_utc.is_(None),
+                ),
+                or_(
+                    EntryReviewState.next_due_at.is_(None),
+                    EntryReviewState.next_due_at <= resolved_now,
+                ),
+            ),
+        )
+
+    @classmethod
+    def _resolve_schedule_value_for_state(
+        cls,
+        state: EntryReviewState,
+        *,
+        now: datetime | None = None,
+        user_timezone: str | None = None,
+    ) -> str:
+        if cls._uses_official_review_day_schedule(state, user_timezone=user_timezone):
+            resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+            if cls._is_state_officially_due(
+                state,
+                now=resolved_now,
+                user_timezone=user_timezone,
+            ):
+                return cls._resolve_schedule_value_from_due_at(
+                    due_at=state.min_due_at_utc,
+                    now=resolved_now,
+                )
+            current_review_date = effective_review_date(
+                instant_utc=resolved_now,
+                user_timezone=user_timezone or "UTC",
+            )
+            day_delta = (state.due_review_date - current_review_date).days
+            if day_delta > 0:
+                return cls._resolve_schedule_value_from_review_day_delta(day_delta)
+            return cls._resolve_schedule_value_from_due_at(
+                due_at=state.min_due_at_utc,
+                now=resolved_now,
+            )
+        return cls._resolve_schedule_value_from_due_at(
+            due_at=state.recheck_due_at or state.next_due_at,
+            now=now,
+        )
+
+    @classmethod
+    def classify_review_bucket(
+        cls,
+        due_at: datetime | None,
+        now: datetime,
+        *,
+        due_review_date: Any | None = None,
+        min_due_at_utc: datetime | None = None,
+        user_timezone: str | None = None,
+    ) -> str:
         resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
         resolved_due_at = cls._normalize_bucket_datetime(due_at)
+        resolved_min_due_at = cls._normalize_bucket_datetime(min_due_at_utc)
+
+        if due_review_date is not None and resolved_min_due_at is not None and user_timezone:
+            officially_due = sticky_due(
+                already_due=resolved_min_due_at <= resolved_now,
+                dynamically_due=due_now(
+                    now_utc=resolved_now,
+                    user_timezone=user_timezone,
+                    due_review_date=due_review_date,
+                    min_due_at_utc=resolved_min_due_at,
+                ),
+            )
+            if officially_due:
+                if resolved_min_due_at <= resolved_now - timedelta(seconds=1):
+                    return "overdue"
+                return "due_now"
+
+            current_review_date = effective_review_date(
+                instant_utc=resolved_now,
+                user_timezone=user_timezone,
+            )
+            day_delta = (due_review_date - current_review_date).days
+            if day_delta > 0:
+                if day_delta == 1:
+                    return "tomorrow"
+                if day_delta <= 7:
+                    return "this_week"
+                if day_delta <= 31:
+                    return "this_month"
+                if day_delta <= 92:
+                    return "one_to_three_months"
+                if day_delta <= 183:
+                    return "three_to_six_months"
+                return "six_plus_months"
+            return "later_today"
 
         if resolved_due_at is None or resolved_due_at <= resolved_now - timedelta(seconds=1):
             return "overdue"
@@ -2295,7 +2500,28 @@ class ReviewService:
 
     @staticmethod
     def _resolve_grouped_queue_due_at(state: EntryReviewState) -> datetime | None:
-        return state.next_due_at
+        return ReviewService._effective_due_at(state)
+
+    @classmethod
+    def _classify_review_bucket_for_state(
+        cls,
+        state: EntryReviewState,
+        *,
+        now: datetime,
+        user_timezone: str | None = None,
+    ) -> str:
+        official_schedule_args: dict[str, Any] = {}
+        if cls._uses_official_review_day_schedule(state, user_timezone=user_timezone):
+            official_schedule_args = {
+                "due_review_date": getattr(state, "due_review_date", None),
+                "min_due_at_utc": getattr(state, "min_due_at_utc", None),
+                "user_timezone": user_timezone,
+            }
+        return cls.classify_review_bucket(
+            cls._resolve_grouped_queue_due_at(state),
+            now,
+            **official_schedule_args,
+        )
 
     @classmethod
     def _validate_review_queue_bucket(cls, bucket: str) -> str:
@@ -2415,6 +2641,12 @@ class ReviewService:
             "text": self._normalize_prompt_text(getattr(state, "entry_text", None)) or "Unavailable",
             "status": getattr(state, "learner_status", None) or "learning",
             "next_review_at": due_at.isoformat() if due_at is not None else None,
+            "due_review_date": getattr(state, "due_review_date", None).isoformat()
+            if getattr(state, "due_review_date", None) is not None
+            else None,
+            "min_due_at_utc": getattr(state, "min_due_at_utc", None).isoformat()
+            if getattr(state, "min_due_at_utc", None) is not None
+            else None,
             "last_reviewed_at": state.last_reviewed_at.isoformat()
             if state.last_reviewed_at is not None
             else None,
@@ -2505,6 +2737,7 @@ class ReviewService:
         *,
         states: list[EntryReviewState],
         now: datetime,
+        user_timezone: str | None = None,
         include_debug_fields: bool = False,
         serialize_row: Callable[[EntryReviewState, bool], dict[str, Any]],
     ) -> list[dict[str, Any]]:
@@ -2513,28 +2746,28 @@ class ReviewService:
             bucket = cls._resolve_srs_bucket(state=state)
             if bucket == "known":
                 continue
-            if cls._is_queue_state_due_now(state, now=now):
+            due_bucket = cls._classify_review_bucket_for_state(
+                state,
+                now=now,
+                user_timezone=user_timezone,
+            )
+            if due_bucket in {"overdue", "due_now"}:
                 due_in_days = 0
                 label = "Due now"
                 group_key = "due_now"
+            elif due_bucket == "later_today":
+                due_in_days = 0
+                label = "Later today"
+                group_key = "later_today"
+            elif due_bucket == "tomorrow":
+                due_in_days = 1
+                label = "Tomorrow"
+                group_key = "tomorrow"
             else:
                 due_at = cls._resolve_grouped_queue_due_at(state)
-                if due_at is None:
-                    due_in_days = 0
-                    label = "Due now"
-                    group_key = "due_now"
-                else:
-                    due_in_days = max((due_at.date() - now.date()).days, 0)
-                    if due_in_days <= 0:
-                        due_in_days = 0
-                        label = "Due now"
-                        group_key = "due_now"
-                    elif due_in_days == 1:
-                        label = "Tomorrow"
-                        group_key = "tomorrow"
-                    else:
-                        label = f"In {due_in_days} days"
-                        group_key = f"in_{due_in_days}_days"
+                due_in_days = max((due_at.date() - now.date()).days, 0) if due_at is not None else 0
+                label = f"In {due_in_days} days"
+                group_key = f"in_{due_in_days}_days"
 
             group = grouped.setdefault(
                 due_in_days,
@@ -2556,12 +2789,13 @@ class ReviewService:
         state: EntryReviewState,
         *,
         now: datetime,
+        user_timezone: str | None = None,
     ) -> bool:
-        if state.recheck_due_at is not None and state.recheck_due_at <= now:
-            return True
-        if state.next_due_at is None:
-            return False
-        return state.next_due_at <= now
+        return ReviewService._is_state_due(
+            state,
+            now=now,
+            user_timezone=user_timezone,
+        )
 
     @classmethod
     def _review_queue_sort_key(cls, item: dict[str, Any], sort: str) -> tuple[Any, ...]:
@@ -2611,11 +2845,16 @@ class ReviewService:
     ) -> dict[str, Any]:
         resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
         states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        user_timezone = None
+        if any(self._state_has_official_review_day_fields(state) for state in states):
+            prefs = await self._get_user_review_preferences(user_id)
+            user_timezone = getattr(prefs, "timezone", None) or "UTC"
         for state in states:
             self._normalize_active_review_state_schedule(state)
         groups = self._group_review_queue_rows_by_due(
             states=states,
             now=resolved_now,
+            user_timezone=user_timezone,
             include_debug_fields=include_debug_fields,
             serialize_row=lambda state, include_debug: self._serialize_grouped_queue_row(
                 state,
@@ -2637,6 +2876,10 @@ class ReviewService:
     ) -> dict[str, Any]:
         resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
         states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        user_timezone = None
+        if any(self._state_has_official_review_day_fields(state) for state in states):
+            prefs = await self._get_user_review_preferences(user_id)
+            user_timezone = getattr(prefs, "timezone", None) or "UTC"
         for state in states:
             self._normalize_active_review_state_schedule(state)
         groups = self._group_review_queue_rows(states=states, now=resolved_now)
@@ -2645,7 +2888,7 @@ class ReviewService:
             bucket = self._resolve_srs_bucket(state=state)
             if bucket == "known" or bucket not in has_due_now_by_bucket:
                 continue
-            if self._is_queue_state_due_now(state, now=resolved_now):
+            if self._is_queue_state_due_now(state, now=resolved_now, user_timezone=user_timezone):
                 has_due_now_by_bucket[bucket] = True
         return {
             "generated_at": resolved_now.isoformat(),
@@ -2761,7 +3004,11 @@ class ReviewService:
             )
             await self.db.commit()
         self._normalize_active_review_state_schedule(state)
-        return self._build_current_schedule_payload(state)
+        user_timezone = None
+        if self._state_has_official_review_day_fields(state):
+            prefs = await self._get_user_review_preferences(user_id)
+            user_timezone = getattr(prefs, "timezone", None) or "UTC"
+        return self._build_current_schedule_payload(state, user_timezone=user_timezone)
 
     async def update_queue_item_schedule(
         self,
@@ -2898,10 +3145,7 @@ class ReviewService:
         if item_id is not None:
             state_query = state_query.where(EntryReviewState.id == item_id)
         else:
-            state_query = state_query.where(
-                (EntryReviewState.recheck_due_at.is_not(None) & (EntryReviewState.recheck_due_at <= now))
-                | (EntryReviewState.next_due_at <= now)
-            )
+            state_query = state_query.where(self._due_queue_filter(now))
         state_result = await self.db.execute(
             state_query
             .order_by(
@@ -2912,7 +3156,23 @@ class ReviewService:
             .limit(fetch_limit)
         )
         due_items: list[dict[str, Any]] = []
-        review_states = self._apply_sibling_bury_rule(list(state_result.scalars().all()))[:limit]
+        review_states = self._apply_sibling_bury_rule(list(state_result.scalars().all()))
+        prefs = None
+        if item_id is None and review_states and any(
+            self._state_has_official_review_day_fields(state) for state in review_states
+        ):
+            prefs = await self._get_user_review_preferences(user_id)
+            user_timezone = getattr(prefs, "timezone", None) or "UTC"
+            review_states = [
+                state
+                for state in review_states
+                if self._is_state_due(
+                    state,
+                    now=now,
+                    user_timezone=user_timezone,
+                )
+            ]
+        review_states = review_states[:limit]
         if review_states:
             accent = await self._get_user_accent_preference(user_id)
             word_entry_ids = list(

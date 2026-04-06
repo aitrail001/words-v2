@@ -41,7 +41,15 @@ def mock_db():
 
 @pytest.fixture
 def review_service(mock_db):
-    return ReviewService(mock_db)
+    service = ReviewService(mock_db)
+    service._get_user_review_preferences = AsyncMock(
+        return_value=MagicMock(
+            timezone="UTC",
+            review_depth_preset="balanced",
+            enable_confidence_check=True,
+        )
+    )
+    return service
 
 
 def _load_timezone_safe_migration():
@@ -239,13 +247,13 @@ class TestEntryQueueSchedule:
             entry_id=entry_id,
         )
 
-        assert created_state.next_due_at is not None
+        assert created_state.next_due_at is None
         assert payload == {
             "queue_item_id": str(created_state.id),
-            "next_review_at": created_state.next_due_at.isoformat(),
+            "next_review_at": None,
             "current_schedule_value": "1d",
             "current_schedule_label": "Tomorrow",
-            "current_schedule_source": "srs_bucket",
+            "current_schedule_source": "scheduled_timestamp",
             "schedule_options": [
                 {"value": "1d", "label": "Tomorrow", "is_default": True},
                 {"value": "2d", "label": "In 2 days", "is_default": False},
@@ -495,18 +503,12 @@ class TestQueueDue:
         word_result.scalars.return_value.all.return_value = [word]
         meanings_result = MagicMock()
         meanings_result.scalars.return_value.all.return_value = meanings
-        total_result = MagicMock()
-        total_result.scalar_one.return_value = 1
-        due_result = MagicMock()
-        due_result.scalar_one.return_value = 1
         aggregate_result = MagicMock()
         aggregate_result.one.return_value = (0, 0)
         mock_db.execute.side_effect = [
             state_result,
             word_result,
             meanings_result,
-            total_result,
-            due_result,
             aggregate_result,
         ]
         review_service._get_user_review_preferences = AsyncMock(
@@ -526,7 +528,8 @@ class TestQueueDue:
         monkeypatch.setattr(review_module, "datetime", _frozen_datetime_class(now))
 
         due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
-        mock_db.execute.side_effect = [total_result, due_result, aggregate_result]
+        review_service._list_active_queue_states = AsyncMock(return_value=[state])
+        mock_db.execute.side_effect = [aggregate_result]
         stats = await review_service.get_queue_stats(user_id)
 
         assert len(due_items) == stats["due_items"] == 1
@@ -566,7 +569,7 @@ class TestGroupedReviewQueue:
             "generated_at": now.isoformat(),
             "total_count": 1,
             "groups": [
-                {"bucket": "overdue", "count": 1},
+                {"bucket": "3d", "count": 1, "has_due_now": True},
             ],
         }
 
@@ -831,7 +834,10 @@ class TestGroupedQueue:
                             "text": "alpha",
                             "status": "learning",
                             "next_review_at": overdue.next_due_at.isoformat(),
+                            "due_review_date": None,
+                            "min_due_at_utc": None,
                             "last_reviewed_at": overdue.last_reviewed_at.isoformat(),
+                            "bucket": "1d",
                         }
                     ],
                 },
@@ -846,7 +852,10 @@ class TestGroupedQueue:
                             "text": "break down",
                             "status": "learning",
                             "next_review_at": tomorrow.next_due_at.isoformat(),
+                            "due_review_date": None,
+                            "min_due_at_utc": None,
                             "last_reviewed_at": None,
+                            "bucket": "7d",
                         }
                     ],
                 },
@@ -954,6 +963,8 @@ class TestGroupedQueue:
                         "text": "alpha",
                         "status": "learning",
                         "next_review_at": learning_state.next_due_at.isoformat(),
+                        "due_review_date": None,
+                        "min_due_at_utc": None,
                         "last_reviewed_at": learning_state.last_reviewed_at.isoformat(),
                         "bucket": "1d",
                     }
@@ -1097,6 +1108,8 @@ class TestGroupedQueue:
                         "text": "alpha",
                         "status": "learning",
                         "next_review_at": valid_state.next_due_at.isoformat(),
+                        "due_review_date": None,
+                        "min_due_at_utc": None,
                         "last_reviewed_at": None,
                         "bucket": "1d",
                     }
@@ -1213,7 +1226,7 @@ class TestGroupedQueue:
         payload = await review_service.get_grouped_review_queue_summary(user_id=user_id, now=now)
 
         assert payload["groups"] == [
-            {"bucket": "1d", "count": 1, "has_due_now": False},
+            {"bucket": "1d", "count": 1, "has_due_now": True},
         ]
 
     @pytest.mark.asyncio
@@ -1262,9 +1275,9 @@ class TestGroupedQueue:
         assert payload["total_count"] == 2
         assert payload["groups"] == [
             {
-                "group_key": "tomorrow",
-                "label": "Tomorrow",
-                "due_in_days": 1,
+                "group_key": "due_now",
+                "label": "Due now",
+                "due_in_days": 0,
                 "count": 1,
                 "items": [
                     {
@@ -1273,7 +1286,9 @@ class TestGroupedQueue:
                         "entry_type": "word",
                         "text": "persistence",
                         "status": "learning",
-                        "next_review_at": due_now_state.next_due_at.isoformat(),
+                        "next_review_at": None,
+                        "due_review_date": None,
+                        "min_due_at_utc": None,
                         "last_reviewed_at": None,
                         "bucket": "1d",
                     }
@@ -1292,6 +1307,8 @@ class TestGroupedQueue:
                         "text": "jump the gun",
                         "status": "learning",
                         "next_review_at": "2026-04-07T10:00:00+00:00",
+                        "due_review_date": None,
+                        "min_due_at_utc": None,
                         "last_reviewed_at": None,
                         "bucket": "3d",
                     }
@@ -1440,8 +1457,8 @@ class TestGroupedQueue:
             user_timezone="America/Los_Angeles",
         )
 
-        assert payload["current_schedule_value"] == "10m"
-        assert payload["current_schedule_label"] == "Later today"
+        assert payload["current_schedule_value"] == "1d"
+        assert payload["current_schedule_label"] == "Tomorrow"
         assert payload["next_review_at"] == state.min_due_at_utc.isoformat()
 
     def test_effective_due_at_prefers_official_review_day_fields_over_legacy_next_due_at(self):
@@ -3244,7 +3261,7 @@ class TestQueueStats:
         stats = await review_service.get_queue_stats(user_id=user_id)
 
         assert stats["total_items"] == 2
-        assert stats["due_items"] == 0
+        assert stats["due_items"] == 1
         assert stats["review_count"] == 4
         assert stats["correct_count"] == 2
         assert stats["accuracy"] == 0.5
@@ -4287,6 +4304,12 @@ class TestEntryReviewStateConcurrency:
             status="learning",
         )
         mock_db.execute.side_effect = [locked_result, prefs_result, learner_status_result]
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=UserPreference(
+                user_id=user_id,
+                timezone="Australia/Melbourne",
+            )
+        )
         monkeypatch.setattr(
             review_submission_module,
             "datetime",

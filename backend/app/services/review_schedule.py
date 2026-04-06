@@ -7,7 +7,9 @@ REVIEW_RELEASE_HOUR_LOCAL = 4
 
 _BUCKET_DAY_OFFSETS: dict[str, int | None] = {
     "1d": 1,
+    "2d": 2,
     "3d": 3,
+    "5d": 5,
     "7d": 7,
     "14d": 14,
     "30d": 30,
@@ -16,6 +18,7 @@ _BUCKET_DAY_OFFSETS: dict[str, int | None] = {
     "3m": 90,
     "180d": 180,
     "6m": 180,
+    "known": None,
     "Known": None,
     "never_for_now": 365,
 }

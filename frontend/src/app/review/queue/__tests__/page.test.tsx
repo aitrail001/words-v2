@@ -99,7 +99,7 @@ describe("ReviewQueuePage", () => {
     expect(screen.getByText("practice")).toBeInTheDocument();
     expect(screen.getByText("jump the gun")).toBeInTheDocument();
     expect(screen.getAllByText(/srs stage/i)[0]).toBeInTheDocument();
-    expect(screen.getByText(/due now/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/due now/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: /^start review$/i })).toHaveAttribute(
       "href",
       "/review",
@@ -154,7 +154,11 @@ describe("ReviewQueuePage", () => {
       />,
     );
 
-    expect(screen.getByText(/next review tomorrow/i)).toBeInTheDocument();
+    expect(
+      screen.getAllByText((_, node) =>
+        Boolean(node?.textContent?.includes("Tomorrow") && node.textContent.includes("4:00 AM")),
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("uses an explicit timezone when formatting cutoff-sensitive due labels", () => {
