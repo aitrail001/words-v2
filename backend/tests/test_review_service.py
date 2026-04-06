@@ -1,13 +1,18 @@
 import uuid
+from importlib import util
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
 import app.services.review as review_module
 import app.services.review_submission as review_submission_module
 from app.services.review import ReviewService
+from app.core.database import Base
 from app.models.entry_review import EntryReviewEvent, EntryReviewState
 from app.models.learner_entry_status import LearnerEntryStatus
 from app.models.word import Word
@@ -35,6 +40,20 @@ def mock_db():
 @pytest.fixture
 def review_service(mock_db):
     return ReviewService(mock_db)
+
+
+def _load_timezone_safe_migration():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "051_add_timezone_safe_review_schedule.py"
+    )
+    spec = util.spec_from_file_location("migration_051_add_timezone_safe_review_schedule", migration_path)
+    assert spec is not None and spec.loader is not None
+    module = util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class TestQueueAdd:
@@ -106,6 +125,54 @@ class TestQueueAdd:
 
 
 class TestEntryQueueSchedule:
+    def test_entry_review_state_persists_timezone_safe_schedule_fields_through_orm(self):
+        engine = create_engine("sqlite:///:memory:", future=True)
+        try:
+            Base.metadata.create_all(engine, tables=[EntryReviewState.__table__])
+
+            due_review_date = date(2026, 4, 11)
+            min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+            state = EntryReviewState(
+                id=uuid.uuid4(),
+                user_id=uuid.uuid4(),
+                entry_type="word",
+                entry_id=uuid.uuid4(),
+                stability=0.3,
+                difficulty=0.5,
+                due_review_date=due_review_date,
+                min_due_at_utc=min_due_at_utc,
+            )
+            state.created_at = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+            state.updated_at = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+
+            with Session(engine) as session:
+                session.add(state)
+                session.commit()
+                session.expire_all()
+
+                persisted = session.execute(
+                    select(EntryReviewState).where(EntryReviewState.id == state.id)
+                ).scalar_one()
+
+                assert persisted.due_review_date == due_review_date
+                assert persisted.min_due_at_utc is not None
+                assert persisted.min_due_at_utc.replace(tzinfo=timezone.utc) == min_due_at_utc
+        finally:
+            engine.dispose()
+
+    def test_timezone_safe_migration_derives_backfill_from_next_due_at(self):
+        migration = _load_timezone_safe_migration()
+        next_due_at = datetime(2026, 4, 9, 18, 0, tzinfo=timezone.utc)
+
+        assert migration._effective_review_date(
+            instant_utc=next_due_at,
+            user_timezone="Australia/Melbourne",
+        ) == date(2026, 4, 10)
+        assert migration._effective_review_date(
+            instant_utc=next_due_at,
+            user_timezone="UTC",
+        ) == date(2026, 4, 9)
+
     def test_entry_review_state_accepts_timezone_safe_schedule_fields(self):
         due_review_date = date(2026, 4, 11)
         min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)

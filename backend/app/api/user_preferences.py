@@ -39,7 +39,7 @@ class UserPreferencesUpdateRequest(BaseModel):
     knowledge_view_preference: str
     show_translations_by_default: bool
     review_depth_preset: str
-    timezone: str
+    timezone: str | None = None
     enable_confidence_check: bool
     enable_word_spelling: bool
     enable_audio_spelling: bool
@@ -75,7 +75,9 @@ class UserPreferencesUpdateRequest(BaseModel):
 
     @field_validator("timezone")
     @classmethod
-    def validate_timezone(cls, value: str) -> str:
+    def validate_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         try:
             ZoneInfo(value)
         except ZoneInfoNotFoundError as exc:
@@ -128,6 +130,7 @@ async def put_user_preferences(
 ):
     result = await db.execute(select(UserPreference).where(UserPreference.user_id == current_user.id))
     row = result.scalar_one_or_none()
+    resolved_timezone = payload.timezone or (row.timezone if row is not None else "UTC")
     if row is None:
         row = UserPreference(
             user_id=current_user.id,
@@ -136,7 +139,7 @@ async def put_user_preferences(
             knowledge_view_preference=payload.knowledge_view_preference,
             show_translations_by_default=payload.show_translations_by_default,
             review_depth_preset=payload.review_depth_preset,
-            timezone=payload.timezone,
+            timezone=resolved_timezone,
             enable_confidence_check=payload.enable_confidence_check,
             enable_word_spelling=payload.enable_word_spelling,
             enable_audio_spelling=payload.enable_audio_spelling,
@@ -149,7 +152,7 @@ async def put_user_preferences(
         row.knowledge_view_preference = payload.knowledge_view_preference
         row.show_translations_by_default = payload.show_translations_by_default
         row.review_depth_preset = payload.review_depth_preset
-        row.timezone = payload.timezone
+        row.timezone = resolved_timezone
         row.enable_confidence_check = payload.enable_confidence_check
         row.enable_word_spelling = payload.enable_word_spelling
         row.enable_audio_spelling = payload.enable_audio_spelling

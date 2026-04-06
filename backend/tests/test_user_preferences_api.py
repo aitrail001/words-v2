@@ -198,6 +198,52 @@ class TestUserPreferencesApi:
         mock_db.add.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_put_legacy_payload_without_timezone_preserves_existing_timezone(
+        self, client, mock_db, auth_token
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        existing = UserPreference(
+            user_id=user_id,
+            accent_preference="us",
+            translation_locale="zh-Hans",
+            knowledge_view_preference="cards",
+            show_translations_by_default=True,
+            review_depth_preset="balanced",
+            enable_confidence_check=True,
+            enable_word_spelling=True,
+            enable_audio_spelling=False,
+            show_pictures_in_questions=False,
+            timezone="Europe/Paris",
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(existing),
+        ]
+
+        response = await client.put(
+            "/api/user-preferences",
+            json={
+                "accent_preference": "uk",
+                "translation_locale": "ja",
+                "knowledge_view_preference": "tags",
+                "show_translations_by_default": False,
+                "review_depth_preset": "gentle",
+                "enable_confidence_check": False,
+                "enable_word_spelling": False,
+                "enable_audio_spelling": True,
+                "show_pictures_in_questions": True,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["timezone"] == "Europe/Paris"
+        assert existing.timezone == "Europe/Paris"
+
+    @pytest.mark.asyncio
     async def test_put_rejects_unknown_timezone(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)

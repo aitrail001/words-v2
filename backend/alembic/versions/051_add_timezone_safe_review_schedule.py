@@ -5,12 +5,11 @@ Revises: 050_drop_legacy_review_tables
 Create Date: 2026-04-06 11:15:00.000000
 """
 
-from datetime import timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from alembic import op
 import sqlalchemy as sa
-
-from app.services.review_schedule import effective_review_date
 
 
 revision = "051_add_timezone_safe_review_schedule"
@@ -20,7 +19,28 @@ depends_on = None
 
 
 def _resolved_timezone(raw_timezone: str | None) -> str:
+    # Legacy rows can be missing timezone data during rollout; default to UTC for backfill.
     return raw_timezone or "UTC"
+
+
+def _normalize_utc_instant(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _user_zone(user_timezone: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(user_timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unknown timezone: {user_timezone}") from exc
+
+
+def _effective_review_date(*, instant_utc: datetime, user_timezone: str, release_hour_local: int = 4) -> date:
+    local_instant = _normalize_utc_instant(instant_utc).astimezone(_user_zone(user_timezone))
+    if local_instant.hour < release_hour_local:
+        return local_instant.date() - timedelta(days=1)
+    return local_instant.date()
 
 
 def upgrade() -> None:
@@ -62,12 +82,12 @@ def upgrade() -> None:
 
         user_timezone = _resolved_timezone(row["timezone"])
         try:
-            due_review_date = effective_review_date(
+            due_review_date = _effective_review_date(
                 instant_utc=min_due_at_utc,
                 user_timezone=user_timezone,
             )
         except ValueError:
-            due_review_date = effective_review_date(
+            due_review_date = _effective_review_date(
                 instant_utc=min_due_at_utc,
                 user_timezone="UTC",
             )
