@@ -16,6 +16,7 @@ export type UserPreferences = {
   knowledge_view_preference: "cards" | "tags" | "list";
   show_translations_by_default: boolean;
   review_depth_preset: "gentle" | "balanced" | "deep";
+  timezone: string;
   enable_confidence_check: boolean;
   enable_word_spelling: boolean;
   enable_audio_spelling: boolean;
@@ -28,6 +29,7 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   knowledge_view_preference: "cards",
   show_translations_by_default: true,
   review_depth_preset: "balanced",
+  timezone: "UTC",
   enable_confidence_check: true,
   enable_word_spelling: true,
   enable_audio_spelling: false,
@@ -39,3 +41,22 @@ export const getUserPreferences = (): Promise<UserPreferences> =>
 
 export const updateUserPreferences = (payload: UserPreferences): Promise<UserPreferences> =>
   apiClient.put<UserPreferences>("/user-preferences", payload);
+
+export const detectDeviceTimezone = (): string | null => {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return timezone || null;
+};
+
+export const syncDetectedDeviceTimezone = async (
+  preferences: UserPreferences,
+  detectedTimezone: string | null = detectDeviceTimezone(),
+): Promise<UserPreferences> => {
+  if (!detectedTimezone || detectedTimezone === preferences.timezone) {
+    return preferences;
+  }
+
+  return updateUserPreferences({
+    ...preferences,
+    timezone: detectedTimezone,
+  });
+};

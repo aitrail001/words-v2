@@ -104,6 +104,40 @@ class TestUserPreferencesApi:
         assert data["timezone"] == "UTC"
 
     @pytest.mark.asyncio
+    async def test_get_returns_existing_timezone_from_preferences(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        existing = UserPreference(
+            user_id=user_id,
+            accent_preference="au",
+            translation_locale="es",
+            knowledge_view_preference="list",
+            show_translations_by_default=False,
+            review_depth_preset="deep",
+            enable_confidence_check=False,
+            enable_word_spelling=False,
+            enable_audio_spelling=True,
+            show_pictures_in_questions=True,
+            timezone="Australia/Melbourne",
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(existing),
+        ]
+
+        response = await client.get(
+            "/api/user-preferences",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["timezone"] == "Australia/Melbourne"
+        assert data["review_depth_preset"] == "deep"
+        assert data["enable_audio_spelling"] is True
+
+    @pytest.mark.asyncio
     async def test_put_upserts_preferences_including_timezone(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)
@@ -276,3 +310,4 @@ class TestUserPreferencesApi:
         )
 
         assert response.status_code == 422
+        assert response.json()["detail"][0]["msg"] == "Value error, Unsupported timezone"
