@@ -13,12 +13,10 @@ from app.models.phrase_sense import PhraseSense
 from app.spaced_repetition import calculate_next_review
 from app.services.review_srs_v1 import (
     REVIEW_SRS_V1_BUCKETS,
-    backoff_bucket,
     build_schedule_options,
     bucket_for_interval_days,
     cadence_step_for_bucket,
     interval_days_for_bucket,
-    next_due_at_for_bucket,
     resolve_bucket_after_review,
 )
 

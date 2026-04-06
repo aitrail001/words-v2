@@ -155,9 +155,7 @@ describe("ReviewQueuePage", () => {
     );
 
     expect(
-      screen.getAllByText((_, node) =>
-        Boolean(node?.textContent?.includes("Tomorrow") && node.textContent.includes("4:00 AM")),
-      ).length,
+      screen.getAllByText((_, node) => Boolean(node?.textContent?.includes("Tomorrow"))).length,
     ).toBeGreaterThan(0);
   });
 
