@@ -142,7 +142,6 @@ function formatLegacyApproximateScheduledReviewTime(value: string | null | undef
 
   return `In ${Math.max(2, Math.round(dayDelta / 30))} months`;
 }
-
 function formatApproximateScheduledReviewTime(reviewQueue: DetailReviewQueue | null | undefined): string | null {
   if (!reviewQueue) {
     return null;
@@ -157,7 +156,7 @@ function formatApproximateScheduledReviewTime(reviewQueue: DetailReviewQueue | n
     return dueLabel;
   }
 
-  return formatLegacyApproximateScheduledReviewTime(resolveScheduledReviewInstant(reviewQueue));
+  return resolveScheduledReviewInstant(reviewQueue) ? reviewQueue.current_schedule_label : null;
 }
 
 function getStatusActionErrorMessage(error: unknown): string {

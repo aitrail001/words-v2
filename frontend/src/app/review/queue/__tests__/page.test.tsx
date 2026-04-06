@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import ReviewQueuePage from "@/app/review/queue/page";
 import { getGroupedReviewQueue } from "@/lib/knowledge-map-client";
 import { ReviewQueueItemCard } from "@/components/review-queue/review-queue-shared";
+import { formatReviewQueueDueLabel } from "@/components/review-queue/review-queue-utils";
 
 jest.mock("@/lib/knowledge-map-client");
 
@@ -156,5 +157,17 @@ describe("ReviewQueuePage", () => {
     expect(
       screen.getByText((content) => /next review tomorrow/i.test(content) && /4:00 am/i.test(content)),
     ).toBeInTheDocument();
+  });
+
+  it("uses an explicit timezone when formatting cutoff-sensitive due labels", () => {
+    const item = {
+      next_review_at: null,
+      due_review_date: "2026-04-10",
+      min_due_at_utc: "2026-04-10T12:00:00Z",
+    };
+    const now = new Date("2026-04-10T10:30:00Z");
+
+    expect(formatReviewQueueDueLabel(item, now, { timeZone: "America/Los_Angeles" })).toBe("Tomorrow");
+    expect(formatReviewQueueDueLabel(item, now, { timeZone: "UTC" })).toBe("Later today");
   });
 });

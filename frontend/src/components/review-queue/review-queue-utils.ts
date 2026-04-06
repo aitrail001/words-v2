@@ -180,6 +180,37 @@ function parseReviewInstant(value: string | null | undefined): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function formatDateKey(year: number, month: number, day: number): string {
+  return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+}
+
+function parseDateKey(value: string): { year: number; month: number; day: number } {
+  const [year, month, day] = value.split("-").map(Number);
+  return { year, month, day };
+}
+
+function shiftDateKey(value: string, deltaDays: number): string {
+  const { year, month, day } = parseDateKey(value);
+  const shifted = new Date(Date.UTC(year, month - 1, day + deltaDays));
+  return formatDateKey(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth() + 1,
+    shifted.getUTCDate(),
+  );
+}
+
+function dateKeyToEpochDay(value: string): number {
+  const { year, month, day } = parseDateKey(value);
+  return Date.UTC(year, month - 1, day) / DAY_IN_MS;
+}
+
+function resolveReviewTimeZone(explicitTimeZone?: string): string | null {
+  if (explicitTimeZone) {
+    return explicitTimeZone;
+  }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+}
+
 function effectiveLocalReviewDay(value: Date): Date {
   const effectiveDay = startOfLocalDay(value);
   if (value.getHours() < REVIEW_DAY_RELEASE_HOUR_LOCAL) {
@@ -188,20 +219,43 @@ function effectiveLocalReviewDay(value: Date): Date {
   return effectiveDay;
 }
 
+function effectiveReviewDateKey(value: Date, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = formatter.formatToParts(value);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const dateKey = formatDateKey(year, month, day);
+  return hour < REVIEW_DAY_RELEASE_HOUR_LOCAL ? shiftDateKey(dateKey, -1) : dateKey;
+}
+
 export function formatReviewQueueDueLabel(
   item: Pick<ReviewQueueItem, "due_review_date" | "min_due_at_utc" | "next_review_at">,
   now: Date = new Date(),
+  options?: {
+    timeZone?: string;
+  },
 ): string | null {
   const dueReviewDate = parseReviewDate(item.due_review_date);
-  if (!dueReviewDate) {
+  if (!dueReviewDate || !item.due_review_date) {
     return null;
   }
 
   const exactDueAt = parseReviewInstant(item.min_due_at_utc ?? item.next_review_at);
-  const effectiveToday = effectiveLocalReviewDay(now);
-  const dayDelta = Math.round(
-    (startOfLocalDay(dueReviewDate).getTime() - effectiveToday.getTime()) / DAY_IN_MS,
-  );
+  const resolvedTimeZone = resolveReviewTimeZone(options?.timeZone);
+  const dayDelta = resolvedTimeZone
+    ? dateKeyToEpochDay(item.due_review_date) - dateKeyToEpochDay(effectiveReviewDateKey(now, resolvedTimeZone))
+    : Math.round(
+        (startOfLocalDay(dueReviewDate).getTime() - effectiveLocalReviewDay(now).getTime()) / DAY_IN_MS,
+      );
 
   if (dayDelta < 0) {
     return "Overdue";
