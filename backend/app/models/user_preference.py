@@ -26,6 +26,9 @@ class UserPreference(Base):
         server_default=text("true"),
     )
     review_depth_preset: Mapped[str] = mapped_column(String(16), nullable=False, insert_default="balanced")
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, insert_default="UTC", server_default=text("'UTC'")
+    )
     enable_confidence_check: Mapped[bool] = mapped_column(
         Boolean, nullable=False, insert_default=True, server_default=text("true")
     )
@@ -62,6 +65,7 @@ class UserPreference(Base):
         kwargs.setdefault("knowledge_view_preference", "cards")
         kwargs.setdefault("show_translations_by_default", True)
         kwargs.setdefault("review_depth_preset", "balanced")
+        kwargs.setdefault("timezone", "UTC")
         kwargs.setdefault("enable_confidence_check", True)
         kwargs.setdefault("enable_word_spelling", True)
         kwargs.setdefault("enable_audio_spelling", False)

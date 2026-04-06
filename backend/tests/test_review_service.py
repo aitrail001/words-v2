@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -106,6 +106,24 @@ class TestQueueAdd:
 
 
 class TestEntryQueueSchedule:
+    def test_entry_review_state_accepts_timezone_safe_schedule_fields(self):
+        due_review_date = date(2026, 4, 11)
+        min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=0.3,
+            difficulty=0.5,
+            due_review_date=due_review_date,
+            min_due_at_utc=min_due_at_utc,
+        )
+
+        assert state.due_review_date == due_review_date
+        assert state.min_due_at_utc == min_due_at_utc
+
     @pytest.mark.asyncio
     async def test_get_entry_queue_schedule_creates_state_for_learning_entry_without_schedule(
         self, review_service, mock_db

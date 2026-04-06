@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
@@ -24,6 +26,7 @@ class UserPreferencesResponse(BaseModel):
     knowledge_view_preference: str
     show_translations_by_default: bool
     review_depth_preset: str
+    timezone: str
     enable_confidence_check: bool
     enable_word_spelling: bool
     enable_audio_spelling: bool
@@ -36,6 +39,7 @@ class UserPreferencesUpdateRequest(BaseModel):
     knowledge_view_preference: str
     show_translations_by_default: bool
     review_depth_preset: str
+    timezone: str
     enable_confidence_check: bool
     enable_word_spelling: bool
     enable_audio_spelling: bool
@@ -69,6 +73,15 @@ class UserPreferencesUpdateRequest(BaseModel):
             raise ValueError("Unsupported review depth preset")
         return value
 
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("Unsupported timezone") from exc
+        return value
+
 
 def _response(row: UserPreference | None) -> UserPreferencesResponse:
     if row is None:
@@ -78,6 +91,7 @@ def _response(row: UserPreference | None) -> UserPreferencesResponse:
             knowledge_view_preference=DEFAULT_VIEW,
             show_translations_by_default=DEFAULT_SHOW_TRANSLATIONS,
             review_depth_preset="balanced",
+            timezone="UTC",
             enable_confidence_check=True,
             enable_word_spelling=True,
             enable_audio_spelling=False,
@@ -89,6 +103,7 @@ def _response(row: UserPreference | None) -> UserPreferencesResponse:
         knowledge_view_preference=row.knowledge_view_preference,
         show_translations_by_default=row.show_translations_by_default,
         review_depth_preset=row.review_depth_preset,
+        timezone=row.timezone,
         enable_confidence_check=row.enable_confidence_check,
         enable_word_spelling=row.enable_word_spelling,
         enable_audio_spelling=row.enable_audio_spelling,
@@ -121,6 +136,7 @@ async def put_user_preferences(
             knowledge_view_preference=payload.knowledge_view_preference,
             show_translations_by_default=payload.show_translations_by_default,
             review_depth_preset=payload.review_depth_preset,
+            timezone=payload.timezone,
             enable_confidence_check=payload.enable_confidence_check,
             enable_word_spelling=payload.enable_word_spelling,
             enable_audio_spelling=payload.enable_audio_spelling,
@@ -133,6 +149,7 @@ async def put_user_preferences(
         row.knowledge_view_preference = payload.knowledge_view_preference
         row.show_translations_by_default = payload.show_translations_by_default
         row.review_depth_preset = payload.review_depth_preset
+        row.timezone = payload.timezone
         row.enable_confidence_check = payload.enable_confidence_check
         row.enable_word_spelling = payload.enable_word_spelling
         row.enable_audio_spelling = payload.enable_audio_spelling
