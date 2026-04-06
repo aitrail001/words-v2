@@ -413,6 +413,124 @@ class TestQueueDue:
 
         assert due_items == []
 
+    @pytest.mark.asyncio
+    async def test_get_due_queue_items_includes_card_at_min_due_boundary_after_westward_timezone_change(
+        self, review_service, mock_db, monkeypatch
+    ):
+        now = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.5,
+        )
+        state.next_due_at = now
+        state.min_due_at_utc = now
+        state.due_review_date = date(2026, 4, 11)
+        word = Word(id=word_id, word="candidate", language="en")
+        meanings = [Meaning(id=meaning_id, word_id=word_id, definition="A person under consideration.")]
+
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = [state]
+        word_result = MagicMock()
+        word_result.scalars.return_value.all.return_value = [word]
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = meanings
+        mock_db.execute.side_effect = [state_result, word_result, meanings_result]
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_confidence_check=True,
+                timezone="America/Los_Angeles",
+            )
+        )
+        review_service._get_user_accent_preference = AsyncMock(return_value="us")
+        review_service._fetch_first_meaning_sentence_map = AsyncMock(return_value={meaning_id: None})
+        review_service._fetch_history_count_by_word_id = AsyncMock(return_value={word_id: 0})
+        review_service._build_card_prompt = AsyncMock(return_value={"prompt_type": "definition_to_entry"})
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "candidate"}
+        )
+        monkeypatch.setattr(review_module, "datetime", _frozen_datetime_class(now))
+
+        due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
+
+        assert len(due_items) == 1
+        assert due_items[0]["id"] == state.id
+
+    @pytest.mark.asyncio
+    async def test_get_queue_stats_matches_due_queue_at_min_due_boundary_after_westward_timezone_change(
+        self, review_service, mock_db, monkeypatch
+    ):
+        now = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        meaning_id = uuid.uuid4()
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            target_type="meaning",
+            target_id=meaning_id,
+            stability=3,
+            difficulty=0.5,
+        )
+        state.next_due_at = now
+        state.min_due_at_utc = now
+        state.due_review_date = date(2026, 4, 11)
+        word = Word(id=word_id, word="candidate", language="en")
+        meanings = [Meaning(id=meaning_id, word_id=word_id, definition="A person under consideration.")]
+
+        state_result = MagicMock()
+        state_result.scalars.return_value.all.return_value = [state]
+        word_result = MagicMock()
+        word_result.scalars.return_value.all.return_value = [word]
+        meanings_result = MagicMock()
+        meanings_result.scalars.return_value.all.return_value = meanings
+        total_result = MagicMock()
+        total_result.scalar_one.return_value = 1
+        due_result = MagicMock()
+        due_result.scalar_one.return_value = 1
+        aggregate_result = MagicMock()
+        aggregate_result.one.return_value = (0, 0)
+        mock_db.execute.side_effect = [
+            state_result,
+            word_result,
+            meanings_result,
+            total_result,
+            due_result,
+            aggregate_result,
+        ]
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                review_depth_preset="balanced",
+                enable_confidence_check=True,
+                timezone="America/Los_Angeles",
+            )
+        )
+        review_service._get_user_accent_preference = AsyncMock(return_value="us")
+        review_service._fetch_first_meaning_sentence_map = AsyncMock(return_value={meaning_id: None})
+        review_service._fetch_history_count_by_word_id = AsyncMock(return_value={word_id: 0})
+        review_service._build_card_prompt = AsyncMock(return_value={"prompt_type": "definition_to_entry"})
+        review_service._build_word_detail_payload = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "candidate"}
+        )
+        monkeypatch.setattr(review_module, "datetime", _frozen_datetime_class(now))
+
+        due_items = await review_service.get_due_queue_items(user_id=user_id, limit=10)
+        mock_db.execute.side_effect = [total_result, due_result, aggregate_result]
+        stats = await review_service.get_queue_stats(user_id)
+
+        assert len(due_items) == stats["due_items"] == 1
+
 
 class TestGroupedReviewQueue:
     @pytest.mark.asyncio
@@ -1300,6 +1418,31 @@ class TestGroupedQueue:
         assert payload["current_schedule_value"] == "1d"
         assert payload["current_schedule_label"] == "Tomorrow"
         assert payload["next_review_at"] == state.next_due_at.isoformat()
+
+    def test_build_current_schedule_payload_uses_sticky_due_for_westward_timezone_change(self):
+        now = datetime(2026, 4, 10, 20, 0, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        state.due_review_date = date(2026, 4, 11)
+        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        state.next_due_at = state.min_due_at_utc
+        state.recheck_due_at = None
+
+        payload = ReviewService._build_current_schedule_payload(
+            state,
+            now=now,
+            user_timezone="America/Los_Angeles",
+        )
+
+        assert payload["current_schedule_value"] == "10m"
+        assert payload["current_schedule_label"] == "Later today"
+        assert payload["next_review_at"] == state.min_due_at_utc.isoformat()
 
     def test_long_horizon_success_sequence_reaches_multi_month_bucket(self):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
