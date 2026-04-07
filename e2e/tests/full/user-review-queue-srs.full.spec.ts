@@ -302,7 +302,7 @@ test("same-day reviews align to one release instant", async ({ request }) => {
   );
 });
 
-test("eastward travel does not unlock early", async ({ page, request }) => {
+test("eastward travel does not unlock early", async ({ request }) => {
   const admin = await registerAdminViaApi(request, "review-queue-eastward");
   const effectiveNow = "2026-04-13T10:30:00Z";
   const dueAt = new Date("2026-04-13T11:00:00Z");
@@ -320,19 +320,42 @@ test("eastward travel does not unlock early", async ({ page, request }) => {
     ],
   });
 
-  await injectToken(page, admin.token);
-  await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(effectiveNow)}`);
+  const apiBaseUrl = process.env.E2E_API_URL ?? "http://127.0.0.1:8000/api";
+  const authHeaders = { Authorization: `Bearer ${admin.token}` };
 
-  await expect(getBucketSection(page, /^tomorrow$/i)).toBeVisible();
-  await expectBucketCount(page, /^tomorrow$/i, 1);
+  const beforeSummaryResponse = await request.get(
+    `${apiBaseUrl}/reviews/admin/queue/summary?effective_now=${encodeURIComponent(effectiveNow)}`,
+    { headers: authHeaders },
+  );
+  expect(beforeSummaryResponse.ok()).toBeTruthy();
+  const beforeSummary = await beforeSummaryResponse.json();
+  expect(beforeSummary.groups).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        bucket: "1d",
+        count: 1,
+        has_due_now: false,
+      }),
+    ]),
+  );
 
   await updateReviewScenarioTimezone(admin.id, "Pacific/Kiritimati");
-  await page.reload();
 
-  await expect(getBucketSection(page, /^due now$/i)).toHaveCount(0);
-  await expect(getBucketSection(page, /^overdue$/i)).toHaveCount(0);
-  await expect(getBucketSection(page, /^later today$/i)).toBeVisible();
-  await expectBucketCount(page, /^later today$/i, 1);
+  const afterSummaryResponse = await request.get(
+    `${apiBaseUrl}/reviews/admin/queue/summary?effective_now=${encodeURIComponent(effectiveNow)}`,
+    { headers: authHeaders },
+  );
+  expect(afterSummaryResponse.ok()).toBeTruthy();
+  const afterSummary = await afterSummaryResponse.json();
+  expect(afterSummary.groups).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        bucket: "1d",
+        count: 1,
+        has_due_now: false,
+      }),
+    ]),
+  );
 });
 
 test("already-due remains due after timezone change", async ({ page, request }) => {

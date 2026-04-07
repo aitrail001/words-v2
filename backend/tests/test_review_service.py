@@ -4679,8 +4679,16 @@ class TestEntryReviewStateConcurrency:
         assert updated.next_due_at == updated.min_due_at_utc
         assert updated.due_review_date is not None
         assert updated.due_review_date in {
-            before.date() + timedelta(days=1),
-            after.date() + timedelta(days=1),
+            due_review_date_for_bucket(
+                reviewed_at_utc=before,
+                user_timezone="UTC",
+                bucket="1d",
+            ),
+            due_review_date_for_bucket(
+                reviewed_at_utc=after,
+                user_timezone="UTC",
+                bucket="1d",
+            ),
         }
         assert updated.recheck_due_at is not None
         assert updated.schedule_options == []
