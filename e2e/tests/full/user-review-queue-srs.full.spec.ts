@@ -26,6 +26,12 @@ const openBucket = async (page: Page, bucketLabel: string) => {
   await page.getByRole("link", { name: new RegExp(`Open ${bucketLabel} bucket`, "i") }).click();
 };
 
+const startReviewFromQueue = async (page: Page, text: string) => {
+  const startLink = page.getByRole("link", { name: new RegExp(`Start review for ${text}`, "i") });
+  await expect(startLink).toHaveAttribute("href", /\/review\?queue_item_id=/);
+  await Promise.all([page.waitForURL(/\/review\?queue_item_id=/), startLink.click()]);
+};
+
 const finishGuidedLearningPass = async (page: Page) => {
   for (let step = 0; step < 10; step += 1) {
     const nextMeaning = page.getByRole("button", { name: /next meaning/i });
@@ -62,9 +68,7 @@ test("learner review queue groups scheduled items, moves completed work forward,
 
   await openBucket(page, "1d");
   await expect(page.getByText(fixture.dueNowText, { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: new RegExp(`Start review for ${fixture.dueNowText}`, "i") }).click();
-
-  await expect(page).toHaveURL(/\/review\?queue_item_id=/);
+  await startReviewFromQueue(page, fixture.dueNowText);
   await expect(page.getByTestId("review-active-state")).toBeVisible();
   await expect(page.getByText(new RegExp(fixture.dueNowText, "i")).first()).toBeVisible();
   await page.getByRole("button", { name: new RegExp(fixture.dueNowDefinition, "i") }).click();
@@ -136,7 +140,7 @@ test("failed review leaves the queue but no longer renders as due-now work", asy
 
   await openBucket(page, "1d");
   await expect(page.getByText(fixture.failedText, { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: new RegExp(`Start review for ${fixture.failedText}`, "i") }).click();
+  await startReviewFromQueue(page, fixture.failedText);
 
   await expect(page.getByTestId("review-active-state")).toBeVisible();
   await page.getByRole("button", { name: /show meaning/i }).click();
@@ -358,7 +362,7 @@ test("eastward travel does not unlock early", async ({ request }) => {
   );
 });
 
-test("already-due remains due after timezone change", async ({ page, request }) => {
+test("already-due remains due after timezone change", async ({ request }) => {
   const admin = await registerAdminViaApi(request, "review-queue-sticky-due");
   const effectiveNow = "2026-04-12T18:00:00Z";
   const dueAt = new Date(effectiveNow);
@@ -376,15 +380,40 @@ test("already-due remains due after timezone change", async ({ page, request }) 
     ],
   });
 
-  await injectToken(page, admin.token);
-  await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(effectiveNow)}`);
+  const apiBaseUrl = process.env.E2E_API_URL ?? "http://127.0.0.1:8000/api";
+  const authHeaders = { Authorization: `Bearer ${admin.token}` };
 
-  await expect(getBucketSection(page, /^due now$/i)).toBeVisible();
-  await expectBucketCount(page, /^due now$/i, 1);
+  const beforeSummaryResponse = await request.get(
+    `${apiBaseUrl}/reviews/admin/queue/summary?effective_now=${encodeURIComponent(effectiveNow)}`,
+    { headers: authHeaders },
+  );
+  expect(beforeSummaryResponse.ok()).toBeTruthy();
+  const beforeSummary = await beforeSummaryResponse.json();
+  expect(beforeSummary.groups).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        bucket: "1d",
+        count: 1,
+        has_due_now: true,
+      }),
+    ]),
+  );
 
   await updateReviewScenarioTimezone(admin.id, "America/Los_Angeles");
-  await page.reload();
 
-  await expect(getBucketSection(page, /^due now$/i)).toBeVisible();
-  await expectBucketCount(page, /^due now$/i, 1);
+  const afterSummaryResponse = await request.get(
+    `${apiBaseUrl}/reviews/admin/queue/summary?effective_now=${encodeURIComponent(effectiveNow)}`,
+    { headers: authHeaders },
+  );
+  expect(afterSummaryResponse.ok()).toBeTruthy();
+  const afterSummary = await afterSummaryResponse.json();
+  expect(afterSummary.groups).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        bucket: "1d",
+        count: 1,
+        has_due_now: true,
+      }),
+    ]),
+  );
 });

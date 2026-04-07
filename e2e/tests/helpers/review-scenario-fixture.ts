@@ -1191,15 +1191,17 @@ export const seedDueReviewScenarioItem = async (
   scenarioKey = "entry-to-definition",
 ): Promise<DueReviewSeedFixture> => {
   const now = new Date();
-  const scenarios = await seedCustomReviewQueue(userId, [
-    {
-      scenarioKey,
-      status: "learning",
-      dueAt: new Date(now.getTime() - 60_000),
-      lastReviewedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
-      srsBucket: "1d",
-    },
-  ]);
+  const scenarios = await seedCustomReviewQueue(userId, {
+    items: [
+      {
+        scenarioKey,
+        status: "learning",
+        dueAt: new Date(now.getTime() - 60_000),
+        lastReviewedAt: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        srsBucket: "1d",
+      },
+    ],
+  });
   const scenario = scenarios[scenarioKey];
   if (!scenario) {
     throw new Error(`Missing due review scenario for ${scenarioKey}`);
