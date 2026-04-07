@@ -4,21 +4,32 @@ import type {
   ReviewQueueBucket,
   ReviewQueueBucketOrder,
   ReviewQueueBucketSort,
+  ReviewQueueItem,
 } from "@/lib/knowledge-map-client";
 
 export const REVIEW_QUEUE_BUCKET_LABELS: Record<ReviewQueueBucket, string> = {
-  overdue: "Overdue",
-  due_now: "Due now",
-  later_today: "Later today",
-  tomorrow: "Tomorrow",
-  this_week: "This week",
-  this_month: "This month",
-  one_to_three_months: "1-3 months",
-  three_to_six_months: "3-6 months",
-  six_plus_months: "6+ months",
+  "1d": "1d",
+  "2d": "2d",
+  "3d": "3d",
+  "5d": "5d",
+  "7d": "7d",
+  "14d": "14d",
+  "30d": "30d",
+  "90d": "90d",
+  "180d": "180d",
 };
 
-export const REVIEWABLE_BUCKETS: ReviewQueueBucket[] = ["overdue", "due_now"];
+export const REVIEWABLE_BUCKETS: ReviewQueueBucket[] = [
+  "1d",
+  "2d",
+  "3d",
+  "5d",
+  "7d",
+  "14d",
+  "30d",
+  "90d",
+  "180d",
+];
 
 export const REVIEW_QUEUE_SORT_OPTIONS: Array<{ value: ReviewQueueBucketSort; label: string }> = [
   { value: "next_review_at", label: "Due time" },
@@ -48,6 +59,9 @@ const reviewTimeFormatter = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
+const REVIEW_DAY_RELEASE_HOUR_LOCAL = 4;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
 export function isReviewQueueBucket(value: string | null | undefined): value is ReviewQueueBucket {
   if (!value) {
     return false;
@@ -72,6 +86,19 @@ export function formatReviewQueueBucketLabel(bucket: ReviewQueueBucket): string 
   return REVIEW_QUEUE_BUCKET_LABELS[bucket] ?? bucket.replaceAll("_", " ");
 }
 
+function normalizeReviewQueueDate(value: string | null): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
 export function formatReviewQueueTime(
   value: string | null,
   options?: {
@@ -79,16 +106,179 @@ export function formatReviewQueueTime(
     invalidLabel?: string;
   },
 ): string {
-  if (!value) {
+  const parsed = normalizeReviewQueueDate(value);
+  if (!parsed) {
     return options?.emptyLabel ?? "Time to be scheduled";
   }
 
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return options?.invalidLabel ?? "Time unavailable";
+  return reviewTimeFormatter.format(parsed);
+}
+
+export function isReviewQueueItemDueNow(value: string | null): boolean {
+  const parsed = normalizeReviewQueueDate(value);
+  if (!parsed) {
+    return true;
+  }
+  return parsed.getTime() <= Date.now();
+}
+
+function startOfLocalDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function parseReviewDate(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
   }
 
-  return reviewTimeFormatter.format(parsed);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day] = match;
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+  if (
+    parsed.getFullYear() !== Number(year)
+    || parsed.getMonth() !== Number(month) - 1
+    || parsed.getDate() !== Number(day)
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function parseReviewInstant(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateKey(year: number, month: number, day: number): string {
+  return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+}
+
+function parseDateKey(value: string): { year: number; month: number; day: number } {
+  const [year, month, day] = value.split("-").map(Number);
+  return { year, month, day };
+}
+
+function shiftDateKey(value: string, deltaDays: number): string {
+  const { year, month, day } = parseDateKey(value);
+  const shifted = new Date(Date.UTC(year, month - 1, day + deltaDays));
+  return formatDateKey(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth() + 1,
+    shifted.getUTCDate(),
+  );
+}
+
+function dateKeyToEpochDay(value: string): number {
+  const { year, month, day } = parseDateKey(value);
+  return Date.UTC(year, month - 1, day) / DAY_IN_MS;
+}
+
+function resolveReviewTimeZone(explicitTimeZone?: string): string | null {
+  if (explicitTimeZone) {
+    return explicitTimeZone;
+  }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+}
+
+function effectiveLocalReviewDay(value: Date): Date {
+  const effectiveDay = startOfLocalDay(value);
+  if (value.getHours() < REVIEW_DAY_RELEASE_HOUR_LOCAL) {
+    effectiveDay.setDate(effectiveDay.getDate() - 1);
+  }
+  return effectiveDay;
+}
+
+function effectiveReviewDateKey(value: Date, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = formatter.formatToParts(value);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const dateKey = formatDateKey(year, month, day);
+  return hour < REVIEW_DAY_RELEASE_HOUR_LOCAL ? shiftDateKey(dateKey, -1) : dateKey;
+}
+
+export function formatReviewQueueDueLabel(
+  item: Pick<ReviewQueueItem, "due_review_date" | "min_due_at_utc" | "next_review_at">,
+  now: Date = new Date(),
+  options?: {
+    timeZone?: string;
+  },
+): string | null {
+  const dueReviewDate = parseReviewDate(item.due_review_date);
+  if (!dueReviewDate || !item.due_review_date) {
+    return null;
+  }
+
+  const exactDueAt = parseReviewInstant(item.min_due_at_utc ?? item.next_review_at);
+  const resolvedTimeZone = resolveReviewTimeZone(options?.timeZone);
+  const dayDelta = resolvedTimeZone
+    ? dateKeyToEpochDay(item.due_review_date) - dateKeyToEpochDay(effectiveReviewDateKey(now, resolvedTimeZone))
+    : Math.round(
+        (startOfLocalDay(dueReviewDate).getTime() - effectiveLocalReviewDay(now).getTime()) / DAY_IN_MS,
+      );
+
+  if (dayDelta < 0) {
+    return "Overdue";
+  }
+  if (dayDelta === 0) {
+    if (exactDueAt && exactDueAt.getTime() <= now.getTime()) {
+      return "Due now";
+    }
+    return "Later today";
+  }
+  if (dayDelta === 1) {
+    return "Tomorrow";
+  }
+  if (dayDelta < 7) {
+    return `In ${dayDelta} days`;
+  }
+  if (dayDelta < 14) {
+    return "In a week";
+  }
+  if (dayDelta < 21) {
+    return "In 2 weeks";
+  }
+  if (dayDelta < 45) {
+    return "In a month";
+  }
+
+  return `In ${Math.max(2, Math.round(dayDelta / 30))} months`;
+}
+
+export function formatReviewQueueSchedule(
+  item: Pick<ReviewQueueItem, "due_review_date" | "min_due_at_utc" | "next_review_at">,
+): string {
+  const dueLabel = formatReviewQueueDueLabel(item);
+  const exactDueAt = item.min_due_at_utc ?? item.next_review_at;
+  const exactTime = formatReviewQueueTime(exactDueAt, {
+    emptyLabel: dueLabel ? "" : "Time to be scheduled",
+  }).trim();
+
+  if (dueLabel && exactTime) {
+    return `${dueLabel} · ${exactTime}`;
+  }
+  if (dueLabel) {
+    return dueLabel;
+  }
+  return exactTime || "Time to be scheduled";
 }
 
 export function formatReviewQueueStatus(status: KnowledgeStatus): string {

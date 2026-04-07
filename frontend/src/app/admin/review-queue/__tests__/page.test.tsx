@@ -52,8 +52,8 @@ describe("AdminReviewQueuePage", () => {
         effectiveNow: "2026-10-05T09:00:00+00:00",
         totalCount: 3,
         groups: [
-          { bucket: "due_now", count: 2 },
-          { bucket: "tomorrow", count: 1 },
+          { bucket: "1d", count: 2, has_due_now: true },
+          { bucket: "7d", count: 1, has_due_now: true },
         ],
       }),
     );
@@ -72,17 +72,13 @@ describe("AdminReviewQueuePage", () => {
     );
     expect(screen.getByText(/request-scoped effective-time overrides/i)).toBeInTheDocument();
     expect(screen.getByText("2026-10-05T09:00:00+00:00")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /due now/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /tomorrow/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open due now bucket/i })).toHaveAttribute(
+    expect(screen.getByRole("heading", { name: /^1d$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^7d$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open 1d bucket/i })).toHaveAttribute(
       "href",
-      "/admin/review-queue/due_now",
+      "/admin/review-queue/1d",
     );
-    expect(screen.getByRole("link", { name: /start review from due now/i })).toHaveAttribute(
-      "href",
-      "/review",
-    );
-    expect(screen.queryByRole("link", { name: /start review from tomorrow/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /start review from .* bucket/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/target_type:/i)).not.toBeInTheDocument();
   });
 
@@ -91,7 +87,7 @@ describe("AdminReviewQueuePage", () => {
       makeQueueSummaryResponse({
         effectiveNow: "2026-10-05T09:00:00+00:00",
         totalCount: 1,
-        groups: [{ bucket: "due_now", count: 1 }],
+        groups: [{ bucket: "1d", count: 1, has_due_now: true }],
       }),
     );
 
@@ -115,7 +111,7 @@ describe("AdminReviewQueuePage", () => {
     mockFetchJson(
       makeQueueSummaryResponse({
         effectiveNow: "2026-10-05T09:00:00+00:00",
-        groups: [{ bucket: "due_now", count: 1 }],
+        groups: [{ bucket: "1d", count: 1, has_due_now: true }],
       }),
     );
 
@@ -134,9 +130,9 @@ describe("AdminReviewQueuePage", () => {
       ),
     );
     expect(screen.getByDisplayValue("2026-10-05T09:00:00+00:00")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open due now bucket/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /open 1d bucket/i })).toHaveAttribute(
       "href",
-      "/admin/review-queue/due_now?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00",
+      "/admin/review-queue/1d?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00",
     );
   });
 

@@ -7,10 +7,12 @@ import {
   REVIEW_QUEUE_ORDER_OPTIONS,
   REVIEW_QUEUE_SORT_OPTIONS,
   formatReviewQueueBucketLabel,
+  formatReviewQueueDueLabel,
   formatReviewQueueEntryType,
   formatReviewQueueStatus,
   formatReviewQueueTime,
   getReviewQueueEntryHref,
+  isReviewQueueItemDueNow,
 } from "@/components/review-queue/review-queue-utils";
 import type {
   AdminReviewQueueItem,
@@ -113,6 +115,45 @@ function ReviewHistoryMiniBar({ history }: { history: ReviewQueueHistoryEvent[] 
   );
 }
 
+export function ReviewQueueModeSwitch({
+  mode,
+}: {
+  mode: "stage" | "due";
+}) {
+  const options = [
+    {
+      href: "/review/queue",
+      label: "Group by stage",
+      active: mode === "stage",
+    },
+    {
+      href: "/review/queue/by-due",
+      label: "Group by due date",
+      active: mode === "due",
+    },
+  ];
+
+  return (
+    <section className="rounded-[0.9rem] bg-white px-4 py-4 shadow-[0_8px_18px_rgba(95,53,177,0.08)]">
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => (
+          <Link
+            key={option.href}
+            href={option.href}
+            className={`rounded-full px-4 py-2 text-sm font-semibold ${
+              option.active
+                ? "bg-[#7b32d3] text-white"
+                : "border border-[#d8caec] text-[#684f85]"
+            }`}
+          >
+            {option.label}
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function ReviewQueueSummaryCard({
   group,
   hrefPrefix,
@@ -141,7 +182,9 @@ export function ReviewQueueSummaryCard({
           >
             Open
           </Link>
-          {group.count > 0 && REVIEWABLE_BUCKETS.includes(group.bucket) ? (
+          {hrefPrefix === "/review/queue" &&
+          group.has_due_now &&
+          REVIEWABLE_BUCKETS.includes(group.bucket) ? (
             <Link
               href="/review"
               aria-label={`Start review from ${bucketLabel}`}
@@ -245,14 +288,31 @@ export function ReviewQueueDebugField({
 export function ReviewQueueItemCard({
   item,
   bucket,
+  allowStartReview = true,
+  showStageLabel = false,
   renderSupplementalFields,
 }: {
   item: ReviewQueueItem | AdminReviewQueueItem;
-  bucket: ReviewQueueBucket;
+  bucket?: ReviewQueueBucket;
+  allowStartReview?: boolean;
+  showStageLabel?: boolean;
   renderSupplementalFields?: (item: ReviewQueueItem | AdminReviewQueueItem) => ReactNode;
 }) {
-  const canStartReview = REVIEWABLE_BUCKETS.includes(bucket);
+  const resolvedBucket = bucket ?? item.bucket ?? null;
+  const exactDueAt = item.min_due_at_utc ?? item.next_review_at;
+  const isDueNow = isReviewQueueItemDueNow(exactDueAt);
+  const canStartReview =
+    allowStartReview &&
+    resolvedBucket !== null &&
+    REVIEWABLE_BUCKETS.includes(resolvedBucket) &&
+    isDueNow;
   const [historyOpen, setHistoryOpen] = useState(false);
+  const dueLabel = formatReviewQueueDueLabel(item) ?? "Due now";
+  const history = item.history ?? [];
+  const successStreak = item.success_streak ?? 0;
+  const lapseCount = item.lapse_count ?? 0;
+  const timesRemembered = item.times_remembered ?? 0;
+  const exposureCount = item.exposure_count ?? 0;
 
   return (
     <li className="rounded-[0.8rem] border border-[#ece1f7] bg-[#faf7ff] px-3 py-3">
@@ -268,8 +328,12 @@ export function ReviewQueueItemCard({
             </span>
           </div>
           <p className="mt-2 text-sm text-[#7b6795]">
-            Next review {formatReviewQueueTime(item.next_review_at)}
+            <span className="font-semibold text-[#5a357b]">{dueLabel}</span>
+            {!isDueNow ? ` · ${formatReviewQueueTime(exactDueAt)}` : ""}
           </p>
+          {showStageLabel && resolvedBucket ? (
+            <p className="mt-1 text-sm text-[#8f7ba8]">SRS stage {formatReviewQueueBucketLabel(resolvedBucket)}</p>
+          ) : null}
           {item.last_reviewed_at ? (
             <p className="mt-1 text-sm text-[#8f7ba8]">
               Last reviewed {formatReviewQueueTime(item.last_reviewed_at)}
@@ -278,17 +342,17 @@ export function ReviewQueueItemCard({
           <div className="mt-3 rounded-[0.7rem] border border-[#ede3fb] bg-white px-3 py-3">
             <div className="flex flex-wrap items-center gap-3">
               <p className="text-sm font-semibold text-[#5a357b]">
-                Success streak {item.success_streak}
+                Success streak {successStreak}
               </p>
               <p className="text-sm font-semibold text-[#8f7ba8]">
-                Lapses {item.lapse_count}
+                Lapses {lapseCount}
               </p>
               <p className="text-sm text-[#8f7ba8]">
-                Remembered {item.times_remembered} / Exposures {item.exposure_count}
+                Remembered {timesRemembered} / Exposures {exposureCount}
               </p>
             </div>
             <div className="mt-2">
-              <ReviewHistoryMiniBar history={item.history} />
+              <ReviewHistoryMiniBar history={history} />
             </div>
             <div className="mt-3">
               <button
@@ -302,8 +366,8 @@ export function ReviewQueueItemCard({
             </div>
             {historyOpen ? (
               <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
-                {item.history.length > 0 ? (
-                  item.history.map((event) => (
+                {history.length > 0 ? (
+                  history.map((event) => (
                     <div
                       key={event.id}
                       className="rounded-[0.65rem] border border-[#f0e7fb] bg-[#faf7ff] px-3 py-2"
@@ -356,5 +420,53 @@ export function ReviewQueueItemCard({
         </div>
       </div>
     </li>
+  );
+}
+
+export function ReviewQueueGroupedSection({
+  title,
+  count,
+  items,
+  bucket,
+  showStageLabel = false,
+  openHref,
+}: {
+  title: string;
+  count: number;
+  items: Array<ReviewQueueItem | AdminReviewQueueItem>;
+  bucket?: ReviewQueueBucket;
+  showStageLabel?: boolean;
+  openHref?: string;
+}) {
+  return (
+    <section className="space-y-3 rounded-[0.9rem] bg-white px-4 py-4 shadow-[0_8px_18px_rgba(95,53,177,0.08)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-[1.2rem] font-semibold text-[#5b2590]">{title}</h2>
+          <p className="mt-1 text-sm text-[#7b6795]">
+            {count} {count === 1 ? "item" : "items"} in this group
+          </p>
+        </div>
+        {openHref ? (
+          <Link
+            href={openHref}
+            aria-label={`Open ${title} bucket`}
+            className="rounded-full border border-[#d8caec] px-4 py-2 text-sm font-semibold text-[#684f85]"
+          >
+            Open
+          </Link>
+        ) : null}
+      </div>
+      <ul className="space-y-3">
+        {items.map((item) => (
+          <ReviewQueueItemCard
+            key={item.queue_item_id}
+            item={item}
+            bucket={bucket}
+            showStageLabel={showStageLabel}
+          />
+        ))}
+      </ul>
+    </section>
   );
 }

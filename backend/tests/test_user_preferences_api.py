@@ -68,8 +68,15 @@ def scalar_one_or_none_result(value):
 
 
 class TestUserPreferencesApi:
+    def test_user_preference_constructor_leaves_timezone_unset(self):
+        model = UserPreference(user_id=uuid.uuid4())
+
+        assert model.timezone is None
+
     @pytest.mark.asyncio
-    async def test_get_returns_defaults_when_missing(self, client, mock_db, auth_token):
+    async def test_get_returns_defaults_when_missing_including_timezone(
+        self, client, mock_db, auth_token
+    ):
         token, user_id = auth_token
         user = make_user(user_id)
 
@@ -94,9 +101,44 @@ class TestUserPreferencesApi:
         assert data["enable_word_spelling"] is True
         assert data["enable_audio_spelling"] is False
         assert data["show_pictures_in_questions"] is False
+        assert data["timezone"] == "UTC"
 
     @pytest.mark.asyncio
-    async def test_put_upserts_preferences(self, client, mock_db, auth_token):
+    async def test_get_returns_existing_timezone_from_preferences(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        existing = UserPreference(
+            user_id=user_id,
+            accent_preference="au",
+            translation_locale="es",
+            knowledge_view_preference="list",
+            show_translations_by_default=False,
+            review_depth_preset="deep",
+            enable_confidence_check=False,
+            enable_word_spelling=False,
+            enable_audio_spelling=True,
+            show_pictures_in_questions=True,
+            timezone="Australia/Melbourne",
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(existing),
+        ]
+
+        response = await client.get(
+            "/api/user-preferences",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["timezone"] == "Australia/Melbourne"
+        assert data["review_depth_preset"] == "deep"
+        assert data["enable_audio_spelling"] is True
+
+    @pytest.mark.asyncio
+    async def test_put_upserts_preferences_including_timezone(self, client, mock_db, auth_token):
         token, user_id = auth_token
         user = make_user(user_id)
 
@@ -117,6 +159,7 @@ class TestUserPreferencesApi:
                 "enable_word_spelling": False,
                 "enable_audio_spelling": True,
                 "show_pictures_in_questions": True,
+                "timezone": "Australia/Melbourne",
             },
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -132,9 +175,12 @@ class TestUserPreferencesApi:
         assert data["enable_word_spelling"] is False
         assert data["enable_audio_spelling"] is True
         assert data["show_pictures_in_questions"] is True
+        assert data["timezone"] == "Australia/Melbourne"
 
     @pytest.mark.asyncio
-    async def test_put_updates_existing_preferences(self, client, mock_db, auth_token):
+    async def test_put_updates_existing_preferences_including_timezone(
+        self, client, mock_db, auth_token
+    ):
         token, user_id = auth_token
         user = make_user(user_id)
         existing = UserPreference(
@@ -148,6 +194,66 @@ class TestUserPreferencesApi:
             enable_word_spelling=True,
             enable_audio_spelling=False,
             show_pictures_in_questions=False,
+            timezone="UTC",
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(existing),
+        ]
+
+        response = await client.put(
+            "/api/user-preferences",
+            json={
+                "accent_preference": "uk",
+                "translation_locale": "ja",
+                "knowledge_view_preference": "tags",
+                "show_translations_by_default": False,
+                "review_depth_preset": "gentle",
+                "enable_confidence_check": False,
+                "enable_word_spelling": False,
+                "enable_audio_spelling": True,
+                "show_pictures_in_questions": True,
+                "timezone": "Europe/Berlin",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["accent_preference"] == "uk"
+        assert data["translation_locale"] == "ja"
+        assert data["knowledge_view_preference"] == "tags"
+        assert data["show_translations_by_default"] is False
+        assert data["review_depth_preset"] == "gentle"
+        assert data["enable_confidence_check"] is False
+        assert data["enable_word_spelling"] is False
+        assert data["enable_audio_spelling"] is True
+        assert data["show_pictures_in_questions"] is True
+        assert data["timezone"] == "Europe/Berlin"
+        assert existing.accent_preference == "uk"
+        assert existing.show_translations_by_default is False
+        assert existing.timezone == "Europe/Berlin"
+        mock_db.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_put_legacy_payload_without_timezone_preserves_existing_timezone(
+        self, client, mock_db, auth_token
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        existing = UserPreference(
+            user_id=user_id,
+            accent_preference="us",
+            translation_locale="zh-Hans",
+            knowledge_view_preference="cards",
+            show_translations_by_default=True,
+            review_depth_preset="balanced",
+            enable_confidence_check=True,
+            enable_word_spelling=True,
+            enable_audio_spelling=False,
+            show_pictures_in_questions=False,
+            timezone="Europe/Paris",
         )
 
         mock_db.execute.side_effect = [
@@ -173,15 +279,77 @@ class TestUserPreferencesApi:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["accent_preference"] == "uk"
-        assert data["translation_locale"] == "ja"
-        assert data["knowledge_view_preference"] == "tags"
+        assert data["timezone"] == "Europe/Paris"
+        assert existing.timezone == "Europe/Paris"
+
+    @pytest.mark.asyncio
+    async def test_put_timezone_only_payload_preserves_existing_preferences(
+        self, client, mock_db, auth_token
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        existing = UserPreference(
+            user_id=user_id,
+            accent_preference="us",
+            translation_locale="zh-Hans",
+            knowledge_view_preference="cards",
+            show_translations_by_default=False,
+            review_depth_preset="balanced",
+            enable_confidence_check=True,
+            enable_word_spelling=True,
+            enable_audio_spelling=False,
+            show_pictures_in_questions=False,
+            timezone="UTC",
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(existing),
+        ]
+
+        response = await client.put(
+            "/api/user-preferences",
+            json={
+                "timezone": "Australia/Melbourne",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["accent_preference"] == "us"
         assert data["show_translations_by_default"] is False
-        assert data["review_depth_preset"] == "gentle"
-        assert data["enable_confidence_check"] is False
-        assert data["enable_word_spelling"] is False
-        assert data["enable_audio_spelling"] is True
-        assert data["show_pictures_in_questions"] is True
-        assert existing.accent_preference == "uk"
+        assert data["timezone"] == "Australia/Melbourne"
+        assert existing.accent_preference == "us"
         assert existing.show_translations_by_default is False
-        mock_db.add.assert_not_called()
+        assert existing.timezone == "Australia/Melbourne"
+
+    @pytest.mark.asyncio
+    async def test_put_rejects_unknown_timezone(self, client, mock_db, auth_token):
+        token, user_id = auth_token
+        user = make_user(user_id)
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(None),
+        ]
+
+        response = await client.put(
+            "/api/user-preferences",
+            json={
+                "accent_preference": "us",
+                "translation_locale": "zh-Hans",
+                "knowledge_view_preference": "cards",
+                "show_translations_by_default": True,
+                "review_depth_preset": "balanced",
+                "enable_confidence_check": True,
+                "enable_word_spelling": True,
+                "enable_audio_spelling": False,
+                "show_pictures_in_questions": False,
+                "timezone": "Mars/Base",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["msg"] == "Value error, Unsupported timezone"

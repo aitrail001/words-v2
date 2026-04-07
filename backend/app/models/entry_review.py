@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    CheckConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -31,6 +33,8 @@ class EntryReviewState(Base):
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     entry_type: Mapped[str] = mapped_column(String(16), nullable=False)
     entry_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    srs_bucket: Mapped[str] = mapped_column(String(16), nullable=False, insert_default="1d")
+    cadence_step: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
     stability: Mapped[float] = mapped_column(Float, nullable=False, insert_default=0.3)
     difficulty: Mapped[float] = mapped_column(Float, nullable=False, insert_default=0.5)
     success_streak: Mapped[int] = mapped_column(Integer, nullable=False, insert_default=0)
@@ -47,6 +51,8 @@ class EntryReviewState(Base):
     recheck_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    due_review_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    min_due_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -55,6 +61,18 @@ class EntryReviewState(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "srs_bucket IN ('1d', '2d', '3d', '5d', '7d', '14d', '30d', '90d', '180d', 'known')",
+            name="ck_entry_review_states_srs_bucket_valid",
+        ),
+        CheckConstraint(
+            "cadence_step IN (0, 1, 2)",
+            name="ck_entry_review_states_cadence_step_valid",
+        ),
+        CheckConstraint(
+            "srs_bucket <> 'known' OR cadence_step = 0",
+            name="ck_entry_review_states_known_bucket_cadence_step",
+        ),
         Index(
             "ix_entry_review_states_user_recheck_due",
             "user_id",

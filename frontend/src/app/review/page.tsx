@@ -147,6 +147,7 @@ export default function ReviewPage() {
   const [audioReplayCount, setAudioReplayCount] = useState(0);
   const [challengeStartedAtMs, setChallengeStartedAtMs] = useState<number | null>(null);
   const [relearnMeaningIndex, setRelearnMeaningIndex] = useState(0);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
   const autoPlayedAudioKeyRef = useRef<string | null>(null);
   const { play, loadingUrl } = useLearnerAudio();
 
@@ -172,6 +173,7 @@ export default function ReviewPage() {
 
   useEffect(() => {
     setTypedAnswerNudge(null);
+    setSubmissionError(null);
   }, [currentIndex, phase]);
 
   useEffect(() => {
@@ -230,12 +232,25 @@ export default function ReviewPage() {
   );
   const promptAudioUrl = prompt?.audio?.preferred_playback_url ?? null;
   const reviewDepthPreset = reviewPreferences?.review_depth_preset ?? "balanced";
+  const reviewLevelLabel = reviewDepthPreset === "deep" ? "Deep" : "Standard";
   const reviewDepthBanner = (
     <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-      <span>Current review depth</span>
-      <span className="font-semibold capitalize">{reviewDepthPreset}</span>
+      <span>Current review level</span>
+      <span className="font-semibold">{reviewLevelLabel}</span>
     </div>
   );
+  const reviewErrorBanner = submissionError ? (
+    <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+      {submissionError}
+    </div>
+  ) : null;
+
+  const getReviewErrorMessage = (error: unknown): string => {
+    if (error instanceof Error && error.message.trim()) {
+      return error.message;
+    }
+    return "Review update failed. Please try again.";
+  };
 
   const buildQueueSubmitPayload = (
     card: ReviewQueueCard,
@@ -460,6 +475,7 @@ export default function ReviewPage() {
 
     setLoading(true);
     try {
+      setSubmissionError(null);
       const response = await apiClient.post<{
         outcome?: ReviewOutcome;
         detail?: ReviewDetailPayload | null;
@@ -481,6 +497,8 @@ export default function ReviewPage() {
       if (outcome === "correct_tested") {
         redirectToReviewDetail(nextRevealState);
       }
+    } catch (error) {
+      setSubmissionError(getReviewErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -495,6 +513,7 @@ export default function ReviewPage() {
     }
     setLoading(true);
     try {
+      setSubmissionError(null);
       const response = await apiClient.post<{
         outcome?: ReviewOutcome;
         detail?: ReviewDetailPayload | null;
@@ -516,6 +535,8 @@ export default function ReviewPage() {
       if (outcome === "correct_tested") {
         redirectToReviewDetail(nextRevealState);
       }
+    } catch (error) {
+      setSubmissionError(getReviewErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -527,6 +548,7 @@ export default function ReviewPage() {
     }
     setLoading(true);
     try {
+      setSubmissionError(null);
       const response = await submitOutcome(currentCard, "lookup");
       setRevealState(
         buildRevealState(
@@ -537,6 +559,8 @@ export default function ReviewPage() {
         ),
       );
       setPhase("relearn");
+    } catch (error) {
+      setSubmissionError(getReviewErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -555,6 +579,7 @@ export default function ReviewPage() {
     ) {
       setLoading(true);
       try {
+        setSubmissionError(null);
         const defaultSchedule = defaultScheduleValue(revealState.scheduleOptions);
         await apiClient.post(`/reviews/queue/${currentCard.queue_item_id}/submit`, buildQueueSubmitPayload(currentCard, {
           quality: 4,
@@ -566,6 +591,9 @@ export default function ReviewPage() {
               ? revealState.selectedSchedule
               : undefined,
         }));
+      } catch (error) {
+        setSubmissionError(getReviewErrorMessage(error));
+        return;
       } finally {
         setLoading(false);
       }
@@ -633,6 +661,7 @@ export default function ReviewPage() {
           </div>
         </div>
         {reviewDepthBanner}
+        {reviewErrorBanner}
         <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
           Opening the full detail page...
         </div>
@@ -664,6 +693,7 @@ export default function ReviewPage() {
           </span>
         </div>
         {reviewDepthBanner}
+        {reviewErrorBanner}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-xs uppercase tracking-wide text-cyan-600">Learn this meaning</div>
           <h2 className="mt-2 text-2xl font-semibold">{detail?.display_text ?? currentCard.word}</h2>
@@ -777,6 +807,7 @@ export default function ReviewPage() {
         </span>
       </div>
       {reviewDepthBanner}
+      {reviewErrorBanner}
 
       {!prompt ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">

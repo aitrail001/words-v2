@@ -19,12 +19,16 @@ jest.mock("@/lib/knowledge-map-client", () => {
     normalizeLearnerTranslation: jest.fn(actual.normalizeLearnerTranslation),
   };
 });
-jest.mock("@/lib/api-client", () => ({
-  apiClient: {
-    post: jest.fn(),
-    put: jest.fn(),
-  },
-}));
+jest.mock("@/lib/api-client", () => {
+  const actual = jest.requireActual("@/lib/api-client");
+  return {
+    ...actual,
+    apiClient: {
+      post: jest.fn(),
+      put: jest.fn(),
+    },
+  };
+});
 jest.mock("@/lib/learner-audio", () => ({
   getPlayableLearnerAccents: jest.fn((voiceAssets) => {
     const locales = new Set(
@@ -960,7 +964,7 @@ describe("KnowledgeEntryDetailPage", () => {
     render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
 
     expect(await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`)).toBeInTheDocument();
-    expect(screen.getByText(/approximately: tomorrow/i)).toBeInTheDocument();
+    expect(screen.getByText(/approximately: pause review/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /override \(manual override\)/i }));
     expect(screen.getByLabelText(/choose next review timing/i)).toHaveValue("never_for_now");
     fireEvent.change(screen.getByLabelText(/choose next review timing/i), { target: { value: "1d" } });
@@ -1023,9 +1027,67 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
 
-    expect(await screen.findByText(/next review scheduled: scheduled time not set yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/next review scheduled: tomorrow/i)).toBeInTheDocument();
     expect(screen.queryByText(/approximately:/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^override$/i })).toBeInTheDocument();
+  });
+
+  it("renders detail next-review timing from min_due_at_utc when next_review_at is absent", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      display_text: "bank on",
+      normalized_form: "bank on",
+      browse_rank: 141,
+      status: "learning",
+      cefr_level: "B1",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "依赖",
+      primary_definition: "To depend on someone.",
+      review_queue: {
+        queue_item_id: "queue-1",
+        next_review_at: null,
+        due_review_date: "2026-04-11",
+        min_due_at_utc: "2026-04-10T18:00:00Z",
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [
+          { value: "1d", label: "Tomorrow", is_default: true },
+          { value: "7d", label: "In a week", is_default: false },
+        ],
+      },
+      meanings: [],
+      senses: [
+        {
+          sense_id: "sense-1",
+          definition: "To depend on someone.",
+          localized_definition: "依赖",
+          part_of_speech: "phrasal_verb",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+        },
+      ],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
+
+    expect(
+      await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-10T18:00:00Z")}`),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/approximately: in a week/i)).toBeInTheDocument();
   });
 
   it("clears next-review controls immediately when an entry is marked as already knew", async () => {
@@ -1144,5 +1206,115 @@ describe("KnowledgeEntryDetailPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /should learn/i }));
 
     await waitFor(() => expect(screen.queryByText(/^Next Review$/i)).not.toBeInTheDocument());
+  });
+
+  it("opens the review flow after Learn Now succeeds", async () => {
+    const push = jest.fn();
+    mockUseRouter.mockReturnValue({ push } as never);
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "drum",
+      normalized_form: "drum",
+      browse_rank: 2400,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "鼓",
+      primary_definition: "A percussion instrument.",
+      review_queue: null,
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A percussion instrument.",
+          localized_definition: "鼓",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+    mockPut.mockResolvedValueOnce({ entry_type: "word", entry_id: "word-1", status: "learning" } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /learn now/i }));
+
+    await waitFor(() =>
+      expect(mockPut).toHaveBeenCalledWith("/knowledge-map/entries/word/word-1/status", {
+        status: "learning",
+      }),
+    );
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith("/review?entry_type=word&entry_id=word-1"),
+    );
+  });
+
+  it("shows an inline error when Learn Now fails", async () => {
+    const push = jest.fn();
+    mockUseRouter.mockReturnValue({ push } as never);
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "word",
+      entry_id: "word-1",
+      display_text: "drum",
+      normalized_form: "drum",
+      browse_rank: 2400,
+      status: "to_learn",
+      cefr_level: "A2",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "鼓",
+      primary_definition: "A percussion instrument.",
+      review_queue: null,
+      meanings: [
+        {
+          id: "meaning-1",
+          definition: "A percussion instrument.",
+          localized_definition: "鼓",
+          part_of_speech: "noun",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+          translations: [],
+          relations: [],
+        },
+      ],
+      senses: [],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+    mockPut.mockRejectedValueOnce(new Error("Status update failed"));
+
+    render(<KnowledgeEntryDetailPage entryType="word" entryId="word-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /learn now/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Status update failed");
+    expect(push).not.toHaveBeenCalled();
   });
 });

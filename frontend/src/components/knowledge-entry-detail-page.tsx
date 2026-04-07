@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { apiClient } from "@/lib/api-client";
+import { ApiError, apiClient } from "@/lib/api-client";
+import {
+  formatReviewQueueDueLabel,
+  formatReviewQueueTime,
+} from "@/components/review-queue/review-queue-utils";
 import {
   getKnowledgeMapEntryDetail,
   normalizeLearnerTranslation,
@@ -51,6 +55,8 @@ const ACCENT_LABELS: Record<UserPreferences["accent_preference"], string> = {
   au: "AU",
 };
 
+type DetailReviewQueue = NonNullable<KnowledgeMapEntryDetail["review_queue"]>;
+
 type LinkedEntryTarget = {
   entry_type: KnowledgeEntryType;
   entry_id: string;
@@ -73,29 +79,29 @@ function actionButtonClass(status: KnowledgeStatus, activeStatus: KnowledgeStatu
   return "bg-white text-[#684f85]";
 }
 
-const reviewScheduleTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-function startOfLocalDay(value: Date): Date {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+function resolveScheduledReviewInstant(reviewQueue: DetailReviewQueue | null | undefined): string | null {
+  return reviewQueue?.min_due_at_utc ?? reviewQueue?.next_review_at ?? null;
 }
 
-function formatScheduledReviewTime(value: string | null | undefined): string {
-  if (!value) {
-    return "Scheduled time not set yet";
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return "Time unavailable";
-  }
-
-  return reviewScheduleTimeFormatter.format(parsed);
+function formatScheduledReviewTime(reviewQueue: DetailReviewQueue | null | undefined): string {
+  return formatReviewQueueTime(resolveScheduledReviewInstant(reviewQueue), {
+    emptyLabel: "Scheduled time not set yet",
+    invalidLabel: "Time unavailable",
+  });
 }
 
-function formatApproximateScheduledReviewTime(value: string | null | undefined): string | null {
+function buildScheduledReviewMessage(
+  reviewQueue: DetailReviewQueue | null | undefined,
+  fallbackLabel: string | null | undefined,
+): string {
+  const formattedTime = formatScheduledReviewTime(reviewQueue);
+  if ((!resolveScheduledReviewInstant(reviewQueue) || formattedTime === "Scheduled time not set yet") && fallbackLabel) {
+    return fallbackLabel;
+  }
+  return formattedTime;
+}
+
+function formatLegacyApproximateScheduledReviewTime(value: string | null | undefined): string | null {
   if (!value) {
     return null;
   }
@@ -106,8 +112,10 @@ function formatApproximateScheduledReviewTime(value: string | null | undefined):
   }
 
   const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTargetDay = new Date(target.getFullYear(), target.getMonth(), target.getDate());
   const dayDelta = Math.round(
-    (startOfLocalDay(target).getTime() - startOfLocalDay(now).getTime()) / (24 * 60 * 60 * 1000),
+    (startOfTargetDay.getTime() - startOfToday.getTime()) / (24 * 60 * 60 * 1000),
   );
 
   if (dayDelta < 0) {
@@ -132,8 +140,33 @@ function formatApproximateScheduledReviewTime(value: string | null | undefined):
     return "In a month";
   }
 
-  const monthDelta = Math.max(2, Math.round(dayDelta / 30));
-  return `In ${monthDelta} months`;
+  return `In ${Math.max(2, Math.round(dayDelta / 30))} months`;
+}
+function formatApproximateScheduledReviewTime(reviewQueue: DetailReviewQueue | null | undefined): string | null {
+  if (!reviewQueue) {
+    return null;
+  }
+
+  const dueLabel = formatReviewQueueDueLabel({
+    next_review_at: reviewQueue.next_review_at,
+    due_review_date: reviewQueue.due_review_date,
+    min_due_at_utc: reviewQueue.min_due_at_utc,
+  });
+  if (dueLabel) {
+    return dueLabel;
+  }
+
+  return resolveScheduledReviewInstant(reviewQueue) ? reviewQueue.current_schedule_label : null;
+}
+
+function getStatusActionErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.message) {
+    return error.message;
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return "We could not update this entry right now.";
 }
 
 function findScheduleLabel(
@@ -309,6 +342,8 @@ export function KnowledgeEntryDetailPage({
   const [reviewSession, setReviewSession] = useState<StoredReviewSession | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
   const [queueScheduleSaving, setQueueScheduleSaving] = useState(false);
+  const [statusActionSaving, setStatusActionSaving] = useState(false);
+  const [statusActionError, setStatusActionError] = useState<string | null>(null);
   const [isScheduleSheetOpen, setIsScheduleSheetOpen] = useState(false);
   const [scheduleDraftValue, setScheduleDraftValue] = useState("");
   const autoPlayedReviewAudioRef = useRef<string | null>(null);
@@ -451,20 +486,28 @@ export function KnowledgeEntryDetailPage({
     ) {
       return;
     }
-    const response = await updateKnowledgeEntryStatus(detail.entry_type, detail.entry_id, status);
-    startTransition(() => {
-      setDetail((current) =>
-        current
-          ? {
-              ...current,
-              status: response.status,
-              review_queue: response.status === "learning" ? current.review_queue : null,
-            }
-          : current,
-      );
-    });
-    if (shouldOpenLearningFlow(previousStatus, status)) {
-      router.push(`/review?entry_type=${detail.entry_type}&entry_id=${detail.entry_id}`);
+    setStatusActionSaving(true);
+    setStatusActionError(null);
+    try {
+      const response = await updateKnowledgeEntryStatus(detail.entry_type, detail.entry_id, status);
+      startTransition(() => {
+        setDetail((current) =>
+          current
+            ? {
+                ...current,
+                status: response.status,
+                review_queue: response.status === "learning" ? current.review_queue : null,
+              }
+            : current,
+        );
+      });
+      if (shouldOpenLearningFlow(previousStatus, status)) {
+        router.push(`/review?entry_type=${detail.entry_type}&entry_id=${detail.entry_id}`);
+      }
+    } catch (error) {
+      setStatusActionError(getStatusActionErrorMessage(error));
+    } finally {
+      setStatusActionSaving(false);
     }
   };
 
@@ -609,12 +652,15 @@ export function KnowledgeEntryDetailPage({
   );
   const approximateScheduledReview = matchingReviewReveal
     ? null
-    : formatApproximateScheduledReviewTime(detailReviewQueue?.next_review_at);
+    : formatApproximateScheduledReviewTime(detailReviewQueue);
   const scheduleSheetApproximateReview =
     approximateScheduledReview ?? activeReviewScheduleLabel;
   const scheduledReviewMessage = matchingReviewReveal
     ? "Next review scheduled: Scheduled time will be set when you continue review."
-    : `Next review scheduled: ${formatScheduledReviewTime(detailReviewQueue?.next_review_at)}`;
+    : `Next review scheduled: ${buildScheduledReviewMessage(
+        detailReviewQueue,
+        detailReviewQueue?.current_schedule_label ?? activeReviewScheduleLabel,
+      )}`;
 
   const updateAccentPreference = (accent: UserPreferences["accent_preference"]) => {
     setPreferences((current) => {
@@ -1168,6 +1214,11 @@ export function KnowledgeEntryDetailPage({
           data-testid="knowledge-detail-bottom-bar"
           className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.85rem)] left-1/2 z-30 flex w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 flex-col gap-2 rounded-[0.65rem] bg-[rgba(245,240,252,0.96)] p-2.5 shadow-[0_12px_26px_rgba(84,46,135,0.14)] backdrop-blur"
         >
+          {statusActionError ? (
+            <p className="rounded-[0.75rem] border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+              {statusActionError}
+            </p>
+          ) : null}
           <div className="flex items-stretch gap-3">
             <div className={`grid flex-1 gap-3 ${statusActions.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
               {statusActions.map((action) => (
@@ -1175,7 +1226,8 @@ export function KnowledgeEntryDetailPage({
                   key={action.status}
                   type="button"
                   onClick={() => void updateStatus(action.status)}
-                  className={`rounded-[0.95rem] px-3 py-3 text-sm font-semibold ${actionButtonClass(action.status, detail.status)}`}
+                  disabled={statusActionSaving}
+                  className={`rounded-[0.95rem] px-3 py-3 text-sm font-semibold disabled:opacity-60 ${actionButtonClass(action.status, detail.status)}`}
                 >
                   {action.label}
                 </button>
@@ -1223,7 +1275,10 @@ export function KnowledgeEntryDetailPage({
             <p className="mt-2 text-sm font-semibold text-[#53287c]">
               {matchingReviewReveal
                 ? "Next review scheduled: Scheduled time will be set when you continue review."
-                : `Next review scheduled: ${formatScheduledReviewTime(detailReviewQueue?.next_review_at)}`}
+                : `Next review scheduled: ${buildScheduledReviewMessage(
+                    detailReviewQueue,
+                    detailReviewQueue?.current_schedule_label ?? activeReviewScheduleLabel,
+                  )}`}
             </p>
             {scheduleSheetApproximateReview ? (
               <p className="mt-1 text-sm text-[#6e5a86]">

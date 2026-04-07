@@ -26,6 +26,9 @@ class UserPreference(Base):
         server_default=text("true"),
     )
     review_depth_preset: Mapped[str] = mapped_column(String(16), nullable=False, insert_default="balanced")
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
     enable_confidence_check: Mapped[bool] = mapped_column(
         Boolean, nullable=False, insert_default=True, server_default=text("true")
     )
