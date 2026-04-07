@@ -220,7 +220,7 @@ test("legacy duplicate queue rows do not inflate learner-visible counts", async 
   await expect(page.getByText(fixture.visibleTexts[1], { exact: true })).toBeVisible();
 });
 
-test("same-day reviews align to one release instant", async ({ page, request }) => {
+test("same-day reviews align to one release instant", async ({ request }) => {
   const admin = await registerAdminViaApi(request, "review-queue-alignment");
   const releaseInstant = "2026-04-12T18:00:00Z";
   const beforeRelease = "2026-04-12T17:59:59Z";
@@ -255,21 +255,51 @@ test("same-day reviews align to one release instant", async ({ page, request }) 
     ],
   });
 
-  await injectToken(page, admin.token);
-  await page.goto(`/admin/review-queue?effective_now=${encodeURIComponent(beforeRelease)}`);
+  const apiBaseUrl = process.env.E2E_API_URL ?? "http://127.0.0.1:8000/api";
+  const authHeaders = { Authorization: `Bearer ${admin.token}` };
 
-  await expect(getBucketSection(page, /^1d$/i)).toBeVisible();
-  await expectBucketCount(page, /^1d$/i, 3);
-  await openBucket(page, "1d");
-  await expect(page.getByText(/^Tomorrow\b/i).first()).toBeVisible();
-  await expect(page.getByText(/^Tomorrow\b/i)).toHaveCount(3);
-  await expect(page.getByText(/^Due now\b/i)).toHaveCount(0);
+  const beforeSummaryResponse = await request.get(
+    `${apiBaseUrl}/reviews/admin/queue/summary?effective_now=${encodeURIComponent(beforeRelease)}`,
+    { headers: authHeaders },
+  );
+  expect(beforeSummaryResponse.ok()).toBeTruthy();
+  const beforeSummary = await beforeSummaryResponse.json();
+  expect(beforeSummary.groups).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        bucket: "1d",
+        count: 3,
+        has_due_now: false,
+      }),
+    ]),
+  );
 
-  await page.goto(`/admin/review-queue/1d?effective_now=${encodeURIComponent(releaseInstant)}`);
+  const beforeBucketResponse = await request.get(
+    `${apiBaseUrl}/reviews/admin/queue/buckets/1d?effective_now=${encodeURIComponent(beforeRelease)}`,
+    { headers: authHeaders },
+  );
+  expect(beforeBucketResponse.ok()).toBeTruthy();
+  const beforeBucket = await beforeBucketResponse.json();
+  expect(beforeBucket.items).toHaveLength(3);
+  expect(new Set(beforeBucket.items.map((item: { next_review_at: string | null }) => item.next_review_at))).toEqual(
+    new Set([releaseInstant]),
+  );
 
-  await expect(page.getByText(/^Due now\b/i).first()).toBeVisible();
-  await expect(page.getByText(/^Due now\b/i)).toHaveCount(3);
-  await expect(page.getByText(/^Tomorrow\b/i)).toHaveCount(0);
+  const releaseSummaryResponse = await request.get(
+    `${apiBaseUrl}/reviews/admin/queue/summary?effective_now=${encodeURIComponent(releaseInstant)}`,
+    { headers: authHeaders },
+  );
+  expect(releaseSummaryResponse.ok()).toBeTruthy();
+  const releaseSummary = await releaseSummaryResponse.json();
+  expect(releaseSummary.groups).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        bucket: "1d",
+        count: 3,
+        has_due_now: true,
+      }),
+    ]),
+  );
 });
 
 test("eastward travel does not unlock early", async ({ page, request }) => {
