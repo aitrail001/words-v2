@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,12 @@ _MONITOR_ENRICH_SCRIPT = _REPO_ROOT / "tools/lexicon/scripts/monitor-enrich.zsh"
 
 
 class ScriptTests(unittest.TestCase):
+    def _resolve_zsh(self) -> str:
+        for candidate in ("/bin/zsh", "/usr/bin/zsh", shutil.which("zsh")):
+            if candidate and Path(candidate).exists():
+                return str(candidate)
+        self.skipTest("zsh is not available in this environment")
+
     def _run_python_script(self, script_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(script_path), *args],
@@ -29,7 +36,7 @@ class ScriptTests(unittest.TestCase):
         env["INTERVAL_SECONDS"] = "0"
         env["TAIL_ROWS"] = "0"
         return subprocess.run(
-            ["/bin/zsh", str(_MONITOR_ENRICH_SCRIPT), "--once", "--no-tail", str(snapshot_dir)],
+            [self._resolve_zsh(), str(_MONITOR_ENRICH_SCRIPT), "--once", "--no-tail", str(snapshot_dir)],
             cwd=_REPO_ROOT,
             capture_output=True,
             text=True,
