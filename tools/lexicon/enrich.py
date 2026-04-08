@@ -2552,6 +2552,38 @@ def _reconcile_resumable_output(
     write_jsonl(output_path, reconciled_rows)
 
 
+def _backfill_checkpoint_from_existing_output(
+    output_path: Path,
+    checkpoint_path: Path,
+    *,
+    lexeme_by_entry_id: dict[str, LexemeRecord],
+) -> None:
+    if not output_path.exists():
+        return
+    existing_completed_lexeme_ids = _load_completed_lexeme_ids(checkpoint_path) if checkpoint_path.exists() else set()
+    checkpoint_rows: list[dict[str, Any]] = []
+    for row in read_jsonl(output_path):
+        entry_id = str(row.get("entry_id") or "").strip()
+        lexeme = lexeme_by_entry_id.get(entry_id)
+        if lexeme is None or lexeme.lexeme_id in existing_completed_lexeme_ids:
+            continue
+        checkpoint_rows.append(
+            {
+                "lexeme_id": lexeme.lexeme_id,
+                "lemma": lexeme.lemma,
+                "generation_run_id": (
+                    str(row.get("generation_run_id") or "").strip()
+                    or str(((row.get("senses") or [{}])[0] or {}).get("generation_run_id") or "").strip()
+                    or f"resume-backfill-{_utc_now()}"
+                ),
+                "completed_at": str(row.get("generated_at") or "").strip() or _utc_now(),
+            }
+        )
+        existing_completed_lexeme_ids.add(lexeme.lexeme_id)
+    if checkpoint_rows:
+        append_jsonl(checkpoint_path, checkpoint_rows)
+
+
 def _append_completed_lexeme_records(
     output_path: Path,
     decisions_path: Path,
@@ -2873,6 +2905,59 @@ def _validate_legacy_accepted_decisions_present_in_compiled_rows(
             "Legacy accepted decisions missing from compiled enrich artifact: "
             f"{preview}{suffix}"
         )
+
+
+def _merge_existing_compiled_core_rows(
+    *,
+    existing_rows: list[dict[str, Any]],
+    runtime_rows: list[dict[str, Any]],
+    snapshot_entry_order: list[str],
+) -> list[dict[str, Any]]:
+    existing_by_entry_id: dict[str, dict[str, Any]] = {}
+    existing_order: list[str] = []
+    for row in existing_rows:
+        entry_id = str(row.get("entry_id") or row.get("lexeme_id") or "").strip()
+        if not entry_id:
+            continue
+        existing_by_entry_id[entry_id] = row
+        existing_order.append(entry_id)
+
+    runtime_by_entry_id: dict[str, dict[str, Any]] = {}
+    runtime_order: list[str] = []
+    for row in runtime_rows:
+        entry_id = str(row.get("entry_id") or row.get("lexeme_id") or "").strip()
+        if not entry_id:
+            continue
+        runtime_by_entry_id[entry_id] = row
+        runtime_order.append(entry_id)
+
+    merged_by_entry_id = dict(existing_by_entry_id)
+    merged_by_entry_id.update(runtime_by_entry_id)
+
+    ordered_ids: list[str] = []
+    seen_ids: set[str] = set()
+
+    for entry_id in existing_order:
+        if entry_id in merged_by_entry_id and entry_id not in seen_ids:
+            ordered_ids.append(entry_id)
+            seen_ids.add(entry_id)
+
+    for entry_id in snapshot_entry_order:
+        if entry_id in merged_by_entry_id and entry_id not in seen_ids:
+            ordered_ids.append(entry_id)
+            seen_ids.add(entry_id)
+
+    for entry_id in runtime_order:
+        if entry_id in merged_by_entry_id and entry_id not in seen_ids:
+            ordered_ids.append(entry_id)
+            seen_ids.add(entry_id)
+
+    for entry_id in merged_by_entry_id:
+        if entry_id not in seen_ids:
+            ordered_ids.append(entry_id)
+            seen_ids.add(entry_id)
+
+    return [merged_by_entry_id[entry_id] for entry_id in ordered_ids]
 
 
 def merge_staged_enrichment_artifacts(
@@ -3263,10 +3348,21 @@ def run_core_enrichment(
     max_new_completed_lexemes: int | None = None,
 ) -> CoreEnrichmentRunResult:
     destination = output_path or snapshot_dir / "words.enriched.core.jsonl"
-    runtime_destination = runtime_output_path or snapshot_dir / "words.enriched.core.runtime.jsonl"
     checkpoint_destination = checkpoint_path or snapshot_dir / "enrich.core.checkpoint.jsonl"
     failures_destination = failures_output or snapshot_dir / "enrich.core.failures.jsonl"
     decisions_destination = decisions_path or snapshot_dir / "enrich.core.decisions.jsonl"
+    lexemes, _ = read_snapshot_inputs(snapshot_dir)
+    lexeme_by_entry_id = {lexeme.entry_id: lexeme for lexeme in lexemes}
+    if runtime_output_path is not None and runtime_output_path != destination:
+        raise RuntimeError(
+            "enrich-core no longer supports a separate runtime output path; use --output for the compiled core artifact"
+        )
+    if resume:
+        _backfill_checkpoint_from_existing_output(
+            destination,
+            checkpoint_destination,
+            lexeme_by_entry_id=lexeme_by_entry_id,
+        )
     effective_settings = settings or LexiconSettings.from_env(stage="core")
     runtime_logger = _build_runtime_logger(
         snapshot_dir=snapshot_dir,
@@ -3307,7 +3403,7 @@ def run_core_enrichment(
         )
     enrich_snapshot(
         snapshot_dir,
-        output_path=runtime_destination,
+        output_path=destination,
         settings=effective_settings,
         model_name=model_name,
         generated_at=generated_at,
@@ -3333,16 +3429,11 @@ def run_core_enrichment(
         max_new_completed_lexemes=max_new_completed_lexemes,
         word_provider=staged_provider,
     )
-    core_rows: list[dict[str, Any]] = []
-    for row in read_jsonl(runtime_destination):
-        core_row, _ = split_compiled_row_for_staging(row)
-        core_rows.append(core_row)
-    write_jsonl(destination, core_rows)
-    lexeme_count = len(read_snapshot_inputs(snapshot_dir)[0])
+    core_rows = read_jsonl(destination) if destination.exists() else []
     return CoreEnrichmentRunResult(
         output_path=destination,
-        runtime_output_path=runtime_destination,
-        lexeme_count=lexeme_count,
+        runtime_output_path=destination,
+        lexeme_count=len(lexemes),
         core_row_count=len(core_rows),
     )
 

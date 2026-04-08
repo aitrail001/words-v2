@@ -1327,7 +1327,7 @@ def build_parser() -> argparse.ArgumentParser:
     enrich_core = subparsers.add_parser('enrich-core', help='write staged English/core learner enrichment rows for a snapshot directory')
     enrich_core.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')
     enrich_core.add_argument('--output', help='optional output path for staged `words.enriched.core.jsonl`')
-    enrich_core.add_argument('--runtime-output', help='optional internal runtime output path for compiled core generation state')
+    enrich_core.add_argument('--runtime-output', help='deprecated alias for --output; separate staged core runtime files are no longer supported')
     enrich_core.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='enrichment provider mode')
     enrich_core.add_argument('--model', help='optional model override for this enrichment run')
     enrich_core.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for real endpoint runs')
