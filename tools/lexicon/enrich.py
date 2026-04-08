@@ -752,8 +752,12 @@ def _validate_openai_compatible_payload(response: dict[str, Any], *, include_tra
     return _normalize_word_enrichment_payload(response, include_translations=include_translations)
 
 
-def _validate_openai_compatible_phrase_payload(response: dict[str, Any]) -> dict[str, Any]:
-    return _normalize_phrase_enrichment_payload(response)
+def _validate_openai_compatible_phrase_payload(
+    response: dict[str, Any],
+    *,
+    include_translations: bool = True,
+) -> dict[str, Any]:
+    return _normalize_phrase_enrichment_payload(response, include_translations=include_translations)
 
 
 def _normalize_examples(value: Any, *, fallback_sentence: str) -> list[SenseExample]:
@@ -1038,8 +1042,8 @@ def _word_enrichment_response_schema(*, include_translations: bool = True) -> di
     return _build_word_enrichment_response_schema(include_translations=include_translations)
 
 
-def _phrase_enrichment_response_schema() -> dict[str, Any]:
-    return _build_phrase_enrichment_response_schema()
+def _phrase_enrichment_response_schema(*, include_translations: bool = True) -> dict[str, Any]:
+    return _build_phrase_enrichment_response_schema(include_translations=include_translations)
 
 
 def _is_repairable_word_payload_error(error: RuntimeError) -> bool:
@@ -1197,7 +1201,7 @@ def _generate_validated_phrase_payload_with_stats(
     include_translations: bool = True,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     prompt = build_phrase_enrichment_prompt(lexeme=lexeme, include_translations=include_translations)
-    response_schema = _phrase_enrichment_response_schema()
+    response_schema = _phrase_enrichment_response_schema(include_translations=include_translations)
     last_error: RuntimeError | None = None
     transient_retries = 0
     repair_attempts = 0
@@ -1231,7 +1235,7 @@ def _generate_validated_phrase_payload_with_stats(
             raise
 
         try:
-            validated = _validate_openai_compatible_phrase_payload(response)
+            validated = _validate_openai_compatible_phrase_payload(response, include_translations=include_translations)
             if repair_attempts > 0:
                 _emit_validation_terminal_event(
                     runtime_logger,
@@ -2929,7 +2933,7 @@ def build_placeholder_translation_provider(
     settings: LexiconSettings | None = None,
     model_name: str | None = None,
 ) -> TranslationProvider:
-    effective_settings = settings or LexiconSettings.from_env()
+    effective_settings = settings or LexiconSettings.from_env(stage="core")
     effective_model_name = model_name or effective_settings.llm_model or "placeholder-llm"
 
     def provider(
@@ -3192,7 +3196,7 @@ def run_core_enrichment(
     checkpoint_destination = checkpoint_path or snapshot_dir / "enrich.core.checkpoint.jsonl"
     failures_destination = failures_output or snapshot_dir / "enrich.core.failures.jsonl"
     decisions_destination = decisions_path or snapshot_dir / "enrich.core.decisions.jsonl"
-    effective_settings = settings or LexiconSettings.from_env()
+    effective_settings = settings or LexiconSettings.from_env(stage="translations")
     runtime_logger = _build_runtime_logger(
         snapshot_dir=snapshot_dir,
         log_level=log_level,

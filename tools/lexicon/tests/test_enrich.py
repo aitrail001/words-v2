@@ -5003,6 +5003,59 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
             )
         self.assertEqual(client.calls, 2)
 
+    def test_generate_validated_phrase_payload_accepts_core_mode_without_translations(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_break_a_leg",
+            lemma="break a leg",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_break_a_leg",
+            entry_type="phrase",
+            normalized_form="break a leg",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="idiom",
+            display_form="Break a leg",
+            seed_metadata={"raw_reviewed_as": "idiom"},
+        )
+        core_only = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                }
+            ],
+        }
+
+        class StubClient:
+            def __init__(self):
+                self.response_schemas: list[dict[str, object] | None] = []
+
+            def generate_json(self, prompt: str, response_schema=None):
+                del prompt
+                self.response_schemas.append(response_schema)
+                return core_only
+
+        client = StubClient()
+        rows, stats = _generate_validated_phrase_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            include_translations=False,
+        )
+
+        self.assertEqual(rows["phrase_kind"], "idiom")
+        self.assertEqual(rows["senses"][0]["translations"], {})
+        self.assertEqual(int(stats["validation_retry_count"]), 0)
+        self.assertNotIn("translations", client.response_schemas[0]["schema"]["properties"]["senses"]["items"]["required"])
+
     def test_generate_validated_phrase_payload_emits_validation_outcome_events(self) -> None:
         lexeme = LexemeRecord(
             snapshot_id="snap-1",

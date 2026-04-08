@@ -46,30 +46,33 @@ def _translation_schema() -> dict[str, Any]:
     }
 
 
-def _sense_schema() -> dict[str, Any]:
+def _sense_schema(*, include_translations: bool = True) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "definition": {"type": "string"},
+        "part_of_speech": {"type": "string"},
+        "examples": {"type": "array", "items": _phrase_example_schema(), "minItems": 1},
+        "grammar_patterns": _nullable_schema({"type": "array", "items": {"type": "string"}}),
+        "usage_note": _nullable_schema({"type": "string"}),
+    }
+    required = [
+        "definition",
+        "part_of_speech",
+        "examples",
+        "grammar_patterns",
+        "usage_note",
+    ]
+    if include_translations:
+        properties["translations"] = {
+            "type": "object",
+            "properties": {locale: _translation_schema() for locale in REQUIRED_TRANSLATION_LOCALES},
+            "required": list(REQUIRED_TRANSLATION_LOCALES),
+            "additionalProperties": False,
+        }
+        required.append("translations")
     return {
         "type": "object",
-        "properties": {
-            "definition": {"type": "string"},
-            "part_of_speech": {"type": "string"},
-            "examples": {"type": "array", "items": _phrase_example_schema(), "minItems": 1},
-            "grammar_patterns": _nullable_schema({"type": "array", "items": {"type": "string"}}),
-            "usage_note": _nullable_schema({"type": "string"}),
-            "translations": {
-                "type": "object",
-                "properties": {locale: _translation_schema() for locale in REQUIRED_TRANSLATION_LOCALES},
-                "required": list(REQUIRED_TRANSLATION_LOCALES),
-                "additionalProperties": False,
-            },
-        },
-        "required": [
-            "definition",
-            "part_of_speech",
-            "examples",
-            "grammar_patterns",
-            "usage_note",
-            "translations",
-        ],
+        "properties": properties,
+        "required": required,
         "additionalProperties": False,
     }
 
@@ -116,7 +119,7 @@ def _normalize_phrase_translation_payload(
     return normalized
 
 
-def build_phrase_enrichment_response_schema() -> dict[str, Any]:
+def build_phrase_enrichment_response_schema(*, include_translations: bool = True) -> dict[str, Any]:
     return {
         "name": "lexicon_enrichment_phrase",
         "strict": True,
@@ -124,7 +127,7 @@ def build_phrase_enrichment_response_schema() -> dict[str, Any]:
             "type": "object",
             "properties": {
                 "phrase_kind": {"type": "string", "enum": sorted(ALLOWED_PHRASE_KINDS)},
-                "senses": {"type": "array", "items": _sense_schema(), "minItems": 1, "maxItems": 2},
+                "senses": {"type": "array", "items": _sense_schema(include_translations=include_translations), "minItems": 1, "maxItems": 2},
                 "confidence": {"type": "number"},
             },
             "required": [
@@ -162,7 +165,7 @@ def _normalize_phrase_translation_usage_note(*, source_usage_note: Any, translat
     )
 
 
-def normalize_phrase_enrichment_payload(response: dict[str, Any]) -> dict[str, Any]:
+def normalize_phrase_enrichment_payload(response: dict[str, Any], *, include_translations: bool = True) -> dict[str, Any]:
     if not isinstance(response, dict):
         raise RuntimeError("OpenAI-compatible endpoint returned a non-object phrase enrichment payload")
 
@@ -196,10 +199,14 @@ def normalize_phrase_enrichment_payload(response: dict[str, Any]) -> dict[str, A
                     if sense.get("usage_note") is not None
                     else None
                 ),
-                "translations": _normalize_phrase_translation_payload(
-                    sense.get("translations"),
-                    example_count=len(examples),
-                    source_usage_note=source_usage_note,
+                "translations": (
+                    _normalize_phrase_translation_payload(
+                        sense.get("translations"),
+                        example_count=len(examples),
+                        source_usage_note=source_usage_note,
+                    )
+                    if include_translations
+                    else {}
                 ),
             }
         )
