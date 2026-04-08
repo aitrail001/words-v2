@@ -8,11 +8,15 @@ from pathlib import Path
 from typing import Iterable
 
 
-def _resolve_decisions_path(path_arg: str) -> Path:
+def _resolve_decision_paths(path_arg: str) -> list[tuple[str, Path]]:
     path = Path(path_arg)
     if path.is_dir():
-        return path / "enrich.decisions.jsonl"
-    return path
+        candidates = [
+            ("realtime", path / "enrich.decisions.jsonl"),
+            ("core", path / "enrich.core.decisions.jsonl"),
+        ]
+        return [(stage, candidate) for stage, candidate in candidates if candidate.exists()]
+    return [("file", path)]
 
 
 def _iter_discard_rows(decisions_path: Path) -> Iterable[dict]:
@@ -28,11 +32,11 @@ def _iter_discard_rows(decisions_path: Path) -> Iterable[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Show discarded realtime enrichment decisions and their discard reasons."
+        description="Show discarded enrichment decisions and their discard reasons."
     )
     parser.add_argument(
         "path",
-        help="snapshot directory or enrich.decisions.jsonl path",
+        help="snapshot directory or explicit decisions JSONL path",
     )
     parser.add_argument(
         "--json",
@@ -41,22 +45,26 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    decisions_path = _resolve_decisions_path(args.path)
-    if not decisions_path.exists():
-        raise SystemExit(f"decisions file not found: {decisions_path}")
+    decision_paths = _resolve_decision_paths(args.path)
+    if not decision_paths:
+        raise SystemExit(f"decisions file not found under: {args.path}")
 
-    for row in _iter_discard_rows(decisions_path):
-        payload = {
-            "lexeme_id": row.get("lexeme_id"),
-            "lemma": row.get("lemma"),
-            "discard_reason": row.get("discard_reason"),
-        }
-        if args.json:
-            print(json.dumps(payload, ensure_ascii=False))
-        else:
-            print(
-                f"{payload['lemma']}\t{payload['discard_reason']}\t{payload['lexeme_id']}"
-            )
+    for stage, decisions_path in decision_paths:
+        if not decisions_path.exists():
+            raise SystemExit(f"decisions file not found: {decisions_path}")
+        for row in _iter_discard_rows(decisions_path):
+            payload = {
+                "stage": stage,
+                "lexeme_id": row.get("lexeme_id"),
+                "lemma": row.get("lemma"),
+                "discard_reason": row.get("discard_reason"),
+            }
+            if args.json:
+                print(json.dumps(payload, ensure_ascii=False))
+            else:
+                print(
+                    f"{payload['stage']}\t{payload['lemma']}\t{payload['discard_reason']}\t{payload['lexeme_id']}"
+                )
     return 0
 
 

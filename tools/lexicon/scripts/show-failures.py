@@ -8,11 +8,16 @@ from pathlib import Path
 from typing import Iterable
 
 
-def _resolve_failures_path(path_arg: str) -> Path:
+def _resolve_failure_paths(path_arg: str) -> list[tuple[str, Path]]:
     path = Path(path_arg)
     if path.is_dir():
-        return path / "enrich.failures.jsonl"
-    return path
+        candidates = [
+            ("realtime", path / "enrich.failures.jsonl"),
+            ("core", path / "enrich.core.failures.jsonl"),
+            ("translations", path / "enrich.translations.failures.jsonl"),
+        ]
+        return [(stage, candidate) for stage, candidate in candidates if candidate.exists()]
+    return [("file", path)]
 
 
 def _iter_failure_rows(failures_path: Path) -> Iterable[dict]:
@@ -26,11 +31,11 @@ def _iter_failure_rows(failures_path: Path) -> Iterable[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Show realtime enrichment failure rows and their error messages."
+        description="Show enrichment failure rows and their error messages."
     )
     parser.add_argument(
         "path",
-        help="snapshot directory or enrich.failures.jsonl path",
+        help="snapshot directory or explicit failures JSONL path",
     )
     parser.add_argument(
         "--json",
@@ -39,20 +44,28 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    failures_path = _resolve_failures_path(args.path)
-    if not failures_path.exists():
-        raise SystemExit(f"failures file not found: {failures_path}")
+    failure_paths = _resolve_failure_paths(args.path)
+    if not failure_paths:
+        raise SystemExit(f"failures file not found under: {args.path}")
 
-    for row in _iter_failure_rows(failures_path):
-        payload = {
-            "lexeme_id": row.get("lexeme_id"),
-            "lemma": row.get("lemma"),
-            "error": row.get("error"),
-        }
-        if args.json:
-            print(json.dumps(payload, ensure_ascii=False))
-        else:
-            print(f"{payload['lemma']}\t{payload['error']}\t{payload['lexeme_id']}")
+    for stage, failures_path in failure_paths:
+        if not failures_path.exists():
+            raise SystemExit(f"failures file not found: {failures_path}")
+        for row in _iter_failure_rows(failures_path):
+            payload = {
+                "stage": stage,
+                "lexeme_id": row.get("lexeme_id"),
+                "lemma": row.get("lemma"),
+                "entry_id": row.get("entry_id"),
+                "sense_id": row.get("sense_id"),
+                "error": row.get("error"),
+            }
+            if args.json:
+                print(json.dumps(payload, ensure_ascii=False))
+            else:
+                label = payload["lemma"] or payload["entry_id"] or "<unknown>"
+                identifier = payload["lexeme_id"] or payload["sense_id"] or payload["entry_id"]
+                print(f"{payload['stage']}\t{label}\t{payload['error']}\t{identifier}")
     return 0
 
 

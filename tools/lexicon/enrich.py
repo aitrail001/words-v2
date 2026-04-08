@@ -2758,6 +2758,11 @@ def split_legacy_enrich_artifact(
     translations_failures_path: Path | None = None,
 ) -> dict[str, Any]:
     compiled_rows = read_jsonl(compiled_input_path)
+    compiled_entry_ids = {
+        str(row.get("lexeme_id") or row.get("entry_id") or "").strip()
+        for row in compiled_rows
+        if str(row.get("lexeme_id") or row.get("entry_id") or "").strip()
+    }
     core_rows: list[dict[str, Any]] = []
     translation_rows: list[dict[str, Any]] = []
     for row in compiled_rows:
@@ -2773,13 +2778,38 @@ def split_legacy_enrich_artifact(
         "core_row_count": len(core_rows),
         "translation_row_count": len(translation_rows),
     }
+    legacy_checkpoint_path = compiled_input_path.parent / "enrich.checkpoint.jsonl"
+    legacy_decisions_path = compiled_input_path.parent / "enrich.decisions.jsonl"
+    legacy_decision_rows: list[dict[str, Any]] | None = None
+    if legacy_decisions_path.exists():
+        legacy_decision_rows = read_jsonl(legacy_decisions_path)
+        _validate_compiled_rows_present_in_legacy_core_ledgers(
+            compiled_entry_ids=compiled_entry_ids,
+            ledger_rows=legacy_decision_rows,
+            ledger_name="decisions",
+        )
+        _validate_legacy_accepted_decisions_present_in_compiled_rows(
+            compiled_entry_ids=compiled_entry_ids,
+            decision_rows=legacy_decision_rows,
+        )
     if core_checkpoint_path is not None:
-        core_checkpoint_rows = [_build_core_migration_checkpoint_row(row) for row in core_rows]
+        if legacy_checkpoint_path.exists():
+            core_checkpoint_rows = read_jsonl(legacy_checkpoint_path)
+            _validate_compiled_rows_present_in_legacy_core_ledgers(
+                compiled_entry_ids=compiled_entry_ids,
+                ledger_rows=core_checkpoint_rows,
+                ledger_name="checkpoint",
+            )
+        else:
+            core_checkpoint_rows = [_build_core_migration_checkpoint_row(row) for row in core_rows]
         write_jsonl(core_checkpoint_path, core_checkpoint_rows)
         payload["core_checkpoint"] = str(core_checkpoint_path)
         payload["core_checkpoint_row_count"] = len(core_checkpoint_rows)
     if core_decisions_path is not None:
-        core_decision_rows = [_build_core_migration_decision_row(row) for row in core_rows]
+        if legacy_decision_rows is not None:
+            core_decision_rows = legacy_decision_rows
+        else:
+            core_decision_rows = [_build_core_migration_decision_row(row) for row in core_rows]
         write_jsonl(core_decisions_path, core_decision_rows)
         payload["core_decisions"] = str(core_decisions_path)
         payload["core_decision_row_count"] = len(core_decision_rows)
@@ -2802,6 +2832,47 @@ def split_legacy_enrich_artifact(
         payload["translations_failures"] = str(translations_failures_path)
         payload["translations_failure_row_count"] = 0
     return payload
+
+
+def _validate_compiled_rows_present_in_legacy_core_ledgers(
+    *,
+    compiled_entry_ids: set[str],
+    ledger_rows: list[dict[str, Any]],
+    ledger_name: str,
+) -> None:
+    ledger_ids = {
+        str(row.get("lexeme_id") or row.get("entry_id") or "").strip()
+        for row in ledger_rows
+        if str(row.get("lexeme_id") or row.get("entry_id") or "").strip()
+    }
+    missing_ids = sorted(compiled_entry_ids - ledger_ids)
+    if missing_ids:
+        preview = ", ".join(missing_ids[:10])
+        suffix = "" if len(missing_ids) <= 10 else f" (+{len(missing_ids) - 10} more)"
+        raise RuntimeError(
+            f"Compiled rows missing from legacy enrich ledgers: {preview}{suffix} (checked {ledger_name})"
+        )
+
+
+def _validate_legacy_accepted_decisions_present_in_compiled_rows(
+    *,
+    compiled_entry_ids: set[str],
+    decision_rows: list[dict[str, Any]],
+) -> None:
+    accepted_legacy_ids = {
+        str(row.get("lexeme_id") or row.get("entry_id") or "").strip()
+        for row in decision_rows
+        if str(row.get("lexeme_id") or row.get("entry_id") or "").strip()
+        and str(row.get("decision") or "").strip() != "discard"
+    }
+    missing_ids = sorted(accepted_legacy_ids - compiled_entry_ids)
+    if missing_ids:
+        preview = ", ".join(missing_ids[:10])
+        suffix = "" if len(missing_ids) <= 10 else f" (+{len(missing_ids) - 10} more)"
+        raise RuntimeError(
+            "Legacy accepted decisions missing from compiled enrich artifact: "
+            f"{preview}{suffix}"
+        )
 
 
 def merge_staged_enrichment_artifacts(
