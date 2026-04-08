@@ -1,0 +1,21 @@
+services:
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.59.0-noble
+    working_dir: /workspace/e2e
+    command: sh -lc "tail -f /dev/null"
+    environment:
+      CI: "true"
+      E2E_BASE_URL: http://nginx
+      E2E_API_URL: http://backend:8000/api
+      E2E_ADMIN_URL: http://admin-frontend:3001
+      E2E_DB_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+    volumes:
+      - ./:/workspace
+    depends_on:
+      backend:
+        condition: service_healthy
+      admin-frontend:
+        condition: service_healthy
+      nginx:
+        condition: service_healthy
+    profiles: ["tests"]

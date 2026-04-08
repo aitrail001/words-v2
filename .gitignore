@@ -17,6 +17,7 @@ venv/
 
 # Node
 node_modules/
+.pnpm-store/
 .next/
 out/
 .turbo/
