@@ -3429,7 +3429,11 @@ def run_core_enrichment(
         max_new_completed_lexemes=max_new_completed_lexemes,
         word_provider=staged_provider,
     )
-    core_rows = read_jsonl(destination) if destination.exists() else []
+    core_rows = []
+    for row in read_jsonl(destination) if destination.exists() else []:
+        core_row, _ = split_compiled_row_for_staging(row)
+        core_rows.append(core_row)
+    write_jsonl(destination, core_rows)
     return CoreEnrichmentRunResult(
         output_path=destination,
         runtime_output_path=destination,
