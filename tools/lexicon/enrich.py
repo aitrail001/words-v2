@@ -2571,6 +2571,7 @@ def _backfill_checkpoint_from_existing_output(
             {
                 "lexeme_id": lexeme.lexeme_id,
                 "lemma": lexeme.lemma,
+                "status": "completed",
                 "generation_run_id": (
                     str(row.get("generation_run_id") or "").strip()
                     or str(((row.get("senses") or [{}])[0] or {}).get("generation_run_id") or "").strip()

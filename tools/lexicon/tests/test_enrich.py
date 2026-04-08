@@ -614,6 +614,7 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(resumed_lemmas, ["run"])
             checkpoint_rows = read_jsonl(snapshot_dir / "enrich.core.checkpoint.jsonl")
             self.assertEqual([row["lexeme_id"] for row in checkpoint_rows], ["lx_alpha", "lx_play"])
+            self.assertEqual([row["status"] for row in checkpoint_rows], ["completed", "completed"])
 
     def test_run_core_enrichment_rejects_distinct_runtime_output_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
