@@ -25,7 +25,13 @@ from tools.lexicon.batch_ledger import (
 from tools.lexicon.batch_ingest import build_batch_output_summary, ingest_batch_outputs
 from tools.lexicon.form_adjudication import adjudicate_forms, load_adjudications
 from tools.lexicon.compile_export import compile_snapshot
-from tools.lexicon.enrich import run_enrichment
+from tools.lexicon.enrich import (
+    merge_staged_enrichment_artifacts,
+    run_core_enrichment,
+    run_enrichment,
+    run_translation_enrichment,
+    split_legacy_enrich_artifact,
+)
 from tools.lexicon.export_db import export_db_fixture
 from tools.lexicon.ids import build_snapshot_id
 from tools.lexicon.inventory import load_seed_rows
@@ -314,6 +320,97 @@ def _enrich_command(args: argparse.Namespace) -> int:
         'enrichment_count': len(result.enrichments),
     }
     print(json.dumps(payload))
+    return 0
+
+
+def _enrich_core_command(args: argparse.Namespace) -> int:
+    if args.retry_failed_only and not args.resume:
+        print('--retry-failed-only requires --resume', file=sys.stderr)
+        return 2
+    if args.skip_failed and not args.resume:
+        print('--skip-failed requires --resume', file=sys.stderr)
+        return 2
+    if args.retry_failed_only and args.skip_failed:
+        print('--retry-failed-only and --skip-failed cannot be combined', file=sys.stderr)
+        return 2
+    try:
+        result = run_core_enrichment(
+            Path(args.snapshot_dir),
+            output_path=Path(args.output) if args.output else None,
+            runtime_output_path=Path(args.runtime_output) if args.runtime_output else None,
+            provider_mode=args.provider_mode,
+            model_name=args.model,
+            reasoning_effort=args.reasoning_effort,
+            max_concurrency=args.max_concurrency,
+            resume=args.resume,
+            retry_failed_only=args.retry_failed_only,
+            skip_failed=args.skip_failed,
+            checkpoint_path=Path(args.checkpoint_path) if args.checkpoint_path else None,
+            failures_output=Path(args.failures_output) if args.failures_output else None,
+            decisions_path=Path(args.decisions_path) if args.decisions_path else None,
+            max_failures=args.max_failures,
+            transient_retries=args.transient_retries,
+            validation_retries=args.validation_retries,
+            log_level=args.log_level,
+            log_file=Path(args.log_file) if args.log_file else None,
+            request_delay_seconds=args.request_delay_seconds,
+            max_new_completed_lexemes=args.max_new_completed_lexemes,
+        )
+    except (LexiconDependencyError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps({
+        'command': 'enrich-core',
+        'snapshot_dir': str(Path(args.snapshot_dir)),
+        'output': str(result.output_path),
+        'runtime_output': str(result.runtime_output_path),
+        'lexeme_count': result.lexeme_count,
+        'core_row_count': result.core_row_count,
+    }))
+    return 0
+
+
+def _enrich_translations_command(args: argparse.Namespace) -> int:
+    if args.retry_failed_only and not args.resume:
+        print('--retry-failed-only requires --resume', file=sys.stderr)
+        return 2
+    if args.skip_failed and not args.resume:
+        print('--skip-failed requires --resume', file=sys.stderr)
+        return 2
+    if args.retry_failed_only and args.skip_failed:
+        print('--retry-failed-only and --skip-failed cannot be combined', file=sys.stderr)
+        return 2
+    try:
+        result = run_translation_enrichment(
+            Path(args.snapshot_dir),
+            core_input_path=Path(args.core_input) if args.core_input else None,
+            output_path=Path(args.output) if args.output else None,
+            provider_mode=args.provider_mode,
+            model_name=args.model,
+            reasoning_effort=args.reasoning_effort,
+            max_concurrency=args.max_concurrency,
+            resume=args.resume,
+            retry_failed_only=args.retry_failed_only,
+            skip_failed=args.skip_failed,
+            checkpoint_path=Path(args.checkpoint_path) if args.checkpoint_path else None,
+            failures_output=Path(args.failures_output) if args.failures_output else None,
+            decisions_path=Path(args.decisions_path) if args.decisions_path else None,
+            max_failures=args.max_failures,
+            transient_retries=args.transient_retries,
+            validation_retries=args.validation_retries,
+            log_level=args.log_level,
+            log_file=Path(args.log_file) if args.log_file else None,
+        )
+    except (LexiconDependencyError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps({
+        'command': 'enrich-translations',
+        'snapshot_dir': str(Path(args.snapshot_dir)),
+        'output': str(result.output_path),
+        'sense_count': result.sense_count,
+        'translation_row_count': result.translation_row_count,
+    }))
     return 0
 
 
@@ -872,6 +969,42 @@ def _review_materialize_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _split_enrich_artifact_command(args: argparse.Namespace) -> int:
+    try:
+        payload = split_legacy_enrich_artifact(
+            compiled_input_path=Path(args.compiled_input),
+            core_output_path=Path(args.core_output),
+            translations_output_path=Path(args.translations_output),
+            core_checkpoint_path=Path(args.core_checkpoint_path) if args.core_checkpoint_path else None,
+            core_decisions_path=Path(args.core_decisions_path) if args.core_decisions_path else None,
+            core_failures_path=Path(args.core_failures_path) if args.core_failures_path else None,
+            translations_checkpoint_path=Path(args.translations_checkpoint_path) if args.translations_checkpoint_path else None,
+            translations_decisions_path=Path(args.translations_decisions_path) if args.translations_decisions_path else None,
+            translations_failures_path=Path(args.translations_failures_path) if args.translations_failures_path else None,
+        )
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    payload['command'] = 'split-enrich-artifact'
+    print(json.dumps(payload))
+    return 0
+
+
+def _merge_enrich_command(args: argparse.Namespace) -> int:
+    try:
+        payload = merge_staged_enrichment_artifacts(
+            core_input_path=Path(args.core_input),
+            translations_input_path=Path(args.translations_input),
+            output_path=Path(args.output),
+        )
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    payload['command'] = 'merge-enrich'
+    print(json.dumps(payload))
+    return 0
+
+
 def _smoke_openai_compatible_command(args: argparse.Namespace) -> int:
     runtime_logger = getattr(args, 'runtime_logger', None)
     try:
@@ -1191,6 +1324,50 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument('--max-new-completed-lexemes', type=int, help='stop after this many newly completed lexemes in the current invocation')
     enrich.set_defaults(handler=_enrich_command)
 
+    enrich_core = subparsers.add_parser('enrich-core', help='write staged English/core learner enrichment rows for a snapshot directory')
+    enrich_core.add_argument('--snapshot-dir', required=True, help='directory containing normalized snapshot JSONL files')
+    enrich_core.add_argument('--output', help='optional output path for staged `words.enriched.core.jsonl`')
+    enrich_core.add_argument('--runtime-output', help='optional internal runtime output path for compiled core generation state')
+    enrich_core.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='enrichment provider mode')
+    enrich_core.add_argument('--model', help='optional model override for this enrichment run')
+    enrich_core.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for real endpoint runs')
+    enrich_core.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel lexeme jobs for core enrichment')
+    enrich_core.add_argument('--resume', action='store_true', help='resume a prior core enrichment run using the checkpoint file')
+    enrich_core.add_argument('--retry-failed-only', action='store_true', help='with --resume, rerun only lexemes previously recorded as failed')
+    enrich_core.add_argument('--skip-failed', action='store_true', help='with --resume, skip lexemes previously recorded as failed instead of retrying them')
+    enrich_core.add_argument('--checkpoint-path', help='optional override path for the core enrichment checkpoint JSONL file')
+    enrich_core.add_argument('--failures-output', help='optional override path for the core enrichment failures JSONL file')
+    enrich_core.add_argument('--decisions-path', help='optional override path for the core enrichment decisions JSONL file')
+    enrich_core.add_argument('--max-failures', type=int, help='stop submitting new core enrichment jobs after this many lexeme failures')
+    enrich_core.add_argument('--transient-retries', type=int, default=2, help='maximum transient transport/model retries per lexeme')
+    enrich_core.add_argument('--validation-retries', type=int, default=1, help='maximum retryable validation retries per lexeme')
+    enrich_core.add_argument('--log-level', choices=['quiet', 'info', 'debug'], default='info', help='runtime progress logging level for enrich-core')
+    enrich_core.add_argument('--log-file', type=Path, help='optional runtime progress log file for enrich-core')
+    enrich_core.add_argument('--request-delay-seconds', type=float, default=1.0, help='delay between enrichment request starts in seconds')
+    enrich_core.add_argument('--max-new-completed-lexemes', type=int, help='stop after this many newly completed lexemes in the current invocation')
+    enrich_core.set_defaults(handler=_enrich_core_command)
+
+    enrich_translations = subparsers.add_parser('enrich-translations', help='write staged translation ledger rows from a core enrichment artifact')
+    enrich_translations.add_argument('--snapshot-dir', required=True, help='directory containing staged core and translation artifacts')
+    enrich_translations.add_argument('--core-input', help='optional staged core JSONL input path; defaults to snapshot_dir/words.enriched.core.jsonl')
+    enrich_translations.add_argument('--output', help='optional output path for staged `words.translations.jsonl`')
+    enrich_translations.add_argument('--provider-mode', choices=['auto', 'placeholder', 'openai_compatible', 'openai_compatible_node'], default='auto', help='translation provider mode')
+    enrich_translations.add_argument('--model', help='optional model override for this translation run')
+    enrich_translations.add_argument('--reasoning-effort', choices=_REASONING_EFFORT_CHOICES, help='optional reasoning effort override for real endpoint runs')
+    enrich_translations.add_argument('--max-concurrency', type=int, default=1, help='maximum parallel sense translation jobs')
+    enrich_translations.add_argument('--resume', action='store_true', help='resume a prior translation run using the checkpoint file')
+    enrich_translations.add_argument('--retry-failed-only', action='store_true', help='with --resume, rerun only senses previously recorded as failed')
+    enrich_translations.add_argument('--skip-failed', action='store_true', help='with --resume, skip senses previously recorded as failed instead of retrying them')
+    enrich_translations.add_argument('--checkpoint-path', help='optional override path for the translation checkpoint JSONL file')
+    enrich_translations.add_argument('--failures-output', help='optional override path for the translation failures JSONL file')
+    enrich_translations.add_argument('--decisions-path', help='optional override path for the translation decisions JSONL file')
+    enrich_translations.add_argument('--max-failures', type=int, help='stop submitting new translation jobs after this many sense failures')
+    enrich_translations.add_argument('--transient-retries', type=int, default=2, help='maximum transient transport/model retries per sense')
+    enrich_translations.add_argument('--validation-retries', type=int, default=1, help='maximum retryable validation retries per sense')
+    enrich_translations.add_argument('--log-level', choices=['quiet', 'info', 'debug'], default='info', help='runtime progress logging level for enrich-translations')
+    enrich_translations.add_argument('--log-file', type=Path, help='optional runtime progress log file for enrich-translations')
+    enrich_translations.set_defaults(handler=_enrich_translations_command)
+
     smoke_openai = subparsers.add_parser('smoke-openai-compatible', help='run a tiny real OpenAI-compatible smoke flow locally')
     smoke_openai.add_argument('--output-dir', required=True, help='directory to write the temporary smoke snapshot and compiled output')
     smoke_openai.add_argument('--snapshot-id', help='optional snapshot identifier override')
@@ -1318,6 +1495,26 @@ def build_parser() -> argparse.ArgumentParser:
     review_materialize.add_argument('--regenerate-output', required=True, help='path to write regeneration request rows')
     _add_shared_logging_args(review_materialize)
     review_materialize.set_defaults(handler=_review_materialize_command)
+
+    split_enrich_artifact = subparsers.add_parser('split-enrich-artifact', help='split a legacy merged learner artifact into staged core and translation ledgers')
+    split_enrich_artifact.add_argument('--compiled-input', required=True, help='merged compiled learner JSONL input path')
+    split_enrich_artifact.add_argument('--core-output', required=True, help='path to write the staged core JSONL artifact')
+    split_enrich_artifact.add_argument('--translations-output', required=True, help='path to write the staged translation ledger JSONL artifact')
+    split_enrich_artifact.add_argument('--core-checkpoint-path', help='optional path to write synthesized `enrich.core.checkpoint.jsonl` for resume')
+    split_enrich_artifact.add_argument('--core-decisions-path', help='optional path to write synthesized `enrich.core.decisions.jsonl` for resume')
+    split_enrich_artifact.add_argument('--core-failures-path', help='optional path to write synthesized empty `enrich.core.failures.jsonl` for resume')
+    split_enrich_artifact.add_argument('--translations-checkpoint-path', help='optional path to write synthesized `enrich.translations.checkpoint.jsonl` for resume')
+    split_enrich_artifact.add_argument('--translations-decisions-path', help='optional path to write synthesized `enrich.translations.decisions.jsonl` for resume')
+    split_enrich_artifact.add_argument('--translations-failures-path', help='optional path to write synthesized empty `enrich.translations.failures.jsonl` for resume')
+    _add_shared_logging_args(split_enrich_artifact)
+    split_enrich_artifact.set_defaults(handler=_split_enrich_artifact_command)
+
+    merge_enrich = subparsers.add_parser('merge-enrich', help='merge staged core and translation artifacts into a downstream-compatible compiled learner JSONL')
+    merge_enrich.add_argument('--core-input', required=True, help='staged core JSONL input path')
+    merge_enrich.add_argument('--translations-input', required=True, help='staged translation ledger JSONL input path')
+    merge_enrich.add_argument('--output', required=True, help='path to write merged compiled learner JSONL output')
+    _add_shared_logging_args(merge_enrich)
+    merge_enrich.set_defaults(handler=_merge_enrich_command)
 
     detect_ambiguous = subparsers.add_parser('detect-ambiguous-forms', help='emit ambiguous canonicalization cases for optional LLM adjudication')
     detect_ambiguous.add_argument('--output', required=True, help='path to write ambiguous_forms.jsonl')
