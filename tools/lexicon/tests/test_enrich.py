@@ -9,9 +9,14 @@ from unittest.mock import patch
 from pathlib import Path
 
 from tools.lexicon.config import LexiconSettings
+from tools.lexicon.jsonl_io import read_jsonl
 from tools.lexicon.enrich import (
     NodeOpenAICompatibleResponsesClient,
     OpenAICompatibleResponsesClient,
+    merge_staged_enrichment_rows,
+    run_core_enrichment,
+    split_legacy_enrich_artifact,
+    split_compiled_row_for_staging,
     _generate_validated_phrase_payload_with_stats,
     _generate_validated_word_payload_with_stats,
     _single_sense_response_schema,
@@ -36,6 +41,7 @@ from tools.lexicon.enrich import (
     enrich_snapshot,
     read_snapshot_inputs,
     run_enrichment,
+    run_translation_enrichment,
 )
 from tools.lexicon.errors import LexiconDependencyError
 from tools.lexicon.models import EnrichmentRecord, LexemeRecord
@@ -254,6 +260,290 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(lexemes[0].entry_type, "phrase")
             self.assertEqual(lexemes[0].phrase_kind, "phrasal_verb")
             self.assertEqual(lexemes[0].display_form, "Take off")
+
+    def test_run_core_enrichment_writes_core_rows_without_translations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+
+            result = run_core_enrichment(
+                snapshot_dir,
+                provider_mode="placeholder",
+                max_concurrency=1,
+            )
+
+            self.assertEqual(result.core_row_count, 1)
+            core_rows = [json.loads(line) for line in result.output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(core_rows), 1)
+            self.assertEqual(core_rows[0]["entry_id"], "lx_run")
+            self.assertNotIn("translations", core_rows[0]["senses"][0])
+
+    def test_run_core_enrichment_uses_core_stage_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            captured: dict[str, object] = {}
+            core_settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-5.4",
+                    "LEXICON_LLM_API_KEY": "secret",
+                }
+            )
+            translation_settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-5.4-mini",
+                    "LEXICON_LLM_API_KEY": "secret",
+                }
+            )
+
+            def fake_from_env(env=None, *, stage=None):
+                if stage == "core":
+                    return core_settings
+                if stage == "translations":
+                    return translation_settings
+                return translation_settings
+
+            def fake_enrich_snapshot(
+                snapshot_dir: Path,
+                *,
+                output_path: Path | None = None,
+                settings: LexiconSettings | None = None,
+                **_: object,
+            ) -> list[EnrichmentRecord]:
+                captured["model"] = settings.llm_model if settings else None
+                assert output_path is not None
+                output_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.1.0",
+                            "entry_id": "lx_run",
+                            "entry_type": "word",
+                            "normalized_form": "run",
+                            "source_provenance": [{"source": "wordnet"}],
+                            "entity_category": "general",
+                            "word": "run",
+                            "part_of_speech": ["verb"],
+                            "cefr_level": "B1",
+                            "frequency_rank": 5,
+                            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                            "senses": [
+                                {
+                                    "sense_id": "sn_lx_run_1",
+                                    "wn_synset_id": "run.v.01",
+                                    "pos": "verb",
+                                    "sense_kind": "standard_meaning",
+                                    "decision": "keep_standard",
+                                    "base_word": None,
+                                    "primary_domain": "general",
+                                    "secondary_domains": [],
+                                    "register": "neutral",
+                                    "definition": "move fast by using your legs",
+                                    "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                    "synonyms": [],
+                                    "antonyms": [],
+                                    "collocations": [],
+                                    "grammar_patterns": [],
+                                    "usage_note": "Common learner note.",
+                                    "enrichment_id": "enr_1",
+                                    "generation_run_id": "run-1",
+                                    "model_name": "gpt-5.4",
+                                    "prompt_version": "v1",
+                                    "confidence": 0.9,
+                                    "generated_at": "2026-04-08T00:00:00Z",
+                                    "translations": {},
+                                }
+                            ],
+                            "confusable_words": [],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "phonetics": _test_phonetics(),
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                return []
+
+            with patch("tools.lexicon.enrich.LexiconSettings.from_env", side_effect=fake_from_env):
+                with patch("tools.lexicon.enrich.enrich_snapshot", side_effect=fake_enrich_snapshot):
+                    result = run_core_enrichment(snapshot_dir, provider_mode="auto", max_concurrency=1)
+
+            self.assertEqual(result.core_row_count, 1)
+            self.assertEqual(captured["model"], "gpt-5.4")
+
+    def test_run_translation_enrichment_writes_translation_ledger_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            core_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordnet"}],
+                        "entity_category": "general",
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "B1",
+                        "frequency_rank": 5,
+                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        "senses": [
+                            {
+                                "sense_id": "sn_lx_run_1",
+                                "wn_synset_id": "run.v.01",
+                                "pos": "verb",
+                                "sense_kind": "standard_meaning",
+                                "decision": "keep_standard",
+                                "base_word": None,
+                                "primary_domain": "general",
+                                "secondary_domains": [],
+                                "register": "neutral",
+                                "definition": "move fast by using your legs",
+                                "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": [],
+                                "usage_note": "Common learner note.",
+                                "enrichment_id": "enr_1",
+                                "generation_run_id": "run-1",
+                                "model_name": "test-model",
+                                "prompt_version": "v1",
+                                "confidence": 0.9,
+                                "generated_at": "2026-04-08T00:00:00Z",
+                            }
+                        ],
+                        "confusable_words": [],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "phonetics": _test_phonetics(),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            def translation_provider(**_: object) -> dict[str, dict[str, object]]:
+                return _test_translations(
+                    definition="move quickly",
+                    usage_note="translation note",
+                    examples=["I run every day."],
+                )
+
+            result = run_translation_enrichment(
+                snapshot_dir,
+                core_input_path=core_path,
+                translation_provider=translation_provider,
+            )
+
+            self.assertEqual(result.translation_row_count, 5)
+            rows = [json.loads(line) for line in result.output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 5)
+            self.assertEqual({row["locale"] for row in rows}, {"zh-Hans", "es", "ar", "pt-BR", "ja"})
+
+    def test_run_translation_enrichment_uses_translation_stage_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            core_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordnet"}],
+                        "entity_category": "general",
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "B1",
+                        "frequency_rank": 5,
+                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        "senses": [
+                            {
+                                "sense_id": "sn_lx_run_1",
+                                "wn_synset_id": "run.v.01",
+                                "pos": "verb",
+                                "sense_kind": "standard_meaning",
+                                "decision": "keep_standard",
+                                "base_word": None,
+                                "primary_domain": "general",
+                                "secondary_domains": [],
+                                "register": "neutral",
+                                "definition": "move fast by using your legs",
+                                "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": [],
+                                "usage_note": "Common learner note.",
+                                "enrichment_id": "enr_1",
+                                "generation_run_id": "run-1",
+                                "model_name": "test-model",
+                                "prompt_version": "v1",
+                                "confidence": 0.9,
+                                "generated_at": "2026-04-08T00:00:00Z",
+                            }
+                        ],
+                        "confusable_words": [],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "phonetics": _test_phonetics(),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            captured: dict[str, object] = {}
+            core_settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-5.4",
+                    "LEXICON_LLM_API_KEY": "secret",
+                }
+            )
+            translation_settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-5.4-mini",
+                    "LEXICON_LLM_API_KEY": "secret",
+                }
+            )
+
+            def fake_from_env(env=None, *, stage=None):
+                if stage == "core":
+                    return core_settings
+                if stage == "translations":
+                    return translation_settings
+                return core_settings
+
+            def fake_build_translation_provider(
+                *,
+                settings: LexiconSettings,
+                **_: object,
+            ):
+                captured["model"] = settings.llm_model
+
+                def provider(**__: object) -> dict[str, dict[str, object]]:
+                    return _test_translations(
+                        definition="move quickly",
+                        usage_note="translation note",
+                        examples=["I run every day."],
+                    )
+
+                return provider
+
+            with patch("tools.lexicon.enrich.LexiconSettings.from_env", side_effect=fake_from_env):
+                with patch("tools.lexicon.enrich.build_translation_provider", side_effect=fake_build_translation_provider):
+                    result = run_translation_enrichment(
+                        snapshot_dir,
+                        core_input_path=core_path,
+                        provider_mode="auto",
+                    )
+
+            self.assertEqual(result.translation_row_count, 5)
+            self.assertEqual(captured["model"], "gpt-5.4-mini")
 
     def test_build_phrase_enrichment_prompt_mentions_phrase_context(self) -> None:
         lexeme = LexemeRecord(
@@ -4909,6 +5199,59 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
             )
         self.assertEqual(client.calls, 2)
 
+    def test_generate_validated_phrase_payload_accepts_core_mode_without_translations(self) -> None:
+        lexeme = LexemeRecord(
+            snapshot_id="snap-1",
+            lexeme_id="ph_break_a_leg",
+            lemma="break a leg",
+            language="en",
+            wordfreq_rank=0,
+            is_wordnet_backed=False,
+            source_refs=["phrase_seed"],
+            created_at="2026-03-23T00:00:00Z",
+            entry_id="ph_break_a_leg",
+            entry_type="phrase",
+            normalized_form="break a leg",
+            source_provenance=[{"source": "phrase_seed"}],
+            phrase_kind="idiom",
+            display_form="Break a leg",
+            seed_metadata={"raw_reviewed_as": "idiom"},
+        )
+        core_only = {
+            "phrase_kind": "idiom",
+            "confidence": 0.9,
+            "senses": [
+                {
+                    "definition": "to wish someone good luck",
+                    "part_of_speech": "phrase",
+                    "examples": [{"sentence": "They told me to break a leg.", "difficulty": "B1"}],
+                    "grammar_patterns": ["say + phrase"],
+                    "usage_note": "Used before a performance.",
+                }
+            ],
+        }
+
+        class StubClient:
+            def __init__(self):
+                self.response_schemas: list[dict[str, object] | None] = []
+
+            def generate_json(self, prompt: str, response_schema=None):
+                del prompt
+                self.response_schemas.append(response_schema)
+                return core_only
+
+        client = StubClient()
+        rows, stats = _generate_validated_phrase_payload_with_stats(
+            client=client,
+            lexeme=lexeme,
+            include_translations=False,
+        )
+
+        self.assertEqual(rows["phrase_kind"], "idiom")
+        self.assertEqual(rows["senses"][0]["translations"], {})
+        self.assertEqual(int(stats["validation_retry_count"]), 0)
+        self.assertNotIn("translations", client.response_schemas[0]["schema"]["properties"]["senses"]["items"]["required"])
+
     def test_generate_validated_phrase_payload_emits_validation_outcome_events(self) -> None:
         lexeme = LexemeRecord(
             snapshot_id="snap-1",
@@ -5132,3 +5475,165 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
         self.assertEqual(rows["senses"][0]["sense_id"], sense_id)
         self.assertEqual(client.calls, 2)
         self.assertEqual(int(stats["retry_count"]), 1)
+
+
+class StagedEnrichmentArtifactTests(unittest.TestCase):
+    def test_split_compiled_row_for_staging_roundtrips_through_merge(self) -> None:
+        compiled_row = {
+            "schema_version": "1.1.0",
+            "entry_id": "lx_run",
+            "entry_type": "word",
+            "normalized_form": "run",
+            "source_provenance": [{"source": "wordfreq", "role": "frequency_rank"}],
+            "entity_category": "general",
+            "word": "run",
+            "part_of_speech": ["verb"],
+            "cefr_level": "B1",
+            "frequency_rank": 5,
+            "forms": {
+                "plural_forms": [],
+                "verb_forms": {"base": "run", "third_person_singular": "runs", "past": "ran", "past_participle": "run", "gerund": "running"},
+                "comparative": None,
+                "superlative": None,
+                "derivations": [],
+            },
+            "senses": [
+                {
+                    "sense_id": "sn_lx_run_1",
+                    "wn_synset_id": "run.v.01",
+                    "pos": "verb",
+                    "sense_kind": "standard_meaning",
+                    "decision": "keep_standard",
+                    "base_word": None,
+                    "primary_domain": "general",
+                    "secondary_domains": [],
+                    "register": "neutral",
+                    "definition": "move quickly on foot",
+                    "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                    "synonyms": [],
+                    "antonyms": [],
+                    "collocations": [],
+                    "grammar_patterns": [],
+                    "usage_note": "Common everyday verb.",
+                    "enrichment_id": "en_sn_lx_run_1_v1",
+                    "generation_run_id": "enrich-2026-04-08T02:00:00Z",
+                    "model_name": "gpt-5.4",
+                    "prompt_version": "v1",
+                    "confidence": 0.9,
+                    "generated_at": "2026-04-08T02:00:00Z",
+                    "translations": _test_translations(
+                        "move quickly on foot",
+                        "Common everyday verb.",
+                        ["I run every morning."],
+                    ),
+                }
+            ],
+            "confusable_words": [],
+            "generated_at": "2026-04-08T02:00:00Z",
+            "phonetics": _test_phonetics(),
+        }
+
+        core_row, translation_rows = split_compiled_row_for_staging(compiled_row)
+        merged_rows = merge_staged_enrichment_rows([core_row], translation_rows)
+
+        self.assertEqual(len(translation_rows), 5)
+        self.assertNotIn("translations", core_row["senses"][0])
+        self.assertEqual(merged_rows, [compiled_row])
+
+    def test_split_legacy_enrich_artifact_can_synthesize_resume_ledgers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            compiled_input = tmp_path / "words.enriched.jsonl"
+            compiled_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_run",
+                "lexeme_id": "lx_run",
+                "entry_type": "word",
+                "normalized_form": "run",
+                "source_provenance": [{"source": "wordfreq", "role": "frequency_rank"}],
+                "entity_category": "general",
+                "word": "run",
+                "part_of_speech": ["verb"],
+                "cefr_level": "B1",
+                "frequency_rank": 5,
+                "forms": {
+                    "plural_forms": [],
+                    "verb_forms": {"base": "run", "third_person_singular": "runs", "past": "ran", "past_participle": "run", "gerund": "running"},
+                    "comparative": None,
+                    "superlative": None,
+                    "derivations": [],
+                },
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_run_1",
+                        "wn_synset_id": "run.v.01",
+                        "pos": "verb",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "move quickly on foot",
+                        "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "Common everyday verb.",
+                        "enrichment_id": "en_sn_lx_run_1_v1",
+                        "generation_run_id": "enrich-2026-04-08T02:00:00Z",
+                        "model_name": "gpt-5.4",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T02:00:00Z",
+                        "translations": _test_translations(
+                            "move quickly on foot",
+                            "Common everyday verb.",
+                            ["I run every morning."],
+                        ),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T02:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            compiled_input.write_text(json.dumps(compiled_row) + "\n", encoding="utf-8")
+
+            payload = split_legacy_enrich_artifact(
+                compiled_input_path=compiled_input,
+                core_output_path=tmp_path / "words.enriched.core.jsonl",
+                translations_output_path=tmp_path / "words.translations.jsonl",
+                core_checkpoint_path=tmp_path / "enrich.core.checkpoint.jsonl",
+                core_decisions_path=tmp_path / "enrich.core.decisions.jsonl",
+                core_failures_path=tmp_path / "enrich.core.failures.jsonl",
+                translations_checkpoint_path=tmp_path / "enrich.translations.checkpoint.jsonl",
+                translations_decisions_path=tmp_path / "enrich.translations.decisions.jsonl",
+                translations_failures_path=tmp_path / "enrich.translations.failures.jsonl",
+            )
+
+            self.assertEqual(payload["core_row_count"], 1)
+            self.assertEqual(payload["translation_row_count"], 5)
+            self.assertEqual(payload["core_checkpoint_row_count"], 1)
+            self.assertEqual(payload["core_decision_row_count"], 1)
+            self.assertEqual(payload["translations_checkpoint_row_count"], 1)
+            self.assertEqual(payload["translations_decision_row_count"], 1)
+
+            core_checkpoint_rows = read_jsonl(tmp_path / "enrich.core.checkpoint.jsonl")
+            self.assertEqual(core_checkpoint_rows[0]["lexeme_id"], "lx_run")
+            self.assertEqual(core_checkpoint_rows[0]["status"], "completed")
+
+            core_decision_rows = read_jsonl(tmp_path / "enrich.core.decisions.jsonl")
+            self.assertEqual(core_decision_rows[0]["decision"], "keep_standard")
+            self.assertEqual(core_decision_rows[0]["accepted_sense_count"], 1)
+
+            translation_checkpoint_rows = read_jsonl(tmp_path / "enrich.translations.checkpoint.jsonl")
+            self.assertEqual(translation_checkpoint_rows[0]["entry_id"], "lx_run")
+            self.assertEqual(translation_checkpoint_rows[0]["sense_id"], "sn_lx_run_1")
+            self.assertEqual(translation_checkpoint_rows[0]["status"], "completed")
+
+            translation_decision_rows = read_jsonl(tmp_path / "enrich.translations.decisions.jsonl")
+            self.assertEqual(translation_decision_rows[0]["locale_count"], 5)
+
+            self.assertEqual(read_jsonl(tmp_path / "enrich.core.failures.jsonl"), [])
+            self.assertEqual(read_jsonl(tmp_path / "enrich.translations.failures.jsonl"), [])

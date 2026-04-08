@@ -50,7 +50,7 @@ def _phonetics_schema() -> dict[str, Any]:
     }
 
 
-def _base_enrichment_item_schema() -> dict[str, Any]:
+def _base_enrichment_item_schema(*, include_translations: bool = True) -> dict[str, Any]:
     verb_forms_schema = {
         "type": "object",
         "properties": {
@@ -126,15 +126,16 @@ def _base_enrichment_item_schema() -> dict[str, Any]:
             },
         }),
         "confidence": {"type": "number"},
-        "translations": {
+    }
+    if include_translations:
+        properties["translations"] = {
             "type": "object",
             "properties": {
                 locale: translation_schema for locale in REQUIRED_TRANSLATION_LOCALES
             },
             "required": list(REQUIRED_TRANSLATION_LOCALES),
             "additionalProperties": False,
-        },
-    }
+        }
     return {
         "type": "object",
         "properties": properties,
@@ -143,16 +144,16 @@ def _base_enrichment_item_schema() -> dict[str, Any]:
     }
 
 
-def build_single_sense_response_schema() -> dict[str, Any]:
+def build_single_sense_response_schema(*, include_translations: bool = True) -> dict[str, Any]:
     return {
         "name": "lexicon_enrichment_single_sense",
         "strict": True,
-        "schema": _base_enrichment_item_schema(),
+        "schema": _base_enrichment_item_schema(include_translations=include_translations),
     }
 
 
-def build_word_enrichment_response_schema() -> dict[str, Any]:
-    item_schema = dict(_base_enrichment_item_schema())
+def build_word_enrichment_response_schema(*, include_translations: bool = True) -> dict[str, Any]:
+    item_schema = dict(_base_enrichment_item_schema(include_translations=include_translations))
     item_properties = dict(item_schema["properties"])
     item_properties["part_of_speech"] = {"type": "string"}
     item_properties["sense_kind"] = {"type": "string", "enum": sorted(ALLOWED_WORD_SENSE_KINDS)}
@@ -198,7 +199,7 @@ def normalize_phonetics_payload(value: Any) -> dict[str, dict[str, Any]] | None:
     return normalized
 
 
-def normalize_word_enrichment_payload(response: dict[str, Any]) -> dict[str, Any]:
+def normalize_word_enrichment_payload(response: dict[str, Any], *, include_translations: bool = True) -> dict[str, Any]:
     if not isinstance(response, dict):
         raise RuntimeError("OpenAI-compatible endpoint returned a non-object enrichment payload")
 
@@ -217,8 +218,11 @@ def normalize_word_enrichment_payload(response: dict[str, Any]) -> dict[str, Any
         raise RuntimeError("OpenAI-compatible enrichment payload field 'primary_domain' must be a string or null")
     if isinstance(primary_domain, str):
         validate_no_control_characters(primary_domain, field="primary_domain")
-    normalized["translations"] = normalize_translation_payload(
-        response.get("translations"),
-        example_count=len(normalized["examples"]),
-    )
+    if include_translations:
+        normalized["translations"] = normalize_translation_payload(
+            response.get("translations"),
+            example_count=len(normalized["examples"]),
+        )
+    else:
+        normalized["translations"] = {}
     return normalized

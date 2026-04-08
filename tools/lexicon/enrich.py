@@ -56,6 +56,7 @@ _NODE_RUN_TIMEOUT_SECONDS = _DEFAULT_LLM_TIMEOUT_SECONDS
 _WORD_DECISIONS = {"discard", "keep_standard", "keep_derived_special"}
 _WORD_SENSE_KINDS = {"standard_meaning", "base_form_reference", "special_meaning"}
 _DEFAULT_RUNTIME_LOG_FILE = "enrich.log"
+_DEFAULT_TRANSLATION_RUNTIME_LOG_FILE = "enrich.translations.log"
 
 
 def _validate_resume_mode_flags(*, resume: bool, retry_failed_only: bool, skip_failed: bool) -> None:
@@ -92,6 +93,44 @@ class WordJobOutcome:
 
 
 WordEnrichmentProvider = Callable[..., WordJobOutcome | list[EnrichmentRecord]]
+TranslationProvider = Callable[..., dict[str, dict[str, Any]]]
+
+
+@dataclass(frozen=True)
+class CoreEnrichmentRunResult:
+    output_path: Path
+    runtime_output_path: Path
+    lexeme_count: int
+    core_row_count: int
+
+
+@dataclass(frozen=True)
+class TranslationRunResult:
+    output_path: Path
+    sense_count: int
+    translation_row_count: int
+
+
+def _resolve_node_transport_script_path() -> Path:
+    local_lexicon_dir = Path(__file__).resolve().parent
+    local_script = local_lexicon_dir / 'node' / 'openai_compatible_responses.mjs'
+    local_node_modules = local_lexicon_dir / 'node_modules' / 'openai'
+    if local_script.exists() and local_node_modules.exists():
+        return local_script
+
+    resolved = Path(__file__).resolve()
+    for parent in resolved.parents:
+        if parent.name != '.worktrees':
+            continue
+        main_repo_root = parent.parent
+        shared_lexicon_dir = main_repo_root / 'tools' / 'lexicon'
+        shared_script = shared_lexicon_dir / 'node' / 'openai_compatible_responses.mjs'
+        shared_node_modules = shared_lexicon_dir / 'node_modules' / 'openai'
+        if shared_script.exists() and shared_node_modules.exists():
+            return shared_script
+        break
+
+    return local_script
 
 
 class OpenAICompatibleResponsesClient:
@@ -159,7 +198,7 @@ def _default_node_runner(payload: dict[str, Any], *, timeout_seconds: int = _NOD
     if not node_bin:
         raise LexiconDependencyError('Node.js is required for openai_compatible_node enrichment mode')
 
-    script_path = Path(__file__).resolve().parent / 'node' / 'openai_compatible_responses.mjs'
+    script_path = _resolve_node_transport_script_path()
     if not script_path.exists():
         raise LexiconDependencyError(f'Node enrichment script is missing: {script_path}')
 
@@ -198,7 +237,7 @@ class _PersistentNodeRunner:
         if not node_bin:
             raise LexiconDependencyError('Node.js is required for openai_compatible_node enrichment mode')
 
-        script_path = Path(__file__).resolve().parent / 'node' / 'openai_compatible_responses.mjs'
+        script_path = _resolve_node_transport_script_path()
         if not script_path.exists():
             raise LexiconDependencyError(f'Node enrichment script is missing: {script_path}')
 
@@ -462,15 +501,20 @@ def _entity_category_prompt_guidance(lexeme: LexemeRecord) -> str:
     )
 
 
-def build_enrichment_prompt(*, lexeme: LexemeRecord, sense: SenseRecord) -> str:
+def build_enrichment_prompt(*, lexeme: LexemeRecord, sense: SenseRecord, include_translations: bool = True) -> str:
+    translation_lines = ""
+    if include_translations:
+        translation_lines = (
+            f"For every selected sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+            "For each translation locale, include definition, usage_note, and examples.\n"
+            "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        )
     return (
         "Return only valid content for the required fields.\n"
         "Top-level output shape: a single JSON object with the enrichment fields only.\n"
-        "Required top-level fields: definition, examples, confidence, and translations.\n"
+        f"Required top-level fields: definition, examples, confidence{', and translations' if include_translations else ''}.\n"
         "The confidence field must be a numeric value between 0 and 1.\n"
-        f"For every selected sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
-        "For each translation locale, include definition, usage_note, and examples.\n"
-        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        f"{translation_lines}"
         "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.\n"
         f"Generate learner-facing enrichment for the English word '{lexeme.lemma}'.\n"
         f"Part of speech: {sense.part_of_speech}.\n"
@@ -704,12 +748,16 @@ def _validate_translations(value: Any, *, example_count: int) -> dict[str, dict[
     return normalized
 
 
-def _validate_openai_compatible_payload(response: dict[str, Any]) -> dict[str, Any]:
-    return _normalize_word_enrichment_payload(response)
+def _validate_openai_compatible_payload(response: dict[str, Any], *, include_translations: bool = True) -> dict[str, Any]:
+    return _normalize_word_enrichment_payload(response, include_translations=include_translations)
 
 
-def _validate_openai_compatible_phrase_payload(response: dict[str, Any]) -> dict[str, Any]:
-    return _normalize_phrase_enrichment_payload(response)
+def _validate_openai_compatible_phrase_payload(
+    response: dict[str, Any],
+    *,
+    include_translations: bool = True,
+) -> dict[str, Any]:
+    return _normalize_phrase_enrichment_payload(response, include_translations=include_translations)
 
 
 def _normalize_examples(value: Any, *, fallback_sentence: str) -> list[SenseExample]:
@@ -780,7 +828,13 @@ def _word_enrichment_grounding_payload(*, senses: list[SenseRecord]) -> list[dic
     return sense_rows
 
 
-def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], prompt_mode: str = "grounded") -> str:
+def build_word_enrichment_prompt(
+    *,
+    lexeme: LexemeRecord,
+    senses: list[SenseRecord],
+    prompt_mode: str = "grounded",
+    include_translations: bool = True,
+) -> str:
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
     if prompt_mode not in _WORD_PROMPT_MODES:
         raise ValueError(f"Unsupported word prompt mode: {prompt_mode}")
@@ -807,13 +861,16 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
         "For 'keep_derived_special', set base_word to the related base word, include exactly one brief base_form_reference sense, and focus the remaining senses on special_meaning entries rather than ordinary base-word meanings.",
         "For 'discard', return an empty senses array and a short discard_reason.",
         "For every kept word, include phonetics.us, phonetics.uk, and phonetics.au with IPA and confidence for each accent.",
-        f"For every kept sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.",
-        "For each translation locale, include definition, usage_note, and examples.",
-        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.",
         "Return a JSON object only. No prose, no markdown, no code fences, and no extra keys outside the schema.",
         _entity_category_prompt_guidance(lexeme).strip(),
         _variant_prompt_guidance(lexeme).strip(),
     ]
+    if include_translations:
+        guidance_lines[20:20] = [
+            f"For every kept sense, include all required translation locales exactly once: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.",
+            "For each translation locale, include definition, usage_note, and examples.",
+            "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.",
+        ]
     if prompt_mode == "grounded" and senses:
         guidance_lines.append(
             f"Optional grounding context only, not a hard schema contract: {json.dumps(_word_enrichment_grounding_payload(senses=senses))}."
@@ -825,31 +882,43 @@ def build_word_enrichment_prompt(*, lexeme: LexemeRecord, senses: list[SenseReco
     )
 
 
-def build_phrase_enrichment_prompt(*, lexeme: LexemeRecord) -> str:
+def build_phrase_enrichment_prompt(*, lexeme: LexemeRecord, include_translations: bool = True) -> str:
     display_form = lexeme.display_form or lexeme.lemma
     phrase_kind = lexeme.phrase_kind or "multiword_expression"
+    translation_instructions = (
+        f"Use the exact required translation locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        if include_translations
+        else ""
+    )
     return (
         f"Create learner-facing enrichment for the English phrase '{display_form}'.\n"
         f"Phrase kind: {phrase_kind}.\n"
         "Return 1 to 2 learner-relevant senses for the phrase as a whole, not its component words.\n"
-        "Each sense must include definition, part_of_speech, at least one example, grammar_patterns, usage_note, and translations.\n"
+        f"Each sense must include definition, part_of_speech, at least one example, grammar_patterns, usage_note{', and translations' if include_translations else ''}.\n"
         f"Each example difficulty must be one of: {', '.join(_ALLOWED_CEFR_LEVELS)}.\n"
-        f"Use the exact required translation locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
-        "For each locale, translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        f"{translation_instructions}"
         "Use the exact phrase naturally in the examples.\n"
         "Return JSON only.\n"
     )
 
 
-def build_phrase_enrichment_repair_prompt(*, lexeme: LexemeRecord, previous_error: str) -> str:
+def build_phrase_enrichment_repair_prompt(*, lexeme: LexemeRecord, previous_error: str, include_translations: bool = True) -> str:
     return (
         f"Repair the previous learner-facing enrichment response for the English phrase '{lexeme.display_form or lexeme.lemma}'.\n"
         f"The previous response was invalid: {previous_error}\n"
-        + build_phrase_enrichment_prompt(lexeme=lexeme)
+        + build_phrase_enrichment_prompt(lexeme=lexeme, include_translations=include_translations)
     )
 
 
-def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[SenseRecord], previous_error: str, prompt_mode: str = "grounded") -> str:
+def build_word_enrichment_repair_prompt(
+    *,
+    lexeme: LexemeRecord,
+    senses: list[SenseRecord],
+    previous_error: str,
+    prompt_mode: str = "grounded",
+    include_translations: bool = True,
+) -> str:
     max_meanings = learner_meaning_cap(lexeme.wordfreq_rank)
     if prompt_mode not in _WORD_PROMPT_MODES:
         raise ValueError(f"Unsupported word prompt mode: {prompt_mode}")
@@ -857,7 +926,12 @@ def build_word_enrichment_repair_prompt(*, lexeme: LexemeRecord, senses: list[Se
         f"Repair the previous learner-facing enrichment response for the English word '{lexeme.lemma}'.\n"
         f"The previous response was invalid: {previous_error}\n"
         f"The repaired response is invalid if the senses array contains more than {max_meanings} items.\n"
-        + build_word_enrichment_prompt(lexeme=lexeme, senses=senses, prompt_mode=prompt_mode)
+        + build_word_enrichment_prompt(
+            lexeme=lexeme,
+            senses=senses,
+            prompt_mode=prompt_mode,
+            include_translations=include_translations,
+        )
     )
 
 
@@ -960,16 +1034,16 @@ def _base_enrichment_item_schema() -> dict[str, Any]:
     }
 
 
-def _single_sense_response_schema() -> dict[str, Any]:
-    return _build_single_sense_response_schema()
+def _single_sense_response_schema(*, include_translations: bool = True) -> dict[str, Any]:
+    return _build_single_sense_response_schema(include_translations=include_translations)
 
 
-def _word_enrichment_response_schema() -> dict[str, Any]:
-    return _build_word_enrichment_response_schema()
+def _word_enrichment_response_schema(*, include_translations: bool = True) -> dict[str, Any]:
+    return _build_word_enrichment_response_schema(include_translations=include_translations)
 
 
-def _phrase_enrichment_response_schema() -> dict[str, Any]:
-    return _build_phrase_enrichment_response_schema()
+def _phrase_enrichment_response_schema(*, include_translations: bool = True) -> dict[str, Any]:
+    return _build_phrase_enrichment_response_schema(include_translations=include_translations)
 
 
 def _is_repairable_word_payload_error(error: RuntimeError) -> bool:
@@ -1124,9 +1198,10 @@ def _generate_validated_phrase_payload_with_stats(
     max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> tuple[dict[str, Any], dict[str, int]]:
-    prompt = build_phrase_enrichment_prompt(lexeme=lexeme)
-    response_schema = _phrase_enrichment_response_schema()
+    prompt = build_phrase_enrichment_prompt(lexeme=lexeme, include_translations=include_translations)
+    response_schema = _phrase_enrichment_response_schema(include_translations=include_translations)
     last_error: RuntimeError | None = None
     transient_retries = 0
     repair_attempts = 0
@@ -1160,7 +1235,7 @@ def _generate_validated_phrase_payload_with_stats(
             raise
 
         try:
-            validated = _validate_openai_compatible_phrase_payload(response)
+            validated = _validate_openai_compatible_phrase_payload(response, include_translations=include_translations)
             if repair_attempts > 0:
                 _emit_validation_terminal_event(
                     runtime_logger,
@@ -1195,6 +1270,7 @@ def _generate_validated_phrase_payload_with_stats(
             prompt = build_phrase_enrichment_repair_prompt(
                 lexeme=lexeme,
                 previous_error=str(last_error),
+                include_translations=include_translations,
             )
 
 
@@ -1206,9 +1282,10 @@ def _generate_validated_single_sense_payload_with_stats(
     max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> tuple[dict[str, Any], dict[str, int]]:
-    prompt = build_enrichment_prompt(lexeme=lexeme, sense=sense)
-    response_schema = _single_sense_response_schema()
+    prompt = build_enrichment_prompt(lexeme=lexeme, sense=sense, include_translations=include_translations)
+    response_schema = _single_sense_response_schema(include_translations=include_translations)
     transient_retries = 0
     validation_retries = 0
     effective_max_transient_retries = max(0, int(max_transient_retries))
@@ -1242,7 +1319,7 @@ def _generate_validated_single_sense_payload_with_stats(
             raise
 
         try:
-            validated = _validate_openai_compatible_payload(response)
+            validated = _validate_openai_compatible_payload(response, include_translations=include_translations)
             if validation_retries > 0:
                 _emit_validation_terminal_event(
                     runtime_logger,
@@ -1287,9 +1364,15 @@ def _generate_validated_word_payload_with_stats(
     max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> tuple[dict[str, Any], dict[str, int]]:
-    prompt = build_word_enrichment_prompt(lexeme=lexeme, senses=senses, prompt_mode=prompt_mode)
-    response_schema = _word_enrichment_response_schema()
+    prompt = build_word_enrichment_prompt(
+        lexeme=lexeme,
+        senses=senses,
+        prompt_mode=prompt_mode,
+        include_translations=include_translations,
+    )
+    response_schema = _word_enrichment_response_schema(include_translations=include_translations)
     last_error: RuntimeError | None = None
     repair_attempts = 0
     transient_retries = 0
@@ -1308,7 +1391,12 @@ def _generate_validated_word_payload_with_stats(
                     else None
                 ),
             )
-            validated = _validate_openai_compatible_word_payload(response, lexeme=lexeme, senses=senses)
+            validated = _validate_openai_compatible_word_payload(
+                response,
+                lexeme=lexeme,
+                senses=senses,
+                include_translations=include_translations,
+            )
             if repair_attempts > 0:
                 _emit_validation_terminal_event(
                     runtime_logger,
@@ -1356,6 +1444,7 @@ def _generate_validated_word_payload_with_stats(
                 senses=senses,
                 previous_error=str(last_error),
                 prompt_mode=prompt_mode,
+                include_translations=include_translations,
             )
 
 
@@ -1368,6 +1457,7 @@ def _generate_validated_word_payload(
     max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> dict[str, Any]:
     rows, _ = _generate_validated_word_payload_with_stats(
         client=client,
@@ -1377,6 +1467,7 @@ def _generate_validated_word_payload(
         max_transient_retries=max_transient_retries,
         max_validation_retries=max_validation_retries,
         runtime_logger=runtime_logger,
+        include_translations=include_translations,
     )
     return rows
 
@@ -1553,7 +1644,13 @@ def _build_phrase_job_outcome(
     return WordJobOutcome(records=records, decision="keep_standard", base_word=None, discard_reason=None, phonetics=None)
 
 
-def _validate_openai_compatible_word_payload(response: dict[str, Any], *, lexeme: LexemeRecord, senses: list[SenseRecord]) -> dict[str, Any]:
+def _validate_openai_compatible_word_payload(
+    response: dict[str, Any],
+    *,
+    lexeme: LexemeRecord,
+    senses: list[SenseRecord],
+    include_translations: bool = True,
+) -> dict[str, Any]:
     if not isinstance(response, dict):
         raise RuntimeError('OpenAI-compatible endpoint returned a non-object word enrichment payload')
     value = response.get('senses')
@@ -1595,7 +1692,7 @@ def _validate_openai_compatible_word_payload(response: dict[str, Any], *, lexeme
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise RuntimeError(f"OpenAI-compatible word enrichment payload field 'senses[{index}]' must be an object")
-        normalized = _validate_openai_compatible_payload(item)
+        normalized = _validate_openai_compatible_payload(item, include_translations=include_translations)
         legacy_sense_id = item.get('sense_id')
         source_sense = source_senses_by_id.get(str(legacy_sense_id or '').strip())
         if isinstance(legacy_sense_id, str) and legacy_sense_id.strip():
@@ -1651,8 +1748,9 @@ def build_placeholder_enrichment_provider(
     settings: LexiconSettings | None = None,
     model_name: str | None = None,
     review_status: str = 'draft',
+    include_translations: bool = True,
 ) -> EnrichmentProvider:
-    effective_settings = settings or LexiconSettings.from_env()
+    effective_settings = settings or LexiconSettings.from_env(stage="core")
     effective_model_name = model_name or effective_settings.llm_model or 'placeholder-llm'
 
     def provider(*, lexeme: LexemeRecord, sense: SenseRecord, settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> EnrichmentRecord:
@@ -1673,14 +1771,18 @@ def build_placeholder_enrichment_provider(
             usage_note=f'Auto-generated learner note for {lexeme.lemma}.',
             forms=_default_forms(lexeme.lemma, sense.part_of_speech),
             confusable_words=[],
-            translations={
-                locale: {
-                    'definition': f'[{locale}] learner definition for {lexeme.lemma}',
-                    'usage_note': f'[{locale}] learner note for {lexeme.lemma}',
-                    'examples': [f'[{locale}] {_default_example(lexeme.lemma, sense.part_of_speech)}'],
+            translations=(
+                {
+                    locale: {
+                        'definition': f'[{locale}] learner definition for {lexeme.lemma}',
+                        'usage_note': f'[{locale}] learner note for {lexeme.lemma}',
+                        'examples': [f'[{locale}] {_default_example(lexeme.lemma, sense.part_of_speech)}'],
+                    }
+                    for locale in _REQUIRED_TRANSLATION_LOCALES
                 }
-                for locale in _REQUIRED_TRANSLATION_LOCALES
-            },
+                if include_translations
+                else {}
+            ),
             model_name=effective_model_name,
             prompt_version=prompt_version,
             generation_run_id=generation_run_id,
@@ -1698,13 +1800,15 @@ def build_placeholder_word_enrichment_provider(
     settings: LexiconSettings | None = None,
     model_name: str | None = None,
     review_status: str = 'draft',
+    include_translations: bool = True,
 ) -> WordEnrichmentProvider:
-    effective_settings = settings or LexiconSettings.from_env()
+    effective_settings = settings or LexiconSettings.from_env(stage="core")
     effective_model_name = model_name or effective_settings.llm_model or 'placeholder-llm'
     sense_provider = build_placeholder_enrichment_provider(
         settings=effective_settings,
         model_name=effective_model_name,
         review_status=review_status,
+        include_translations=include_translations,
     )
 
     def provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str) -> list[EnrichmentRecord]:
@@ -1733,14 +1837,18 @@ def build_placeholder_word_enrichment_provider(
                         "forms": _default_forms(lexeme.lemma, synthetic_pos),
                         "confusable_words": [],
                         "confidence": 0.5,
-                        "translations": {
-                            locale: {
-                                'definition': f'[{locale}] learner definition for {lexeme.lemma}',
-                                'usage_note': f'[{locale}] learner note for {lexeme.lemma}',
-                                'examples': [f'[{locale}] {_default_example(lexeme.lemma, synthetic_pos)}'],
+                        "translations": (
+                            {
+                                locale: {
+                                    'definition': f'[{locale}] learner definition for {lexeme.lemma}',
+                                    'usage_note': f'[{locale}] learner note for {lexeme.lemma}',
+                                    'examples': [f'[{locale}] {_default_example(lexeme.lemma, synthetic_pos)}'],
+                                }
+                                for locale in _REQUIRED_TRANSLATION_LOCALES
                             }
-                            for locale in _REQUIRED_TRANSLATION_LOCALES
-                        },
+                            if include_translations
+                            else {}
+                        ),
                     }
                 ],
             }
@@ -1780,6 +1888,7 @@ def build_openai_compatible_node_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> EnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible_node enrichment mode')
@@ -1807,6 +1916,7 @@ def build_openai_compatible_node_enrichment_provider(
             max_transient_retries=transient_retries,
             max_validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
         return _build_enrichment_record(
             lexeme=lexeme,
@@ -1832,6 +1942,7 @@ def build_openai_compatible_node_word_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> WordEnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible_node enrichment mode')
@@ -1861,6 +1972,7 @@ def build_openai_compatible_node_word_enrichment_provider(
             max_transient_retries=transient_retries,
             max_validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
         outcome = _build_word_job_outcome(
             lexeme=lexeme,
@@ -1887,6 +1999,7 @@ def build_openai_compatible_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> EnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
@@ -1914,6 +2027,7 @@ def build_openai_compatible_enrichment_provider(
             max_transient_retries=transient_retries,
             max_validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
         return _build_enrichment_record(
             lexeme=lexeme,
@@ -1939,6 +2053,7 @@ def build_openai_compatible_word_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> WordEnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
@@ -1968,6 +2083,7 @@ def build_openai_compatible_word_enrichment_provider(
             max_transient_retries=transient_retries,
             max_validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
         outcome = _build_word_job_outcome(
             lexeme=lexeme,
@@ -1994,6 +2110,7 @@ def build_openai_compatible_phrase_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> WordEnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
@@ -2021,6 +2138,7 @@ def build_openai_compatible_phrase_enrichment_provider(
             max_transient_retries=transient_retries,
             max_validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
         return _build_phrase_job_outcome(
             lexeme=lexeme,
@@ -2045,6 +2163,7 @@ def build_openai_compatible_node_phrase_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> WordEnrichmentProvider:
     if not settings.llm_base_url:
         raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible_node enrichment mode')
@@ -2072,6 +2191,7 @@ def build_openai_compatible_node_phrase_enrichment_provider(
             max_transient_retries=transient_retries,
             max_validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
         return _build_phrase_job_outcome(
             lexeme=lexeme,
@@ -2098,11 +2218,17 @@ def build_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> EnrichmentProvider:
     if provider_mode not in _PROVIDER_MODES:
         raise ValueError(f'Unsupported provider mode: {provider_mode}')
     if provider_mode == 'placeholder':
-        return build_placeholder_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+        return build_placeholder_enrichment_provider(
+            settings=settings,
+            model_name=model_name,
+            review_status=review_status,
+            include_translations=include_translations,
+        )
     if provider_mode == 'openai_compatible':
         return build_openai_compatible_enrichment_provider(
             settings=settings,
@@ -2113,6 +2239,7 @@ def build_enrichment_provider(
             transient_retries=transient_retries,
             validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
     if provider_mode == 'openai_compatible_node':
         return build_openai_compatible_node_enrichment_provider(
@@ -2136,6 +2263,7 @@ def build_enrichment_provider(
                 transient_retries=transient_retries,
                 validation_retries=validation_retries,
                 runtime_logger=runtime_logger,
+                include_translations=include_translations,
             )
         return build_openai_compatible_enrichment_provider(
             settings=settings,
@@ -2146,8 +2274,14 @@ def build_enrichment_provider(
             transient_retries=transient_retries,
             validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
-    return build_placeholder_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+    return build_placeholder_enrichment_provider(
+        settings=settings,
+        model_name=model_name,
+        review_status=review_status,
+        include_translations=include_translations,
+    )
 
 
 def build_word_enrichment_provider(
@@ -2162,11 +2296,17 @@ def build_word_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> WordEnrichmentProvider:
     if provider_mode not in _PROVIDER_MODES:
         raise ValueError(f'Unsupported provider mode: {provider_mode}')
     if provider_mode == 'placeholder':
-        return build_placeholder_word_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+        return build_placeholder_word_enrichment_provider(
+            settings=settings,
+            model_name=model_name,
+            review_status=review_status,
+            include_translations=include_translations,
+        )
     if provider_mode == 'openai_compatible':
         return build_openai_compatible_word_enrichment_provider(
             settings=settings,
@@ -2177,6 +2317,7 @@ def build_word_enrichment_provider(
             transient_retries=transient_retries,
             validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
     if provider_mode == 'openai_compatible_node':
         return build_openai_compatible_node_word_enrichment_provider(
@@ -2200,6 +2341,7 @@ def build_word_enrichment_provider(
                 transient_retries=transient_retries,
                 validation_retries=validation_retries,
                 runtime_logger=runtime_logger,
+                include_translations=include_translations,
             )
         return build_openai_compatible_word_enrichment_provider(
             settings=settings,
@@ -2210,8 +2352,14 @@ def build_word_enrichment_provider(
             transient_retries=transient_retries,
             validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
-    return build_placeholder_word_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+    return build_placeholder_word_enrichment_provider(
+        settings=settings,
+        model_name=model_name,
+        review_status=review_status,
+        include_translations=include_translations,
+    )
 
 
 def build_phrase_enrichment_provider(
@@ -2226,11 +2374,17 @@ def build_phrase_enrichment_provider(
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
     runtime_logger: RuntimeLogger | None = None,
+    include_translations: bool = True,
 ) -> WordEnrichmentProvider:
     if provider_mode not in _PROVIDER_MODES:
         raise ValueError(f'Unsupported provider mode: {provider_mode}')
     if provider_mode == 'placeholder':
-        return build_placeholder_word_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+        return build_placeholder_word_enrichment_provider(
+            settings=settings,
+            model_name=model_name,
+            review_status=review_status,
+            include_translations=include_translations,
+        )
     if provider_mode == 'openai_compatible':
         return build_openai_compatible_phrase_enrichment_provider(
             settings=settings,
@@ -2241,6 +2395,7 @@ def build_phrase_enrichment_provider(
             transient_retries=transient_retries,
             validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
     if provider_mode == 'openai_compatible_node':
         return build_openai_compatible_node_phrase_enrichment_provider(
@@ -2252,6 +2407,7 @@ def build_phrase_enrichment_provider(
             transient_retries=transient_retries,
             validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
     if settings.llm_base_url and settings.llm_model and settings.llm_api_key:
         if settings.llm_transport == 'node':
@@ -2264,6 +2420,7 @@ def build_phrase_enrichment_provider(
                 transient_retries=transient_retries,
                 validation_retries=validation_retries,
                 runtime_logger=runtime_logger,
+                include_translations=include_translations,
             )
         return build_openai_compatible_phrase_enrichment_provider(
             settings=settings,
@@ -2274,8 +2431,14 @@ def build_phrase_enrichment_provider(
             transient_retries=transient_retries,
             validation_retries=validation_retries,
             runtime_logger=runtime_logger,
+            include_translations=include_translations,
         )
-    return build_placeholder_word_enrichment_provider(settings=settings, model_name=model_name, review_status=review_status)
+    return build_placeholder_word_enrichment_provider(
+        settings=settings,
+        model_name=model_name,
+        review_status=review_status,
+        include_translations=include_translations,
+    )
 
 
 def _build_phrase_lexeme(row: dict[str, Any]) -> LexemeRecord:
@@ -2435,6 +2598,866 @@ def _compiled_row_from_outcome(*, lexeme: LexemeRecord, outcome: WordJobOutcome)
     return compiled.to_dict()
 
 
+def split_compiled_row_for_staging(compiled_row: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    core_row = dict(compiled_row)
+    translation_rows: list[dict[str, Any]] = []
+    core_senses: list[dict[str, Any]] = []
+    for sense in compiled_row.get("senses") or []:
+        sense_row = dict(sense)
+        translations = dict(sense_row.pop("translations", {}) or {})
+        sense_id = str(sense_row.get("sense_id") or "").strip()
+        entry_id = str(core_row.get("entry_id") or "").strip()
+        generated_at = str(sense_row.get("generated_at") or core_row.get("generated_at") or "").strip() or None
+        generation_run_id = str(sense_row.get("generation_run_id") or "").strip() or None
+        model_name = str(sense_row.get("model_name") or "").strip() or None
+        prompt_version = str(sense_row.get("prompt_version") or "").strip() or None
+        for locale, payload in translations.items():
+            translation_rows.append(
+                {
+                    "entry_id": entry_id,
+                    "sense_id": sense_id,
+                    "locale": locale,
+                    "definition": payload.get("definition"),
+                    "usage_note": payload.get("usage_note"),
+                    "examples": list(payload.get("examples") or []),
+                    "generated_at": generated_at,
+                    "generation_run_id": generation_run_id,
+                    "model_name": model_name,
+                    "prompt_version": prompt_version,
+                    "status": "completed",
+                }
+            )
+        core_senses.append(sense_row)
+    core_row["senses"] = core_senses
+    return core_row, translation_rows
+
+
+def _build_core_migration_checkpoint_row(core_row: dict[str, Any]) -> dict[str, Any]:
+    lexeme_id = str(core_row.get("lexeme_id") or core_row.get("entry_id") or "").strip()
+    if not lexeme_id:
+        raise RuntimeError("Core rows must include lexeme_id or entry_id to build resume ledgers")
+    completed_at = str(core_row.get("generated_at") or "").strip() or _utc_now()
+    generation_run_id = (
+        str(core_row.get("generation_run_id") or "").strip()
+        or str(((core_row.get("senses") or [{}])[0] or {}).get("generation_run_id") or "").strip()
+        or f"split-core-{completed_at}"
+    )
+    lemma = str(core_row.get("word") or core_row.get("display_form") or core_row.get("normalized_form") or "").strip()
+    return {
+        "lexeme_id": lexeme_id,
+        "lemma": lemma,
+        "status": "completed",
+        "generation_run_id": generation_run_id,
+        "completed_at": completed_at,
+    }
+
+
+def _build_core_migration_decision_row(core_row: dict[str, Any]) -> dict[str, Any]:
+    checkpoint_row = _build_core_migration_checkpoint_row(core_row)
+    senses = list(core_row.get("senses") or [])
+    first_sense = (senses[0] if senses else {}) or {}
+    decision = str(first_sense.get("decision") or "").strip()
+    if not decision:
+        decision = "keep_derived_special" if first_sense.get("base_word") else "keep_standard"
+    return {
+        **checkpoint_row,
+        "decision": decision,
+        "base_word": first_sense.get("base_word"),
+        "discard_reason": None,
+        "accepted_sense_count": len(senses),
+    }
+
+
+def _build_translation_migration_checkpoint_rows(translation_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in translation_rows:
+        entry_id = str(row.get("entry_id") or "").strip()
+        sense_id = str(row.get("sense_id") or "").strip()
+        if not entry_id or not sense_id:
+            raise RuntimeError("Translation rows must include entry_id and sense_id to build resume ledgers")
+        key = (entry_id, sense_id)
+        completed_at = str(row.get("generated_at") or "").strip() or _utc_now()
+        generation_run_id = str(row.get("generation_run_id") or "").strip() or f"split-translations-{completed_at}"
+        existing = grouped.get(key)
+        if existing is None or completed_at > str(existing.get("completed_at") or ""):
+            grouped[key] = {
+                "entry_id": entry_id,
+                "sense_id": sense_id,
+                "status": "completed",
+                "generation_run_id": generation_run_id,
+                "completed_at": completed_at,
+            }
+    return list(grouped.values())
+
+
+def _build_translation_migration_decision_rows(translation_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    locale_counts: dict[tuple[str, str], int] = {}
+    for row in translation_rows:
+        entry_id = str(row.get("entry_id") or "").strip()
+        sense_id = str(row.get("sense_id") or "").strip()
+        if not entry_id or not sense_id:
+            raise RuntimeError("Translation rows must include entry_id and sense_id to build resume ledgers")
+        locale_counts[(entry_id, sense_id)] = locale_counts.get((entry_id, sense_id), 0) + 1
+    checkpoint_rows = _build_translation_migration_checkpoint_rows(translation_rows)
+    return [
+        {
+            **row,
+            "locale_count": locale_counts[(str(row["entry_id"]), str(row["sense_id"]))],
+        }
+        for row in checkpoint_rows
+    ]
+
+
+def merge_staged_enrichment_rows(
+    core_rows: list[dict[str, Any]],
+    translation_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    translations_by_key: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for row in translation_rows:
+        entry_id = str(row.get("entry_id") or "").strip()
+        sense_id = str(row.get("sense_id") or "").strip()
+        locale = str(row.get("locale") or "").strip()
+        if not entry_id or not sense_id or not locale:
+            raise RuntimeError("Translation rows must include non-empty entry_id, sense_id, and locale")
+        translations_by_key.setdefault((entry_id, sense_id), {})[locale] = {
+            "definition": row.get("definition"),
+            "usage_note": row.get("usage_note"),
+            "examples": list(row.get("examples") or []),
+        }
+
+    merged_rows: list[dict[str, Any]] = []
+    for core_row in core_rows:
+        merged_row = dict(core_row)
+        entry_id = str(merged_row.get("entry_id") or "").strip()
+        merged_senses: list[dict[str, Any]] = []
+        for sense in merged_row.get("senses") or []:
+            sense_row = dict(sense)
+            sense_id = str(sense_row.get("sense_id") or "").strip()
+            translations = translations_by_key.get((entry_id, sense_id))
+            if translations is None:
+                raise RuntimeError(
+                    f"Missing translations for entry_id={entry_id or '<unknown>'} sense_id={sense_id or '<unknown>'}"
+                )
+            sense_row["translations"] = translations
+            merged_senses.append(sense_row)
+        merged_row["senses"] = merged_senses
+        merged_rows.append(merged_row)
+    return merged_rows
+
+
+def split_legacy_enrich_artifact(
+    *,
+    compiled_input_path: Path,
+    core_output_path: Path,
+    translations_output_path: Path,
+    core_checkpoint_path: Path | None = None,
+    core_decisions_path: Path | None = None,
+    core_failures_path: Path | None = None,
+    translations_checkpoint_path: Path | None = None,
+    translations_decisions_path: Path | None = None,
+    translations_failures_path: Path | None = None,
+) -> dict[str, Any]:
+    compiled_rows = read_jsonl(compiled_input_path)
+    core_rows: list[dict[str, Any]] = []
+    translation_rows: list[dict[str, Any]] = []
+    for row in compiled_rows:
+        core_row, extracted_translation_rows = split_compiled_row_for_staging(row)
+        core_rows.append(core_row)
+        translation_rows.extend(extracted_translation_rows)
+    write_jsonl(core_output_path, core_rows)
+    write_jsonl(translations_output_path, translation_rows)
+    payload = {
+        "compiled_input": str(compiled_input_path),
+        "core_output": str(core_output_path),
+        "translations_output": str(translations_output_path),
+        "core_row_count": len(core_rows),
+        "translation_row_count": len(translation_rows),
+    }
+    if core_checkpoint_path is not None:
+        core_checkpoint_rows = [_build_core_migration_checkpoint_row(row) for row in core_rows]
+        write_jsonl(core_checkpoint_path, core_checkpoint_rows)
+        payload["core_checkpoint"] = str(core_checkpoint_path)
+        payload["core_checkpoint_row_count"] = len(core_checkpoint_rows)
+    if core_decisions_path is not None:
+        core_decision_rows = [_build_core_migration_decision_row(row) for row in core_rows]
+        write_jsonl(core_decisions_path, core_decision_rows)
+        payload["core_decisions"] = str(core_decisions_path)
+        payload["core_decision_row_count"] = len(core_decision_rows)
+    if core_failures_path is not None:
+        write_jsonl(core_failures_path, [])
+        payload["core_failures"] = str(core_failures_path)
+        payload["core_failure_row_count"] = 0
+    if translations_checkpoint_path is not None:
+        translation_checkpoint_rows = _build_translation_migration_checkpoint_rows(translation_rows)
+        write_jsonl(translations_checkpoint_path, translation_checkpoint_rows)
+        payload["translations_checkpoint"] = str(translations_checkpoint_path)
+        payload["translations_checkpoint_row_count"] = len(translation_checkpoint_rows)
+    if translations_decisions_path is not None:
+        translation_decision_rows = _build_translation_migration_decision_rows(translation_rows)
+        write_jsonl(translations_decisions_path, translation_decision_rows)
+        payload["translations_decisions"] = str(translations_decisions_path)
+        payload["translations_decision_row_count"] = len(translation_decision_rows)
+    if translations_failures_path is not None:
+        write_jsonl(translations_failures_path, [])
+        payload["translations_failures"] = str(translations_failures_path)
+        payload["translations_failure_row_count"] = 0
+    return payload
+
+
+def merge_staged_enrichment_artifacts(
+    *,
+    core_input_path: Path,
+    translations_input_path: Path,
+    output_path: Path,
+) -> dict[str, Any]:
+    core_rows = read_jsonl(core_input_path)
+    translation_rows = read_jsonl(translations_input_path)
+    merged_rows = merge_staged_enrichment_rows(core_rows, translation_rows)
+    write_jsonl(output_path, merged_rows)
+    return {
+        "core_input": str(core_input_path),
+        "translations_input": str(translations_input_path),
+        "output": str(output_path),
+        "merged_row_count": len(merged_rows),
+    }
+
+
+def _translation_job_key(*, entry_id: str, sense_id: str) -> str:
+    return f"{entry_id}::{sense_id}"
+
+
+def _build_translation_response_schema() -> dict[str, Any]:
+    translation_schema = {
+        "type": "object",
+        "properties": {
+            "definition": {"type": "string"},
+            "usage_note": {"type": "string"},
+            "examples": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["definition", "usage_note", "examples"],
+        "additionalProperties": False,
+    }
+    return {
+        "name": "lexicon_enrichment_translations",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                locale: translation_schema for locale in _REQUIRED_TRANSLATION_LOCALES
+            },
+            "required": list(_REQUIRED_TRANSLATION_LOCALES),
+            "additionalProperties": False,
+        },
+    }
+
+
+def build_translation_prompt(*, core_row: dict[str, Any], sense_row: dict[str, Any]) -> str:
+    examples = [
+        str((example or {}).get("sentence") or "").strip()
+        for example in (sense_row.get("examples") or [])
+        if str((example or {}).get("sentence") or "").strip()
+    ]
+    payload = {
+        "entry_id": core_row.get("entry_id"),
+        "word": core_row.get("word"),
+        "sense_id": sense_row.get("sense_id"),
+        "part_of_speech": sense_row.get("pos"),
+        "definition": sense_row.get("definition"),
+        "usage_note": sense_row.get("usage_note"),
+        "examples": examples,
+    }
+    return (
+        "Translate the learner-facing sense payload into all required locales.\n"
+        f"Use the exact required locales: {', '.join(_REQUIRED_TRANSLATION_LOCALES)}.\n"
+        "For each locale, return definition, usage_note, and examples.\n"
+        "translations.examples must contain exactly the same number of items as the English examples array, in the same order.\n"
+        "Preserve meaning and learner-friendly tone. Return JSON only.\n"
+        f"English source payload: {json.dumps(payload, ensure_ascii=False)}\n"
+    )
+
+
+def _validate_translation_response(response: dict[str, Any], *, example_count: int) -> dict[str, dict[str, Any]]:
+    return _validate_translations(response, example_count=example_count)
+
+
+def _generate_validated_translation_payload_with_stats(
+    *,
+    client: OpenAICompatibleResponsesClient | NodeOpenAICompatibleResponsesClient,
+    core_row: dict[str, Any],
+    sense_row: dict[str, Any],
+    max_transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    max_validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
+    prompt = build_translation_prompt(core_row=core_row, sense_row=sense_row)
+    response_schema = _build_translation_response_schema()
+    transient_retries = 0
+    repair_attempts = 0
+    effective_max_transient_retries = max(0, int(max_transient_retries))
+    effective_max_validation_retries = max(0, int(max_validation_retries))
+    example_count = len(sense_row.get("examples") or [])
+    while True:
+        try:
+            response = _client_generate_json(
+                client,
+                prompt,
+                response_schema=response_schema,
+                reasoning_effort_override=(
+                    _validation_retry_reasoning_effort(client)
+                    if repair_attempts > 0
+                    else None
+                ),
+            )
+            validated = _validate_translation_response(response, example_count=example_count)
+            return validated, {
+                "repair_count": repair_attempts,
+                "retry_count": transient_retries,
+            }
+        except RuntimeError as exc:
+            if _is_retryable_word_generation_error(exc) and transient_retries < effective_max_transient_retries:
+                transient_retries += 1
+                time.sleep(_transient_retry_backoff_seconds(transient_retries))
+                continue
+            if not _is_repairable_word_payload_error(exc) or repair_attempts >= effective_max_validation_retries:
+                raise
+            repair_attempts += 1
+            transient_retries = 0
+            prompt = (
+                f"Repair the previous translation response. The previous response was invalid: {exc}\n"
+                + build_translation_prompt(core_row=core_row, sense_row=sense_row)
+            )
+
+
+def build_placeholder_translation_provider(
+    *,
+    settings: LexiconSettings | None = None,
+    model_name: str | None = None,
+) -> TranslationProvider:
+    effective_settings = settings or LexiconSettings.from_env(stage="core")
+    effective_model_name = model_name or effective_settings.llm_model or "placeholder-llm"
+
+    def provider(
+        *,
+        core_row: dict[str, Any],
+        sense_row: dict[str, Any],
+        settings: LexiconSettings,
+        generated_at: str,
+        generation_run_id: str,
+        prompt_version: str,
+    ) -> dict[str, dict[str, Any]]:
+        del settings, generated_at, generation_run_id, prompt_version
+        examples = [
+            str((example or {}).get("sentence") or "").strip()
+            for example in (sense_row.get("examples") or [])
+            if str((example or {}).get("sentence") or "").strip()
+        ]
+        word = str(core_row.get("word") or "").strip() or "entry"
+        return {
+            locale: {
+                "definition": f"[{locale}] learner definition for {word}",
+                "usage_note": f"[{locale}] learner note for {word}",
+                "examples": [f"[{locale}] {example}" for example in examples],
+            }
+            for locale in _REQUIRED_TRANSLATION_LOCALES
+        }
+
+    return provider
+
+
+def build_openai_compatible_translation_provider(
+    *,
+    settings: LexiconSettings,
+    model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    client: Any | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
+) -> TranslationProvider:
+    if not settings.llm_base_url:
+        raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible enrichment mode')
+    if not (model_name or settings.llm_model):
+        raise LexiconDependencyError('LEXICON_LLM_MODEL is required for openai_compatible enrichment mode')
+    if not settings.llm_api_key:
+        raise LexiconDependencyError('LEXICON_LLM_API_KEY is required for openai_compatible enrichment mode')
+    effective_model_name = model_name or settings.llm_model
+    effective_reasoning_effort = reasoning_effort or settings.llm_reasoning_effort
+    responses_client = OpenAICompatibleResponsesClient(
+        endpoint=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=str(effective_model_name),
+        client=client,
+        timeout_seconds=settings.llm_timeout_seconds,
+        reasoning_effort=effective_reasoning_effort,
+    )
+
+    def provider(
+        *,
+        core_row: dict[str, Any],
+        sense_row: dict[str, Any],
+        settings: LexiconSettings,
+        generated_at: str,
+        generation_run_id: str,
+        prompt_version: str,
+    ) -> dict[str, dict[str, Any]]:
+        del settings, generated_at, generation_run_id, prompt_version
+        payload, _ = _generate_validated_translation_payload_with_stats(
+            client=responses_client,
+            core_row=core_row,
+            sense_row=sense_row,
+            max_transient_retries=transient_retries,
+            max_validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
+        )
+        return payload
+
+    return provider
+
+
+def build_openai_compatible_node_translation_provider(
+    *,
+    settings: LexiconSettings,
+    model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    runner: NodeRunner | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
+) -> TranslationProvider:
+    if not settings.llm_base_url:
+        raise LexiconDependencyError('LEXICON_LLM_BASE_URL is required for openai_compatible_node enrichment mode')
+    if not (model_name or settings.llm_model):
+        raise LexiconDependencyError('LEXICON_LLM_MODEL is required for openai_compatible_node enrichment mode')
+    if not settings.llm_api_key:
+        raise LexiconDependencyError('LEXICON_LLM_API_KEY is required for openai_compatible_node enrichment mode')
+    effective_model_name = model_name or settings.llm_model
+    effective_reasoning_effort = reasoning_effort or settings.llm_reasoning_effort
+    responses_client = NodeOpenAICompatibleResponsesClient(
+        endpoint=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=str(effective_model_name),
+        runner=runner,
+        timeout_seconds=settings.llm_timeout_seconds,
+        reasoning_effort=effective_reasoning_effort,
+    )
+
+    def provider(
+        *,
+        core_row: dict[str, Any],
+        sense_row: dict[str, Any],
+        settings: LexiconSettings,
+        generated_at: str,
+        generation_run_id: str,
+        prompt_version: str,
+    ) -> dict[str, dict[str, Any]]:
+        del settings, generated_at, generation_run_id, prompt_version
+        payload, _ = _generate_validated_translation_payload_with_stats(
+            client=responses_client,
+            core_row=core_row,
+            sense_row=sense_row,
+            max_transient_retries=transient_retries,
+            max_validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
+        )
+        return payload
+
+    return provider
+
+
+def build_translation_provider(
+    *,
+    settings: LexiconSettings,
+    provider_mode: str = "auto",
+    model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    client: Any | None = None,
+    runner: NodeRunner | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    runtime_logger: RuntimeLogger | None = None,
+) -> TranslationProvider:
+    if provider_mode not in _PROVIDER_MODES:
+        raise ValueError(f'Unsupported provider mode: {provider_mode}')
+    if provider_mode == "placeholder":
+        return build_placeholder_translation_provider(settings=settings, model_name=model_name)
+    if provider_mode == "openai_compatible":
+        return build_openai_compatible_translation_provider(
+            settings=settings,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            client=client,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
+        )
+    if provider_mode == "openai_compatible_node":
+        return build_openai_compatible_node_translation_provider(
+            settings=settings,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            runner=runner,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
+        )
+    if settings.llm_base_url and settings.llm_model and settings.llm_api_key:
+        if settings.llm_transport == "node":
+            return build_openai_compatible_node_translation_provider(
+                settings=settings,
+                model_name=model_name,
+                reasoning_effort=reasoning_effort,
+                runner=runner,
+                transient_retries=transient_retries,
+                validation_retries=validation_retries,
+                runtime_logger=runtime_logger,
+            )
+        return build_openai_compatible_translation_provider(
+            settings=settings,
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            client=client,
+            transient_retries=transient_retries,
+            validation_retries=validation_retries,
+            runtime_logger=runtime_logger,
+        )
+    return build_placeholder_translation_provider(settings=settings, model_name=model_name)
+
+
+def _load_completed_translation_keys(checkpoint_path: Path) -> set[str]:
+    return {
+        _translation_job_key(entry_id=str(row.get("entry_id") or ""), sense_id=str(row.get("sense_id") or ""))
+        for row in _read_jsonl_if_exists(checkpoint_path)
+        if str(row.get("status") or "") == "completed" and row.get("entry_id") and row.get("sense_id")
+    }
+
+
+def _load_failed_translation_keys(failures_path: Path) -> set[str]:
+    return {
+        _translation_job_key(entry_id=str(row.get("entry_id") or ""), sense_id=str(row.get("sense_id") or ""))
+        for row in _read_jsonl_if_exists(failures_path)
+        if str(row.get("status") or "") == "failed" and row.get("entry_id") and row.get("sense_id")
+    }
+
+
+def _reconcile_resumable_translation_output(output_path: Path, *, completed_keys: set[str]) -> None:
+    if not output_path.exists():
+        return
+    write_jsonl(
+        output_path,
+        [
+            row for row in read_jsonl(output_path)
+            if _translation_job_key(entry_id=str(row.get("entry_id") or ""), sense_id=str(row.get("sense_id") or "")) in completed_keys
+        ],
+    )
+
+
+def _reconcile_translation_decisions_output(decisions_path: Path, *, completed_keys: set[str]) -> None:
+    if not decisions_path.exists():
+        return
+    write_jsonl(
+        decisions_path,
+        [
+            row for row in read_jsonl(decisions_path)
+            if _translation_job_key(entry_id=str(row.get("entry_id") or ""), sense_id=str(row.get("sense_id") or "")) in completed_keys
+        ],
+    )
+
+
+def run_core_enrichment(
+    snapshot_dir: Path,
+    *,
+    output_path: Path | None = None,
+    runtime_output_path: Path | None = None,
+    settings: LexiconSettings | None = None,
+    model_name: str | None = None,
+    generated_at: str | None = None,
+    generation_run_id: str | None = None,
+    prompt_version: str = "v1",
+    review_status: str = "draft",
+    provider_mode: str = "auto",
+    reasoning_effort: str | None = None,
+    max_concurrency: int = 1,
+    resume: bool = False,
+    retry_failed_only: bool = False,
+    skip_failed: bool = False,
+    checkpoint_path: Path | None = None,
+    failures_output: Path | None = None,
+    decisions_path: Path | None = None,
+    max_failures: int | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    log_level: str = "info",
+    log_file: Path | None = None,
+    request_delay_seconds: float = 0.0,
+    max_new_completed_lexemes: int | None = None,
+) -> CoreEnrichmentRunResult:
+    destination = output_path or snapshot_dir / "words.enriched.core.jsonl"
+    runtime_destination = runtime_output_path or snapshot_dir / "words.enriched.core.runtime.jsonl"
+    checkpoint_destination = checkpoint_path or snapshot_dir / "enrich.core.checkpoint.jsonl"
+    failures_destination = failures_output or snapshot_dir / "enrich.core.failures.jsonl"
+    decisions_destination = decisions_path or snapshot_dir / "enrich.core.decisions.jsonl"
+    effective_settings = settings or LexiconSettings.from_env(stage="core")
+    runtime_logger = _build_runtime_logger(
+        snapshot_dir=snapshot_dir,
+        log_level=log_level,
+        log_file=log_file,
+    )
+    word_provider = build_word_enrichment_provider(
+        settings=effective_settings,
+        provider_mode=provider_mode,
+        model_name=model_name,
+        reasoning_effort=reasoning_effort,
+        review_status=review_status,
+        transient_retries=transient_retries,
+        validation_retries=validation_retries,
+        runtime_logger=runtime_logger,
+        include_translations=False,
+    )
+    phrase_provider = build_phrase_enrichment_provider(
+        settings=effective_settings,
+        provider_mode=provider_mode,
+        model_name=model_name,
+        reasoning_effort=reasoning_effort,
+        review_status=review_status,
+        transient_retries=transient_retries,
+        validation_retries=validation_retries,
+        runtime_logger=runtime_logger,
+        include_translations=False,
+    )
+    def staged_provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str):
+        provider = phrase_provider if lexeme.entry_type == "phrase" else word_provider
+        return provider(
+            lexeme=lexeme,
+            senses=senses,
+            settings=settings,
+            generated_at=generated_at,
+            generation_run_id=generation_run_id,
+            prompt_version=prompt_version,
+        )
+    enrich_snapshot(
+        snapshot_dir,
+        output_path=runtime_destination,
+        settings=effective_settings,
+        model_name=model_name,
+        generated_at=generated_at,
+        generation_run_id=generation_run_id,
+        prompt_version=prompt_version,
+        review_status=review_status,
+        provider_mode=provider_mode,
+        reasoning_effort=reasoning_effort,
+        mode="per_word",
+        max_concurrency=max_concurrency,
+        resume=resume,
+        retry_failed_only=retry_failed_only,
+        skip_failed=skip_failed,
+        checkpoint_path=checkpoint_destination,
+        failures_output=failures_destination,
+        decisions_path=decisions_destination,
+        max_failures=max_failures,
+        transient_retries=transient_retries,
+        validation_retries=validation_retries,
+        log_level=log_level,
+        log_file=log_file,
+        request_delay_seconds=request_delay_seconds,
+        max_new_completed_lexemes=max_new_completed_lexemes,
+        word_provider=staged_provider,
+    )
+    core_rows: list[dict[str, Any]] = []
+    for row in read_jsonl(runtime_destination):
+        core_row, _ = split_compiled_row_for_staging(row)
+        core_rows.append(core_row)
+    write_jsonl(destination, core_rows)
+    lexeme_count = len(read_snapshot_inputs(snapshot_dir)[0])
+    return CoreEnrichmentRunResult(
+        output_path=destination,
+        runtime_output_path=runtime_destination,
+        lexeme_count=lexeme_count,
+        core_row_count=len(core_rows),
+    )
+
+
+def run_translation_enrichment(
+    snapshot_dir: Path,
+    *,
+    core_input_path: Path | None = None,
+    output_path: Path | None = None,
+    settings: LexiconSettings | None = None,
+    model_name: str | None = None,
+    generated_at: str | None = None,
+    generation_run_id: str | None = None,
+    prompt_version: str = "v1",
+    provider_mode: str = "auto",
+    reasoning_effort: str | None = None,
+    translation_provider: TranslationProvider | None = None,
+    max_concurrency: int = 1,
+    resume: bool = False,
+    retry_failed_only: bool = False,
+    skip_failed: bool = False,
+    checkpoint_path: Path | None = None,
+    failures_output: Path | None = None,
+    decisions_path: Path | None = None,
+    max_failures: int | None = None,
+    transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
+    validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
+    log_level: str = "info",
+    log_file: Path | None = None,
+) -> TranslationRunResult:
+    _validate_resume_mode_flags(resume=resume, retry_failed_only=retry_failed_only, skip_failed=skip_failed)
+    effective_settings = settings or LexiconSettings.from_env(stage="translations")
+    effective_generated_at = generated_at or _utc_now()
+    effective_generation_run_id = generation_run_id or f"translate-{effective_generated_at}"
+    runtime_logger = _build_runtime_logger(
+        snapshot_dir=snapshot_dir,
+        log_level=log_level,
+        log_file=log_file or (snapshot_dir / _DEFAULT_TRANSLATION_RUNTIME_LOG_FILE),
+    )
+    core_path = core_input_path or snapshot_dir / "words.enriched.core.jsonl"
+    destination = output_path or snapshot_dir / "words.translations.jsonl"
+    checkpoint_destination = checkpoint_path or snapshot_dir / "enrich.translations.checkpoint.jsonl"
+    failures_destination = failures_output or snapshot_dir / "enrich.translations.failures.jsonl"
+    decisions_destination = decisions_path or snapshot_dir / "enrich.translations.decisions.jsonl"
+    provider = translation_provider or build_translation_provider(
+        settings=effective_settings,
+        provider_mode=provider_mode,
+        model_name=model_name,
+        reasoning_effort=reasoning_effort,
+        transient_retries=transient_retries,
+        validation_retries=validation_retries,
+        runtime_logger=runtime_logger,
+    )
+    core_rows = read_jsonl(core_path)
+    sense_jobs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for core_row in core_rows:
+        for sense_row in core_row.get("senses") or []:
+            sense_jobs.append((core_row, sense_row))
+
+    completed_keys = _load_completed_translation_keys(checkpoint_destination) if resume else set()
+    failed_keys = _load_failed_translation_keys(failures_destination) if resume and (retry_failed_only or skip_failed) else set()
+    unresolved_failed_keys = failed_keys - completed_keys
+    if resume:
+        _reconcile_resumable_translation_output(destination, completed_keys=completed_keys)
+        _reconcile_translation_decisions_output(decisions_destination, completed_keys=completed_keys)
+    else:
+        write_jsonl(destination, [])
+        write_jsonl(checkpoint_destination, [])
+        write_jsonl(failures_destination, [])
+        write_jsonl(decisions_destination, [])
+
+    def is_pending(job: tuple[dict[str, Any], dict[str, Any]]) -> bool:
+        core_row, sense_row = job
+        key = _translation_job_key(entry_id=str(core_row.get("entry_id") or ""), sense_id=str(sense_row.get("sense_id") or ""))
+        if resume and retry_failed_only:
+            return key in unresolved_failed_keys
+        if resume and skip_failed:
+            return key not in completed_keys and key not in unresolved_failed_keys
+        return key not in completed_keys
+
+    pending_jobs = [job for job in sense_jobs if is_pending(job)]
+    failures: list[str] = []
+
+    def persist_completed(core_row: dict[str, Any], sense_row: dict[str, Any], payload: dict[str, dict[str, Any]]) -> None:
+        entry_id = str(core_row.get("entry_id") or "")
+        sense_id = str(sense_row.get("sense_id") or "")
+        key = _translation_job_key(entry_id=entry_id, sense_id=sense_id)
+        if key in completed_keys:
+            return
+        rows = [
+            {
+                "entry_id": entry_id,
+                "sense_id": sense_id,
+                "locale": locale,
+                "definition": locale_payload.get("definition"),
+                "usage_note": locale_payload.get("usage_note"),
+                "examples": list(locale_payload.get("examples") or []),
+                "generated_at": effective_generated_at,
+                "generation_run_id": effective_generation_run_id,
+                "model_name": model_name or effective_settings.llm_model or "placeholder-llm",
+                "prompt_version": prompt_version,
+                "status": "completed",
+            }
+            for locale, locale_payload in payload.items()
+        ]
+        append_jsonl(destination, rows)
+        append_jsonl(decisions_destination, [{
+            "entry_id": entry_id,
+            "sense_id": sense_id,
+            "status": "completed",
+            "generation_run_id": effective_generation_run_id,
+            "completed_at": _utc_now(),
+            "locale_count": len(rows),
+        }])
+        append_jsonl(checkpoint_destination, [{
+            "entry_id": entry_id,
+            "sense_id": sense_id,
+            "status": "completed",
+            "generation_run_id": effective_generation_run_id,
+            "completed_at": _utc_now(),
+        }])
+        completed_keys.add(key)
+
+    def handle_failure(core_row: dict[str, Any], sense_row: dict[str, Any], exc: Exception) -> None:
+        entry_id = str(core_row.get("entry_id") or "")
+        sense_id = str(sense_row.get("sense_id") or "")
+        failures.append(f"{entry_id}/{sense_id}: {exc}")
+        append_jsonl(failures_destination, [{
+            "entry_id": entry_id,
+            "sense_id": sense_id,
+            "status": "failed",
+            "generation_run_id": effective_generation_run_id,
+            "failed_at": _utc_now(),
+            "error": str(exc),
+        }])
+
+    effective_max_concurrency = max(1, int(max_concurrency or 1))
+    if effective_max_concurrency == 1:
+        for core_row, sense_row in pending_jobs:
+            try:
+                payload = provider(
+                    core_row=core_row,
+                    sense_row=sense_row,
+                    settings=effective_settings,
+                    generated_at=effective_generated_at,
+                    generation_run_id=effective_generation_run_id,
+                    prompt_version=prompt_version,
+                )
+                persist_completed(core_row, sense_row, payload)
+            except Exception as exc:
+                handle_failure(core_row, sense_row, exc)
+                if max_failures is not None and len(failures) >= max(1, int(max_failures)):
+                    break
+    else:
+        with ThreadPoolExecutor(max_workers=effective_max_concurrency) as executor:
+            future_map = {
+                executor.submit(
+                    provider,
+                    core_row=core_row,
+                    sense_row=sense_row,
+                    settings=effective_settings,
+                    generated_at=effective_generated_at,
+                    generation_run_id=effective_generation_run_id,
+                    prompt_version=prompt_version,
+                ): (core_row, sense_row)
+                for core_row, sense_row in pending_jobs
+            }
+            for future in as_completed(future_map):
+                core_row, sense_row = future_map[future]
+                try:
+                    persist_completed(core_row, sense_row, future.result())
+                except Exception as exc:
+                    handle_failure(core_row, sense_row, exc)
+                    if max_failures is not None and len(failures) >= max(1, int(max_failures)):
+                        break
+
+    if failures:
+        raise RuntimeError("Translation enrichment failed for " + "; ".join(sorted(failures)))
+
+    return TranslationRunResult(
+        output_path=destination,
+        sense_count=len(sense_jobs),
+        translation_row_count=len(_load_existing_output_rows(destination)),
+    )
+
+
 def _validate_compiled_word_outcome(*, lexeme: LexemeRecord, outcome: WordJobOutcome) -> None:
     compiled_row = _compiled_row_from_outcome(lexeme=lexeme, outcome=outcome)
     if compiled_row is None:
@@ -2518,6 +3541,7 @@ def enrich_snapshot(
     skip_failed: bool = False,
     checkpoint_path: Path | None = None,
     failures_output: Path | None = None,
+    decisions_path: Path | None = None,
     max_failures: int | None = None,
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
@@ -2544,7 +3568,7 @@ def enrich_snapshot(
     effective_request_delay_seconds = max(0.0, float(request_delay_seconds or 0.0))
     checkpoint_destination = checkpoint_path or snapshot_dir / 'enrich.checkpoint.jsonl'
     failures_destination = failures_output or snapshot_dir / 'enrich.failures.jsonl'
-    decisions_destination = snapshot_dir / 'enrich.decisions.jsonl'
+    decisions_destination = decisions_path or snapshot_dir / 'enrich.decisions.jsonl'
     effective_max_failures = None if max_failures is None else max(1, int(max_failures))
     effective_max_new_completed_lexemes = (
         None
@@ -2770,6 +3794,7 @@ def run_enrichment(
     skip_failed: bool = False,
     checkpoint_path: Path | None = None,
     failures_output: Path | None = None,
+    decisions_path: Path | None = None,
     max_failures: int | None = None,
     transient_retries: int = _DEFAULT_WORD_TRANSIENT_RETRIES,
     validation_retries: int = _DEFAULT_WORD_REPAIR_ATTEMPTS,
@@ -2802,6 +3827,7 @@ def run_enrichment(
         skip_failed=skip_failed,
         checkpoint_path=checkpoint_path,
         failures_output=failures_output,
+        decisions_path=decisions_path,
         max_failures=max_failures,
         transient_retries=transient_retries,
         validation_retries=validation_retries,

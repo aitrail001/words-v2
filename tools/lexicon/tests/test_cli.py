@@ -1594,6 +1594,148 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["phrase_count"], 1)
             mocked_export.assert_called_once_with(output_path, max_words=10, max_phrases=20)
 
+    def test_split_enrich_artifact_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            compiled_path = Path(tmpdir) / "words.enriched.jsonl"
+            core_path = Path(tmpdir) / "words.enriched.core.jsonl"
+            translations_path = Path(tmpdir) / "words.translations.jsonl"
+            core_checkpoint_path = Path(tmpdir) / "enrich.core.checkpoint.jsonl"
+            translations_checkpoint_path = Path(tmpdir) / "enrich.translations.checkpoint.jsonl"
+
+            with patch(
+                "tools.lexicon.cli.split_legacy_enrich_artifact",
+                return_value={
+                    "compiled_input": str(compiled_path),
+                    "core_output": str(core_path),
+                    "translations_output": str(translations_path),
+                    "core_row_count": 1,
+                    "translation_row_count": 5,
+                    "core_checkpoint": str(core_checkpoint_path),
+                    "translations_checkpoint": str(translations_checkpoint_path),
+                },
+            ) as mocked_split:
+                code, stdout, _ = self.run_cli([
+                    "split-enrich-artifact",
+                    "--compiled-input",
+                    str(compiled_path),
+                    "--core-output",
+                    str(core_path),
+                    "--translations-output",
+                    str(translations_path),
+                    "--core-checkpoint-path",
+                    str(core_checkpoint_path),
+                    "--translations-checkpoint-path",
+                    str(translations_checkpoint_path),
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "split-enrich-artifact")
+            self.assertEqual(payload["core_row_count"], 1)
+            self.assertEqual(payload["translation_row_count"], 5)
+            self.assertEqual(mocked_split.call_args.kwargs["compiled_input_path"], compiled_path)
+            self.assertEqual(mocked_split.call_args.kwargs["core_output_path"], core_path)
+            self.assertEqual(mocked_split.call_args.kwargs["translations_output_path"], translations_path)
+            self.assertEqual(mocked_split.call_args.kwargs["core_checkpoint_path"], core_checkpoint_path)
+            self.assertEqual(mocked_split.call_args.kwargs["translations_checkpoint_path"], translations_checkpoint_path)
+
+    def test_merge_enrich_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            core_path = Path(tmpdir) / "words.enriched.core.jsonl"
+            translations_path = Path(tmpdir) / "words.translations.jsonl"
+            output_path = Path(tmpdir) / "words.enriched.jsonl"
+
+            with patch(
+                "tools.lexicon.cli.merge_staged_enrichment_artifacts",
+                return_value={
+                    "core_input": str(core_path),
+                    "translations_input": str(translations_path),
+                    "output": str(output_path),
+                    "merged_row_count": 1,
+                },
+            ) as mocked_merge:
+                code, stdout, _ = self.run_cli([
+                    "merge-enrich",
+                    "--core-input",
+                    str(core_path),
+                    "--translations-input",
+                    str(translations_path),
+                    "--output",
+                    str(output_path),
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "merge-enrich")
+            self.assertEqual(payload["merged_row_count"], 1)
+            self.assertEqual(mocked_merge.call_args.kwargs["core_input_path"], core_path)
+            self.assertEqual(mocked_merge.call_args.kwargs["translations_input_path"], translations_path)
+            self.assertEqual(mocked_merge.call_args.kwargs["output_path"], output_path)
+
+    def test_enrich_core_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            output_path = snapshot_dir / "words.enriched.core.jsonl"
+            runtime_output_path = snapshot_dir / "words.enriched.core.runtime.jsonl"
+
+            with patch(
+                "tools.lexicon.cli.run_core_enrichment",
+                return_value=type(
+                    "Result",
+                    (),
+                    {
+                        "output_path": output_path,
+                        "runtime_output_path": runtime_output_path,
+                        "lexeme_count": 10,
+                        "core_row_count": 8,
+                    },
+                )(),
+            ) as mocked_run:
+                code, stdout, _ = self.run_cli([
+                    "enrich-core",
+                    "--snapshot-dir",
+                    str(snapshot_dir),
+                    "--resume",
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "enrich-core")
+            self.assertEqual(payload["lexeme_count"], 10)
+            self.assertEqual(payload["core_row_count"], 8)
+            self.assertEqual(mocked_run.call_args.args[0], snapshot_dir)
+
+    def test_enrich_translations_command_writes_json_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            output_path = snapshot_dir / "words.translations.jsonl"
+
+            with patch(
+                "tools.lexicon.cli.run_translation_enrichment",
+                return_value=type(
+                    "Result",
+                    (),
+                    {
+                        "output_path": output_path,
+                        "sense_count": 7,
+                        "translation_row_count": 35,
+                    },
+                )(),
+            ) as mocked_run:
+                code, stdout, _ = self.run_cli([
+                    "enrich-translations",
+                    "--snapshot-dir",
+                    str(snapshot_dir),
+                    "--resume",
+                ])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "enrich-translations")
+            self.assertEqual(payload["sense_count"], 7)
+            self.assertEqual(payload["translation_row_count"], 35)
+            self.assertEqual(mocked_run.call_args.args[0], snapshot_dir)
+
 
 if __name__ == "__main__":
     unittest.main()
