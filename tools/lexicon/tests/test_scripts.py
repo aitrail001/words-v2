@@ -29,7 +29,7 @@ class ScriptTests(unittest.TestCase):
         env["INTERVAL_SECONDS"] = "0"
         env["TAIL_ROWS"] = "0"
         return subprocess.run(
-            ["zsh", str(_MONITOR_ENRICH_SCRIPT), "--once", "--no-tail", str(snapshot_dir)],
+            ["/bin/zsh", str(_MONITOR_ENRICH_SCRIPT), "--once", "--no-tail", str(snapshot_dir)],
             cwd=_REPO_ROOT,
             capture_output=True,
             text=True,
