@@ -5837,3 +5837,106 @@ class StagedEnrichmentArtifactTests(unittest.TestCase):
                     core_checkpoint_path=tmp_path / "enrich.core.checkpoint.jsonl",
                     core_decisions_path=tmp_path / "enrich.core.decisions.jsonl",
                 )
+
+    def test_split_legacy_enrich_artifact_rejects_legacy_accepted_rows_missing_from_compiled_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            compiled_input = tmp_path / "words.enriched.jsonl"
+            compiled_input.write_text(json.dumps({
+                "schema_version": "1.1.0",
+                "entry_id": "lx_run",
+                "entry_type": "word",
+                "normalized_form": "run",
+                "source_provenance": [{"source": "wordfreq", "role": "frequency_rank"}],
+                "entity_category": "general",
+                "word": "run",
+                "part_of_speech": ["verb"],
+                "cefr_level": "B1",
+                "frequency_rank": 5,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_run_1",
+                        "wn_synset_id": "run.v.01",
+                        "pos": "verb",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "move quickly on foot",
+                        "examples": [{"sentence": "I run every morning.", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "Common everyday verb.",
+                        "enrichment_id": "en_sn_lx_run_1_v1",
+                        "generation_run_id": "enrich-2026-04-08T02:00:00Z",
+                        "model_name": "gpt-5.4",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T02:00:00Z",
+                        "translations": _test_translations(),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T02:00:00Z",
+                "phonetics": _test_phonetics(),
+            }) + "\n", encoding="utf-8")
+            write_jsonl(
+                tmp_path / "enrich.checkpoint.jsonl",
+                [
+                    {
+                        "lexeme_id": "lx_run",
+                        "lemma": "run",
+                        "status": "completed",
+                        "generation_run_id": "legacy-run",
+                        "completed_at": "2026-04-08T02:00:01Z",
+                    },
+                    {
+                        "lexeme_id": "lx_jump",
+                        "lemma": "jump",
+                        "status": "completed",
+                        "generation_run_id": "legacy-run",
+                        "completed_at": "2026-04-08T02:00:02Z",
+                    },
+                ],
+            )
+            write_jsonl(
+                tmp_path / "enrich.decisions.jsonl",
+                [
+                    {
+                        "lexeme_id": "lx_run",
+                        "lemma": "run",
+                        "status": "completed",
+                        "generation_run_id": "legacy-run",
+                        "completed_at": "2026-04-08T02:00:01Z",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "discard_reason": None,
+                        "accepted_sense_count": 1,
+                    },
+                    {
+                        "lexeme_id": "lx_jump",
+                        "lemma": "jump",
+                        "status": "completed",
+                        "generation_run_id": "legacy-run",
+                        "completed_at": "2026-04-08T02:00:02Z",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "discard_reason": None,
+                        "accepted_sense_count": 1,
+                    },
+                ],
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "Legacy accepted decisions missing from compiled enrich artifact: lx_jump"):
+                split_legacy_enrich_artifact(
+                    compiled_input_path=compiled_input,
+                    core_output_path=tmp_path / "words.enriched.core.jsonl",
+                    translations_output_path=tmp_path / "words.translations.jsonl",
+                    core_checkpoint_path=tmp_path / "enrich.core.checkpoint.jsonl",
+                    core_decisions_path=tmp_path / "enrich.core.decisions.jsonl",
+                )
