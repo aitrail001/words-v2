@@ -278,6 +278,100 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(core_rows[0]["entry_id"], "lx_run")
             self.assertNotIn("translations", core_rows[0]["senses"][0])
 
+    def test_run_core_enrichment_uses_core_stage_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            captured: dict[str, object] = {}
+            core_settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-5.4",
+                    "LEXICON_LLM_API_KEY": "secret",
+                }
+            )
+            translation_settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-5.4-mini",
+                    "LEXICON_LLM_API_KEY": "secret",
+                }
+            )
+
+            def fake_from_env(env=None, *, stage=None):
+                if stage == "core":
+                    return core_settings
+                if stage == "translations":
+                    return translation_settings
+                return translation_settings
+
+            def fake_enrich_snapshot(
+                snapshot_dir: Path,
+                *,
+                output_path: Path | None = None,
+                settings: LexiconSettings | None = None,
+                **_: object,
+            ) -> list[EnrichmentRecord]:
+                captured["model"] = settings.llm_model if settings else None
+                assert output_path is not None
+                output_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1.1.0",
+                            "entry_id": "lx_run",
+                            "entry_type": "word",
+                            "normalized_form": "run",
+                            "source_provenance": [{"source": "wordnet"}],
+                            "entity_category": "general",
+                            "word": "run",
+                            "part_of_speech": ["verb"],
+                            "cefr_level": "B1",
+                            "frequency_rank": 5,
+                            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                            "senses": [
+                                {
+                                    "sense_id": "sn_lx_run_1",
+                                    "wn_synset_id": "run.v.01",
+                                    "pos": "verb",
+                                    "sense_kind": "standard_meaning",
+                                    "decision": "keep_standard",
+                                    "base_word": None,
+                                    "primary_domain": "general",
+                                    "secondary_domains": [],
+                                    "register": "neutral",
+                                    "definition": "move fast by using your legs",
+                                    "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                    "synonyms": [],
+                                    "antonyms": [],
+                                    "collocations": [],
+                                    "grammar_patterns": [],
+                                    "usage_note": "Common learner note.",
+                                    "enrichment_id": "enr_1",
+                                    "generation_run_id": "run-1",
+                                    "model_name": "gpt-5.4",
+                                    "prompt_version": "v1",
+                                    "confidence": 0.9,
+                                    "generated_at": "2026-04-08T00:00:00Z",
+                                    "translations": {},
+                                }
+                            ],
+                            "confusable_words": [],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "phonetics": _test_phonetics(),
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                return []
+
+            with patch("tools.lexicon.enrich.LexiconSettings.from_env", side_effect=fake_from_env):
+                with patch("tools.lexicon.enrich.enrich_snapshot", side_effect=fake_enrich_snapshot):
+                    result = run_core_enrichment(snapshot_dir, provider_mode="auto", max_concurrency=1)
+
+            self.assertEqual(result.core_row_count, 1)
+            self.assertEqual(captured["model"], "gpt-5.4")
+
     def test_run_translation_enrichment_writes_translation_ledger_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -348,6 +442,108 @@ class EnrichSnapshotTests(unittest.TestCase):
             rows = [json.loads(line) for line in result.output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(rows), 5)
             self.assertEqual({row["locale"] for row in rows}, {"zh-Hans", "es", "ar", "pt-BR", "ja"})
+
+    def test_run_translation_enrichment_uses_translation_stage_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            core_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordnet"}],
+                        "entity_category": "general",
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "B1",
+                        "frequency_rank": 5,
+                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        "senses": [
+                            {
+                                "sense_id": "sn_lx_run_1",
+                                "wn_synset_id": "run.v.01",
+                                "pos": "verb",
+                                "sense_kind": "standard_meaning",
+                                "decision": "keep_standard",
+                                "base_word": None,
+                                "primary_domain": "general",
+                                "secondary_domains": [],
+                                "register": "neutral",
+                                "definition": "move fast by using your legs",
+                                "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": [],
+                                "usage_note": "Common learner note.",
+                                "enrichment_id": "enr_1",
+                                "generation_run_id": "run-1",
+                                "model_name": "test-model",
+                                "prompt_version": "v1",
+                                "confidence": 0.9,
+                                "generated_at": "2026-04-08T00:00:00Z",
+                            }
+                        ],
+                        "confusable_words": [],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "phonetics": _test_phonetics(),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            captured: dict[str, object] = {}
+            core_settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-5.4",
+                    "LEXICON_LLM_API_KEY": "secret",
+                }
+            )
+            translation_settings = LexiconSettings.from_env(
+                {
+                    "LEXICON_LLM_BASE_URL": "https://example.test/v1",
+                    "LEXICON_LLM_MODEL": "gpt-5.4-mini",
+                    "LEXICON_LLM_API_KEY": "secret",
+                }
+            )
+
+            def fake_from_env(env=None, *, stage=None):
+                if stage == "core":
+                    return core_settings
+                if stage == "translations":
+                    return translation_settings
+                return core_settings
+
+            def fake_build_translation_provider(
+                *,
+                settings: LexiconSettings,
+                **_: object,
+            ):
+                captured["model"] = settings.llm_model
+
+                def provider(**__: object) -> dict[str, dict[str, object]]:
+                    return _test_translations(
+                        definition="move quickly",
+                        usage_note="translation note",
+                        examples=["I run every day."],
+                    )
+
+                return provider
+
+            with patch("tools.lexicon.enrich.LexiconSettings.from_env", side_effect=fake_from_env):
+                with patch("tools.lexicon.enrich.build_translation_provider", side_effect=fake_build_translation_provider):
+                    result = run_translation_enrichment(
+                        snapshot_dir,
+                        core_input_path=core_path,
+                        provider_mode="auto",
+                    )
+
+            self.assertEqual(result.translation_row_count, 5)
+            self.assertEqual(captured["model"], "gpt-5.4-mini")
 
     def test_build_phrase_enrichment_prompt_mentions_phrase_context(self) -> None:
         lexeme = LexemeRecord(

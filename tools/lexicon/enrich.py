@@ -1802,7 +1802,7 @@ def build_placeholder_word_enrichment_provider(
     review_status: str = 'draft',
     include_translations: bool = True,
 ) -> WordEnrichmentProvider:
-    effective_settings = settings or LexiconSettings.from_env(stage="translations")
+    effective_settings = settings or LexiconSettings.from_env(stage="core")
     effective_model_name = model_name or effective_settings.llm_model or 'placeholder-llm'
     sense_provider = build_placeholder_enrichment_provider(
         settings=effective_settings,
@@ -3196,7 +3196,7 @@ def run_core_enrichment(
     checkpoint_destination = checkpoint_path or snapshot_dir / "enrich.core.checkpoint.jsonl"
     failures_destination = failures_output or snapshot_dir / "enrich.core.failures.jsonl"
     decisions_destination = decisions_path or snapshot_dir / "enrich.core.decisions.jsonl"
-    effective_settings = settings or LexiconSettings.from_env(stage="translations")
+    effective_settings = settings or LexiconSettings.from_env(stage="core")
     runtime_logger = _build_runtime_logger(
         snapshot_dir=snapshot_dir,
         log_level=log_level,
@@ -3303,7 +3303,7 @@ def run_translation_enrichment(
     log_file: Path | None = None,
 ) -> TranslationRunResult:
     _validate_resume_mode_flags(resume=resume, retry_failed_only=retry_failed_only, skip_failed=skip_failed)
-    effective_settings = settings or LexiconSettings.from_env()
+    effective_settings = settings or LexiconSettings.from_env(stage="translations")
     effective_generated_at = generated_at or _utc_now()
     effective_generation_run_id = generation_run_id or f"translate-{effective_generated_at}"
     runtime_logger = _build_runtime_logger(
