@@ -1,14 +1,10 @@
-# Project-scoped Codex configuration for the words-v2 lexicon batch tool project.
+# Project-scoped Codex configuration for the words-v2 monorepo.
 #
 # Notes:
 # - Custom agents live under `.codex/agents/*.toml`.
-# - If your environment does not expose `gpt-5.4-mini`, replace it with `gpt-5-mini`.
-# - Keep the root session on a stronger coordinating model, and use cheaper specialist
-#   agents where possible.
-#
-# This file is safe as a starting point for interactive development.
-# For a later fully autonomous run, you may choose to switch `approval_policy`
-# from `on-request` to `never` after you trust the workflow.
+# - Keep the root session on a stronger coordinating model.
+# - Use cheaper slice specialists for delegated work.
+# - Avoid lexicon-specific agent defaults at repo root while that tool is still evolving.
 
 model = "gpt-5.4"
 model_reasoning_effort = "medium"
@@ -22,7 +18,7 @@ service_tier = "fast"
 network_access = true
 
 [agents]
-max_threads = 6
+max_threads = 4
 max_depth = 1
 job_max_runtime_seconds = 3600
 

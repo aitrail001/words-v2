@@ -11,7 +11,9 @@ build/
 .eggs/
 *.egg
 .venv/
+.venv-backend
 .venv-backend/
+.venv-lexicon
 .venv-lexicon/
 venv/
 

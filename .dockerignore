@@ -1,0 +1,11 @@
+*
+!backend/
+!backend/**
+!tools/
+!tools/**
+!deploy/
+!deploy/**
+!docs/
+!docs/**
+!scripts/
+!scripts/**

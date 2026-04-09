@@ -1,5 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
+const BACKEND_PORT = process.env.BACKEND_PORT ?? "8000";
+const FRONTEND_PORT = process.env.FRONTEND_PORT ?? "3000";
+const ADMIN_FRONTEND_PORT = process.env.ADMIN_FRONTEND_PORT ?? "3001";
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
@@ -17,7 +21,7 @@ export default defineConfig({
   ],
   outputDir: "test-results",
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
+    baseURL: process.env.E2E_BASE_URL ?? `http://localhost:${FRONTEND_PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
@@ -27,33 +31,28 @@ export default defineConfig({
   },
   webServer: [
     {
-      command:
-        "bash -lc 'cd ../backend && source .venv-backend/bin/activate && set -a && source ../.env.localdev && set +a && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload'",
-      url: "http://127.0.0.1:8000/api/health",
       name: "backend",
+      command:
+        "bash -lc 'source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && uvicorn app.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000} --reload'",
+      url: `http://127.0.0.1:${BACKEND_PORT}/api/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
     {
-      command:
-        "bash -lc 'cd ../frontend && NEXT_PUBLIC_API_URL=http://localhost:8000/api npm run dev'",
-      url: "http://127.0.0.1:3000",
       name: "frontend",
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
-    },
-    {
       command:
-        "bash -lc 'cd ../admin-frontend && NEXT_PUBLIC_API_URL=http://localhost:8000/api npm run dev'",
-      url: "http://127.0.0.1:3001/login",
-      name: "admin",
+        "bash -lc 'set -a && source .env.localdev && set +a && cd frontend && NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-8000}/api npm run dev -- --hostname 0.0.0.0 -p ${FRONTEND_PORT:-3000}'",
+      url: `http://127.0.0.1:${FRONTEND_PORT}`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
-  ],
-  projects: [
     {
-      name: "chromium",
+      name: "admin-frontend",
+      command:
+        "bash -lc 'set -a && source .env.localdev && set +a && cd admin-frontend && NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-8000}/api npm run dev'",
+      url: `http://127.0.0.1:${ADMIN_FRONTEND_PORT}/login`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
     },
   ],
 });

@@ -1,70 +1,68 @@
 # Rollback Runbook
 
-Use this runbook when a release candidate causes user-visible regression or service risk in pre-prod/prod.
+Use this runbook when a release candidate causes user-visible regression or service risk in pre-prod or production.
 
-## 1. Trigger Conditions
+## Trigger conditions
 
 Start rollback when any of the following is true:
 
-- API health fails or sustained 5xx rate exceeds SLO.
-- Login/review/import core user flows fail in smoke validation.
-- Migration introduces blocking query/performance regression.
-- Data integrity risk detected (incorrect writes, missing critical records).
-- Incident commander declares rollback as fastest safe path.
+- API health fails or sustained 5xx rate exceeds acceptable limits
+- login, review, import, or key admin/operator flows fail after release
+- a migration introduces blocking correctness or performance risk
+- data integrity risk is detected
+- the incident owner declares rollback the fastest safe path
 
-## 2. App Rollback Sequence
+## Inputs you need
 
-1. Freeze new deploys and announce rollback start.
-2. Identify last known good release (`GOOD_SHA` / image tag).
-3. Roll backend, worker, frontend to `GOOD_SHA`.
-4. Restart services in dependency order (DB/Redis unchanged):
-   - backend
-   - worker
-   - frontend
-5. Capture rollback start/end timestamps and deployed versions.
+Before executing rollback, identify:
 
-Example (compose-based environment):
+- the bad candidate SHA / tag
+- the last known good release
+- the current environment
+- whether a migration rollback is safe, required, or prohibited
+- who is coordinating communications and verification
 
-```bash
-# Update deployed refs/tags to GOOD_SHA in your deployment config, then:
-docker compose up -d backend worker frontend
-docker compose ps
-```
+## Rollback flow
 
-## 3. DB Migration Rollback Cautions
+1. Stop further promotion activity.
+2. Identify the last known good artifact.
+3. Execute the environment’s rollback command or workflow.
+4. Verify service health.
+5. Verify core smoke paths.
+6. Decide whether DB state also requires intervention.
+7. Record what was rolled back, why, and what still needs follow-up.
 
-- Prefer forward-fix over DB downgrade for most incidents.
-- Do not run `alembic downgrade` in shared environments unless:
-  - migration has a tested, reversible downgrade path
-  - data-loss impact is explicitly reviewed
-  - incident lead approves downgrade
-- If schema changed and app rollback needs compatibility:
-  - deploy compatibility hotfix (forward migration/fix) instead of destructive downgrade where possible
+## Database caution
 
-## 4. Post-Rollback Verification
+Application rollback and database rollback are not always the same operation.
 
-Run and record:
+Rules:
+- never assume migrations are safely reversible without checking
+- if rollback keeps the newer DB schema, verify app compatibility with that schema
+- if data repair is required, document it separately from the app rollback itself
 
-```bash
-curl -fsS "${API_BASE_URL}/api/health"
-curl -fsS -o /dev/null -w "%{http_code}\n" "${WEB_BASE_URL}/register"
-```
+## Minimum post-rollback checks
 
-Application checks:
+After rollback:
 
-- auth register/login works
-- review flow loads and submits
-- import endpoint accepts `.epub` upload and returns expected response code
+- API health is green
+- learner login works
+- learner review entry works for at least a smoke case
+- import path is healthy if it was in scope
+- admin frontend and critical admin/operator flows work if they were in scope
 
-CI signal checks:
+## Records to keep
 
-- latest `E2E Smoke (required)` status is green for rollback target line
-- if available, `E2E Full` last run for rollback target line is green
+Capture:
 
-Close rollback only after verification is complete and incident notes include:
+- incident or release reference
+- rollback command or workflow URL
+- health-check evidence
+- smoke verification evidence
+- any DB-specific follow-up required
 
-- trigger condition
-- exact rollback target
-- commands executed
-- verification evidence
+## Related docs
 
+- `release-promotion.md`
+- `real-preprod-verification.md`
+- `preprod-readiness-checklist.md`
