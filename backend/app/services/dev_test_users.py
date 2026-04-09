@@ -20,9 +20,11 @@ class DevTestUserSpec:
 
 
 DEV_TEST_USERS: tuple[DevTestUserSpec, ...] = (
+    DevTestUserSpec(email="admin@admin.com", password="12345678", role="admin"),
     DevTestUserSpec(email="admin01@admin.com", password="12345678", role="admin"),
     DevTestUserSpec(email="admin02@admin.com", password="12345678", role="admin"),
     DevTestUserSpec(email="admin03@admin.com", password="12345678", role="admin"),
+    DevTestUserSpec(email="user@user.com", password="12345678", role="user"),
     DevTestUserSpec(email="user01@user.com", password="12345678", role="user"),
     DevTestUserSpec(email="user02@user.com", password="12345678", role="user"),
     DevTestUserSpec(email="user03@user.com", password="12345678", role="user"),

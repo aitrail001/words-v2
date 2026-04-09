@@ -300,7 +300,7 @@ test-admin:
 	cd admin-frontend && npm test -- --runInBand
 
 smoke-local:
-	bash -lc 'set -a && source .env.localdev && set +a && export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" && export E2E_BASE_URL=http://localhost:$$FRONTEND_PORT && export E2E_API_URL=http://localhost:$$BACKEND_PORT/api && export E2E_ADMIN_URL=http://localhost:$$ADMIN_FRONTEND_PORT && cd e2e && npx playwright test -c playwright.local.config.ts --grep @smoke'
+	bash -lc 'set -a && source .env.localdev && set +a && export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" && export E2E_BASE_URL=http://localhost:$$FRONTEND_PORT && export E2E_API_URL=http://localhost:$$BACKEND_PORT/api && export E2E_ADMIN_URL=http://localhost:$$ADMIN_FRONTEND_PORT && ./e2e/node_modules/.bin/playwright test -c e2e/playwright.local.config.ts --grep @smoke'
 
 nuc-rsync-data:
 	rsync -a --delete $(HOME)/words-shared/ $(NUC_HOST):$(NUC_SHARED_DATA_DIR)/
