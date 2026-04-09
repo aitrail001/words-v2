@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   apiUrl,
   authHeaders,
+  injectAdminToken,
   registerAdminViaApi,
   waitForAppReady,
 } from "../helpers/auth";
@@ -127,10 +128,8 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   expect(batch).toBeTruthy();
 
   await waitForAppReady(request, adminUrl);
-  await page.goto(`${adminUrl}/login`);
-  await page.getByTestId("login-email-input").fill(user.email);
-  await page.getByTestId("login-password-input").fill(user.password);
-  await page.getByTestId("login-submit-button").click();
+  await injectAdminToken(page, user.token, adminUrl);
+  await page.goto(`${adminUrl}/`);
   await expect(page).toHaveURL(`${adminUrl}/`);
 
   await page.goto(`${adminUrl}/lexicon/compiled-review`);
