@@ -86,6 +86,7 @@ services:
       dockerfile: Dockerfile.prod
       args:
         NEXT_PUBLIC_API_URL: /api
+        BACKEND_URL: http://backend:8000/api
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -106,6 +107,7 @@ services:
       dockerfile: Dockerfile.prod
       args:
         NEXT_PUBLIC_API_URL: http://${TEST_HOST}:${TEST_PUBLIC_PORT}/api
+        BACKEND_URL: http://backend:8000/api
     restart: unless-stopped
     environment:
       NODE_ENV: production
