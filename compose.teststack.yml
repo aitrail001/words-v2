@@ -59,7 +59,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile.prod
-    command: celery -A app.celery_app:celery_app worker --loglevel=info --concurrency=2
+    command: sh -lc "celery -A app.celery_app:celery_app worker --loglevel=info --concurrency=2 --queues=${CELERY_QUEUES:-default,imports}"
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
@@ -69,6 +69,7 @@ services:
       DEV_TEST_USERS_ENABLED: "${DEV_TEST_USERS_ENABLED:-true}"
       JWT_SECRET: ${JWT_SECRET}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CELERY_QUEUES: ${CELERY_QUEUES:-default,imports}
     volumes:
       - ${WORDS_DATA_DIR}:/app/data:rw
       - words_uploads_data:/app/uploads

@@ -316,7 +316,7 @@ local-backend-dev:
 	bash -lc 'source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && uvicorn app.main:app --host 0.0.0.0 --port $$BACKEND_PORT --reload'
 
 local-worker-dev:
-	bash -lc 'source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && celery -A app.celery_app:celery_app worker --loglevel=info --concurrency=2'
+	bash -lc 'source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && celery -A app.celery_app:celery_app worker --loglevel=info --concurrency=2 --queues=$${CELERY_QUEUES:-default,imports}'
 
 local-frontend-dev:
 	bash -lc 'set -a && source .env.localdev && set +a && cd frontend && NEXT_PUBLIC_API_URL=http://localhost:$$BACKEND_PORT/api npm run dev -- --hostname 0.0.0.0 -p $$FRONTEND_PORT'
