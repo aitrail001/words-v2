@@ -38,7 +38,7 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
-      - ${WORDS_DATA_DIR}:/app/data:ro
+      - ${WORDS_DATA_DIR}:/app/data:rw
       - words_uploads_data:/app/uploads
     ports:
       - "${TEST_BACKEND_PORT:-18000}:8000"
@@ -106,12 +106,12 @@ services:
       context: ./admin-frontend
       dockerfile: Dockerfile.prod
       args:
-        NEXT_PUBLIC_API_URL: http://${TEST_HOST}:${TEST_PUBLIC_PORT}/api
+        NEXT_PUBLIC_API_URL: ${TEST_INTERNAL_API_URL:-http://backend:8000/api}
         BACKEND_URL: http://backend:8000/api
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: http://${TEST_HOST}:${TEST_PUBLIC_PORT}/api
+      NEXT_PUBLIC_API_URL: ${TEST_INTERNAL_API_URL:-http://backend:8000/api}
       BACKEND_URL: http://backend:8000/api
     ports:
       - "${TEST_ADMIN_PORT:-13001}:3001"

@@ -2,6 +2,8 @@ SHELL := /bin/bash
 
 PROJECT_NAME ?= words-stack
 ENV_FILE ?= .env.stack.mac
+CI_PROJECT_NAME ?= words-ci-stack
+CI_ENV_FILE ?= .env.stack.ci
 
 DEV_DB_NAME ?= vocabapp_dev_full
 TEST_DB_NAME ?= vocabapp_test_full
@@ -20,6 +22,10 @@ TOOLS_COMPOSE := docker compose -p $(PROJECT_NAME) --env-file $(ENV_FILE) -f com
 STACK_COMPOSE := docker compose -p $(PROJECT_NAME) --env-file $(ENV_FILE) -f compose.infra.yml -f compose.teststack.yml
 E2E_COMPOSE := docker compose -p $(PROJECT_NAME) --env-file $(ENV_FILE) -f compose.infra.yml -f compose.teststack.yml -f compose.e2e.yml
 STACK_WORKER_SCALE := --scale worker=2
+CI_INFRA_COMPOSE := docker compose -p $(CI_PROJECT_NAME) --env-file $(CI_ENV_FILE) -f compose.infra.yml
+CI_STACK_COMPOSE := docker compose -p $(CI_PROJECT_NAME) --env-file $(CI_ENV_FILE) -f compose.infra.yml -f compose.teststack.yml
+CI_E2E_COMPOSE := docker compose -p $(CI_PROJECT_NAME) --env-file $(CI_ENV_FILE) -f compose.infra.yml -f compose.teststack.yml -f compose.e2e.yml
+CI_STACK_WORKER_SCALE := --scale worker=1
 
 PYTHON ?= python3.13
 CACHE_ROOT ?= $(HOME)/.cache/words
@@ -46,6 +52,7 @@ LEXICON_NODE_STAMP := tools/lexicon/node/node_modules/.lock-$(LEXICON_NODE_LOCK_
 .PHONY: help config chmod-scripts \
         volumes infra-up infra-down tools-up tools-down tools-logs \
         stack-up stack-build stack-down stack-logs stack-ps stack-restart stack-smoke stack-full \
+        ci-config ci-stack-up ci-stack-build ci-stack-down ci-stack-logs ci-stack-ps ci-stack-restart ci-stack-smoke ci-stack-full \
         db-bootstrap db-backup-dev db-backup-test db-restore-dev db-restore-test db-refresh-template db-create-run \
         backend-install lexicon-install frontend-install admin-install e2e-install \
         worktree-bootstrap clean-worktree-links \
@@ -89,6 +96,15 @@ help:
 	  "make stack-restart         # restart stack containers" \
 	  "make stack-smoke           # run Playwright smoke against running test stack" \
 	  "make stack-full            # run full Playwright suite against running test stack" \
+	  "make ci-config             # validate CI-style compose config using CI_ENV_FILE" \
+	  "make ci-stack-up           # start CI-style stack without rebuilding" \
+	  "make ci-stack-build        # rebuild/start CI-style stack" \
+	  "make ci-stack-down         # stop CI-style stack" \
+	  "make ci-stack-logs         # tail CI-style stack logs" \
+	  "make ci-stack-ps           # show CI-style stack containers" \
+	  "make ci-stack-restart      # restart CI-style stack containers" \
+	  "make ci-stack-smoke        # run Playwright smoke against CI-style stack" \
+	  "make ci-stack-full         # run full Playwright suite against CI-style stack" \
 	  "make db-backup-dev         # dump dev DB to DEV_FULL_DUMP_PATH" \
 	  "make db-backup-test        # dump test DB to TEST_FULL_DUMP_PATH" \
 	  "make db-restore-dev        # restore dev DB from TEST_FULL_DUMP_PATH" \
@@ -100,6 +116,9 @@ help:
 
 config:
 	$(STACK_COMPOSE) config >/dev/null
+
+ci-config:
+	$(CI_STACK_COMPOSE) config >/dev/null
 
 chmod-scripts:
 	chmod +x scripts/db/*.sh scripts/deploy/*.sh
@@ -152,6 +171,30 @@ stack-smoke:
 
 stack-full:
 	$(E2E_COMPOSE) --profile tests run --rm playwright npm run test:full
+
+ci-stack-up: volumes
+	$(CI_STACK_COMPOSE) up -d $(CI_STACK_WORKER_SCALE)
+
+ci-stack-build: volumes
+	$(CI_STACK_COMPOSE) up -d --build $(CI_STACK_WORKER_SCALE)
+
+ci-stack-down:
+	$(CI_STACK_COMPOSE) down --remove-orphans
+
+ci-stack-logs:
+	$(CI_STACK_COMPOSE) logs -f --tail=200
+
+ci-stack-ps:
+	$(CI_STACK_COMPOSE) ps
+
+ci-stack-restart:
+	$(CI_STACK_COMPOSE) restart
+
+ci-stack-smoke:
+	$(CI_E2E_COMPOSE) --profile tests run --rm playwright npm run test:smoke:ci
+
+ci-stack-full:
+	$(CI_E2E_COMPOSE) --profile tests run --rm playwright npm run test:full
 
 db-backup-dev: chmod-scripts
 	./scripts/db/backup-db.sh $(ENV_FILE) $(DEV_DB_NAME) $(DEV_FULL_DUMP_PATH)

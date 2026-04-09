@@ -1,6 +1,6 @@
 services:
   playwright:
-    image: mcr.microsoft.com/playwright:v1.52.0-noble
+    image: mcr.microsoft.com/playwright:v1.59.1-noble
     working_dir: /workspace/e2e
     command: sh -lc "tail -f /dev/null"
     environment:

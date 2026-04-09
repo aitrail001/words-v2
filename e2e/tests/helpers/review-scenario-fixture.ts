@@ -693,7 +693,7 @@ const upsertPhraseScenario = async (
   );
   const resolvedEntryId = phraseResult.rows[0]?.id ?? scenario.entryId;
 
-  await client.query(
+  const phraseSenseResult = await client.query<{ id: string }>(
     `
     INSERT INTO lexicon.phrase_senses (
       id,
@@ -738,6 +738,7 @@ const upsertPhraseScenario = async (
       synonyms = EXCLUDED.synonyms,
       antonyms = EXCLUDED.antonyms,
       collocations = EXCLUDED.collocations
+    RETURNING id::text AS id
     `,
     [
       scenario.targetId,
@@ -752,6 +753,7 @@ const upsertPhraseScenario = async (
       JSON.stringify(scenario.collocations ?? []),
     ],
   );
+  const resolvedTargetId = phraseSenseResult.rows[0]?.id ?? scenario.targetId;
 
   if (scenario.sentence) {
     await client.query(
@@ -780,13 +782,13 @@ const upsertPhraseScenario = async (
         order_index = EXCLUDED.order_index,
         source = EXCLUDED.source
       `,
-      [randomUUID(), scenario.targetId, scenario.sentence],
+      [randomUUID(), resolvedTargetId, scenario.sentence],
     );
   }
   return {
     ...scenario,
     resolvedEntryId,
-    resolvedTargetId: scenario.targetId,
+    resolvedTargetId,
   };
 };
 

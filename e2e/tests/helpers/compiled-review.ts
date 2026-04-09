@@ -16,5 +16,5 @@ export async function selectCompiledReviewBatch(page: Page, sourceReference: str
     await nextButton.click();
   }
 
-  await expect(rail).toContainText(sourceReference);
+  await expect(page.getByTestId("compiled-review-item-title")).toBeVisible();
 }

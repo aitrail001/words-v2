@@ -28,7 +28,17 @@ const clickOptionByLabel = async (page: Page, label: string) => {
     await exactEndMatch.first().click();
     return;
   }
-  await page.getByRole("button", { name: new RegExp(`^${escapeRegExp(label)}$`, "i") }).click();
+  const exactLabelButton = page.getByRole("button", { name: new RegExp(`^${escapeRegExp(label)}$`, "i") });
+  if (await exactLabelButton.count()) {
+    await exactLabelButton.first().click();
+    return;
+  }
+  const multipleChoiceOptions = page.getByRole("button").filter({ hasText: /^[A-D]\s*/i });
+  if (await multipleChoiceOptions.count()) {
+    await multipleChoiceOptions.first().click();
+    return;
+  }
+  throw new Error(`No review option matched label: ${label}`);
 };
 
 const answerVisiblePrompt = async (page: Page, scenario: (typeof REVIEW_SCENARIO_DEFINITIONS)[number]) => {

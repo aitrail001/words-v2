@@ -15,6 +15,7 @@ env:
   STACK_COMPOSE_FILES: -f compose.infra.yml -f compose.teststack.yml
   E2E_COMPOSE_FILES: -f compose.infra.yml -f compose.teststack.yml -f compose.e2e.yml
   TEST_DB_NAME: vocabapp_test_full
+  TEST_INTERNAL_API_URL: http://backend:8000/api
   TEST_BACKEND_PORT: 18000
   TEST_PUBLIC_PORT: 18088
   TEST_ADMIN_PORT: 13001

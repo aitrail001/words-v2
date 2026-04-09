@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
+import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
@@ -96,17 +96,12 @@ test("admin can review compiled JSONL directly and materialize sidecar outputs",
   const hostDir = path.join(hostRootDir, snapshotName);
   const backendDir = `${backendRootDir}/${snapshotName}`;
   const compiledHostPath = path.join(hostDir, "words.enriched.jsonl");
-  const reviewedHostDir = path.join(hostDir, "reviewed");
-  const decisionsHostPath = path.join(reviewedHostDir, "review.decisions.jsonl");
-  const outputHostDir = reviewedHostDir;
-  const compiledBackendPath = `${backendDir}/words.enriched.jsonl`;
-  const decisionsBackendPath = `${backendDir}/reviewed/review.decisions.jsonl`;
   const outputBackendDir = `${backendDir}/reviewed`;
+  const decisionsBackendPath = `${outputBackendDir}/review.decisions.jsonl`;
+  const compiledBackendPath = `${backendDir}/words.enriched.jsonl`;
 
   await mkdir(hostDir, { recursive: true });
-  await rm(outputHostDir, { recursive: true, force: true });
   await rm(compiledHostPath, { force: true });
-  await rm(decisionsHostPath, { force: true });
 
   const compiledJsonl = [
     JSON.stringify(buildCompiledWordRow(uniqueSuffix, normalized)),
@@ -140,7 +135,19 @@ test("admin can review compiled JSONL directly and materialize sidecar outputs",
   await expect(page.getByText(`${outputBackendDir}/approved.jsonl`)).toBeVisible();
   await expect(page.getByText(`${outputBackendDir}/review.decisions.jsonl`).last()).toBeVisible();
 
-  const decisionsLines = (await readFile(decisionsHostPath, "utf-8"))
+  const decisionsResponse = await request.post(`${apiUrl}/lexicon-jsonl-reviews/download/decisions`, {
+    headers: {
+      ...authHeaders(user.token),
+      "Content-Type": "application/json",
+    },
+    data: {
+      artifact_path: compiledBackendPath,
+      decisions_path: decisionsBackendPath,
+      output_dir: outputBackendDir,
+    },
+  });
+  expect(decisionsResponse.status()).toBe(200);
+  const decisionsLines = (await decisionsResponse.text())
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line) as { entry_id: string; decision: string; decision_reason: string | null });
@@ -159,7 +166,19 @@ test("admin can review compiled JSONL directly and materialize sidecar outputs",
     ]),
   );
 
-  const approvedLines = (await readFile(path.join(outputHostDir, "approved.jsonl"), "utf-8"))
+  const approvedResponse = await request.post(`${apiUrl}/lexicon-jsonl-reviews/download/approved`, {
+    headers: {
+      ...authHeaders(user.token),
+      "Content-Type": "application/json",
+    },
+    data: {
+      artifact_path: compiledBackendPath,
+      decisions_path: decisionsBackendPath,
+      output_dir: outputBackendDir,
+    },
+  });
+  expect(approvedResponse.status()).toBe(200);
+  const approvedLines = (await approvedResponse.text())
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line) as { entry_id: string });
@@ -172,7 +191,5 @@ test("admin can review compiled JSONL directly and materialize sidecar outputs",
   expect(approvedLines).toHaveLength(2);
 
   await rm(compiledHostPath, { force: true });
-  await rm(decisionsHostPath, { force: true });
-  await rm(outputHostDir, { recursive: true, force: true });
   await rm(hostDir, { recursive: true, force: true });
 });

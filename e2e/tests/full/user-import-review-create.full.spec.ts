@@ -1,10 +1,8 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { registerViaApi } from "../helpers/auth";
+import { ensureMinimalEpubFixture } from "../helpers/epub-fixture";
 import { prepareImportFixture } from "../helpers/import-fixture";
 import { waitForImportJobTerminal } from "../helpers/import-jobs";
-
-const EPUB_FIXTURE = path.resolve(process.cwd(), "tests/fixtures/epub/valid-minimal.epub");
 
 type WordListDetail = {
   id: string;
@@ -22,8 +20,9 @@ test("import review flow creates a generic word list from selected entries", asy
   request,
 }) => {
   test.slow();
+  const epubFixture = await ensureMinimalEpubFixture();
 
-  await prepareImportFixture(EPUB_FIXTURE);
+  await prepareImportFixture(epubFixture);
 
   const user = await registerViaApi(request, "import-review-create");
   page.on("dialog", (dialog) => dialog.accept());
@@ -37,7 +36,7 @@ test("import review flow creates a generic word list from selected entries", asy
   await page.waitForTimeout(1500);
 
   const listName = `Review Import ${Date.now()}`;
-  await page.getByTestId("imports-upload-input").setInputFiles(EPUB_FIXTURE);
+  await page.getByTestId("imports-upload-input").setInputFiles(epubFixture);
 
   const createImportResponsePromise = page.waitForResponse((response) => {
     const req = response.request();

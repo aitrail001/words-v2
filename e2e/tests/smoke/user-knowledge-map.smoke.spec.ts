@@ -186,10 +186,11 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page.getByText("tambor").first()).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole("button", { name: `Play audio for ${LEARN_WORD}` })).toBeVisible();
   await expect(page.getByRole("button", { name: `Play definition audio for ${LEARN_WORD}` })).toBeVisible();
-  await expect(page.getByRole("button", { name: `Play example audio for ${LEARN_WORD}` })).toBeVisible();
+  const learnExampleAudioButton = page.getByRole("button", { name: `Play example audio for ${LEARN_WORD}` }).first();
+  await expect(learnExampleAudioButton).toBeVisible();
   await page.getByRole("button", { name: `Play audio for ${LEARN_WORD}` }).click();
   await page.getByRole("button", { name: `Play definition audio for ${LEARN_WORD}` }).click();
-  await page.getByRole("button", { name: `Play example audio for ${LEARN_WORD}` }).click();
+  await learnExampleAudioButton.click();
   await expect.poll(() => requestedAudioUrls.length).toBeGreaterThanOrEqual(3);
 
   await page.goto("/settings");
@@ -206,7 +207,8 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page.getByText("/rɪˈzɪliəns/")).toBeVisible();
   await expect(page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
   await expect(page.getByRole("button", { name: `Play definition audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
-  await expect(page.getByRole("button", { name: `Play example audio for ${KNOWLEDGE_WORD}` })).toBeVisible();
+  const knowledgeExampleAudioButton = page.getByRole("button", { name: `Play example audio for ${KNOWLEDGE_WORD}` }).first();
+  await expect(knowledgeExampleAudioButton).toBeVisible();
 
   await page.getByRole("button", { name: `Play audio for ${KNOWLEDGE_WORD}` }).click();
   await expect
@@ -217,7 +219,7 @@ test("@smoke learner knowledge map supports mixed catalog browsing and persisted
   await expect(page.getByRole("button", { name: "Use UK accent" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText("/rɪˈzɪl.i.əns/")).toBeVisible();
   await page.getByRole("button", { name: `Play definition audio for ${KNOWLEDGE_WORD}` }).click();
-  await page.getByRole("button", { name: `Play example audio for ${KNOWLEDGE_WORD}` }).click();
+  await knowledgeExampleAudioButton.click();
   await expect.poll(() => requestedAudioUrls.length).toBeGreaterThanOrEqual(3);
 
   await page.goto("/search");

@@ -1,24 +1,23 @@
-import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { injectToken, registerViaApi } from "../helpers/auth";
+import { ensureMinimalEpubFixture } from "../helpers/epub-fixture";
 import { prepareImportFixture } from "../helpers/import-fixture";
 import { ImportJobSnapshot, waitForImportJobTerminal } from "../helpers/import-jobs";
-
-const EPUB_FIXTURE = path.resolve(process.cwd(), "tests/fixtures/epub/valid-minimal.epub");
 
 test("word-list import reaches completed terminal status with valid epub", async ({
   page,
   request,
 }) => {
   test.slow();
+  const epubFixture = await ensureMinimalEpubFixture();
 
-  await prepareImportFixture(EPUB_FIXTURE);
+  await prepareImportFixture(epubFixture);
 
   const user = await registerViaApi(request, "import-terminal");
   await injectToken(page, user.token);
   await page.goto("/imports");
   await expect(page.getByTestId("imports-page-title")).toBeVisible();
-  await page.getByTestId("imports-upload-input").setInputFiles(EPUB_FIXTURE);
+  await page.getByTestId("imports-upload-input").setInputFiles(epubFixture);
 
   const createResponsePromise = page.waitForResponse((response) => {
     const req = response.request();
