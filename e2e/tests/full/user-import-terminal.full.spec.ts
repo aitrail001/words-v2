@@ -53,6 +53,6 @@ test("word-list import reaches completed terminal status with valid epub", async
   await expect(page).toHaveURL(new RegExp(`/imports/${created.id}$`), { timeout: 15_000 });
   await page.goto("/imports");
   await page.getByTestId("imports-history-toggle").click();
-  await expect(page.getByTestId(`imports-row-${created.id}`)).toContainText("Valid Minimal EPUB");
+  await expect(page.getByTestId(`imports-row-${created.id}`)).toContainText("Title: Valid Minimal");
   await expect(page.getByTestId(`imports-row-${created.id}`)).toContainText("completed");
 });
