@@ -5,7 +5,7 @@ This runbook covers the active lexicon workflow only: word snapshot generation, 
 ## 1. Setup
 
 ```bash
-.venv-lexicon/bin/python -m pip install -r tools/lexicon/requirements.txt
+make lexicon-install
 .venv-lexicon/bin/python -m nltk.downloader wordnet omw-1.4
 cp tools/lexicon/.env.example tools/lexicon/.env.local
 set -a && source tools/lexicon/.env.local && set +a
@@ -16,6 +16,8 @@ If you want the Node-backed transport:
 ```bash
 npm --prefix tools/lexicon ci
 ```
+
+`make lexicon-install` creates or reuses the shared lexicon virtualenv at `~/.cache/words/venvs/` and keeps a worktree-local `.venv-lexicon` link when possible. If your current worktree already has a real `.venv-lexicon` directory, the target leaves it alone.
 
 Important:
 

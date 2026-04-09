@@ -1,109 +1,108 @@
-# Agent Operating Contract (Repository Scope)
 
-This file defines how coding agents should operate in this repository.
+# words-v2 agent guide
 
-## Purpose and Ownership
+## Scope and precedence
+- This is the canonical shared repo instruction file.
+- More specific `AGENTS.md` files in subdirectories override this file for local work.
+- `CLAUDE.md` exists only to import this file for Claude Code.
 
-1. `AGENTS.md` is the operational source of truth for agent behavior.
-2. `CLAUDE.md` remains product/domain context source of truth.
-3. If rules conflict:
-   - system/developer instructions override repository files
-   - `AGENTS.md` overrides process sections duplicated elsewhere in repo docs
+## Runtime Contract (Mac-first dual-stack)
 
-## Session Kickoff Checklist (Reusable)
+### Local dev on the Mac
+Use host processes for daily development.
+- start postgres and redis with `make infra-up`
+- run backend, frontend, and admin-frontend as host processes
+- worker runs locally when async features are being developed
+- do not run worker in Docker while app services are local
+- run local Playwright with `e2e/playwright.local.config.ts`
+- Playwright local smoke runs locally
+- Docker is used only for postgres, redis, and optional tools
+- use database `vocabapp_dev_full`
 
-Use this checklist at the start of every new task/session.
+Default persistent test stack (Mac now, NUC later):
+- use `compose.infra.yml + compose.teststack.yml (+ compose.e2e.yml)` only
+- run a full containerized stack with persistent DB `vocabapp_test_full`
+- mount `${WORDS_DATA_DIR}` read-only into backend/worker/migrate
+- use external Docker volumes `words_pg_data`, `words_redis_data`, `words_uploads_data`, `words_pgadmin_data`, and `words_redis_commander_data`
 
-1. Confirm runtime context (repo path, branch, target slice).
-2. Perform skill applicability check and invoke all relevant skills before implementation.
-3. Use a git worktree for non-trivial work.
-4. Require verification evidence before any completion claim.
-5. Update `docs/status/project-status.md` when feature/gate/release state changes.
+Do not do these unless the user explicitly asks:
+- do not mix host backend with container frontend/admin or container Playwright with host backend
+- do not run `docker compose down -v` on the shared stack
+- do not create alternate runtime shapes when the sanctioned files already cover the use case
 
-Shortcut prompt users can paste:
+Canonical commands:
+- `make worktree-bootstrap`
+- `make infra-up`
+- `make local-backend-dev`
+- `make local-worker-dev`
+- `make local-frontend-dev`
+- `make local-admin-dev`
+- `make test-backend`
+- `make test-frontend`
+- `make test-admin`
+- `make smoke-local`
+- `make stack-build`
+- `make stack-smoke`
+- `make stack-full`
+- `make db-bootstrap`
+- `make db-refresh-template`
 
-`Follow AGENTS kickoff checklist: skill-check first, use relevant skills, worktree for non-trivial changes, verify before done, and update docs/status/project-status.md with evidence.`
+### Worktree bootstrap
 
-## Canonical Project Status
+Every new worktree must run:
+```bash
+    make worktree-bootstrap
+```
 
-1. Live status source of truth: `docs/status/project-status.md`.
-2. Do not treat plan files as live status.
-3. Any meaningful feature/gate/release state change must update `docs/status/project-status.md`.
+Rules:
+- Never create a fresh backend venv inside each worktree if a shared hashed venv can be reused.
+- Use the repo-root symlink .venv-backend that points to the shared backend venv under ~/.cache/words/venvs/...
+- Keep node_modules local to each worktree.
+- Reuse shared npm cache under ~/.cache/words/npm
+- Reuse shared Playwright browser cache under ~/.cache/words/ms-playwright
 
-## Mandatory Workflow (Every Implementation Task)
+## Repo map
+- `backend/` FastAPI backend
+- `frontend/` learner app
+- `admin-frontend/` admin app
+- `e2e/` Playwright tests
+- `tools/lexicon/` specialized offline/admin tooling
+- `docs/archive/` Historical material under is not current truth
 
-1. Determine applicable skills before acting.
-2. For behavior/feature changes, perform brief design alignment first.
-3. For multi-step work, produce/update a written plan in `docs/plans/`.
-4. Use an isolated git worktree by default for non-trivial slices.
-5. Write/adjust tests first where practical; run verification before claiming success.
-6. Update docs/status as part of the same change set.
 
-Hard gate:
+## How to work here
+Prefer the smallest safe change that solves the requested problem.
 
-- No implementation starts until a skill check is completed and relevant skills are invoked.
+Use external workflow skills or personal tooling when helpful, but do not restate those workflow details here. This file gives repo-specific constraints, not a full engineering methodology.
 
-## Skill Invocation Policy
+For planning:
+- tiny change: no written plan required
+- normal change: optional brief plan
+- risky or cross-slice change: use your preferred planning workflow before coding
 
-Use the smallest required set, but do not skip relevant skills.
+Treat these as risky or cross-slice by default:
+- schema or migration changes
+- auth / permissions / secrets handling
+- review or SRS behavior changes
+- import pipeline changes
+- CI / release workflow changes
+- lexicon artifact-contract changes
+- anything touching more than one app plus backend
 
-1. Process:
-   - `using-superpowers` at task start
-   - `brainstorming` before behavior-changing implementation
-   - `writing-plans` for multi-step tasks
-   - `using-git-worktrees` for non-trivial feature slices
-2. Build/debug quality:
-   - `test-driven-development` or `tdd-workflow` for features/bugfixes
-   - `systematic-debugging` for failures/flakes
-   - `verification-before-completion` before any "done/fixed/passing" claim
-3. Domain:
-   - `backend-patterns` for backend architecture/API/data changes
-   - `frontend-patterns` for frontend behavior/state/UI changes
-   - `api-design` for endpoint contract changes
-   - `security-review` for auth, secrets, input-handling, permissions
-   - `e2e-testing` for user-flow and CI gate changes
-4. Collaboration:
-   - `dispatching-parallel-agents` and `subagent-driven-development` for parallelizable work
-   - `requesting-code-review` before merge on substantial changes
-   - `receiving-code-review` when applying review feedback
-   - `finishing-a-development-branch` when implementation is complete
+## Git and GitHub
 
-## Branching, Worktrees, and Commits
+- Keep branches and commits focused.
+- Do not mix unrelated cleanup into a feature change.
+- Avoid destructive git commands unless explicitly requested.
+- Prefer `gh` for GitHub operations when available.
+- Use first-class `gh pr ...` / `gh issue ...` commands when they exist.
+- If there is no first-class command, use `gh api` instead of manual browser-only workflows.
+- For repeated GitHub review housekeeping, prefer a helper script or documented workflow over ad hoc command reconstruction.
+- bring local main branch up to date after merge if you can
+- when create a new branch / worktree, ask if you it should based on which branch (not just silently default to main), and check if there are open branches might need to be merged to main
 
-1. Use feature branches and worktrees for isolated tasks.
-2. Keep commits focused and reversible.
-3. Do not include unrelated local changes in commits.
-4. Never use destructive git operations unless explicitly requested.
-5. After a PR merges, do not keep using that merged branch/worktree as a scratchpad for follow-up work.
-6. For follow-up work after merge, either clean up the old worktree immediately or create a fresh branch/worktree before continuing.
-7. If local changes must be preserved before cleanup, export them intentionally (commit, stash, or patch backup) instead of leaving silent dirty worktrees behind.
-
-## Verification Standard
-
-Before claiming completion:
-
-1. Run relevant backend/frontend/tests/e2e checks for the changed scope.
-2. Confirm results from fresh command output.
-3. Report what was verified and what was not run.
-
-## CI/Release Governance
-
-1. PR required checks are mandatory merge gates.
-2. Release promotion must follow `docs/runbooks/release-promotion.md`.
-3. Rollback procedure is `docs/runbooks/rollback.md`.
-4. Pre-prod readiness gate is `docs/runbooks/preprod-readiness-checklist.md`.
-
-## Documentation Update Rules
-
-When changing behavior or governance:
-
-1. Update relevant plan/runbook/docs.
-2. Update `docs/status/project-status.md`.
-3. If a significant technical decision is made, add/update an ADR in `docs/decisions/`.
-
-## Practical Defaults
-
-1. Prefer clarity over novelty.
-2. Keep implementation scope tight to requested outcome.
-3. Surface risks early; do not hide uncertainty.
-4. Minimize "policy drift" by linking to canonical docs rather than duplicating long guidance.
+## Verification
+- Run the smallest relevant tests/lint/build for the changed slice.
+- for UI/workflow changes, prefer automated smoke first
+- Report exactly what ran and what did not run.
+- Do not claim completion without fresh verification.

@@ -34,7 +34,7 @@ from app.services.lexicon_jsonl_reviews import materialize_jsonl_review_outputs
 from app.services.lexicon_tool_imports import import_lexicon_tool_module
 
 settings = get_settings()
-sync_engine = create_engine(settings.database_url_sync)
+sync_engine = create_engine(settings.database_url_sync, pool_pre_ping=True)
 PROGRESS_COMMIT_CALLBACK_INTERVAL = 25
 VOICE_IMPORT_LEXICAL_GROUP_CHUNK_SIZE = 100
 IMPORT_DB_ROW_CHUNK_SIZE = 250

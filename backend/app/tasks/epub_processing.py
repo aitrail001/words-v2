@@ -22,7 +22,7 @@ from app.services.source_imports import (
 
 logger = get_logger(__name__)
 settings = get_settings()
-sync_engine = create_engine(settings.database_url_sync)
+sync_engine = create_engine(settings.database_url_sync, pool_pre_ping=True)
 
 
 def _import_source_lock_key(import_source_id: uuid.UUID) -> int:

@@ -11,6 +11,17 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  STACK_COMPOSE_FILES: -f compose.infra.yml -f compose.teststack.yml
+  E2E_COMPOSE_FILES: -f compose.infra.yml -f compose.teststack.yml -f compose.e2e.yml
+  TEST_DB_NAME: vocabapp_test_full
+  TEST_INTERNAL_API_URL: http://backend:8000/api
+  TEST_BACKEND_PORT: 18000
+  TEST_PUBLIC_PORT: 18088
+  TEST_ADMIN_PORT: 13001
+  WORDS_DATA_DIR: ${{ github.workspace }}/data
+  JWT_SECRET: test-secret
+
 jobs:
   backend:
     name: Backend (lint + test)
@@ -233,11 +244,14 @@ jobs:
         env:
           POSTGRES_USER: vocabapp
           POSTGRES_PASSWORD: change_this_password_in_production
-          POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build --force-recreate postgres redis backend worker frontend admin-frontend
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
+          mkdir -p "${WORDS_DATA_DIR}"
+          docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
 
       - name: Wait for backend and frontends
         run: |
@@ -245,7 +259,7 @@ jobs:
 
           backend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
               backend_ready=1
               break
             fi
@@ -253,14 +267,14 @@ jobs:
           done
           if [ "${backend_ready}" -ne 1 ]; then
             echo "Backend health endpoint did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend
             exit 1
           fi
 
           frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
               frontend_ready=1
               break
             fi
@@ -268,14 +282,14 @@ jobs:
           done
           if [ "${frontend_ready}" -ne 1 ]; then
             echo "Frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend frontend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend frontend nginx
             exit 1
           fi
 
           admin_frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
               admin_frontend_ready=1
               break
             fi
@@ -283,19 +297,19 @@ jobs:
           done
           if [ "${admin_frontend_ready}" -ne 1 ]; then
             echo "Admin frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend admin-frontend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend admin-frontend
             exit 1
           fi
 
       - name: Apply migrations
-        run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
+        run: docker compose ${STACK_COMPOSE_FILES} exec -T backend alembic upgrade head
 
       - name: Run Playwright smoke suite
         env:
-          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/vocabapp_dev
+          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/${{ env.TEST_DB_NAME }}
         run: |
-          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
             -e E2E_API_URL=http://backend:8000/api \
             -e E2E_ADMIN_URL=http://admin-frontend:3001 \
@@ -307,12 +321,12 @@ jobs:
         run: |
           compose_logs_dir="${RUNNER_TEMP}/e2e-smoke-compose-logs"
           mkdir -p "${compose_logs_dir}"
-          docker compose -f docker-compose.yml --profile tests ps > "${compose_logs_dir}/ps.txt"
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} ps > "${compose_logs_dir}/ps.txt"
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
 
       - name: Upload Playwright smoke artifacts
         if: always()
@@ -327,7 +341,7 @@ jobs:
 
       - name: Tear down app stack
         if: always()
-        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
+        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
   e2e-review-srs:
     name: E2E Review + SRS Scenarios (required)
@@ -352,11 +366,14 @@ jobs:
         env:
           POSTGRES_USER: vocabapp
           POSTGRES_PASSWORD: change_this_password_in_production
-          POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build --force-recreate postgres redis backend worker frontend admin-frontend
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
+          mkdir -p "${WORDS_DATA_DIR}"
+          docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
 
       - name: Wait for backend and frontends
         run: |
@@ -364,7 +381,7 @@ jobs:
 
           backend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
               backend_ready=1
               break
             fi
@@ -372,14 +389,14 @@ jobs:
           done
           if [ "${backend_ready}" -ne 1 ]; then
             echo "Backend health endpoint did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend
             exit 1
           fi
 
           frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
               frontend_ready=1
               break
             fi
@@ -387,14 +404,14 @@ jobs:
           done
           if [ "${frontend_ready}" -ne 1 ]; then
             echo "Frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend frontend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend frontend nginx
             exit 1
           fi
 
           admin_frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
               admin_frontend_ready=1
               break
             fi
@@ -402,19 +419,19 @@ jobs:
           done
           if [ "${admin_frontend_ready}" -ne 1 ]; then
             echo "Admin frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend admin-frontend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend admin-frontend
             exit 1
           fi
 
       - name: Apply migrations
-        run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
+        run: docker compose ${STACK_COMPOSE_FILES} exec -T backend alembic upgrade head
 
       - name: Run Playwright review + SRS scenario suite
         env:
-          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/vocabapp_dev
+          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/${{ env.TEST_DB_NAME }}
         run: |
-          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
             -e E2E_API_URL=http://backend:8000/api \
             -e E2E_ADMIN_URL=http://admin-frontend:3001 \
@@ -426,12 +443,12 @@ jobs:
         run: |
           compose_logs_dir="${RUNNER_TEMP}/e2e-review-srs-compose-logs"
           mkdir -p "${compose_logs_dir}"
-          docker compose -f docker-compose.yml --profile tests ps > "${compose_logs_dir}/ps.txt"
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} ps > "${compose_logs_dir}/ps.txt"
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
 
       - name: Upload Playwright review + SRS artifacts
         if: always()
@@ -446,7 +463,7 @@ jobs:
 
       - name: Tear down app stack
         if: always()
-        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
+        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
   e2e-admin:
     name: E2E Admin (required)
@@ -472,11 +489,14 @@ jobs:
         env:
           POSTGRES_USER: vocabapp
           POSTGRES_PASSWORD: change_this_password_in_production
-          POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build --force-recreate postgres redis backend worker frontend admin-frontend
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
+          mkdir -p "${WORDS_DATA_DIR}"
+          docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
 
       - name: Wait for backend and frontends
         run: |
@@ -484,7 +504,7 @@ jobs:
 
           backend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
               backend_ready=1
               break
             fi
@@ -492,14 +512,14 @@ jobs:
           done
           if [ "${backend_ready}" -ne 1 ]; then
             echo "Backend health endpoint did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend
             exit 1
           fi
 
           frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
               frontend_ready=1
               break
             fi
@@ -507,14 +527,14 @@ jobs:
           done
           if [ "${frontend_ready}" -ne 1 ]; then
             echo "Frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend frontend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend frontend nginx
             exit 1
           fi
 
           admin_frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
               admin_frontend_ready=1
               break
             fi
@@ -522,19 +542,19 @@ jobs:
           done
           if [ "${admin_frontend_ready}" -ne 1 ]; then
             echo "Admin frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend admin-frontend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend admin-frontend
             exit 1
           fi
 
       - name: Apply migrations
-        run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
+        run: docker compose ${STACK_COMPOSE_FILES} exec -T backend alembic upgrade head
 
       - name: Run Playwright admin suite
         env:
-          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/vocabapp_dev
+          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/${{ env.TEST_DB_NAME }}
         run: |
-          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
             -e E2E_API_URL=http://backend:8000/api \
             -e E2E_ADMIN_URL=http://admin-frontend:3001 \
@@ -546,12 +566,12 @@ jobs:
         run: |
           compose_logs_dir="${RUNNER_TEMP}/e2e-admin-compose-logs"
           mkdir -p "${compose_logs_dir}"
-          docker compose -f docker-compose.yml --profile tests ps > "${compose_logs_dir}/ps.txt"
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} ps > "${compose_logs_dir}/ps.txt"
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
 
       - name: Upload Playwright admin artifacts
         if: always()
@@ -566,7 +586,7 @@ jobs:
 
       - name: Tear down app stack
         if: always()
-        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
+        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
   e2e-user:
     name: E2E User (required)
@@ -592,11 +612,14 @@ jobs:
         env:
           POSTGRES_USER: vocabapp
           POSTGRES_PASSWORD: change_this_password_in_production
-          POSTGRES_DB: vocabapp_dev
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build --force-recreate postgres redis backend worker frontend admin-frontend
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
+          mkdir -p "${WORDS_DATA_DIR}"
+          docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
 
       - name: Wait for backend and frontends
         run: |
@@ -604,7 +627,7 @@ jobs:
 
           backend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
               backend_ready=1
               break
             fi
@@ -612,14 +635,14 @@ jobs:
           done
           if [ "${backend_ready}" -ne 1 ]; then
             echo "Backend health endpoint did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend
             exit 1
           fi
 
           frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
               frontend_ready=1
               break
             fi
@@ -627,14 +650,14 @@ jobs:
           done
           if [ "${frontend_ready}" -ne 1 ]; then
             echo "Frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend frontend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend frontend nginx
             exit 1
           fi
 
           admin_frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
               admin_frontend_ready=1
               break
             fi
@@ -642,19 +665,19 @@ jobs:
           done
           if [ "${admin_frontend_ready}" -ne 1 ]; then
             echo "Admin frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests ps
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 migrate worker backend admin-frontend
+            docker compose ${STACK_COMPOSE_FILES} ps
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend admin-frontend
             exit 1
           fi
 
       - name: Apply migrations
-        run: docker compose -f docker-compose.yml exec -T backend alembic upgrade head
+        run: docker compose ${STACK_COMPOSE_FILES} exec -T backend alembic upgrade head
 
       - name: Run Playwright user suite
         env:
-          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/vocabapp_dev
+          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/${{ env.TEST_DB_NAME }}
         run: |
-          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
             -e E2E_BASE_URL=http://frontend:3000 \
             -e E2E_API_URL=http://backend:8000/api \
             -e E2E_ADMIN_URL=http://admin-frontend:3001 \
@@ -666,12 +689,12 @@ jobs:
         run: |
           compose_logs_dir="${RUNNER_TEMP}/e2e-user-compose-logs"
           mkdir -p "${compose_logs_dir}"
-          docker compose -f docker-compose.yml --profile tests ps > "${compose_logs_dir}/ps.txt"
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
-          docker compose -f docker-compose.yml --profile tests logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} ps > "${compose_logs_dir}/ps.txt"
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
+          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
 
       - name: Upload Playwright user artifacts
         if: always()
@@ -686,7 +709,7 @@ jobs:
 
       - name: Tear down app stack
         if: always()
-        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
+        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
   e2e-full-gate:
     name: E2E Full (required)

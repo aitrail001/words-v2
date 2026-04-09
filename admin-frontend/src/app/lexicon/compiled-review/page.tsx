@@ -158,7 +158,7 @@ export default function LexiconCompiledReviewPage() {
     [batches.length],
   );
 
-  const loadBatches = async (preferredBatchId?: string) => {
+  const loadBatches = useCallback(async (preferredBatchId?: string) => {
     setLoading(true);
     setError(null);
     try {
@@ -166,6 +166,8 @@ export default function LexiconCompiledReviewPage() {
       setBatches(nextBatches);
       const nextSelected =
         nextBatches.find((batch) => batch.id === preferredBatchId)?.id ??
+        nextBatches.find((batch) => batch.source_reference === sourceReferenceContext)?.id ??
+        nextBatches.find((batch) => batch.snapshot_id === snapshotContext)?.id ??
         nextBatches[0]?.id ??
         "";
       setSelectedBatchId(nextSelected);
@@ -174,7 +176,7 @@ export default function LexiconCompiledReviewPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [snapshotContext, sourceReferenceContext]);
 
   const loadItems = useCallback(async (batchId: string, offset: number) => {
     setItemsLoading(true);
@@ -209,7 +211,7 @@ export default function LexiconCompiledReviewPage() {
     setImportSourceReference(searchParam("sourceReference"));
     setImportArtifactPath(searchParam("artifactPath"));
     void loadBatches();
-  }, []);
+  }, [loadBatches]);
 
   useEffect(() => {
     if (!snapshotContext) return;
@@ -239,7 +241,7 @@ export default function LexiconCompiledReviewPage() {
       .finally(() => {
         setImportLoading(false);
       });
-  }, [artifactPathContext, autoStart, sourceReferenceContext]);
+  }, [artifactPathContext, autoStart, loadBatches, sourceReferenceContext]);
 
   useEffect(() => {
     if (!selectedBatchId) {
@@ -326,7 +328,7 @@ export default function LexiconCompiledReviewPage() {
     } finally {
       setSaveLoading(false);
     }
-  }, [items, selectedBatchId, selectedItem, decisionReason]);
+  }, [decisionReason, items, loadBatches, selectedBatchId, selectedItem]);
 
   const handleBulkDecision = useCallback(async (reviewStatus: ReviewDecisionStatus) => {
     if (!selectedBatch) return;
@@ -471,7 +473,7 @@ export default function LexiconCompiledReviewPage() {
         });
     }, 500);
     return () => window.clearInterval(timer);
-  }, [bulkJob, itemsOffset, loadItems, selectedBatchId]);
+  }, [bulkJob, itemsOffset, loadBatches, loadItems, selectedBatchId]);
 
   const handleDeleteBatch = async () => {
     if (!selectedBatch) return;

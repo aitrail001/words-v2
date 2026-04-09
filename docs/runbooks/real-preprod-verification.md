@@ -1,79 +1,75 @@
 # Real Pre-Prod Verification
 
-Use this runbook when a release candidate must be validated against the actual deployed pre-prod environment and its persistent populated database. Run this after `Deploy Preprod` succeeds and before `Production Promote`.
+Use this runbook when a release candidate must be validated against the actual deployed pre-prod environment and its persistent populated database.
 
-For the disposable GitHub Actions rehearsal, see [`preprod-readiness-checklist.md`](./preprod-readiness-checklist.md).
+Run this after `Deploy Preprod` succeeds and before `Production Promote`.
+
+For the disposable rehearsal, see `preprod-readiness-checklist.md`.
 
 ## Scope
 
-This runbook is for the **real pre-prod environment**:
+This runbook is for the real pre-prod environment:
 
-- persistent deployed API/frontend/worker services
+- deployed API, worker, learner frontend, and admin frontend services
 - persistent pre-prod Postgres and Redis
 - existing application and lexicon data already present
-- real migration and rollback evidence against that environment
+- real migrations and real rollback expectations
 
-It is not the Docker-based rehearsal that creates and destroys an ephemeral local stack.
+It is not the disposable Docker rehearsal.
 
 ## Preconditions
 
 Before running real pre-prod verification:
 
-- release candidate SHA is frozen
+- release candidate SHA or tag is frozen
 - pre-prod URLs are known
 - operator has deploy access
-- operator has DB migration access
+- migration access is available
 - rollback procedure is ready
-- data owners understand that pre-prod already contains persistent data
+- release owners know whether lexicon behavior is in scope
 
 ## Required evidence
 
 Capture and keep:
 
 - deploy command or workflow run URL
-- migration command output against pre-prod DB
-- rollback drill output if required by the release window
-- post-deploy health checks
-- smoke verification output
-- any bounded lexicon smoke artifacts and `source_reference` used
+- migration output against the real pre-prod DB
+- health-check results
+- smoke verification results
+- rollback drill evidence if the release window requires one
+- any bounded lexicon smoke evidence if lexicon/import paths are in scope
 
 ## Verification flow
 
 1. Deploy the candidate to pre-prod.
-2. Run health checks against the deployed API and frontend.
+2. Verify service health for API, learner frontend, and admin frontend.
 3. Apply DB migrations against the existing pre-prod DB.
-4. Run rollback drill if the release window requires it.
-5. Re-apply the candidate if rollback was exercised.
-6. Run app smoke checks against the deployed environment.
-7. If lexicon/import behavior is in scope, run a tiny bounded lexicon smoke against the persistent pre-prod DB.
+4. Run bounded smoke checks against the deployed environment.
+5. If required for the release window, perform the rollback drill.
+6. Re-deploy the candidate if rollback was exercised.
+7. Record final pass/fail evidence.
 
-## Persistent DB rules
+## Persistent data rules
 
-Because pre-prod already contains data:
+Because pre-prod contains persistent data:
 
-- do not replace the database with a fresh Docker database for final verification
-- do not run bulk lexicon imports as part of release verification
-- use isolated, auditable smoke data only
-- prefer unique source references for any lexicon smoke import
+- do not replace the DB with a fresh disposable DB
+- do not run broad bulk imports as part of release verification
+- use only isolated, auditable smoke data
+- use unique identifiers for any temporary lexicon smoke material
 
-Recommended lexicon smoke characteristics:
+## Optional lexicon-specific check
 
-- 1-3 words only
-- unique `source_reference` such as `preprod-lexicon-smoke-<date>-<sha>`
-- verify readback via `GET /api/words/{word_id}/enrichment`
-- record cleanup expectations if the smoke data should later be removed
+Run this only when the release touches lexicon import/schema/API/operator paths or when the release manager explicitly wants lexicon confidence.
 
-## Lexicon-specific check
+Recommended characteristics:
 
-Run this only when the release touches lexicon import/schema/API paths or when you need confidence that the admin lexicon path still works in pre-prod.
+- tiny bounded input only
+- unique `source_reference`
+- verify readback through current APIs or admin/operator paths
+- do not treat historical `compile-export` flows as the current source of truth
 
-Minimum lexicon check:
-
-1. generate or provide a tiny validated compiled JSONL
-2. import it with a unique `source_reference`
-3. authenticate against pre-prod
-4. search an imported word
-5. verify `GET /api/words/{word_id}/enrichment` returns learner-facing fields
+For the current lexicon operator contract, use `../../tools/lexicon/README.md`.
 
 ## Pass criteria
 
@@ -81,13 +77,14 @@ Real pre-prod verification passes only if all are true:
 
 - deploy succeeded
 - migrations completed without manual repair
-- rollback expectations were satisfied for the release window
-- health and smoke checks passed against the deployed pre-prod environment
-- any lexicon smoke run passed and returned expected enrichment data
+- health checks passed
+- required smoke checks passed
+- rollback expectations for the release window were satisfied
+- any lexicon-specific smoke in scope passed
 
 ## Related docs
 
-- [`preprod-readiness-checklist.md`](./preprod-readiness-checklist.md)
-- [`release-promotion.md`](./release-promotion.md)
-- [`rollback.md`](./rollback.md)
-- [`lexicon-working-gate.md`](./lexicon-working-gate.md)
+- `preprod-readiness-checklist.md`
+- `release-promotion.md`
+- `rollback.md`
+- `../../tools/lexicon/README.md`

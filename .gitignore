@@ -11,12 +11,15 @@ build/
 .eggs/
 *.egg
 .venv/
+.venv-backend
 .venv-backend/
+.venv-lexicon
 .venv-lexicon/
 venv/
 
 # Node
 node_modules/
+.pnpm-store/
 .next/
 out/
 .turbo/

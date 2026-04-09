@@ -1,65 +1,74 @@
 # Pre-Prod Readiness Checklist
 
-Use this checklist before promoting a release candidate to a pre-prod test window. This checklist covers release readiness expectations and the disposable rehearsal workflow in `.github/workflows/preprod-readiness.yml`; it is not, by itself, a substitute for verifying a real persistent pre-prod environment.
+Use this checklist before promoting a release candidate into a pre-prod test window.
 
-For end-to-end promotion order (merge -> tag -> deploy -> verify -> promote), see [`release-promotion.md`](./release-promotion.md).
+This runbook covers the disposable rehearsal workflow in `.github/workflows/preprod-readiness.yml`. It is not a substitute for verifying the real deployed pre-prod environment.
 
-Related distinction:
+For real environment verification, use `real-preprod-verification.md`.
 
-- **Preprod readiness rehearsal** = disposable Docker-based rollback/smoke drill against an ephemeral stack; today this is what `.github/workflows/preprod-readiness.yml` runs.
-- **Real preprod verification** = verification against the actual deployed pre-prod environment and its persistent populated DB; use [`real-preprod-verification.md`](./real-preprod-verification.md).
+## Purpose
 
-## 1. Prerequisites
+The rehearsal answers:
 
-- Release candidate commit SHA is frozen and shared.
-- GitHub Actions read/dispatch permission is confirmed.
-- Local/Docker runner prerequisites for the rehearsal are available.
-- Branch protection/ruleset is active on `main`.
+- can the stack boot from current repo configuration?
+- can migrations and smoke checks run in a disposable environment?
+- can the dual-frontend stack (learner + admin) be exercised by automation?
+- is rollback still documented and plausible before using the real environment?
 
-For deployed pre-prod URLs, learner/admin frontend reachability, migration access, and persistent DB checks, use [`real-preprod-verification.md`](./real-preprod-verification.md) after `Deploy Preprod` succeeds.
+## Preconditions
 
-## 2. Required Checks (Must Be Green)
+Before running the rehearsal:
 
-For the exact release candidate SHA:
+- the release candidate SHA or tag is identified
+- required CI on `main` is green for the candidate
+- Docker-based stack boot is expected to work from the repo
+- relevant environment variables or defaults for the rehearsal are available
 
-- `Backend (lint + test)`
-- `Frontend (lint + test)`
-- `E2E Smoke (required)` on PR to `main`
-- `E2E Full` executed for candidate on `main` (push or manual dispatch), green
+## What the rehearsal should cover
 
-Reject candidate if any required check is failed, cancelled, or missing.
+Minimum expectations:
 
-## 3. Migration + Rollback Drill Expectation
+1. backend service boots
+2. learner frontend boots
+3. admin frontend boots
+4. database and worker services boot
+5. migrations apply cleanly in the disposable environment
+6. required smoke paths can run against the disposable stack
+7. rollback documentation still matches the current release flow
 
-Before first pre-prod test cycle of a release window:
+## Required evidence
 
-1. Deploy candidate to pre-prod.
-2. Apply DB migrations.
-3. Execute rollback drill from [`rollback.md`](./rollback.md):
-   - app rollback sequence
-   - post-rollback verification
-4. Re-deploy candidate and re-run smoke.
+Capture:
 
-Evidence required:
+- workflow run URL or equivalent invocation evidence
+- migration success evidence
+- health-check evidence
+- smoke verification evidence
+- any failures and the exact fix applied before rerun
 
-- migration command output
-- rollback command output
-- verification command output
+Put long command output in `docs/reports/` or the PR, not in `docs/status/project-status.md`.
 
-## 4. Smoke/Full Expectations
+## Pass criteria
 
-- Smoke suite is fast gate and must pass before any merge or promote decision.
-- Full suite is broader regression signal and must pass on the same candidate line before pre-prod sign-off.
-- Any flaky/fail signal is treated as blocking until root cause is identified and fixed.
+The rehearsal passes only if all are true:
 
-## 5. Go/No-Go Criteria
+- workflow configuration is valid
+- the disposable stack boots cleanly
+- migrations succeed
+- learner and admin smoke checks succeed
+- no blocker remains for running real pre-prod verification next
 
-Go only if all are true:
+## Does not prove
 
-- All required checks are green for candidate SHA.
-- Migration completed without manual data repair.
-- Rollback drill completed successfully with documented evidence.
-- Post-deploy smoke checks pass in pre-prod.
-- No open Sev-1/Sev-2 defects tied to the candidate.
+This rehearsal does **not** prove:
 
-No-Go if any item above is false.
+- real deploy wiring is configured for a real environment
+- production promote variables are correct
+- persistent pre-prod data behaves correctly
+- rollback has been validated against the actual pre-prod environment
+
+## Related docs
+
+- `real-preprod-verification.md`
+- `release-promotion.md`
+- `rollback.md`

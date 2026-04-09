@@ -7,6 +7,16 @@ concurrency:
   group: preprod-readiness-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  STACK_COMPOSE_FILES: -f compose.infra.yml -f compose.teststack.yml
+  E2E_COMPOSE_FILES: -f compose.infra.yml -f compose.teststack.yml -f compose.e2e.yml
+  TEST_DB_NAME: vocabapp_test_full
+  TEST_BACKEND_PORT: 18000
+  TEST_PUBLIC_PORT: 18088
+  TEST_ADMIN_PORT: 13001
+  WORDS_DATA_DIR: ${{ github.workspace }}/data
+  JWT_SECRET: test-secret
+
 jobs:
   preprod-readiness:
     name: "Rehearsal: Rollback + Smoke Health"
@@ -15,7 +25,6 @@ jobs:
     env:
       POSTGRES_USER: vocabapp
       POSTGRES_PASSWORD: devpassword
-      POSTGRES_DB: vocabapp_dev
       NEXT_PUBLIC_API_URL: http://backend:8000/api
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
       E2E_BASE_URL: http://frontend:3000
@@ -41,7 +50,11 @@ jobs:
       - name: Start app stack (docker compose)
         id: start_stack
         run: |
-          docker compose -f docker-compose.yml --profile tests up -d --build postgres redis backend worker frontend admin-frontend
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
+          mkdir -p "${WORDS_DATA_DIR}"
+          docker compose ${STACK_COMPOSE_FILES} up -d --build postgres redis backend worker frontend admin-frontend nginx
 
       - name: Wait for backend, learner frontend, and admin frontend readiness
         id: readiness
@@ -50,7 +63,7 @@ jobs:
 
           backend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
               backend_ready=1
               break
             fi
@@ -58,13 +71,13 @@ jobs:
           done
           if [ "${backend_ready}" -ne 1 ]; then
             echo "Backend health endpoint did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 backend
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 backend
             exit 1
           fi
 
           frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3000/register >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
               frontend_ready=1
               break
             fi
@@ -72,13 +85,13 @@ jobs:
           done
           if [ "${frontend_ready}" -ne 1 ]; then
             echo "Frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 frontend
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 frontend nginx
             exit 1
           fi
 
           admin_frontend_ready=0
           for i in {1..60}; do
-            if curl -fsS http://localhost:3001/login >/dev/null 2>&1; then
+            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
               admin_frontend_ready=1
               break
             fi
@@ -86,7 +99,7 @@ jobs:
           done
           if [ "${admin_frontend_ready}" -ne 1 ]; then
             echo "Admin frontend did not become ready in time."
-            docker compose -f docker-compose.yml --profile tests logs --tail=200 admin-frontend
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 admin-frontend
             exit 1
           fi
 
@@ -94,28 +107,28 @@ jobs:
         id: rollback_drill
         run: |
           set -euo pipefail
-          docker compose -f docker-compose.yml exec -T backend sh -lc "alembic upgrade head"
-          docker compose -f docker-compose.yml exec -T backend sh -lc "alembic downgrade -1"
-          docker compose -f docker-compose.yml exec -T backend sh -lc "alembic upgrade head"
+          docker compose ${STACK_COMPOSE_FILES} exec -T backend sh -lc "alembic upgrade head"
+          docker compose ${STACK_COMPOSE_FILES} exec -T backend sh -lc "alembic downgrade -1"
+          docker compose ${STACK_COMPOSE_FILES} exec -T backend sh -lc "alembic upgrade head"
 
       - name: Run Playwright review smoke tests
         id: review_smoke
         run: |
-          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
             -e E2E_BASE_URL="${E2E_BASE_URL}" \
             -e E2E_API_URL="${E2E_API_URL}" \
             -e E2E_ADMIN_URL="${E2E_ADMIN_URL}" \
-            -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}" \
+            -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}" \
             playwright sh -lc "cd /workspace/e2e && npm run test:review:ci"
 
       - name: Run Playwright smoke tests
         id: smoke
         run: |
-          docker compose -f docker-compose.yml --profile tests run --rm --no-deps \
+          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
             -e E2E_BASE_URL="${E2E_BASE_URL}" \
             -e E2E_API_URL="${E2E_API_URL}" \
             -e E2E_ADMIN_URL="${E2E_ADMIN_URL}" \
-            -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}" \
+            -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}" \
             playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"
 
       - name: Validate observability signal
@@ -130,7 +143,7 @@ jobs:
 
           curl --retry 5 --retry-delay 1 --retry-connrefused -fsS -D "${headers_file}" \
             -H "X-Request-ID: ${request_id}" \
-            http://localhost:8000/api/health >/dev/null
+            http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null
 
           tr -d '\r' < "${headers_file}" > "${normalized_headers_file}"
           grep -qi "^x-request-id: ${request_id}$" "${normalized_headers_file}"
@@ -138,7 +151,7 @@ jobs:
           access_log_found=0
           for _ in {1..10}; do
             backend_logs_file="$(mktemp)"
-            docker compose -f docker-compose.yml --profile tests logs --tail=400 backend > "${backend_logs_file}"
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${backend_logs_file}"
             if grep -q "http_access" "${backend_logs_file}"; then
               access_log_found=1
               rm -f "${backend_logs_file}"
@@ -150,7 +163,7 @@ jobs:
 
           if [ "${access_log_found}" -ne 1 ]; then
             echo "Expected http_access entry was not found in backend logs."
-            docker compose -f docker-compose.yml --profile tests logs --tail=400 backend
+            docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend
             exit 1
           fi
 
@@ -168,7 +181,7 @@ jobs:
       - name: Tear down app stack
         id: teardown
         if: always()
-        run: docker compose -f docker-compose.yml --profile tests down -v --remove-orphans
+        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
       - name: Write readiness checklist summary
         if: always()

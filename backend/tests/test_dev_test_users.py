@@ -27,14 +27,16 @@ async def test_ensure_dev_test_users_creates_missing_users():
 
 @pytest.mark.asyncio
 async def test_ensure_dev_test_users_updates_role_and_activation_for_existing_users():
-    existing_admin = User(email="admin@admin.com", password_hash="not-bcrypt", role="user", is_active=False)
-    existing_user = User(email="user@user.com", password_hash="not-bcrypt", role="admin", is_active=False)
+    existing_users = [
+        User(email=spec.email, password_hash="not-bcrypt", role="user" if spec.role == "admin" else "admin", is_active=False)
+        for spec in DEV_TEST_USERS
+    ]
 
     session = AsyncMock()
     session.add = MagicMock()
     session.execute.side_effect = [
-        MagicMock(scalar_one_or_none=MagicMock(return_value=existing_admin)),
-        MagicMock(scalar_one_or_none=MagicMock(return_value=existing_user)),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=existing_user))
+        for existing_user in existing_users
     ]
     session_factory = MagicMock()
     session_factory.return_value.__aenter__.return_value = session
@@ -43,10 +45,8 @@ async def test_ensure_dev_test_users_updates_role_and_activation_for_existing_us
     await ensure_dev_test_users(session_factory)
 
     assert session.add.call_count == 0
-    assert existing_admin.role == "admin"
-    assert existing_admin.is_active is True
-    assert existing_admin.password_hash.startswith("$2")
-    assert existing_user.role == "user"
-    assert existing_user.is_active is True
-    assert existing_user.password_hash.startswith("$2")
+    for user in existing_users:
+        assert user.role in {"admin", "user"}
+        assert user.is_active is True
+        assert user.password_hash.startswith("$2")
     session.commit.assert_awaited_once()

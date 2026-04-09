@@ -1,0 +1,42 @@
+services:
+  pgadmin:
+    build:
+      context: .
+      dockerfile: deploy/pgadmin/Dockerfile
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
+      PGPASS_FILE: /var/lib/pgadmin/pgpass
+    volumes:
+      - words_pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["tools"]
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    volumes:
+      - words_redis_commander_data:/redis-commander/config
+    ports:
+      - "${REDIS_COMMANDER_PORT:-8081}:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: ["tools"]
+
+volumes:
+  words_pgadmin_data:
+    external: true
+    name: words_pgadmin_data
+  words_redis_commander_data:
+    external: true
+    name: words_redis_commander_data

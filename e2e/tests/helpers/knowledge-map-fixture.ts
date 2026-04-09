@@ -927,6 +927,16 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
           true,
           now()
         )
+      ON CONFLICT (entry_type, entry_id)
+      DO UPDATE SET
+        display_text = EXCLUDED.display_text,
+        normalized_form = EXCLUDED.normalized_form,
+        browse_rank = EXCLUDED.browse_rank,
+        bucket_start = EXCLUDED.bucket_start,
+        cefr_level = EXCLUDED.cefr_level,
+        primary_part_of_speech = EXCLUDED.primary_part_of_speech,
+        phrase_kind = EXCLUDED.phrase_kind,
+        is_ranked = EXCLUDED.is_ranked
       `,
       [wordId, KNOWLEDGE_WORD, learnWordId, LEARN_WORD],
     );
@@ -965,6 +975,16 @@ export const seedKnowledgeMapFixture = async (userId: string): Promise<FixtureId
         false,
         now()
       FROM next_rank
+      ON CONFLICT (entry_type, entry_id)
+      DO UPDATE SET
+        display_text = EXCLUDED.display_text,
+        normalized_form = EXCLUDED.normalized_form,
+        browse_rank = EXCLUDED.browse_rank,
+        bucket_start = EXCLUDED.bucket_start,
+        cefr_level = EXCLUDED.cefr_level,
+        primary_part_of_speech = EXCLUDED.primary_part_of_speech,
+        phrase_kind = EXCLUDED.phrase_kind,
+        is_ranked = EXCLUDED.is_ranked
       `,
       [phraseId, KNOWLEDGE_PHRASE, KNOWLEDGE_PHRASE],
     );

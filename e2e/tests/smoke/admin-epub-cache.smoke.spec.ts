@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
-import path from "node:path";
 import { injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
+import { ensureMinimalEpubFixture } from "../helpers/epub-fixture";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
-const EPUB_FIXTURE = path.resolve(process.cwd(), "tests/fixtures/epub/valid-minimal.epub");
 test("@smoke admin can open EPUB cache management page", async ({ page, request }) => {
+  const epubFixture = await ensureMinimalEpubFixture();
   const user = await registerAdminViaApi(request, "admin-epub-cache-smoke");
 
   await waitForAppReady(request, adminUrl);
@@ -24,7 +24,7 @@ test("@smoke admin can open EPUB cache management page", async ({ page, request 
   await expect(page.getByTestId("epub-cache-recent-batches")).toBeVisible();
 
   const fileInput = page.locator('input[type="file"]');
-  await fileInput.setInputFiles([EPUB_FIXTURE, EPUB_FIXTURE]);
+  await fileInput.setInputFiles([epubFixture, epubFixture]);
   await page.getByRole("button", { name: "Start pre-import batch" }).click();
   await expect(page.getByText(/Batch created with \d+ jobs/)).toBeVisible();
   await page.getByRole("link", { name: "Open batch" }).first().click();
