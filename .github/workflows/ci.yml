@@ -246,6 +246,9 @@ jobs:
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
           mkdir -p "${WORDS_DATA_DIR}"
           docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
 
@@ -365,6 +368,9 @@ jobs:
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
           mkdir -p "${WORDS_DATA_DIR}"
           docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
 
@@ -485,6 +491,9 @@ jobs:
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
           mkdir -p "${WORDS_DATA_DIR}"
           docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
 
@@ -605,6 +614,9 @@ jobs:
           NEXT_PUBLIC_API_URL: http://backend:8000/api
           ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
         run: |
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
           mkdir -p "${WORDS_DATA_DIR}"
           docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
 

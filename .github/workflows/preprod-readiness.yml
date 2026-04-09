@@ -50,6 +50,9 @@ jobs:
       - name: Start app stack (docker compose)
         id: start_stack
         run: |
+          docker volume create words_pg_data >/dev/null
+          docker volume create words_redis_data >/dev/null
+          docker volume create words_uploads_data >/dev/null
           mkdir -p "${WORDS_DATA_DIR}"
           docker compose ${STACK_COMPOSE_FILES} up -d --build postgres redis backend worker frontend admin-frontend nginx
 
