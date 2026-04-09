@@ -8,6 +8,7 @@ import {
   registerAdminViaApi,
   waitForAppReady,
 } from "../helpers/auth";
+import { selectCompiledReviewBatch } from "../helpers/compiled-review";
 
 type CompiledReviewBatch = {
   id: string;
@@ -134,7 +135,8 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
 
   await page.goto(`${adminUrl}/lexicon/compiled-review`);
   await expect(page.getByTestId("lexicon-compiled-review-page")).toBeVisible();
-  await expect(page.getByTestId("compiled-review-batches-list")).toContainText("words.enriched.jsonl");
+  await selectCompiledReviewBatch(page, snapshotName);
+  await expect(page.getByTestId("compiled-review-batches-list")).toContainText(snapshotName);
   await expect(page.getByTestId("compiled-review-item-title")).toContainText(normalized);
   await expect(page.getByTestId("compiled-review-items-list")).toContainText("pending");
   await page.getByTestId("compiled-review-decision-reason").fill("approved in compiled review smoke");

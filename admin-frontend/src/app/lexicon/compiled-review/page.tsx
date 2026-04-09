@@ -166,6 +166,8 @@ export default function LexiconCompiledReviewPage() {
       setBatches(nextBatches);
       const nextSelected =
         nextBatches.find((batch) => batch.id === preferredBatchId)?.id ??
+        nextBatches.find((batch) => batch.source_reference === sourceReferenceContext)?.id ??
+        nextBatches.find((batch) => batch.snapshot_id === snapshotContext)?.id ??
         nextBatches[0]?.id ??
         "";
       setSelectedBatchId(nextSelected);

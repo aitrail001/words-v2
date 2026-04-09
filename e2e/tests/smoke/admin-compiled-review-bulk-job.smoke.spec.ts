@@ -9,6 +9,7 @@ import {
   registerAdminViaApi,
   waitForAppReady,
 } from "../helpers/auth";
+import { selectCompiledReviewBatch } from "../helpers/compiled-review";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
@@ -104,8 +105,9 @@ test("@smoke admin can bulk approve a compiled lexicon batch with progress", asy
   await page.goto(`${adminUrl}/`);
   await expect(page).toHaveURL(`${adminUrl}/`);
 
-  await page.goto(`${adminUrl}/lexicon/compiled-review`);
+  await page.goto(`${adminUrl}/lexicon/compiled-review?sourceReference=${encodeURIComponent(snapshotName)}`);
   await expect(page.getByTestId("lexicon-compiled-review-page")).toBeVisible();
+  await selectCompiledReviewBatch(page, snapshotName);
   await expect(page.getByTestId("compiled-review-item-title")).toContainText(words[0]);
   await page.getByTestId("compiled-review-decision-reason").fill("bulk approved in smoke");
   await page.getByTestId("compiled-review-approve-all-button").click();
