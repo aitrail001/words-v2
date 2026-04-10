@@ -2507,6 +2507,18 @@ def _load_existing_output_rows(output_path: Path) -> list[dict[str, Any]]:
     return [dict(row) for row in read_jsonl(output_path)]
 
 
+def _rows_are_core_shape(rows: list[dict[str, Any]]) -> bool:
+    for row in rows:
+        for sense in row.get("senses") or []:
+            if isinstance(sense, dict) and "translations" in sense:
+                return False
+    return True
+
+
+def _core_artifact_entry_id(row: dict[str, Any]) -> str:
+    return str(row.get("entry_id") or row.get("lexeme_id") or "").strip()
+
+
 def _reconcile_decisions_output(
     decisions_path: Path,
     *,
@@ -2563,7 +2575,7 @@ def _backfill_checkpoint_from_existing_output(
     existing_completed_lexeme_ids = _load_completed_lexeme_ids(checkpoint_path) if checkpoint_path.exists() else set()
     checkpoint_rows: list[dict[str, Any]] = []
     for row in read_jsonl(output_path):
-        entry_id = str(row.get("entry_id") or "").strip()
+        entry_id = _core_artifact_entry_id(row)
         lexeme = lexeme_by_entry_id.get(entry_id)
         if lexeme is None or lexeme.lexeme_id in existing_completed_lexeme_ids:
             continue
@@ -2583,6 +2595,27 @@ def _backfill_checkpoint_from_existing_output(
         existing_completed_lexeme_ids.add(lexeme.lexeme_id)
     if checkpoint_rows:
         append_jsonl(checkpoint_path, checkpoint_rows)
+
+
+def _backfill_decisions_from_existing_output(
+    output_path: Path,
+    decisions_path: Path,
+    *,
+    lexeme_by_entry_id: dict[str, LexemeRecord],
+) -> None:
+    if not output_path.exists():
+        return
+    existing_completed_lexeme_ids = _load_completed_lexeme_ids(decisions_path) if decisions_path.exists() else set()
+    decision_rows: list[dict[str, Any]] = []
+    for row in read_jsonl(output_path):
+        entry_id = _core_artifact_entry_id(row)
+        lexeme = lexeme_by_entry_id.get(entry_id)
+        if lexeme is None or lexeme.lexeme_id in existing_completed_lexeme_ids:
+            continue
+        decision_rows.append(_build_core_migration_decision_row(row))
+        existing_completed_lexeme_ids.add(lexeme.lexeme_id)
+    if decision_rows:
+        append_jsonl(decisions_path, decision_rows)
 
 
 def _append_completed_lexeme_records(
@@ -2639,7 +2672,7 @@ def split_compiled_row_for_staging(compiled_row: dict[str, Any]) -> tuple[dict[s
         sense_row = dict(sense)
         translations = dict(sense_row.pop("translations", {}) or {})
         sense_id = str(sense_row.get("sense_id") or "").strip()
-        entry_id = str(core_row.get("entry_id") or "").strip()
+        entry_id = _core_artifact_entry_id(core_row)
         generated_at = str(sense_row.get("generated_at") or core_row.get("generated_at") or "").strip() or None
         generation_run_id = str(sense_row.get("generation_run_id") or "").strip() or None
         model_name = str(sense_row.get("model_name") or "").strip() or None
@@ -2752,29 +2785,65 @@ def merge_staged_enrichment_rows(
         locale = str(row.get("locale") or "").strip()
         if not entry_id or not sense_id or not locale:
             raise RuntimeError("Translation rows must include non-empty entry_id, sense_id, and locale")
-        translations_by_key.setdefault((entry_id, sense_id), {})[locale] = {
+        key = (entry_id, sense_id)
+        locale_map = translations_by_key.setdefault(key, {})
+        if locale in locale_map:
+            raise RuntimeError(
+                f"Duplicate translation rows found for entry_id={entry_id} sense_id={sense_id} locale={locale}"
+            )
+        locale_map[locale] = {
             "definition": row.get("definition"),
             "usage_note": row.get("usage_note"),
             "examples": list(row.get("examples") or []),
         }
 
     merged_rows: list[dict[str, Any]] = []
+    seen_core_entry_ids: set[str] = set()
+    consumed_translation_keys: set[tuple[str, str]] = set()
     for core_row in core_rows:
         merged_row = dict(core_row)
         entry_id = str(merged_row.get("entry_id") or "").strip()
+        if not entry_id:
+            raise RuntimeError("Core rows must include non-empty entry_id")
+        if entry_id in seen_core_entry_ids:
+            raise RuntimeError(f"Duplicate staged core rows found for entry_id={entry_id}")
+        seen_core_entry_ids.add(entry_id)
         merged_senses: list[dict[str, Any]] = []
         for sense in merged_row.get("senses") or []:
             sense_row = dict(sense)
             sense_id = str(sense_row.get("sense_id") or "").strip()
+            if not sense_id:
+                raise RuntimeError(f"Core rows must include non-empty sense_id for entry_id={entry_id}")
             translations = translations_by_key.get((entry_id, sense_id))
             if translations is None:
                 raise RuntimeError(
                     f"Missing translations for entry_id={entry_id or '<unknown>'} sense_id={sense_id or '<unknown>'}"
                 )
+            required_locales = set(_REQUIRED_TRANSLATION_LOCALES)
+            if set(translations) != required_locales:
+                missing_locales = sorted(required_locales - set(translations))
+                extra_locales = sorted(set(translations) - required_locales)
+                details: list[str] = []
+                if missing_locales:
+                    details.append(f"missing locales: {missing_locales}")
+                if extra_locales:
+                    details.append(f"unexpected locales: {extra_locales}")
+                raise RuntimeError(
+                    f"Translation rows for entry_id={entry_id or '<unknown>'} sense_id={sense_id or '<unknown>'} must include exactly the required locale set"
+                    + (f" ({'; '.join(details)})" if details else "")
+                )
             sense_row["translations"] = translations
+            consumed_translation_keys.add((entry_id, sense_id))
             merged_senses.append(sense_row)
         merged_row["senses"] = merged_senses
         merged_rows.append(merged_row)
+
+    orphan_translation_keys = sorted(set(translations_by_key) - consumed_translation_keys)
+    if orphan_translation_keys:
+        preview_entry_id, preview_sense_id = orphan_translation_keys[0]
+        raise RuntimeError(
+            f"Orphan translation rows found for entry_id={preview_entry_id} sense_id={preview_sense_id}"
+        )
     return merged_rows
 
 
@@ -2961,6 +3030,18 @@ def _merge_existing_compiled_core_rows(
     return [merged_by_entry_id[entry_id] for entry_id in ordered_ids]
 
 
+def _merge_artifact_entry_key(row: dict[str, Any]) -> str:
+    return str(row.get("entry_id") or row.get("lexeme_id") or "").strip()
+
+
+def _normalize_merge_artifact_row(row: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(row)
+    entry_id = _merge_artifact_entry_key(normalized)
+    if entry_id and not str(normalized.get("entry_id") or "").strip():
+        normalized["entry_id"] = entry_id
+    return normalized
+
+
 def merge_staged_enrichment_artifacts(
     *,
     core_input_path: Path,
@@ -2970,7 +3051,35 @@ def merge_staged_enrichment_artifacts(
     core_rows = read_jsonl(core_input_path)
     translation_rows = read_jsonl(translations_input_path)
     merged_rows = merge_staged_enrichment_rows(core_rows, translation_rows)
-    write_jsonl(output_path, merged_rows)
+    if output_path.exists():
+        existing_rows = read_jsonl(output_path)
+        existing_by_entry_id: dict[str, dict[str, Any]] = {}
+        for row in existing_rows:
+            entry_id = _merge_artifact_entry_key(row)
+            if not entry_id:
+                continue
+            if entry_id in existing_by_entry_id:
+                raise RuntimeError(f"Existing merged output contains duplicate entry_id={entry_id}")
+            existing_by_entry_id[entry_id] = _normalize_merge_artifact_row(row)
+        merged_by_entry_id = {
+            _merge_artifact_entry_key(row): _normalize_merge_artifact_row(row)
+            for row in merged_rows
+            if _merge_artifact_entry_key(row)
+        }
+        for entry_id, existing_row in existing_by_entry_id.items():
+            merged_row = merged_by_entry_id.get(entry_id)
+            if merged_row is None:
+                raise RuntimeError(f"Existing merged row for entry_id={entry_id} is missing from recomputed merge")
+            if existing_row != merged_row:
+                raise RuntimeError(f"Existing merged row for entry_id={entry_id} disagrees with recomputed merge")
+        missing_rows = [
+            row for row in merged_rows
+            if _merge_artifact_entry_key(row) not in existing_by_entry_id
+        ]
+        if missing_rows:
+            append_jsonl(output_path, missing_rows)
+    else:
+        write_jsonl(output_path, merged_rows)
     return {
         "core_input": str(core_input_path),
         "translations_input": str(translations_input_path),
@@ -3320,6 +3429,107 @@ def _reconcile_translation_decisions_output(decisions_path: Path, *, completed_k
     )
 
 
+def _backfill_translation_ledgers_from_existing_output(
+    output_path: Path,
+    *,
+    checkpoint_path: Path,
+    decisions_path: Path,
+) -> set[str]:
+    completed_keys = _load_completed_translation_keys(checkpoint_path) if checkpoint_path.exists() else set()
+    if not output_path.exists():
+        return completed_keys
+
+    completed_decision_keys = _load_completed_translation_keys(decisions_path) if decisions_path.exists() else set()
+    rows_by_key: dict[str, list[dict[str, Any]]] = {}
+    for row in read_jsonl(output_path):
+        entry_id = str(row.get("entry_id") or "").strip()
+        sense_id = str(row.get("sense_id") or "").strip()
+        if not entry_id or not sense_id:
+            continue
+        rows_by_key.setdefault(_translation_job_key(entry_id=entry_id, sense_id=sense_id), []).append(row)
+
+    checkpoint_rows: list[dict[str, Any]] = []
+    decision_rows: list[dict[str, Any]] = []
+    for key, rows in rows_by_key.items():
+        coherent_group = _select_coherent_completed_translation_group(rows)
+        if coherent_group is None:
+            continue
+
+        entry_id = str(coherent_group["entry_id"] or "").strip()
+        sense_id = str(coherent_group["sense_id"] or "").strip()
+        completed_at = str(coherent_group["completed_at"] or "").strip()
+        generation_run_id = str(coherent_group["generation_run_id"] or "").strip()
+        locale_rows = coherent_group["locale_rows"]
+        if key not in completed_keys:
+            checkpoint_rows.append(
+                {
+                    "entry_id": entry_id,
+                    "sense_id": sense_id,
+                    "status": "completed",
+                    "generation_run_id": generation_run_id,
+                    "completed_at": completed_at or _utc_now(),
+                }
+            )
+            completed_keys.add(key)
+        if key not in completed_decision_keys:
+            decision_rows.append(
+                {
+                    "entry_id": entry_id,
+                    "sense_id": sense_id,
+                    "status": "completed",
+                    "generation_run_id": generation_run_id,
+                    "completed_at": completed_at or _utc_now(),
+                    "locale_count": len(locale_rows),
+                }
+            )
+            completed_decision_keys.add(key)
+
+    if checkpoint_rows:
+        append_jsonl(checkpoint_path, checkpoint_rows)
+    if decision_rows:
+        append_jsonl(decisions_path, decision_rows)
+    return completed_keys
+
+
+def _select_coherent_completed_translation_group(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    grouped_rows: dict[str, list[dict[str, Any]]] = {}
+    for index, row in enumerate(rows):
+        run_id = str(row.get("generation_run_id") or "").strip()
+        if not run_id:
+            run_id = f"__missing__::{index}"
+        grouped_rows.setdefault(run_id, []).append(row)
+
+    candidates: list[dict[str, Any]] = []
+    for run_id, run_rows in grouped_rows.items():
+        locale_rows: dict[str, dict[str, Any]] = {}
+        for row in run_rows:
+            locale = str(row.get("locale") or "").strip()
+            if not locale or locale in locale_rows:
+                locale_rows = {}
+                break
+            locale_rows[locale] = row
+        if set(locale_rows) != set(_REQUIRED_TRANSLATION_LOCALES):
+            continue
+        completed_at = max(
+            (str(row.get("generated_at") or "").strip() for row in run_rows if str(row.get("generated_at") or "").strip()),
+            default="",
+        )
+        candidates.append(
+            {
+                "generation_run_id": run_id,
+                "entry_id": str(run_rows[0].get("entry_id") or "").strip(),
+                "sense_id": str(run_rows[0].get("sense_id") or "").strip(),
+                "completed_at": completed_at or _utc_now(),
+                "locale_rows": locale_rows,
+            }
+        )
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (str(item["completed_at"]), str(item["generation_run_id"])))
+    return candidates[-1]
+
+
 def run_core_enrichment(
     snapshot_dir: Path,
     *,
@@ -3358,42 +3568,61 @@ def run_core_enrichment(
         raise RuntimeError(
             "enrich-core no longer supports a separate runtime output path; use --output for the compiled core artifact"
         )
+    existing_rows = _load_existing_output_rows(destination) if resume and destination.exists() else []
+    existing_output_is_core_shape = _rows_are_core_shape(existing_rows)
     if resume:
         _backfill_checkpoint_from_existing_output(
             destination,
             checkpoint_destination,
             lexeme_by_entry_id=lexeme_by_entry_id,
         )
+        _backfill_decisions_from_existing_output(
+            destination,
+            decisions_destination,
+            lexeme_by_entry_id=lexeme_by_entry_id,
+        )
+    runtime_destination = destination
+    if resume and destination.exists():
+        runtime_destination = destination.with_name(f"{destination.name}.runtime")
     effective_settings = settings or LexiconSettings.from_env(stage="core")
     runtime_logger = _build_runtime_logger(
         snapshot_dir=snapshot_dir,
         log_level=log_level,
         log_file=log_file,
     )
-    word_provider = build_word_enrichment_provider(
-        settings=effective_settings,
-        provider_mode=provider_mode,
-        model_name=model_name,
-        reasoning_effort=reasoning_effort,
-        review_status=review_status,
-        transient_retries=transient_retries,
-        validation_retries=validation_retries,
-        runtime_logger=runtime_logger,
-        include_translations=False,
-    )
-    phrase_provider = build_phrase_enrichment_provider(
-        settings=effective_settings,
-        provider_mode=provider_mode,
-        model_name=model_name,
-        reasoning_effort=reasoning_effort,
-        review_status=review_status,
-        transient_retries=transient_retries,
-        validation_retries=validation_retries,
-        runtime_logger=runtime_logger,
-        include_translations=False,
-    )
+    word_provider: WordEnrichmentProvider | None = None
+    phrase_provider: WordEnrichmentProvider | None = None
+
     def staged_provider(*, lexeme: LexemeRecord, senses: list[SenseRecord], settings: LexiconSettings, generated_at: str, generation_run_id: str, prompt_version: str):
-        provider = phrase_provider if lexeme.entry_type == "phrase" else word_provider
+        nonlocal word_provider, phrase_provider
+        if lexeme.entry_type == "phrase":
+            if phrase_provider is None:
+                phrase_provider = build_phrase_enrichment_provider(
+                    settings=effective_settings,
+                    provider_mode=provider_mode,
+                    model_name=model_name,
+                    reasoning_effort=reasoning_effort,
+                    review_status=review_status,
+                    transient_retries=transient_retries,
+                    validation_retries=validation_retries,
+                    runtime_logger=runtime_logger,
+                    include_translations=False,
+                )
+            provider = phrase_provider
+        else:
+            if word_provider is None:
+                word_provider = build_word_enrichment_provider(
+                    settings=effective_settings,
+                    provider_mode=provider_mode,
+                    model_name=model_name,
+                    reasoning_effort=reasoning_effort,
+                    review_status=review_status,
+                    transient_retries=transient_retries,
+                    validation_retries=validation_retries,
+                    runtime_logger=runtime_logger,
+                    include_translations=False,
+                )
+            provider = word_provider
         return provider(
             lexeme=lexeme,
             senses=senses,
@@ -3401,10 +3630,10 @@ def run_core_enrichment(
             generated_at=generated_at,
             generation_run_id=generation_run_id,
             prompt_version=prompt_version,
-        )
+    )
     enrich_snapshot(
         snapshot_dir,
-        output_path=destination,
+        output_path=runtime_destination,
         settings=effective_settings,
         model_name=model_name,
         generated_at=generated_at,
@@ -3430,16 +3659,38 @@ def run_core_enrichment(
         max_new_completed_lexemes=max_new_completed_lexemes,
         word_provider=staged_provider,
     )
-    core_rows = []
-    for row in read_jsonl(destination) if destination.exists() else []:
-        core_row, _ = split_compiled_row_for_staging(row)
-        core_rows.append(core_row)
-    write_jsonl(destination, core_rows)
+    runtime_rows = _load_existing_output_rows(runtime_destination)
+    runtime_core_rows = [split_compiled_row_for_staging(row)[0] for row in runtime_rows]
+    if runtime_destination != destination and runtime_destination.exists():
+        runtime_destination.unlink(missing_ok=True)
+    if resume and destination.exists() and existing_output_is_core_shape:
+        existing_rows_by_entry_id = {
+            _core_artifact_entry_id(row): row
+            for row in existing_rows
+            if _core_artifact_entry_id(row)
+        }
+        append_rows: list[dict[str, Any]] = []
+        for row in runtime_core_rows:
+            entry_id = _core_artifact_entry_id(row)
+            if not entry_id:
+                continue
+            existing_row = existing_rows_by_entry_id.get(entry_id)
+            if existing_row is not None:
+                if existing_row != row:
+                    raise RuntimeError(f"Existing core row for entry_id={entry_id} disagrees with resumed enrichment output")
+                continue
+            append_rows.append(row)
+        if append_rows:
+            append_jsonl(destination, append_rows)
+    else:
+        core_rows = [split_compiled_row_for_staging(row)[0] for row in existing_rows]
+        core_rows.extend(runtime_core_rows)
+        write_jsonl(destination, core_rows)
     return CoreEnrichmentRunResult(
         output_path=destination,
-        runtime_output_path=destination,
+        runtime_output_path=runtime_destination,
         lexeme_count=len(lexemes),
-        core_row_count=len(core_rows),
+        core_row_count=len(_load_existing_output_rows(destination)),
     )
 
 
@@ -3499,16 +3750,19 @@ def run_translation_enrichment(
             sense_jobs.append((core_row, sense_row))
 
     completed_keys = _load_completed_translation_keys(checkpoint_destination) if resume else set()
-    failed_keys = _load_failed_translation_keys(failures_destination) if resume and (retry_failed_only or skip_failed) else set()
-    unresolved_failed_keys = failed_keys - completed_keys
     if resume:
-        _reconcile_resumable_translation_output(destination, completed_keys=completed_keys)
-        _reconcile_translation_decisions_output(decisions_destination, completed_keys=completed_keys)
+        completed_keys = _backfill_translation_ledgers_from_existing_output(
+            destination,
+            checkpoint_path=checkpoint_destination,
+            decisions_path=decisions_destination,
+        )
     else:
         write_jsonl(destination, [])
         write_jsonl(checkpoint_destination, [])
         write_jsonl(failures_destination, [])
         write_jsonl(decisions_destination, [])
+    failed_keys = _load_failed_translation_keys(failures_destination) if resume and (retry_failed_only or skip_failed) else set()
+    unresolved_failed_keys = failed_keys - completed_keys
 
     def is_pending(job: tuple[dict[str, Any], dict[str, Any]]) -> bool:
         core_row, sense_row = job
@@ -3742,28 +3996,8 @@ def enrich_snapshot(
         if max_new_completed_lexemes is None
         else max(1, int(max_new_completed_lexemes))
     )
-    word_enrichment_provider = word_provider or build_word_enrichment_provider(
-        settings=effective_settings,
-        provider_mode=provider_mode,
-        model_name=model_name,
-        reasoning_effort=reasoning_effort,
-        review_status=review_status,
-        client=None,
-        transient_retries=transient_retries,
-        validation_retries=validation_retries,
-        runtime_logger=runtime_logger,
-    )
-    phrase_enrichment_provider = build_phrase_enrichment_provider(
-        settings=effective_settings,
-        provider_mode=provider_mode,
-        model_name=model_name,
-        reasoning_effort=reasoning_effort,
-        review_status=review_status,
-        client=None,
-        transient_retries=transient_retries,
-        validation_retries=validation_retries,
-        runtime_logger=runtime_logger,
-    )
+    word_enrichment_provider = word_provider
+    phrase_enrichment_provider: WordEnrichmentProvider | None = None
     ordered_lexemes = sorted(lexemes, key=lambda item: (item.wordfreq_rank, item.lemma))
     ordered_sense_lists = {
         lexeme.lexeme_id: sorted(senses_by_lexeme.get(lexeme.lexeme_id, []), key=lambda item: item.sense_order)
@@ -3818,6 +4052,7 @@ def enrich_snapshot(
         return (completed_this_run + future_map_size) < effective_max_new_completed_lexemes
 
     def run_word_job(lexeme: LexemeRecord) -> WordJobOutcome:
+        nonlocal word_enrichment_provider, phrase_enrichment_provider
         word_senses = ordered_sense_lists.get(lexeme.lexeme_id, [])
         _emit_lexeme_event(
             runtime_logger,
@@ -3838,8 +4073,36 @@ def enrich_snapshot(
         selected_provider = (
             word_provider
             if word_provider is not None
-            else (phrase_enrichment_provider if lexeme.entry_type == "phrase" else word_enrichment_provider)
+            else None
         )
+        if selected_provider is None and lexeme.entry_type == "phrase":
+            if phrase_enrichment_provider is None:
+                phrase_enrichment_provider = build_phrase_enrichment_provider(
+                    settings=effective_settings,
+                    provider_mode=provider_mode,
+                    model_name=model_name,
+                    reasoning_effort=reasoning_effort,
+                    review_status=review_status,
+                    client=None,
+                    transient_retries=transient_retries,
+                    validation_retries=validation_retries,
+                    runtime_logger=runtime_logger,
+                )
+            selected_provider = phrase_enrichment_provider
+        if selected_provider is None:
+            if word_enrichment_provider is None:
+                word_enrichment_provider = build_word_enrichment_provider(
+                    settings=effective_settings,
+                    provider_mode=provider_mode,
+                    model_name=model_name,
+                    reasoning_effort=reasoning_effort,
+                    review_status=review_status,
+                    client=None,
+                    transient_retries=transient_retries,
+                    validation_retries=validation_retries,
+                    runtime_logger=runtime_logger,
+                )
+            selected_provider = word_enrichment_provider
         return _coerce_word_job_outcome(
             selected_provider(
                 lexeme=lexeme,

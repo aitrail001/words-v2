@@ -1736,6 +1736,20 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["translation_row_count"], 35)
             self.assertEqual(mocked_run.call_args.args[0], snapshot_dir)
 
+    def test_runtime_guard_rejects_wrong_interpreter(self) -> None:
+        with patch(
+            "tools.lexicon.cli._ensure_lexicon_cli_runtime",
+            side_effect=RuntimeError("Lexicon CLI must run with `.venv-lexicon/bin/python`."),
+        ):
+            code, _, stderr = self.run_cli([
+                "enrich-core",
+                "--snapshot-dir",
+                "snapshot",
+            ])
+
+        self.assertEqual(code, 2)
+        self.assertIn(".venv-lexicon/bin/python", stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

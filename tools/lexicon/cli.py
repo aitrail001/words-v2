@@ -53,6 +53,7 @@ from tools.lexicon.phrase_inventory import build_phrase_inventory_records
 
 _REASONING_EFFORT_CHOICES = ['none', 'low', 'medium', 'high']
 _RUNTIME_LOG_LEVEL_CHOICES = ['quiet', 'info', 'debug']
+_LEXICON_VENV_GUARD_BYPASS_ENV = 'LEXICON_SKIP_VENV_GUARD'
 
 
 def _empty_sense_provider(_word: str) -> list[object]:
@@ -131,6 +132,40 @@ def _emit_item_progress(
 def _add_shared_logging_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--log-level', choices=_RUNTIME_LOG_LEVEL_CHOICES, default='info', help='runtime progress logging level')
     parser.add_argument('--log-file', type=Path, help='optional runtime progress log file; defaults to <command-root>/<command>.log')
+
+
+def _lexicon_repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _should_skip_lexicon_venv_guard() -> bool:
+    if os.getenv(_LEXICON_VENV_GUARD_BYPASS_ENV) == '1':
+        return True
+    return 'PYTEST_CURRENT_TEST' in os.environ
+
+
+def _ensure_lexicon_cli_runtime() -> None:
+    if _should_skip_lexicon_venv_guard():
+        return
+
+    repo_root = _lexicon_repo_root()
+    expected_root = repo_root / '.venv-lexicon'
+    expected_python = expected_root / 'bin' / 'python'
+    if not expected_python.exists():
+        raise RuntimeError(
+            'Lexicon CLI requires the repo-root .venv-lexicon interpreter. '
+            'Run `make lexicon-install` or `make worktree-bootstrap` first.'
+        )
+
+    current_prefix = Path(sys.prefix)
+    expected_roots = {expected_root, expected_root.resolve()}
+    if current_prefix not in expected_roots and current_prefix.resolve() not in expected_roots:
+        raise RuntimeError(
+            'Lexicon CLI must run with `.venv-lexicon/bin/python`. '
+            f'Current environment root: {current_prefix}. '
+            f'Expected environment root: {expected_root.resolve()}. '
+            f'Set `{_LEXICON_VENV_GUARD_BYPASS_ENV}=1` only when you intentionally need to bypass this guard.'
+        )
 
 
 def _resolve_existing_db_url(explicit_database_url: str | None) -> str | None:
@@ -1624,6 +1659,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     argv_list = list(argv) if argv is not None else None
     parser = build_parser()
     args = parser.parse_args(argv_list)
+    try:
+        _ensure_lexicon_cli_runtime()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     runtime_logger = _build_runtime_logger(args)
     setattr(args, 'runtime_logger', runtime_logger)
     _emit_command_event(
