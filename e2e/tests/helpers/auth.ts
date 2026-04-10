@@ -6,6 +6,7 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 const TOKEN_STORAGE_KEY = "words_access_token";
 const ADMIN_TOKEN_STORAGE_KEY = "words_admin_access_token";
 const DEFAULT_PASSWORD = "password123";
+const AUTH_REQUEST_TIMEOUT_MS = 20_000;
 
 type AuthTokens = {
   access_token: string;
@@ -46,7 +47,7 @@ const getDbConfig = () => {
     port: Number(process.env.E2E_DB_PORT ?? 5432),
     user: process.env.E2E_DB_USER ?? "vocabapp",
     password: process.env.E2E_DB_PASSWORD ?? "devpassword",
-    database: process.env.E2E_DB_NAME ?? "vocabapp_dev",
+    database: process.env.E2E_DB_NAME ?? process.env.DEV_DB_NAME ?? "vocabapp_dev_full",
   };
 };
 
@@ -57,6 +58,7 @@ const loginViaApi = async (
 ): Promise<AuthTokens> => {
   const response = await request.post(`${API_URL}/auth/login`, {
     data: { email, password },
+    timeout: AUTH_REQUEST_TIMEOUT_MS,
   });
 
   expect(response.ok()).toBeTruthy();
@@ -94,6 +96,7 @@ export const registerViaApi = async (
 
   const response = await request.post(`${API_URL}/auth/register`, {
     data: { email, password },
+    timeout: AUTH_REQUEST_TIMEOUT_MS,
   });
 
   expect(response.ok()).toBeTruthy();
@@ -105,6 +108,7 @@ export const registerViaApi = async (
     headers: {
       Authorization: `Bearer ${body.access_token}`,
     },
+    timeout: AUTH_REQUEST_TIMEOUT_MS,
   });
 
   expect(meResponse.ok()).toBeTruthy();
@@ -131,6 +135,7 @@ export const registerAdminViaApi = async (
   const tokens = await loginViaApi(request, user.email, user.password);
   const meResponse = await request.get(`${API_URL}/auth/me`, {
     headers: authHeaders(tokens.access_token),
+    timeout: AUTH_REQUEST_TIMEOUT_MS,
   });
 
   expect(meResponse.ok()).toBeTruthy();

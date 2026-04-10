@@ -12,6 +12,7 @@ import {
 import { selectCompiledReviewBatch } from "../helpers/compiled-review";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
+const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? process.env.WORDS_DATA_DIR ?? path.join(process.cwd(), "data");
 
 type CompiledReviewBatch = {
   id: string;
@@ -71,7 +72,7 @@ test("@smoke admin can bulk approve a compiled lexicon batch with progress", asy
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
   const base = `bulkartifact${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const snapshotName = `compiled-review-bulk-${base}`;
-  const hostSnapshotDir = path.join(process.cwd(), "..", "data", "lexicon", "snapshots", snapshotName);
+  const hostSnapshotDir = path.join(dataRoot, "lexicon", "snapshots", snapshotName);
   const words = [`${base}one`, `${base}two`, `${base}three`];
   const jsonl = words.map((word, index) => JSON.stringify(buildCompiledWordRow(`${uniqueSuffix}-${index + 1}`, word))).join("\n") + "\n";
 

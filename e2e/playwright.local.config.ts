@@ -1,8 +1,11 @@
+import path from "node:path";
+
 import { defineConfig } from "@playwright/test";
 
 const BACKEND_PORT = process.env.BACKEND_PORT ?? "8000";
 const FRONTEND_PORT = process.env.FRONTEND_PORT ?? "3000";
 const ADMIN_FRONTEND_PORT = process.env.ADMIN_FRONTEND_PORT ?? "3001";
+const REPO_ROOT = path.resolve(__dirname, "..");
 
 export default defineConfig({
   testDir: "./tests",
@@ -33,7 +36,7 @@ export default defineConfig({
     {
       name: "backend",
       command:
-        "bash -lc 'source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && uvicorn app.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000} --reload'",
+        `bash -lc 'cd "${REPO_ROOT}" && source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && uvicorn app.main:app --host 0.0.0.0 --port \${BACKEND_PORT:-8000} --reload'`,
       url: `http://127.0.0.1:${BACKEND_PORT}/api/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
@@ -41,7 +44,7 @@ export default defineConfig({
     {
       name: "frontend",
       command:
-        "bash -lc 'set -a && source .env.localdev && set +a && cd frontend && NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-8000}/api npm run dev -- --hostname 0.0.0.0 -p ${FRONTEND_PORT:-3000}'",
+        `bash -lc 'cd "${REPO_ROOT}" && set -a && source .env.localdev && set +a && cd frontend && NEXT_PUBLIC_API_URL=http://localhost:\${BACKEND_PORT:-8000}/api npm run dev -- --hostname 0.0.0.0 -p \${FRONTEND_PORT:-3000}'`,
       url: `http://127.0.0.1:${FRONTEND_PORT}`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
@@ -49,7 +52,7 @@ export default defineConfig({
     {
       name: "admin-frontend",
       command:
-        "bash -lc 'set -a && source .env.localdev && set +a && cd admin-frontend && NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-8000}/api npm run dev'",
+        `bash -lc 'cd "${REPO_ROOT}" && set -a && source .env.localdev && set +a && cd admin-frontend && NEXT_PUBLIC_API_URL=http://localhost:\${BACKEND_PORT:-8000}/api npm run dev'`,
       url: `http://127.0.0.1:${ADMIN_FRONTEND_PORT}/login`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

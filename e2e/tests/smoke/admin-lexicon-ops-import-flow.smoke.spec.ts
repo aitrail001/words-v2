@@ -5,7 +5,7 @@ import path from "node:path";
 import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
-const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? path.join(process.cwd(), "..", "data");
+const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? process.env.WORDS_DATA_DIR ?? path.join(process.cwd(), "data");
 
 const buildCompiledWordRow = (runId: string, word: string) => ({
   schema_version: "1.1.0",

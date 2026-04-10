@@ -2,10 +2,10 @@ import { expect, test } from "@playwright/test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
+import { authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady, apiUrl } from "../helpers/auth";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
-const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? path.join(process.cwd(), "..", "data");
+const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? process.env.WORDS_DATA_DIR ?? path.join(process.cwd(), "data");
 
 test("@smoke admin can launch voice import from Lexicon Voice and run dry-run/import", async ({ page, request }) => {
   const user = await registerAdminViaApi(request, "admin-voice-import-smoke");
@@ -43,12 +43,34 @@ test("@smoke admin can launch voice import from Lexicon Voice and run dry-run/im
     "utf-8",
   );
 
+  await expect
+    .poll(
+      async () => {
+        const response = await request.get(`${apiUrl}/lexicon-ops/voice-runs?q=${encodeURIComponent(runName)}`, {
+          headers: authHeaders(user.token),
+          timeout: 30_000,
+        });
+        if (!response.ok()) {
+          return false;
+        }
+        const runs = (await response.json()) as { items: Array<{ run_name: string }> };
+        return runs.items.some((run) => run.run_name === runName);
+      },
+      {
+        timeout: 15_000,
+        intervals: [250, 500, 1_000],
+      },
+    )
+    .toBeTruthy();
+
   await waitForAppReady(request, adminUrl);
   await injectAdminToken(page, user.token, adminUrl);
 
-  await page.goto(`${adminUrl}/lexicon/voice`);
+  await page.goto(`${adminUrl}/lexicon/voice-runs`);
   await expect(page.getByTestId("lexicon-voice-page")).toBeVisible();
-  await expect(page.getByTestId("lexicon-voice-runs")).toContainText(runName);
+  await page.getByTestId("lexicon-voice-runs-search").fill(runName);
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId(`lexicon-voice-run-import-${runName}`)).toBeVisible({ timeout: 30_000 });
   await page.getByTestId(`lexicon-voice-run-import-${runName}`).click();
 
   await expect(page).toHaveURL(/\/lexicon\/voice-import/);

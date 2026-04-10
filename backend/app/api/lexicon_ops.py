@@ -431,10 +431,7 @@ def _voice_run_summary(run_dir: Path) -> LexiconVoiceRunSummaryResponse:
     plan_path = run_dir / "voice_plan.jsonl"
     manifest_path = run_dir / "voice_manifest.jsonl"
     errors_path = run_dir / "voice_errors.jsonl"
-    latest = run_dir.stat().st_mtime
-    for path in (plan_path, manifest_path, errors_path):
-        if path.exists() and path.is_file():
-            latest = max(latest, path.stat().st_mtime)
+    latest = _voice_run_latest_mtime(run_dir)
     plan_stats = _voice_run_row_stats(plan_path, latest_rows_limit=0)
     manifest_stats = _voice_run_row_stats(manifest_path, latest_rows_limit=0)
     error_stats = _voice_run_row_stats(errors_path, latest_rows_limit=0)
@@ -447,6 +444,22 @@ def _voice_run_summary(run_dir: Path) -> LexiconVoiceRunSummaryResponse:
         existing_count=manifest_stats.status_counts.get("existing", 0),
         failed_count=error_stats.total_rows,
     )
+
+
+def _voice_run_latest_mtime(run_dir: Path) -> float:
+    latest = run_dir.stat().st_mtime
+    for path in (
+        run_dir / "voice_plan.jsonl",
+        run_dir / "voice_manifest.jsonl",
+        run_dir / "voice_errors.jsonl",
+    ):
+        if path.exists() and path.is_file():
+            latest = max(latest, path.stat().st_mtime)
+    return latest
+
+
+def _voice_run_index_mtime(run_dir: Path) -> float:
+    return run_dir.stat().st_mtime
 
 
 def _latest_jsonl_rows(path: Path, limit: int = 5) -> list[dict[str, object]]:
@@ -1019,13 +1032,10 @@ async def list_voice_runs(
     normalized_q = (q or "").strip().lower()
     if normalized_q:
         run_dirs = [entry for entry in run_dirs if normalized_q in entry.name.lower()]
-    runs = [
-        _voice_run_summary(entry)
-        for entry in run_dirs
-    ]
-    runs.sort(key=lambda item: item.updated_at, reverse=True)
-    total = len(runs)
-    items = runs[offset: offset + limit]
+    run_dirs.sort(key=_voice_run_index_mtime, reverse=True)
+    total = len(run_dirs)
+    page_dirs = run_dirs[offset: offset + limit]
+    items = [_voice_run_summary(entry) for entry in page_dirs]
     return LexiconVoiceRunListResponse(
         items=items,
         total=total,

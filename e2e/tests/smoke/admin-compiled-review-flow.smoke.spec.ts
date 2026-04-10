@@ -34,6 +34,7 @@ type CompiledReviewItemsPage = {
 };
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
+const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? process.env.WORDS_DATA_DIR ?? "/app/data";
 
 const buildCompiledWordRow = (runId: string, word: string) => ({
   schema_version: "1.1.0",
@@ -97,10 +98,12 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   const normalized = `artifact${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const secondary = `${normalized}harbor`;
   const snapshotName = `compiled-review-${normalized}`;
-  const hostSnapshotDir = path.join(process.cwd(), "..", "data", "lexicon", "snapshots", snapshotName);
+  const hostSnapshotDir = path.join(dataRoot, "lexicon", "snapshots", snapshotName);
   const reviewedHostDir = path.join(hostSnapshotDir, "reviewed");
   const approvedHostPath = path.join(reviewedHostDir, "approved.jsonl");
   const decisionsHostPath = path.join(reviewedHostDir, "review.decisions.jsonl");
+  const backendDataRoot = process.env.E2E_WORDS_DATA_ROOT ?? process.env.WORDS_DATA_DIR ?? "/app/data";
+  const backendApprovedPath = `${backendDataRoot}/lexicon/snapshots/${snapshotName}/reviewed/approved.jsonl`;
   const jsonl = `${JSON.stringify(buildCompiledWordRow(uniqueSuffix, normalized))}\n${JSON.stringify(buildCompiledWordRow(`${uniqueSuffix}-2`, secondary))}\n`;
 
   await rm(hostSnapshotDir, { recursive: true, force: true });
@@ -197,7 +200,7 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   ]);
 
   await page.getByRole("button", { name: "Materialize Reviewed Outputs" }).click();
-  await expect(page.getByText(`/app/data/lexicon/snapshots/${snapshotName}/reviewed/approved.jsonl`)).toBeVisible();
+  await expect(page.getByText(backendApprovedPath)).toBeVisible();
   await expect
     .poll(
       async () => {

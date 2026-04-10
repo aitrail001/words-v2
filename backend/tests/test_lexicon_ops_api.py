@@ -7,6 +7,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.dialects import postgresql
 
+from app.api import lexicon_ops
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.redis import get_redis
@@ -606,6 +607,40 @@ class TestLexiconVoiceRuns:
         assert payload["q"] == "voice"
         assert len(payload["items"]) == 1
         assert payload["items"][0]["run_name"] in {"voice-roundtrip", "voice-run-b"}
+
+    @pytest.mark.asyncio
+    async def test_list_voice_runs_only_summarizes_requested_page(self, client, mock_db, voice_root_env, monkeypatch):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        _mock_authenticated_user(mock_db, _make_user(user_id))
+
+        run_names = ["voice-run-1", "voice-run-2", "voice-run-3"]
+        for name in run_names:
+            run_dir = voice_root_env / name
+            run_dir.mkdir()
+            _write_jsonl(run_dir / "voice_plan.jsonl", [{"unit_id": "1"}])
+            _write_jsonl(run_dir / "voice_manifest.jsonl", [{"status": "generated"}])
+            _write_jsonl(run_dir / "voice_errors.jsonl", [])
+
+        seen: list[str] = []
+        original_summary = lexicon_ops._voice_run_summary
+
+        def recording_summary(run_dir):
+            seen.append(run_dir.name)
+            return original_summary(run_dir)
+
+        monkeypatch.setattr(lexicon_ops, "_voice_run_summary", recording_summary)
+
+        response = await client.get(
+            "/api/lexicon-ops/voice-runs?limit=1&offset=0",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 3
+        assert len(payload["items"]) == 1
+        assert seen == [payload["items"][0]["run_name"]]
 
     @pytest.mark.asyncio
     async def test_get_voice_run_detail_returns_latest_rows(self, client, mock_db, voice_root_env):
