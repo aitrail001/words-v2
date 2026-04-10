@@ -13,6 +13,7 @@ from tools.lexicon.jsonl_io import append_jsonl, read_jsonl, write_jsonl
 from tools.lexicon.enrich import (
     NodeOpenAICompatibleResponsesClient,
     OpenAICompatibleResponsesClient,
+    merge_staged_enrichment_artifacts,
     merge_staged_enrichment_rows,
     run_core_enrichment,
     split_legacy_enrich_artifact,
@@ -616,6 +617,390 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual([row["lexeme_id"] for row in checkpoint_rows], ["lx_alpha", "lx_play"])
             self.assertEqual([row["status"] for row in checkpoint_rows], ["completed", "completed"])
 
+    def test_run_core_enrichment_resume_preserves_existing_core_output_and_backfills_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            existing_core_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "existing alpha",
+                        "examples": [{"sentence": "alpha existing", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "existing alpha note",
+                        "enrichment_id": "en_alpha_existing",
+                        "generation_run_id": "existing-run",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            core_path.write_text(json.dumps(existing_core_row) + "\n", encoding="utf-8")
+
+            def fake_enrich_snapshot(
+                snapshot_dir: Path,
+                *,
+                output_path: Path | None = None,
+                checkpoint_path: Path | None = None,
+                decisions_path: Path | None = None,
+                resume: bool = False,
+                **_: object,
+            ) -> list[EnrichmentRecord]:
+                self.assertTrue(resume)
+                assert checkpoint_path is not None
+                assert decisions_path is not None
+                lexemes, _ = read_snapshot_inputs(snapshot_dir)
+                completed_lexeme_ids = {row["lexeme_id"] for row in read_jsonl(checkpoint_path)}
+                pending_lemmas = [
+                    lexeme.lemma
+                    for lexeme in sorted(lexemes, key=lambda item: (item.wordfreq_rank, item.lemma))
+                    if lexeme.lexeme_id not in completed_lexeme_ids
+                ]
+                self.assertEqual(pending_lemmas, ["run", "play"])
+                assert output_path is not None
+                append_jsonl(output_path, [{
+                    "schema_version": "1.1.0",
+                    "entry_id": "lx_run",
+                    "entry_type": "word",
+                    "normalized_form": "run",
+                    "source_provenance": [{"source": "wordnet"}],
+                    "entity_category": "general",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
+                    "cefr_level": "B1",
+                    "frequency_rank": 2,
+                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "senses": [
+                        {
+                            "sense_id": "sn_lx_run_1",
+                            "wn_synset_id": "run.v.01",
+                            "pos": "verb",
+                            "sense_kind": "standard_meaning",
+                            "decision": "keep_standard",
+                            "base_word": None,
+                            "primary_domain": "general",
+                            "secondary_domains": [],
+                            "register": "neutral",
+                            "definition": "new run",
+                            "examples": [{"sentence": "run new", "difficulty": "B1"}],
+                            "synonyms": [],
+                            "antonyms": [],
+                            "collocations": [],
+                            "grammar_patterns": [],
+                            "usage_note": "new run note",
+                            "enrichment_id": "en_run_new",
+                            "generation_run_id": "run-1",
+                            "model_name": "gpt-5.4",
+                            "prompt_version": "v1",
+                            "confidence": 0.9,
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "translations": {},
+                        }
+                    ],
+                    "confusable_words": [],
+                    "generated_at": "2026-04-08T00:00:00Z",
+                    "phonetics": _test_phonetics(),
+                }])
+                append_jsonl(checkpoint_path, [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "run-1",
+                    "completed_at": "2026-04-08T00:00:00Z",
+                }])
+                append_jsonl(decisions_path, [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "run-1",
+                    "completed_at": "2026-04-08T00:00:00Z",
+                    "decision": "keep_standard",
+                    "base_word": None,
+                    "discard_reason": None,
+                    "accepted_sense_count": 1,
+                }])
+                return []
+
+            with patch("tools.lexicon.enrich.enrich_snapshot", side_effect=fake_enrich_snapshot):
+                run_core_enrichment(snapshot_dir, max_concurrency=1, resume=True)
+
+            core_rows = read_jsonl(core_path)
+            self.assertEqual([row["entry_id"] for row in core_rows], ["lx_alpha", "lx_run"])
+            self.assertEqual(core_rows[0]["senses"][0]["definition"], "existing alpha")
+            self.assertEqual(core_rows[1]["senses"][0]["definition"], "new run")
+            checkpoint_rows = read_jsonl(snapshot_dir / "enrich.core.checkpoint.jsonl")
+            self.assertEqual([row["lexeme_id"] for row in checkpoint_rows], ["lx_alpha", "lx_run"])
+            decision_rows = read_jsonl(snapshot_dir / "enrich.core.decisions.jsonl")
+            self.assertEqual([row["lexeme_id"] for row in decision_rows], ["lx_alpha", "lx_run"])
+            self.assertEqual(decision_rows[0]["decision"], "keep_standard")
+            self.assertEqual(decision_rows[1]["decision"], "keep_standard")
+
+    def test_run_core_enrichment_resume_without_preexisting_output_does_not_duplicate_runtime_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+
+            def fake_enrich_snapshot(
+                snapshot_dir: Path,
+                *,
+                output_path: Path | None = None,
+                checkpoint_path: Path | None = None,
+                decisions_path: Path | None = None,
+                resume: bool = False,
+                **_: object,
+            ) -> list[EnrichmentRecord]:
+                self.assertTrue(resume)
+                self.assertEqual(output_path, core_path)
+                assert output_path is not None
+                assert checkpoint_path is not None
+                assert decisions_path is not None
+                append_jsonl(output_path, [{
+                    "schema_version": "1.1.0",
+                    "entry_id": "lx_run",
+                    "entry_type": "word",
+                    "normalized_form": "run",
+                    "source_provenance": [{"source": "wordnet"}],
+                    "entity_category": "general",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
+                    "cefr_level": "B1",
+                    "frequency_rank": 2,
+                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "senses": [
+                        {
+                            "sense_id": "sn_lx_run_1",
+                            "wn_synset_id": "run.v.01",
+                            "pos": "verb",
+                            "sense_kind": "standard_meaning",
+                            "decision": "keep_standard",
+                            "base_word": None,
+                            "primary_domain": "general",
+                            "secondary_domains": [],
+                            "register": "neutral",
+                            "definition": "new run",
+                            "examples": [{"sentence": "run new", "difficulty": "B1"}],
+                            "synonyms": [],
+                            "antonyms": [],
+                            "collocations": [],
+                            "grammar_patterns": [],
+                            "usage_note": "new run note",
+                            "enrichment_id": "en_run_new",
+                            "generation_run_id": "run-1",
+                            "model_name": "gpt-5.4",
+                            "prompt_version": "v1",
+                            "confidence": 0.9,
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "translations": {},
+                        }
+                    ],
+                    "confusable_words": [],
+                    "generated_at": "2026-04-08T00:00:00Z",
+                    "phonetics": _test_phonetics(),
+                }])
+                append_jsonl(checkpoint_path, [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "run-1",
+                    "completed_at": "2026-04-08T00:00:00Z",
+                }])
+                append_jsonl(decisions_path, [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "run-1",
+                    "completed_at": "2026-04-08T00:00:00Z",
+                    "decision": "keep_standard",
+                    "base_word": None,
+                    "discard_reason": None,
+                    "accepted_sense_count": 1,
+                }])
+                return []
+
+            with patch("tools.lexicon.enrich.enrich_snapshot", side_effect=fake_enrich_snapshot):
+                result = run_core_enrichment(snapshot_dir, max_concurrency=1, resume=True)
+
+            core_rows = read_jsonl(core_path)
+            self.assertEqual(result.core_row_count, 1)
+            self.assertEqual([row["entry_id"] for row in core_rows], ["lx_run"])
+
+    def test_run_core_enrichment_resume_supports_legacy_lexeme_id_only_rows_and_split_translation_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            legacy_compiled_row = {
+                "schema_version": "1.1.0",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "translations": _test_translations("alpha definition", "alpha note", ["alpha example"]),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+
+            split_core_row, split_translation_rows = split_compiled_row_for_staging(legacy_compiled_row)
+            self.assertNotIn("entry_id", split_core_row)
+            self.assertEqual({row["entry_id"] for row in split_translation_rows}, {"lx_alpha"})
+
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            legacy_existing_row = dict(legacy_compiled_row)
+            legacy_existing_row.pop("entry_id", None)
+            write_jsonl(core_path, [legacy_existing_row])
+
+            def fake_enrich_snapshot(
+                snapshot_dir: Path,
+                *,
+                output_path: Path | None = None,
+                checkpoint_path: Path | None = None,
+                decisions_path: Path | None = None,
+                resume: bool = False,
+                **_: object,
+            ) -> list[EnrichmentRecord]:
+                self.assertTrue(resume)
+                assert checkpoint_path is not None
+                assert decisions_path is not None
+                self.assertEqual({row["lexeme_id"] for row in read_jsonl(checkpoint_path)}, {"lx_alpha"})
+                self.assertEqual({row["lexeme_id"] for row in read_jsonl(decisions_path)}, {"lx_alpha"})
+                assert output_path is not None
+                append_jsonl(output_path, [{
+                    "schema_version": "1.1.0",
+                    "entry_id": "lx_run",
+                    "entry_type": "word",
+                    "normalized_form": "run",
+                    "source_provenance": [{"source": "wordnet"}],
+                    "entity_category": "general",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
+                    "cefr_level": "B1",
+                    "frequency_rank": 2,
+                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "senses": [
+                        {
+                            "sense_id": "sn_lx_run_1",
+                            "wn_synset_id": "run.v.01",
+                            "pos": "verb",
+                            "sense_kind": "standard_meaning",
+                            "decision": "keep_standard",
+                            "base_word": None,
+                            "primary_domain": "general",
+                            "secondary_domains": [],
+                            "register": "neutral",
+                            "definition": "new run",
+                            "examples": [{"sentence": "run new", "difficulty": "B1"}],
+                            "synonyms": [],
+                            "antonyms": [],
+                            "collocations": [],
+                            "grammar_patterns": [],
+                            "usage_note": "new run note",
+                            "enrichment_id": "en_run_new",
+                            "generation_run_id": "run-1",
+                            "model_name": "gpt-5.4",
+                            "prompt_version": "v1",
+                            "confidence": 0.9,
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "translations": {},
+                        }
+                    ],
+                    "confusable_words": [],
+                    "generated_at": "2026-04-08T00:00:00Z",
+                    "phonetics": _test_phonetics(),
+                }])
+                append_jsonl(checkpoint_path, [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "run-1",
+                    "completed_at": "2026-04-08T00:00:00Z",
+                }])
+                append_jsonl(decisions_path, [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "run-1",
+                    "completed_at": "2026-04-08T00:00:00Z",
+                    "decision": "keep_standard",
+                    "base_word": None,
+                    "discard_reason": None,
+                    "accepted_sense_count": 1,
+                }])
+                return []
+
+            with patch("tools.lexicon.enrich.enrich_snapshot", side_effect=fake_enrich_snapshot):
+                run_core_enrichment(snapshot_dir, max_concurrency=1, resume=True)
+
+            checkpoint_rows = read_jsonl(snapshot_dir / "enrich.core.checkpoint.jsonl")
+            decision_rows = read_jsonl(snapshot_dir / "enrich.core.decisions.jsonl")
+            self.assertEqual([row["lexeme_id"] for row in checkpoint_rows], ["lx_alpha", "lx_run"])
+            self.assertEqual([row["lexeme_id"] for row in decision_rows], ["lx_alpha", "lx_run"])
+            core_rows = read_jsonl(core_path)
+            self.assertEqual(core_rows[0]["lexeme_id"], "lx_alpha")
+            self.assertNotIn("entry_id", core_rows[0])
+            self.assertEqual(core_rows[1]["entry_id"], "lx_run")
+
     def test_run_core_enrichment_rejects_distinct_runtime_output_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -698,6 +1083,310 @@ class EnrichSnapshotTests(unittest.TestCase):
             rows = [json.loads(line) for line in result.output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(rows), 5)
             self.assertEqual({row["locale"] for row in rows}, {"zh-Hans", "es", "ar", "pt-BR", "ja"})
+
+    def test_run_translation_enrichment_resume_backfills_completed_rows_without_truncating_partial_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            core_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "schema_version": "1.1.0",
+                                "entry_id": "lx_run",
+                                "entry_type": "word",
+                                "normalized_form": "run",
+                                "source_provenance": [{"source": "wordnet"}],
+                                "entity_category": "general",
+                                "word": "run",
+                                "part_of_speech": ["verb"],
+                                "cefr_level": "B1",
+                                "frequency_rank": 5,
+                                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                                "senses": [
+                                    {
+                                        "sense_id": "sn_lx_run_1",
+                                        "wn_synset_id": "run.v.01",
+                                        "pos": "verb",
+                                        "sense_kind": "standard_meaning",
+                                        "decision": "keep_standard",
+                                        "base_word": None,
+                                        "primary_domain": "general",
+                                        "secondary_domains": [],
+                                        "register": "neutral",
+                                        "definition": "move fast by using your legs",
+                                        "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                        "synonyms": [],
+                                        "antonyms": [],
+                                        "collocations": [],
+                                        "grammar_patterns": [],
+                                        "usage_note": "Common learner note.",
+                                        "enrichment_id": "enr_1",
+                                        "generation_run_id": "run-1",
+                                        "model_name": "test-model",
+                                        "prompt_version": "v1",
+                                        "confidence": 0.9,
+                                        "generated_at": "2026-04-08T00:00:00Z",
+                                    },
+                                    {
+                                        "sense_id": "sn_lx_run_2",
+                                        "wn_synset_id": "run.v.02",
+                                        "pos": "verb",
+                                        "sense_kind": "standard_meaning",
+                                        "decision": "keep_standard",
+                                        "base_word": None,
+                                        "primary_domain": "general",
+                                        "secondary_domains": [],
+                                        "register": "neutral",
+                                        "definition": "move along",
+                                        "examples": [{"sentence": "Run to the door.", "difficulty": "B1"}],
+                                        "synonyms": [],
+                                        "antonyms": [],
+                                        "collocations": [],
+                                        "grammar_patterns": [],
+                                        "usage_note": "Second sense.",
+                                        "enrichment_id": "enr_2",
+                                        "generation_run_id": "run-1",
+                                        "model_name": "test-model",
+                                        "prompt_version": "v1",
+                                        "confidence": 0.9,
+                                        "generated_at": "2026-04-08T00:00:00Z",
+                                    },
+                                ],
+                                "confusable_words": [],
+                                "generated_at": "2026-04-08T00:00:00Z",
+                                "phonetics": _test_phonetics(),
+                            }
+                        )
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            translations_path = snapshot_dir / "words.translations.jsonl"
+            translations_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "zh-Hans",
+                            "definition": "existing zh",
+                            "usage_note": "existing zh note",
+                            "examples": ["existing example"],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "generation_run_id": "existing-1",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "es",
+                            "definition": "existing es",
+                            "usage_note": "existing es note",
+                            "examples": ["existing example"],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "generation_run_id": "existing-1",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "ar",
+                            "definition": "existing ar",
+                            "usage_note": "existing ar note",
+                            "examples": ["existing example"],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "generation_run_id": "existing-1",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "pt-BR",
+                            "definition": "existing pt",
+                            "usage_note": "existing pt note",
+                            "examples": ["existing example"],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "generation_run_id": "existing-1",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "ja",
+                            "definition": "existing ja",
+                            "usage_note": "existing ja note",
+                            "examples": ["existing example"],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "generation_run_id": "existing-1",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "zh-Hans",
+                            "definition": "latest zh",
+                            "usage_note": "latest zh note",
+                            "examples": ["latest example"],
+                            "generated_at": "2026-04-09T00:00:00Z",
+                            "generation_run_id": "existing-3",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "es",
+                            "definition": "latest es",
+                            "usage_note": "latest es note",
+                            "examples": ["latest example"],
+                            "generated_at": "2026-04-09T00:00:00Z",
+                            "generation_run_id": "existing-3",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "ar",
+                            "definition": "latest ar",
+                            "usage_note": "latest ar note",
+                            "examples": ["latest example"],
+                            "generated_at": "2026-04-09T00:00:00Z",
+                            "generation_run_id": "existing-3",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "pt-BR",
+                            "definition": "latest pt",
+                            "usage_note": "latest pt note",
+                            "examples": ["latest example"],
+                            "generated_at": "2026-04-09T00:00:00Z",
+                            "generation_run_id": "existing-3",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_1",
+                            "locale": "ja",
+                            "definition": "latest ja",
+                            "usage_note": "latest ja note",
+                            "examples": ["latest example"],
+                            "generated_at": "2026-04-09T00:00:00Z",
+                            "generation_run_id": "existing-3",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_2",
+                            "locale": "zh-Hans",
+                            "definition": "partial zh",
+                            "usage_note": "partial zh note",
+                            "examples": ["partial example"],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "generation_run_id": "existing-2",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_2",
+                            "locale": "es",
+                            "definition": "partial es",
+                            "usage_note": "partial es note",
+                            "examples": ["partial example"],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "generation_run_id": "existing-2",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                        json.dumps({
+                            "entry_id": "lx_run",
+                            "sense_id": "sn_lx_run_2",
+                            "locale": "ar",
+                            "definition": "partial ar",
+                            "usage_note": "partial ar note",
+                            "examples": ["partial example"],
+                            "generated_at": "2026-04-08T00:00:00Z",
+                            "generation_run_id": "existing-2",
+                            "model_name": "test-model",
+                            "prompt_version": "v1",
+                            "status": "completed",
+                        }),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            observed_calls: list[str] = []
+
+            def translation_provider(*, core_row: dict[str, object], sense_row: dict[str, object], **_: object) -> dict[str, dict[str, object]]:
+                sense_id = str(sense_row["sense_id"])
+                observed_calls.append(sense_id)
+                self.assertEqual(sense_id, "sn_lx_run_2")
+                checkpoint_rows = read_jsonl(snapshot_dir / "enrich.translations.checkpoint.jsonl")
+                self.assertEqual({row["sense_id"] for row in checkpoint_rows}, {"sn_lx_run_1"})
+                return _test_translations(
+                    definition="new sense",
+                    usage_note="new sense note",
+                    examples=["Run to the door."],
+                )
+
+            result = run_translation_enrichment(
+                snapshot_dir,
+                core_input_path=core_path,
+                output_path=translations_path,
+                translation_provider=translation_provider,
+                resume=True,
+            )
+
+            self.assertEqual(observed_calls, ["sn_lx_run_2"])
+            checkpoint_rows = read_jsonl(snapshot_dir / "enrich.translations.checkpoint.jsonl")
+            self.assertEqual({row["sense_id"] for row in checkpoint_rows}, {"sn_lx_run_1", "sn_lx_run_2"})
+            sense1_checkpoint = next(row for row in checkpoint_rows if row["sense_id"] == "sn_lx_run_1")
+            self.assertEqual(sense1_checkpoint["generation_run_id"], "existing-3")
+            self.assertEqual(sense1_checkpoint["completed_at"], "2026-04-09T00:00:00Z")
+            decision_rows = read_jsonl(snapshot_dir / "enrich.translations.decisions.jsonl")
+            self.assertEqual({row["sense_id"] for row in decision_rows}, {"sn_lx_run_1", "sn_lx_run_2"})
+            sense1_decision = next(row for row in decision_rows if row["sense_id"] == "sn_lx_run_1")
+            self.assertEqual(sense1_decision["generation_run_id"], "existing-3")
+            self.assertEqual(sense1_decision["completed_at"], "2026-04-09T00:00:00Z")
+            self.assertEqual(sense1_decision["locale_count"], 5)
+            rows = read_jsonl(translations_path)
+            self.assertEqual(len(rows), 18)
+            self.assertTrue(
+                any(
+                    row["sense_id"] == "sn_lx_run_2"
+                    and row["locale"] == "zh-Hans"
+                    and row["definition"] == "partial zh"
+                    for row in rows
+                )
+            )
+            self.assertEqual(result.translation_row_count, len(rows))
 
     def test_run_translation_enrichment_uses_translation_stage_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5795,6 +6484,516 @@ class StagedEnrichmentArtifactTests(unittest.TestCase):
         self.assertEqual(len(translation_rows), 5)
         self.assertNotIn("translations", core_row["senses"][0])
         self.assertEqual(merged_rows, [compiled_row])
+
+    def test_merge_staged_enrichment_artifacts_appends_only_missing_rows_and_preserves_existing_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_input = tmp_path / "words.enriched.core.jsonl"
+            translations_input = tmp_path / "words.translations.jsonl"
+            output_path = tmp_path / "words.enriched.jsonl"
+
+            compiled_alpha = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "translations": _test_translations("alpha definition", "alpha note", ["alpha example"]),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            compiled_beta = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_beta",
+                "lexeme_id": "lx_beta",
+                "entry_type": "word",
+                "normalized_form": "beta",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "beta",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 2,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_beta_1",
+                        "wn_synset_id": "beta.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "beta definition",
+                        "examples": [{"sentence": "beta example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "beta note",
+                        "enrichment_id": "en_beta",
+                        "generation_run_id": "run-beta",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "translations": _test_translations("beta definition", "beta note", ["beta example"]),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            core_alpha, translation_alpha = split_compiled_row_for_staging(compiled_alpha)
+            core_beta, translation_beta = split_compiled_row_for_staging(compiled_beta)
+            write_jsonl(core_input, [core_alpha, core_beta])
+            write_jsonl(translations_input, translation_alpha + translation_beta)
+            write_jsonl(output_path, [compiled_alpha])
+
+            payload = merge_staged_enrichment_artifacts(
+                core_input_path=core_input,
+                translations_input_path=translations_input,
+                output_path=output_path,
+            )
+
+            rows = read_jsonl(output_path)
+            self.assertEqual(payload["merged_row_count"], 2)
+            self.assertEqual([row["entry_id"] for row in rows], ["lx_alpha", "lx_beta"])
+            self.assertEqual(rows[0], compiled_alpha)
+            self.assertEqual(rows[1], compiled_beta)
+
+    def test_merge_staged_enrichment_artifacts_rejects_duplicate_existing_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_input = tmp_path / "words.enriched.core.jsonl"
+            translations_input = tmp_path / "words.translations.jsonl"
+            output_path = tmp_path / "words.enriched.jsonl"
+
+            compiled_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "translations": _test_translations("alpha definition", "alpha note", ["alpha example"]),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            core_row, translation_rows = split_compiled_row_for_staging(compiled_row)
+            write_jsonl(core_input, [core_row])
+            write_jsonl(translations_input, translation_rows)
+            write_jsonl(output_path, [compiled_row, compiled_row])
+
+            with self.assertRaisesRegex(RuntimeError, "duplicate entry_id=lx_alpha"):
+                merge_staged_enrichment_artifacts(
+                    core_input_path=core_input,
+                    translations_input_path=translations_input,
+                    output_path=output_path,
+                )
+
+    def test_merge_staged_enrichment_artifacts_preserves_legacy_lexeme_id_only_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_input = tmp_path / "words.enriched.core.jsonl"
+            translations_input = tmp_path / "words.translations.jsonl"
+            output_path = tmp_path / "words.enriched.jsonl"
+
+            compiled_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "translations": _test_translations("alpha definition", "alpha note", ["alpha example"]),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            core_row, translation_rows = split_compiled_row_for_staging(compiled_row)
+            write_jsonl(core_input, [core_row])
+            write_jsonl(translations_input, translation_rows)
+            legacy_existing_row = dict(compiled_row)
+            legacy_existing_row.pop("entry_id")
+            write_jsonl(output_path, [legacy_existing_row])
+
+            payload = merge_staged_enrichment_artifacts(
+                core_input_path=core_input,
+                translations_input_path=translations_input,
+                output_path=output_path,
+            )
+
+            rows = read_jsonl(output_path)
+            self.assertEqual(payload["merged_row_count"], 1)
+            self.assertEqual(len(rows), 1)
+            self.assertNotIn("entry_id", rows[0])
+            self.assertEqual(rows[0]["lexeme_id"], "lx_alpha")
+            self.assertEqual(rows[0]["senses"][0]["definition"], "alpha definition")
+
+    def test_merge_staged_enrichment_rows_rejects_incomplete_locale_sets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            translation_rows = [
+                {
+                    "entry_id": "lx_alpha",
+                    "sense_id": "sn_lx_alpha_1",
+                    "locale": "zh-Hans",
+                    "definition": "zh",
+                    "usage_note": "zh note",
+                    "examples": ["example"],
+                },
+                {
+                    "entry_id": "lx_alpha",
+                    "sense_id": "sn_lx_alpha_1",
+                    "locale": "es",
+                    "definition": "es",
+                    "usage_note": "es note",
+                    "examples": ["example"],
+                },
+            ]
+
+            with self.assertRaisesRegex(RuntimeError, "must include exactly the required locale set"):
+                merge_staged_enrichment_rows([core_row], translation_rows)
+
+    def test_merge_staged_enrichment_rows_rejects_duplicate_core_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            translation_rows = [
+                {
+                    "entry_id": "lx_alpha",
+                    "sense_id": "sn_lx_alpha_1",
+                    "locale": locale,
+                    "definition": f"{locale} definition",
+                    "usage_note": f"{locale} note",
+                    "examples": ["alpha example"],
+                }
+                for locale in ["zh-Hans", "es", "ar", "pt-BR", "ja"]
+            ]
+
+            with self.assertRaisesRegex(RuntimeError, "Duplicate staged core rows found for entry_id=lx_alpha"):
+                merge_staged_enrichment_rows([core_row, core_row], translation_rows)
+
+    def test_merge_staged_enrichment_rows_rejects_orphan_translation_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            translation_rows = [
+                {
+                    "entry_id": "lx_alpha",
+                    "sense_id": "sn_lx_alpha_1",
+                    "locale": locale,
+                    "definition": f"{locale} definition",
+                    "usage_note": f"{locale} note",
+                    "examples": ["alpha example"],
+                }
+                for locale in ["zh-Hans", "es", "ar", "pt-BR", "ja"]
+            ]
+            translation_rows.append({
+                "entry_id": "lx_orphan",
+                "sense_id": "sn_orphan_1",
+                "locale": "zh-Hans",
+                "definition": "orphan definition",
+                "usage_note": "orphan note",
+                "examples": ["orphan example"],
+            })
+
+            with self.assertRaisesRegex(RuntimeError, "Orphan translation rows found for entry_id=lx_orphan sense_id=sn_orphan_1"):
+                merge_staged_enrichment_rows([core_row], translation_rows)
+
+    def test_merge_staged_enrichment_artifacts_rejects_existing_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_input = tmp_path / "words.enriched.core.jsonl"
+            translations_input = tmp_path / "words.translations.jsonl"
+            output_path = tmp_path / "words.enriched.jsonl"
+
+            compiled_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "translations": _test_translations("alpha definition", "alpha note", ["alpha example"]),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            core_row, translation_rows = split_compiled_row_for_staging(compiled_row)
+            write_jsonl(core_input, [core_row])
+            write_jsonl(translations_input, translation_rows)
+            broken_existing_row = json.loads(json.dumps(compiled_row))
+            broken_existing_row["senses"][0]["definition"] = "different definition"
+            write_jsonl(output_path, [broken_existing_row])
+
+            with self.assertRaisesRegex(RuntimeError, "disagrees with recomputed merge"):
+                merge_staged_enrichment_artifacts(
+                    core_input_path=core_input,
+                    translations_input_path=translations_input,
+                    output_path=output_path,
+                )
 
     def test_split_legacy_enrich_artifact_can_synthesize_resume_ledgers(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
