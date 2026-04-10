@@ -47,6 +47,10 @@ def _thread_id_for_comment(repo: str, pr_number: int, comment_id: int) -> str:
               id
               isResolved
               comments(first: 100) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
                 nodes {
                   databaseId
                 }
@@ -79,6 +83,57 @@ def _thread_id_for_comment(repo: str, pr_number: int, comment_id: int) -> str:
             for comment in thread["comments"]["nodes"]:
                 if int(comment["databaseId"]) == comment_id:
                     return str(thread["id"])
+            comment_page = thread["comments"].get("pageInfo", {})
+            comment_after = comment_page.get("endCursor")
+            while comment_page.get("hasNextPage"):
+                comments_query = """
+                query($owner: String!, $name: String!, $pr: Int!, $threadId: ID!, $after: String) {
+                  repository(owner: $owner, name: $name) {
+                    pullRequest(number: $pr) {
+                      id
+                    }
+                  }
+                  node(id: $threadId) {
+                    ... on PullRequestReviewThread {
+                      comments(first: 100, after: $after) {
+                        pageInfo {
+                          hasNextPage
+                          endCursor
+                        }
+                        nodes {
+                          databaseId
+                        }
+                      }
+                    }
+                  }
+                }
+                """
+                comments_payload = json.loads(
+                    _run_gh(
+                        [
+                            "api",
+                            "graphql",
+                            "-f",
+                            f"query={comments_query}",
+                            "-F",
+                            f"owner={owner}",
+                            "-F",
+                            f"name={name}",
+                            "-F",
+                            f"pr={pr_number}",
+                            "-F",
+                            f"threadId={thread['id']}",
+                            "-F",
+                            f"after={comment_after}",
+                        ]
+                    )
+                )
+                comments = comments_payload["data"]["node"]["comments"]
+                for comment in comments["nodes"]:
+                    if int(comment["databaseId"]) == comment_id:
+                        return str(thread["id"])
+                comment_page = comments["pageInfo"]
+                comment_after = comment_page.get("endCursor")
         if not threads["pageInfo"]["hasNextPage"]:
             break
         after = str(threads["pageInfo"]["endCursor"])
