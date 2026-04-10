@@ -56,6 +56,7 @@ LEXICON_NODE_STAMP := tools/lexicon/node/node_modules/.lock-$(LEXICON_NODE_LOCK_
         db-bootstrap db-backup-dev db-backup-test db-restore-dev db-restore-test db-refresh-template db-create-run \
         backend-install lexicon-install frontend-install admin-install e2e-install \
         lexicon-enrich-core lexicon-enrich-translations lexicon-merge lexicon-smoke-real \
+        gh-resolve-review-thread \
         worktree-bootstrap clean-worktree-links \
         local-backend-dev local-worker-dev local-frontend-dev local-admin-dev \
         lint-backend lint-frontend lint-admin \
@@ -63,6 +64,7 @@ LEXICON_NODE_STAMP := tools/lexicon/node/node_modules/.lock-$(LEXICON_NODE_LOCK_
         nuc-rsync-data deploy-nuc
 
 LEXICON_ARGS ?=
+GH_ARGS ?=
 
 help:
 	@printf "%s\n" \
@@ -79,6 +81,7 @@ help:
 	  "make lexicon-enrich-translations # run enrich-translations via .venv-lexicon (pass LEXICON_ARGS='...')" \
 	  "make lexicon-merge         # run merge-enrich via .venv-lexicon (pass LEXICON_ARGS='...')" \
 	  "make lexicon-smoke-real    # run smoke-openai-compatible via .venv-lexicon (pass LEXICON_ARGS='...')" \
+	  "make gh-resolve-review-thread # reply to a PR review comment and resolve its thread (pass GH_ARGS='...')" \
 	  "make frontend-install      # install learner frontend deps in this worktree" \
 	  "make admin-install         # install admin frontend deps in this worktree" \
 	  "make e2e-install           # install Playwright deps in this worktree" \
@@ -335,6 +338,9 @@ lexicon-smoke-real: lexicon-install
 	bash -lc 'set -euo pipefail; \
 		if [ -f tools/lexicon/.env.local ]; then set -a; source tools/lexicon/.env.local; set +a; fi; \
 		.venv-lexicon/bin/python -m tools.lexicon.cli smoke-openai-compatible $(LEXICON_ARGS)'
+
+gh-resolve-review-thread:
+	$(PYTHON) scripts/github/resolve_review_thread.py $(GH_ARGS)
 
 clean-worktree-links:
 	rm -f .venv-backend

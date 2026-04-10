@@ -15,3 +15,4 @@
 - Prefer the make targets above so the interpreter and `.env.local` loading stay consistent.
 - The CLI now fails fast when it is not running under `.venv-lexicon`.
 - If a test or one-off debug session must bypass that check, set `LEXICON_SKIP_VENV_GUARD=1` explicitly for that invocation.
+- After addressing inline PR review feedback for lexicon changes, reply and resolve the GitHub review thread with `make gh-resolve-review-thread GH_ARGS='--pr <pr> --comment-id <id> --body-file <path>'` or `--body '...'`.
