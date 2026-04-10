@@ -188,6 +188,22 @@ describe("LexiconImportDbPage", () => {
     expect(screen.getByTestId("lexicon-import-db-recent-jobs")).toHaveTextContent("Elapsed");
   });
 
+  it("keeps the dry-run result visible when an active job is already tracked", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("lexicon-import-db-active-jobs", JSON.stringify(["job-1"]));
+    mockGetLexiconJob.mockResolvedValue(buildImportJob({ id: "job-1", progress_current_label: "bank" }));
+    mockListLexiconJobs.mockResolvedValue([]);
+
+    render(<LexiconImportDbPage />);
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-progress")).toBeInTheDocument());
+    await user.click(screen.getByTestId("lexicon-import-db-dry-run-button"));
+
+    await waitFor(() => expect(screen.getByTestId("lexicon-import-db-summary-rows")).toBeInTheDocument());
+    expect(screen.getByTestId("lexicon-import-db-summary-rows")).toHaveTextContent("Rows");
+    expect(screen.getByTestId("lexicon-import-db-summary-rows")).toHaveTextContent("1");
+  });
+
   it("shows a clear lock conflict message when create returns 409", async () => {
     const user = userEvent.setup();
     mockCreateImportDbLexiconJob.mockRejectedValue(
