@@ -2,6 +2,7 @@ import json
 import io
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import redirect_stderr
@@ -278,6 +279,160 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(len(core_rows), 1)
             self.assertEqual(core_rows[0]["entry_id"], "lx_run")
             self.assertNotIn("translations", core_rows[0]["senses"][0])
+
+    def test_run_core_enrichment_flushes_completed_rows_out_of_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            (snapshot_dir / "lexemes.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "snapshot_id": "snap-1",
+                                "lexeme_id": "lx_alpha",
+                                "lemma": "alpha",
+                                "language": "en",
+                                "wordfreq_rank": 1,
+                                "is_wordnet_backed": True,
+                                "source_refs": ["wordnet"],
+                                "created_at": "2026-03-07T00:00:00Z",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "snapshot_id": "snap-1",
+                                "lexeme_id": "lx_beta",
+                                "lemma": "beta",
+                                "language": "en",
+                                "wordfreq_rank": 2,
+                                "is_wordnet_backed": True,
+                                "source_refs": ["wordnet"],
+                                "created_at": "2026-03-07T00:00:00Z",
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (snapshot_dir / "senses.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "snapshot_id": "snap-1",
+                                "sense_id": "sn_lx_alpha_1",
+                                "lexeme_id": "lx_alpha",
+                                "wn_synset_id": "alpha.n.01",
+                                "part_of_speech": "noun",
+                                "canonical_gloss": "alpha sense",
+                                "selection_reason": "common learner sense",
+                                "sense_order": 1,
+                                "is_high_polysemy": False,
+                                "created_at": "2026-03-07T00:00:00Z",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "snapshot_id": "snap-1",
+                                "sense_id": "sn_lx_beta_1",
+                                "lexeme_id": "lx_beta",
+                                "wn_synset_id": "beta.n.01",
+                                "part_of_speech": "noun",
+                                "canonical_gloss": "beta sense",
+                                "selection_reason": "common learner sense",
+                                "sense_order": 1,
+                                "is_high_polysemy": False,
+                                "created_at": "2026-03-07T00:00:00Z",
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            allow_alpha_finish = threading.Event()
+            beta_returned = threading.Event()
+            failures: list[BaseException] = []
+
+            def make_record(*, lexeme, sense, generated_at, generation_run_id, prompt_version):
+                return EnrichmentRecord(
+                    snapshot_id=sense.snapshot_id,
+                    enrichment_id=f"en_{sense.sense_id}",
+                    sense_id=sense.sense_id,
+                    definition=f"definition for {lexeme.lemma}",
+                    examples=[{"sentence": f"{lexeme.lemma} example", "difficulty": "A1"}],
+                    cefr_level="A1",
+                    primary_domain="general",
+                    secondary_domains=[],
+                    register="neutral",
+                    synonyms=[],
+                    antonyms=[],
+                    collocations=[],
+                    grammar_patterns=[],
+                    usage_note=f"note for {lexeme.lemma}",
+                    forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    confusable_words=[],
+                    model_name="test-provider",
+                    prompt_version=prompt_version,
+                    generation_run_id=generation_run_id,
+                    confidence=0.9,
+                    review_status="draft",
+                    generated_at=generated_at,
+                    translations=_test_translations(
+                        f"definition for {lexeme.lemma}",
+                        f"note for {lexeme.lemma}",
+                        [f"{lexeme.lemma} example"],
+                    ),
+                )
+
+            def fake_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                if lexeme.lexeme_id == "lx_alpha":
+                    allow_alpha_finish.wait(timeout=5)
+                else:
+                    beta_returned.set()
+                return [
+                    make_record(
+                        lexeme=lexeme,
+                        sense=senses[0],
+                        generated_at=generated_at,
+                        generation_run_id=generation_run_id,
+                        prompt_version=prompt_version,
+                    )
+                ]
+
+            def run_job() -> None:
+                try:
+                    with patch("tools.lexicon.enrich.build_word_enrichment_provider", return_value=fake_provider):
+                        run_core_enrichment(
+                            snapshot_dir,
+                            max_concurrency=2,
+                        )
+                except BaseException as exc:  # pragma: no cover - assertion surfaced below
+                    failures.append(exc)
+
+            worker = threading.Thread(target=run_job)
+            worker.start()
+            self.assertTrue(beta_returned.wait(timeout=5))
+
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                rows = read_jsonl(core_path) if core_path.exists() else []
+                if len(rows) == 1:
+                    break
+                time.sleep(0.01)
+
+            rows = read_jsonl(core_path)
+            self.assertEqual([row["entry_id"] for row in rows], ["lx_beta"])
+            self.assertNotIn("translations", rows[0]["senses"][0])
+
+            allow_alpha_finish.set()
+            worker.join(timeout=5)
+            self.assertFalse(worker.is_alive())
+            self.assertFalse(failures)
+            rows = read_jsonl(core_path)
+            self.assertEqual([row["entry_id"] for row in rows], ["lx_beta", "lx_alpha"])
 
     def test_run_core_enrichment_uses_core_stage_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

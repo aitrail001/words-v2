@@ -2558,7 +2558,8 @@ def _reconcile_resumable_output(
         return
     reconciled_rows: list[dict[str, Any]] = []
     for row in read_jsonl(output_path):
-        lexeme_id = lexeme_id_by_entry_id.get(str(row.get('entry_id') or ''))
+        entry_id = _core_artifact_entry_id(row)
+        lexeme_id = str(row.get('lexeme_id') or '').strip() or lexeme_id_by_entry_id.get(entry_id)
         if lexeme_id and lexeme_id in completed_lexeme_ids:
             reconciled_rows.append(row)
     write_jsonl(output_path, reconciled_rows)
@@ -2628,10 +2629,13 @@ def _append_completed_lexeme_records(
     generation_run_id: str,
     completed_lexeme_ids: set[str],
     runtime_logger: RuntimeLogger | None = None,
+    compiled_row_mapper: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> None:
     completed_at = _utc_now()
     compiled_row = _compiled_row_from_outcome(lexeme=lexeme, outcome=outcome)
     if compiled_row is not None:
+        if compiled_row_mapper is not None:
+            compiled_row = compiled_row_mapper(compiled_row)
         append_jsonl(output_path, [compiled_row])
     _write_per_word_decision(
         decisions_path,
@@ -3568,8 +3572,6 @@ def run_core_enrichment(
         raise RuntimeError(
             "enrich-core no longer supports a separate runtime output path; use --output for the compiled core artifact"
         )
-    existing_rows = _load_existing_output_rows(destination) if resume and destination.exists() else []
-    existing_output_is_core_shape = _rows_are_core_shape(existing_rows)
     if resume:
         _backfill_checkpoint_from_existing_output(
             destination,
@@ -3581,10 +3583,6 @@ def run_core_enrichment(
             decisions_destination,
             lexeme_by_entry_id=lexeme_by_entry_id,
         )
-    runtime_destination = destination
-    destination_preexisted = destination.exists()
-    if resume and destination.exists():
-        runtime_destination = destination.with_name(f"{destination.name}.runtime")
     effective_settings = settings or LexiconSettings.from_env(stage="core")
     runtime_logger = _build_runtime_logger(
         snapshot_dir=snapshot_dir,
@@ -3634,7 +3632,7 @@ def run_core_enrichment(
     )
     enrich_snapshot(
         snapshot_dir,
-        output_path=runtime_destination,
+        output_path=destination,
         settings=effective_settings,
         model_name=model_name,
         generated_at=generated_at,
@@ -3659,37 +3657,14 @@ def run_core_enrichment(
         request_delay_seconds=request_delay_seconds,
         max_new_completed_lexemes=max_new_completed_lexemes,
         word_provider=staged_provider,
+        compiled_row_mapper=lambda row: split_compiled_row_for_staging(row)[0],
     )
-    runtime_rows = _load_existing_output_rows(runtime_destination)
-    runtime_core_rows = [split_compiled_row_for_staging(row)[0] for row in runtime_rows]
-    if runtime_destination != destination and runtime_destination.exists():
-        runtime_destination.unlink(missing_ok=True)
-    if resume and destination_preexisted and destination.exists() and existing_output_is_core_shape:
-        existing_rows_by_entry_id = {
-            _core_artifact_entry_id(row): row
-            for row in existing_rows
-            if _core_artifact_entry_id(row)
-        }
-        append_rows: list[dict[str, Any]] = []
-        for row in runtime_core_rows:
-            entry_id = _core_artifact_entry_id(row)
-            if not entry_id:
-                continue
-            existing_row = existing_rows_by_entry_id.get(entry_id)
-            if existing_row is not None:
-                if existing_row != row:
-                    raise RuntimeError(f"Existing core row for entry_id={entry_id} disagrees with resumed enrichment output")
-                continue
-            append_rows.append(row)
-        if append_rows:
-            append_jsonl(destination, append_rows)
-    else:
-        core_rows = [split_compiled_row_for_staging(row)[0] for row in existing_rows]
-        core_rows.extend(runtime_core_rows)
-        write_jsonl(destination, core_rows)
+    destination_rows = _load_existing_output_rows(destination)
+    if not _rows_are_core_shape(destination_rows):
+        write_jsonl(destination, [split_compiled_row_for_staging(row)[0] for row in destination_rows])
     return CoreEnrichmentRunResult(
         output_path=destination,
-        runtime_output_path=runtime_destination,
+        runtime_output_path=destination,
         lexeme_count=len(lexemes),
         core_row_count=len(_load_existing_output_rows(destination)),
     )
@@ -3971,6 +3946,7 @@ def enrich_snapshot(
     log_file: Path | None = None,
     request_delay_seconds: float = 0.0,
     max_new_completed_lexemes: int | None = None,
+    compiled_row_mapper: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> list[EnrichmentRecord]:
     if mode != 'per_word':
         raise ValueError(f'Unsupported enrichment mode: {mode}')
@@ -4127,6 +4103,7 @@ def enrich_snapshot(
             generation_run_id=effective_generation_run_id,
             completed_lexeme_ids=completed_lexeme_ids,
             runtime_logger=runtime_logger,
+            compiled_row_mapper=compiled_row_mapper,
         )
 
     def handle_failure(lexeme: LexemeRecord, exc: Exception) -> None:
