@@ -66,6 +66,13 @@ class Settings(BaseSettings):
         """Parse and strip whitespace from allowed origins."""
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
+    @property
+    def cors_origin_regex(self) -> str | None:
+        """Allow common loopback origins during local development."""
+        if self.environment != "development":
+            return None
+        return r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+
 
 @lru_cache
 def get_settings() -> Settings:

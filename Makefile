@@ -136,7 +136,7 @@ infra-up: volumes
 infra-down:
 	$(INFRA_COMPOSE) down --remove-orphans
 
-tools-up: infra-up
+tools-up:
 	$(TOOLS_COMPOSE) --profile tools up -d
 
 tools-down:
@@ -343,7 +343,28 @@ test-admin:
 	cd admin-frontend && npm test -- --runInBand
 
 smoke-local:
-	bash -lc 'set -a && source .env.localdev && set +a && export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" && export E2E_BASE_URL=http://localhost:$$FRONTEND_PORT && export E2E_API_URL=http://localhost:$$BACKEND_PORT/api && export E2E_ADMIN_URL=http://localhost:$$ADMIN_FRONTEND_PORT && ./e2e/node_modules/.bin/playwright test -c e2e/playwright.local.config.ts --grep @smoke'
+	bash -lc 'set -euo pipefail; \
+		set -a; source .env.localdev; set +a; \
+		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)"; \
+		export E2E_BASE_URL=http://localhost:$$FRONTEND_PORT; \
+		export E2E_API_URL=http://localhost:$$BACKEND_PORT/api; \
+		export E2E_ADMIN_URL=http://localhost:$$ADMIN_FRONTEND_PORT; \
+		export E2E_DB_NAME=$${E2E_DB_NAME:-$$DEV_DB_NAME}; \
+		export E2E_WORDS_DATA_ROOT=$${E2E_WORDS_DATA_ROOT:-$$WORDS_DATA_DIR}; \
+		WORKER_LOG=/tmp/words-local-worker.log; \
+		source .venv-backend/bin/activate; \
+		cd backend; \
+		celery -A app.celery_app:celery_app worker --loglevel=info --concurrency=2 --queues=$${CELERY_QUEUES:-default,imports} >"$$WORKER_LOG" 2>&1 & \
+		WORKER_PID=$$!; \
+		cd ..; \
+		trap "kill $$WORKER_PID >/dev/null 2>&1 || true" EXIT INT TERM; \
+		for _ in $$(seq 1 30); do \
+			if rg -q "ready" "$$WORKER_LOG"; then \
+				break; \
+			fi; \
+			sleep 1; \
+		done; \
+		./e2e/node_modules/.bin/playwright test -c e2e/playwright.local.config.ts --grep @smoke'
 
 nuc-rsync-data:
 	rsync -a --delete $(HOME)/words-shared/ $(NUC_HOST):$(NUC_SHARED_DATA_DIR)/

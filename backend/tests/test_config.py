@@ -31,3 +31,15 @@ def test_settings_ignore_unrelated_env_keys(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     settings = Settings(_env_file=None)
     assert settings.environment == "development"
+
+
+def test_dev_settings_allow_loopback_origin_regex(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    settings = Settings(_env_file=None)
+    assert settings.cors_origin_regex == r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+
+
+def test_non_dev_settings_disable_loopback_origin_regex(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    settings = Settings(_env_file=None)
+    assert settings.cors_origin_regex is None

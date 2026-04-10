@@ -386,7 +386,7 @@ const getDbConfigs = (): DbConfig[] => {
     port: Number(process.env.E2E_DB_PORT ?? 5432),
     user: process.env.E2E_DB_USER ?? "vocabapp",
     password,
-    database: process.env.E2E_DB_NAME ?? "vocabapp_dev",
+    database: process.env.E2E_DB_NAME ?? process.env.DEV_DB_NAME ?? "vocabapp_dev_full",
   }));
 };
 

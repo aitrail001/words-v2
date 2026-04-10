@@ -9,6 +9,7 @@ import {
   waitForAppReady,
 } from "../helpers/auth";
 import { selectCompiledReviewBatch } from "../helpers/compiled-review";
+import { backendWordsDataRoot, hostWordsDataRoot } from "../helpers/paths";
 
 type CompiledReviewBatch = {
   id: string;
@@ -97,10 +98,11 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   const normalized = `artifact${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const secondary = `${normalized}harbor`;
   const snapshotName = `compiled-review-${normalized}`;
-  const hostSnapshotDir = path.join(process.cwd(), "..", "data", "lexicon", "snapshots", snapshotName);
+  const hostSnapshotDir = path.join(hostWordsDataRoot, "lexicon", "snapshots", snapshotName);
   const reviewedHostDir = path.join(hostSnapshotDir, "reviewed");
   const approvedHostPath = path.join(reviewedHostDir, "approved.jsonl");
   const decisionsHostPath = path.join(reviewedHostDir, "review.decisions.jsonl");
+  const backendApprovedPath = `${backendWordsDataRoot}/lexicon/snapshots/${snapshotName}/reviewed/approved.jsonl`;
   const jsonl = `${JSON.stringify(buildCompiledWordRow(uniqueSuffix, normalized))}\n${JSON.stringify(buildCompiledWordRow(`${uniqueSuffix}-2`, secondary))}\n`;
 
   await rm(hostSnapshotDir, { recursive: true, force: true });
@@ -197,7 +199,7 @@ test("@smoke admin can review and export a compiled lexicon batch", async ({ pag
   ]);
 
   await page.getByRole("button", { name: "Materialize Reviewed Outputs" }).click();
-  await expect(page.getByText(`/app/data/lexicon/snapshots/${snapshotName}/reviewed/approved.jsonl`)).toBeVisible();
+  await expect(page.getByText(backendApprovedPath)).toBeVisible();
   await expect
     .poll(
       async () => {

@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
+import { backendWordsDataRoot, hostWordsDataRoot } from "../helpers/paths";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
 
@@ -91,8 +92,8 @@ test("@smoke admin can review compiled JSONL directly and materialize sidecar ou
   const normalized = `jsonl${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const phrase = `break a leg ${normalized}`;
   const snapshotName = `jsonl-review-${normalized}`;
-  const hostRootDir = path.join(process.cwd(), "..", "data", "lexicon", "snapshots");
-  const backendRootDir = "/app/data/lexicon/snapshots";
+  const hostRootDir = path.join(hostWordsDataRoot, "lexicon", "snapshots");
+  const backendRootDir = `${backendWordsDataRoot}/lexicon/snapshots`;
   const hostDir = path.join(hostRootDir, snapshotName);
   const backendDir = `${backendRootDir}/${snapshotName}`;
   const compiledHostPath = path.join(hostDir, "words.enriched.jsonl");
