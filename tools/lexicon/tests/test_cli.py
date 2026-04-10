@@ -12,6 +12,8 @@ from pathlib import Path
 from tools.lexicon import cli
 from tools.lexicon.enrich import EnrichmentRunResult
 from tools.lexicon.errors import LexiconDependencyError
+from tools.lexicon.jsonl_io import read_jsonl, write_jsonl
+from tools.lexicon.tests.test_enrich import EnrichSnapshotTests, _test_phonetics
 
 
 class CliTests(unittest.TestCase):
@@ -34,6 +36,98 @@ class CliTests(unittest.TestCase):
             except SystemExit as exc:
                 code = int(exc.code)
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def run_cli_skip_guard(self, argv: list[str]) -> tuple[int, str, str]:
+        with patch.dict(os.environ, {cli._LEXICON_VENV_GUARD_BYPASS_ENV: "1"}):
+            return self.run_cli(argv)
+
+    def _write_resume_modes_snapshot(self, snapshot_dir: Path) -> None:
+        EnrichSnapshotTests()._write_resume_modes_snapshot(snapshot_dir)
+
+    def _write_single_snapshot(self, snapshot_dir: Path) -> None:
+        EnrichSnapshotTests()._write_snapshot(snapshot_dir)
+
+    def _existing_alpha_compiled_row(self) -> dict[str, object]:
+        return {
+            "schema_version": "1.1.0",
+            "entry_id": "lx_alpha",
+            "entry_type": "word",
+            "normalized_form": "alpha",
+            "source_provenance": [{"source": "wordnet"}],
+            "entity_category": "general",
+            "word": "alpha",
+            "part_of_speech": ["noun"],
+            "cefr_level": "A1",
+            "frequency_rank": 1,
+            "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+            "senses": [
+                {
+                    "sense_id": "sn_lx_alpha_1",
+                    "wn_synset_id": "alpha.n.01",
+                    "pos": "noun",
+                    "sense_kind": "standard_meaning",
+                    "decision": "keep_standard",
+                    "base_word": None,
+                    "primary_domain": "general",
+                    "secondary_domains": [],
+                    "register": "neutral",
+                    "definition": "existing alpha",
+                    "examples": [{"sentence": "alpha existing", "difficulty": "A1"}],
+                    "synonyms": [],
+                    "antonyms": [],
+                    "collocations": [],
+                    "grammar_patterns": [],
+                    "usage_note": "existing alpha note",
+                    "enrichment_id": "en_alpha_existing",
+                    "generation_run_id": "existing-run",
+                    "model_name": "test-model",
+                    "prompt_version": "v1",
+                    "confidence": 0.9,
+                    "generated_at": "2026-04-08T00:00:00Z",
+                    "translations": {
+                        "zh-Hans": {"definition": "zh:existing alpha", "usage_note": "zh:existing alpha note", "examples": ["zh:alpha existing"]},
+                        "es": {"definition": "es:existing alpha", "usage_note": "es:existing alpha note", "examples": ["es:alpha existing"]},
+                        "ar": {"definition": "ar:existing alpha", "usage_note": "ar:existing alpha note", "examples": ["ar:alpha existing"]},
+                        "pt-BR": {"definition": "pt:existing alpha", "usage_note": "pt:existing alpha note", "examples": ["pt:alpha existing"]},
+                        "ja": {"definition": "ja:existing alpha", "usage_note": "ja:existing alpha note", "examples": ["ja:alpha existing"]},
+                    },
+                }
+            ],
+            "confusable_words": [],
+            "generated_at": "2026-04-08T00:00:00Z",
+            "phonetics": _test_phonetics(),
+        }
+
+    def _existing_alpha_core_row(self) -> dict[str, object]:
+        row = self._existing_alpha_compiled_row()
+        sense = dict(row["senses"][0])  # type: ignore[index]
+        sense.pop("translations", None)
+        row["senses"] = [sense]
+        return row
+
+    def _existing_alpha_translation_rows(self) -> list[dict[str, object]]:
+        return [
+            {
+                "entry_id": "lx_alpha",
+                "sense_id": "sn_lx_alpha_1",
+                "locale": locale,
+                "definition": definition,
+                "usage_note": usage_note,
+                "examples": [example],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "generation_run_id": "existing-run",
+                "model_name": "test-model",
+                "prompt_version": "v1",
+                "status": "completed",
+            }
+            for locale, definition, usage_note, example in [
+                ("zh-Hans", "zh:existing alpha", "zh:existing alpha note", "zh:alpha existing"),
+                ("es", "es:existing alpha", "es:existing alpha note", "es:alpha existing"),
+                ("ar", "ar:existing alpha", "ar:existing alpha note", "ar:alpha existing"),
+                ("pt-BR", "pt:existing alpha", "pt:existing alpha note", "pt:alpha existing"),
+                ("ja", "ja:existing alpha", "ja:existing alpha note", "ja:alpha existing"),
+            ]
+        ]
 
     def test_top_level_help_lists_available_commands(self) -> None:
         code, stdout, _ = self.run_cli(["--help"])
@@ -1735,6 +1829,255 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["sense_count"], 7)
             self.assertEqual(payload["translation_row_count"], 35)
             self.assertEqual(mocked_run.call_args.args[0], snapshot_dir)
+
+    def test_enrich_command_placeholder_cli_preserves_existing_output_and_backfills_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            write_jsonl(snapshot_dir / "words.enriched.jsonl", [self._existing_alpha_compiled_row()])
+            write_jsonl(
+                snapshot_dir / "enrich.failures.jsonl",
+                [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "failed",
+                    "generation_run_id": "failed-run",
+                    "failed_at": "2026-03-07T00:00:00Z",
+                    "error": "gateway timeout",
+                }],
+            )
+
+            code, stdout, stderr = self.run_cli_skip_guard([
+                "enrich",
+                "--snapshot-dir",
+                str(snapshot_dir),
+                "--provider-mode",
+                "placeholder",
+                "--request-delay-seconds",
+                "0",
+                "--log-level",
+                "quiet",
+            ])
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "enrich")
+            self.assertEqual(payload["enrichment_count"], 3)
+            rows = read_jsonl(snapshot_dir / "words.enriched.jsonl")
+            self.assertEqual({row["entry_id"] for row in rows}, {"lx_alpha", "lx_run", "lx_play"})
+            self.assertEqual(sum(1 for row in rows if row["entry_id"] == "lx_alpha"), 1)
+            self.assertEqual(
+                {row["lexeme_id"] for row in read_jsonl(snapshot_dir / "enrich.checkpoint.jsonl")},
+                {"lx_alpha", "lx_run", "lx_play"},
+            )
+            self.assertEqual(
+                {row["lexeme_id"] for row in read_jsonl(snapshot_dir / "enrich.decisions.jsonl")},
+                {"lx_alpha", "lx_run", "lx_play"},
+            )
+
+    def test_enrich_command_placeholder_cli_resume_failure_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as retry_tmpdir:
+            retry_snapshot_dir = Path(retry_tmpdir)
+            self._write_resume_modes_snapshot(retry_snapshot_dir)
+            write_jsonl(
+                retry_snapshot_dir / "enrich.failures.jsonl",
+                [{
+                    "lexeme_id": "lx_run",
+                    "entry_id": "lx_run",
+                    "entry_type": "word",
+                    "lemma": "run",
+                    "display_form": "run",
+                    "status": "failed",
+                    "generation_run_id": "failed-run",
+                    "failed_at": "2026-03-07T00:00:00Z",
+                    "error": "gateway timeout",
+                }],
+            )
+
+            code, stdout, stderr = self.run_cli_skip_guard([
+                "enrich",
+                "--snapshot-dir",
+                str(retry_snapshot_dir),
+                "--provider-mode",
+                "placeholder",
+                "--resume",
+                "--retry-failed-only",
+                "--request-delay-seconds",
+                "0",
+                "--log-level",
+                "quiet",
+            ])
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["enrichment_count"], 1)
+            retry_rows = read_jsonl(retry_snapshot_dir / "words.enriched.jsonl")
+            self.assertEqual([row["entry_id"] for row in retry_rows], ["lx_run"])
+
+        with tempfile.TemporaryDirectory() as skip_tmpdir:
+            skip_snapshot_dir = Path(skip_tmpdir)
+            self._write_resume_modes_snapshot(skip_snapshot_dir)
+            write_jsonl(
+                skip_snapshot_dir / "enrich.failures.jsonl",
+                [{
+                    "lexeme_id": "lx_run",
+                    "entry_id": "lx_run",
+                    "entry_type": "word",
+                    "lemma": "run",
+                    "display_form": "run",
+                    "status": "failed",
+                    "generation_run_id": "failed-run",
+                    "failed_at": "2026-03-07T00:00:00Z",
+                    "error": "gateway timeout",
+                }],
+            )
+
+            code, stdout, stderr = self.run_cli_skip_guard([
+                "enrich",
+                "--snapshot-dir",
+                str(skip_snapshot_dir),
+                "--provider-mode",
+                "placeholder",
+                "--resume",
+                "--skip-failed",
+                "--request-delay-seconds",
+                "0",
+                "--log-level",
+                "quiet",
+            ])
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["enrichment_count"], 2)
+            skip_rows = read_jsonl(skip_snapshot_dir / "words.enriched.jsonl")
+            self.assertEqual({row["entry_id"] for row in skip_rows}, {"lx_alpha", "lx_play"})
+
+    def test_staged_cli_placeholder_core_translation_merge_preserve_existing_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            write_jsonl(snapshot_dir / "words.enriched.core.jsonl", [self._existing_alpha_core_row()])
+            write_jsonl(snapshot_dir / "words.translations.jsonl", self._existing_alpha_translation_rows())
+
+            code, stdout, stderr = self.run_cli_skip_guard([
+                "enrich-core",
+                "--snapshot-dir",
+                str(snapshot_dir),
+                "--provider-mode",
+                "placeholder",
+                "--request-delay-seconds",
+                "0",
+                "--log-level",
+                "quiet",
+            ])
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "enrich-core")
+            core_rows = read_jsonl(snapshot_dir / "words.enriched.core.jsonl")
+            self.assertEqual({row["entry_id"] for row in core_rows}, {"lx_alpha", "lx_run", "lx_play"})
+            self.assertEqual(sum(1 for row in core_rows if row["entry_id"] == "lx_alpha"), 1)
+            self.assertEqual(
+                {row["lexeme_id"] for row in read_jsonl(snapshot_dir / "enrich.core.checkpoint.jsonl")},
+                {"lx_alpha", "lx_run", "lx_play"},
+            )
+
+            code, stdout, stderr = self.run_cli_skip_guard([
+                "enrich-translations",
+                "--snapshot-dir",
+                str(snapshot_dir),
+                "--provider-mode",
+                "placeholder",
+                "--log-level",
+                "quiet",
+            ])
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "enrich-translations")
+            translation_rows = read_jsonl(snapshot_dir / "words.translations.jsonl")
+            self.assertEqual(len(translation_rows), 15)
+            self.assertTrue(
+                any(
+                    row["entry_id"] == "lx_alpha"
+                    and row["locale"] == "zh-Hans"
+                    and row["definition"] == "zh:existing alpha"
+                    for row in translation_rows
+                )
+            )
+            self.assertEqual(
+                {row["sense_id"] for row in read_jsonl(snapshot_dir / "enrich.translations.checkpoint.jsonl")},
+                {"sn_lx_alpha_1", "sn_lx_run_1", "sn_lx_play_1"},
+            )
+
+            merged_output = snapshot_dir / "words.enriched.jsonl"
+            code, stdout, stderr = self.run_cli_skip_guard([
+                "merge-enrich",
+                "--core-input",
+                str(snapshot_dir / "words.enriched.core.jsonl"),
+                "--translations-input",
+                str(snapshot_dir / "words.translations.jsonl"),
+                "--output",
+                str(merged_output),
+                "--log-level",
+                "quiet",
+            ])
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "merge-enrich")
+            merged_rows = read_jsonl(merged_output)
+            self.assertEqual({row["entry_id"] for row in merged_rows}, {"lx_alpha", "lx_run", "lx_play"})
+            alpha_row = next(row for row in merged_rows if row["entry_id"] == "lx_alpha")
+            self.assertEqual(alpha_row["senses"][0]["translations"]["zh-Hans"]["definition"], "zh:existing alpha")
+
+    def test_split_enrich_artifact_command_real_smoke_roundtrips_staged_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir) / "snapshot"
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            self._write_single_snapshot(snapshot_dir)
+
+            code, _, stderr = self.run_cli_skip_guard([
+                "enrich",
+                "--snapshot-dir",
+                str(snapshot_dir),
+                "--provider-mode",
+                "placeholder",
+                "--request-delay-seconds",
+                "0",
+                "--log-level",
+                "quiet",
+            ])
+            self.assertEqual(code, 0, stderr)
+
+            core_output = snapshot_dir / "words.enriched.core.jsonl"
+            translations_output = snapshot_dir / "words.translations.jsonl"
+            core_checkpoint = snapshot_dir / "enrich.core.checkpoint.jsonl"
+            translations_checkpoint = snapshot_dir / "enrich.translations.checkpoint.jsonl"
+
+            code, stdout, stderr = self.run_cli_skip_guard([
+                "split-enrich-artifact",
+                "--compiled-input",
+                str(snapshot_dir / "words.enriched.jsonl"),
+                "--core-output",
+                str(core_output),
+                "--translations-output",
+                str(translations_output),
+                "--core-checkpoint-path",
+                str(core_checkpoint),
+                "--translations-checkpoint-path",
+                str(translations_checkpoint),
+                "--log-level",
+                "quiet",
+            ])
+
+            self.assertEqual(code, 0, stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "split-enrich-artifact")
+            self.assertEqual(len(read_jsonl(core_output)), 1)
+            self.assertEqual(len(read_jsonl(translations_output)), 5)
+            self.assertEqual(len(read_jsonl(core_checkpoint)), 1)
+            self.assertEqual(len(read_jsonl(translations_checkpoint)), 1)
 
     def test_runtime_guard_rejects_wrong_interpreter(self) -> None:
         with patch(

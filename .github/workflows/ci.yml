@@ -195,8 +195,8 @@ jobs:
       - name: Download WordNet corpora
         run: python -m nltk.downloader -d "$NLTK_DATA" wordnet omw-1.4
 
-      - name: Run lexicon pytest suite
-        run: python -m pytest tools/lexicon/tests -q
+      - name: Run full lexicon test suite
+        run: make ci-test-lexicon
 
       - name: Run lexicon smoke flow
         env:

@@ -3534,6 +3534,14 @@ def _select_coherent_completed_translation_group(rows: list[dict[str, Any]]) -> 
     return candidates[-1]
 
 
+def _normalize_staged_core_runtime_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        normalized_row, _ = split_compiled_row_for_staging(_normalize_merge_artifact_row(row))
+        normalized_rows.append(normalized_row)
+    return normalized_rows
+
+
 def run_core_enrichment(
     snapshot_dir: Path,
     *,
@@ -3572,7 +3580,7 @@ def run_core_enrichment(
         raise RuntimeError(
             "enrich-core no longer supports a separate runtime output path; use --output for the compiled core artifact"
         )
-    if resume:
+    if destination.exists():
         _backfill_checkpoint_from_existing_output(
             destination,
             checkpoint_destination,
@@ -3658,10 +3666,8 @@ def run_core_enrichment(
         max_new_completed_lexemes=max_new_completed_lexemes,
         word_provider=staged_provider,
         compiled_row_mapper=lambda row: split_compiled_row_for_staging(row)[0],
+        preserve_existing_output=True,
     )
-    destination_rows = _load_existing_output_rows(destination)
-    if not _rows_are_core_shape(destination_rows):
-        write_jsonl(destination, [split_compiled_row_for_staging(row)[0] for row in destination_rows])
     return CoreEnrichmentRunResult(
         output_path=destination,
         runtime_output_path=destination,
@@ -3719,23 +3725,33 @@ def run_translation_enrichment(
         validation_retries=validation_retries,
         runtime_logger=runtime_logger,
     )
-    core_rows = read_jsonl(core_path)
+    core_rows = _normalize_staged_core_runtime_rows(read_jsonl(core_path))
     sense_jobs: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for core_row in core_rows:
         for sense_row in core_row.get("senses") or []:
             sense_jobs.append((core_row, sense_row))
 
-    completed_keys = _load_completed_translation_keys(checkpoint_destination) if resume else set()
     if resume:
         completed_keys = _backfill_translation_ledgers_from_existing_output(
             destination,
             checkpoint_path=checkpoint_destination,
             decisions_path=decisions_destination,
         )
+    elif destination.exists():
+        completed_keys = _backfill_translation_ledgers_from_existing_output(
+            destination,
+            checkpoint_path=checkpoint_destination,
+            decisions_path=decisions_destination,
+        )
     else:
+        completed_keys = set()
+    if not destination.exists():
         write_jsonl(destination, [])
+    if not checkpoint_destination.exists():
         write_jsonl(checkpoint_destination, [])
+    if not failures_destination.exists():
         write_jsonl(failures_destination, [])
+    if not decisions_destination.exists():
         write_jsonl(decisions_destination, [])
     failed_keys = _load_failed_translation_keys(failures_destination) if resume and (retry_failed_only or skip_failed) else set()
     unresolved_failed_keys = failed_keys - completed_keys
@@ -3947,6 +3963,7 @@ def enrich_snapshot(
     request_delay_seconds: float = 0.0,
     max_new_completed_lexemes: int | None = None,
     compiled_row_mapper: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    preserve_existing_output: bool = False,
 ) -> list[EnrichmentRecord]:
     if mode != 'per_word':
         raise ValueError(f'Unsupported enrichment mode: {mode}')
@@ -3981,12 +3998,27 @@ def enrich_snapshot(
         for lexeme in ordered_lexemes
     }
     lexeme_id_by_entry_id = {lexeme.entry_id: lexeme.lexeme_id for lexeme in ordered_lexemes}
-    completed_lexeme_ids = _load_completed_lexeme_ids(checkpoint_destination) if resume else set()
+    if preserve_existing_output and destination.exists():
+        _backfill_checkpoint_from_existing_output(
+            destination,
+            checkpoint_destination,
+            lexeme_by_entry_id=lexemes_by_id,
+        )
+        _backfill_decisions_from_existing_output(
+            destination,
+            decisions_destination,
+            lexeme_by_entry_id=lexemes_by_id,
+        )
+    completed_lexeme_ids = (
+        _load_completed_lexeme_ids(checkpoint_destination)
+        if (resume or preserve_existing_output) and checkpoint_destination.exists()
+        else set()
+    )
     load_failed_lexeme_ids = resume and (retry_failed_only or skip_failed)
     failed_lexeme_ids = _load_failed_lexeme_ids(failures_destination) if load_failed_lexeme_ids else set()
     unresolved_failed_lexeme_ids = failed_lexeme_ids - completed_lexeme_ids
     completed_count_before_run = len(completed_lexeme_ids)
-    if resume:
+    if resume and not preserve_existing_output:
         _reconcile_resumable_output(
             destination,
             completed_lexeme_ids=completed_lexeme_ids,
@@ -4006,12 +4038,21 @@ def enrich_snapshot(
         ]
     else:
         pending_lexemes = [lexeme for lexeme in ordered_lexemes if lexeme.lexeme_id not in completed_lexeme_ids]
-    if not resume:
+    if not resume and not preserve_existing_output:
         write_jsonl(destination, [])
         write_jsonl(checkpoint_destination, [])
         write_jsonl(failures_destination, [])
         write_jsonl(decisions_destination, [])
         completed_count_before_run = 0
+    else:
+        if not destination.exists():
+            write_jsonl(destination, [])
+        if not checkpoint_destination.exists():
+            write_jsonl(checkpoint_destination, [])
+        if not failures_destination.exists():
+            write_jsonl(failures_destination, [])
+        if not decisions_destination.exists():
+            write_jsonl(decisions_destination, [])
 
     failures: list[str] = []
     request_start_lock = Lock()
@@ -4243,5 +4284,6 @@ def run_enrichment(
         log_file=log_file,
         request_delay_seconds=request_delay_seconds,
         max_new_completed_lexemes=max_new_completed_lexemes,
+        preserve_existing_output=True,
     )
     return EnrichmentRunResult(output_path=destination, enrichments=enrichments, lexeme_count=len(lexemes), mode=mode)
