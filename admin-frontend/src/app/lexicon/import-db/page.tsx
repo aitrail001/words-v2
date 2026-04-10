@@ -869,7 +869,7 @@ export default function LexiconImportDbPage() {
         </section>
       ) : null}
 
-      {!activeJobs.length && currentResultSection ? (
+      {currentResultSection ? (
         <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           {currentResultSection}
         </section>

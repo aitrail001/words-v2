@@ -359,7 +359,7 @@ smoke-local:
 		cd ..; \
 		trap "kill $$WORKER_PID >/dev/null 2>&1 || true" EXIT INT TERM; \
 		for _ in $$(seq 1 30); do \
-			if rg -q "ready" "$$WORKER_LOG"; then \
+			if grep -q "ready" "$$WORKER_LOG"; then \
 				break; \
 			fi; \
 			sleep 1; \
