@@ -458,10 +458,6 @@ def _voice_run_latest_mtime(run_dir: Path) -> float:
     return latest
 
 
-def _voice_run_index_mtime(run_dir: Path) -> float:
-    return run_dir.stat().st_mtime
-
-
 def _latest_jsonl_rows(path: Path, limit: int = 5) -> list[dict[str, object]]:
     if not path.exists() or not path.is_file():
         return []
@@ -1032,7 +1028,7 @@ async def list_voice_runs(
     normalized_q = (q or "").strip().lower()
     if normalized_q:
         run_dirs = [entry for entry in run_dirs if normalized_q in entry.name.lower()]
-    run_dirs.sort(key=_voice_run_index_mtime, reverse=True)
+    run_dirs.sort(key=_voice_run_latest_mtime, reverse=True)
     total = len(run_dirs)
     page_dirs = run_dirs[offset: offset + limit]
     items = [_voice_run_summary(entry) for entry in page_dirs]

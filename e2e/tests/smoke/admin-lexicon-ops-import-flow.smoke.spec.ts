@@ -3,9 +3,9 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { apiUrl, authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady } from "../helpers/auth";
+import { hostWordsDataRoot } from "../helpers/paths";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
-const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? process.env.WORDS_DATA_DIR ?? path.join(process.cwd(), "data");
 
 const buildCompiledWordRow = (runId: string, word: string) => ({
   schema_version: "1.1.0",
@@ -54,7 +54,7 @@ test("@smoke admin can launch final import from Lexicon Ops and verify in DB Ins
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
   const normalized = `opsimport${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
   const snapshotName = `ops-import-${normalized}`;
-  const hostSnapshotDir = path.join(dataRoot, "lexicon", "snapshots", snapshotName);
+  const hostSnapshotDir = path.join(hostWordsDataRoot, "lexicon", "snapshots", snapshotName);
   const reviewedHostDir = path.join(hostSnapshotDir, "reviewed");
   const compiledHostPath = path.join(hostSnapshotDir, "words.enriched.jsonl");
   const approvedHostPath = path.join(reviewedHostDir, "approved.jsonl");

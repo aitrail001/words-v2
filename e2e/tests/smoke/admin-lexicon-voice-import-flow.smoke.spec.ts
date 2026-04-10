@@ -3,15 +3,15 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { authHeaders, injectAdminToken, registerAdminViaApi, waitForAppReady, apiUrl } from "../helpers/auth";
+import { hostWordsDataRoot } from "../helpers/paths";
 
 const adminUrl = process.env.E2E_ADMIN_URL ?? "http://localhost:3001";
-const dataRoot = process.env.E2E_WORDS_DATA_ROOT ?? process.env.WORDS_DATA_DIR ?? path.join(process.cwd(), "data");
 
 test("@smoke admin can launch voice import from Lexicon Voice and run dry-run/import", async ({ page, request }) => {
   const user = await registerAdminViaApi(request, "admin-voice-import-smoke");
   const uniqueSuffix = `${Date.now()}-${test.info().workerIndex}`;
   const runName = `voice-import-smoke-${uniqueSuffix.replace(/[^0-9a-z]/gi, "").toLowerCase()}`;
-  const hostRunDir = path.join(dataRoot, "lexicon", "voice", runName);
+  const hostRunDir = path.join(hostWordsDataRoot, "lexicon", "voice", runName);
   const manifestHostPath = path.join(hostRunDir, "voice_manifest.jsonl");
 
   await rm(hostRunDir, { recursive: true, force: true });
