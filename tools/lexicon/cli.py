@@ -141,7 +141,9 @@ def _lexicon_repo_root() -> Path:
 def _should_skip_lexicon_venv_guard() -> bool:
     if os.getenv(_LEXICON_VENV_GUARD_BYPASS_ENV) == '1':
         return True
-    return 'PYTEST_CURRENT_TEST' in os.environ
+    if 'PYTEST_CURRENT_TEST' in os.environ:
+        return True
+    return 'pytest' in sys.modules
 
 
 def _ensure_lexicon_cli_runtime() -> None:

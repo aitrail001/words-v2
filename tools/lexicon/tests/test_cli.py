@@ -1750,6 +1750,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn(".venv-lexicon/bin/python", stderr)
 
+    def test_runtime_guard_bypass_survives_cleared_environment_under_pytest(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(cli._should_skip_lexicon_venv_guard())
+
 
 if __name__ == "__main__":
     unittest.main()
