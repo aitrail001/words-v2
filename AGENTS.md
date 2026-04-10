@@ -100,7 +100,6 @@ Treat these as risky or cross-slice by default:
 - For repeated GitHub review housekeeping, prefer a helper script or documented workflow over ad hoc command reconstruction.
 - After addressing an inline PR review comment, reply and resolve the thread in the same session. Use `make gh-resolve-review-thread GH_ARGS='--pr <pr> --comment-id <id> --body-file <path>'` or `--body '...'` instead of leaving addressed threads open.
 - bring local main branch up to date after merge if you can
-- when create a new branch / worktree, ask if you it should based on which branch (not just silently default to main), and check if there are open branches might need to be merged to main
 
 ## Verification
 - Run the smallest relevant tests/lint/build for the changed slice.
