@@ -3582,6 +3582,7 @@ def run_core_enrichment(
             lexeme_by_entry_id=lexeme_by_entry_id,
         )
     runtime_destination = destination
+    destination_preexisted = destination.exists()
     if resume and destination.exists():
         runtime_destination = destination.with_name(f"{destination.name}.runtime")
     effective_settings = settings or LexiconSettings.from_env(stage="core")
@@ -3663,7 +3664,7 @@ def run_core_enrichment(
     runtime_core_rows = [split_compiled_row_for_staging(row)[0] for row in runtime_rows]
     if runtime_destination != destination and runtime_destination.exists():
         runtime_destination.unlink(missing_ok=True)
-    if resume and destination.exists() and existing_output_is_core_shape:
+    if resume and destination_preexisted and destination.exists() and existing_output_is_core_shape:
         existing_rows_by_entry_id = {
             _core_artifact_entry_id(row): row
             for row in existing_rows
