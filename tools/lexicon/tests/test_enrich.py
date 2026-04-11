@@ -1382,6 +1382,87 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(len(rows), 5)
             self.assertEqual({row["locale"] for row in rows}, {"zh-Hans", "es", "ar", "pt-BR", "ja"})
 
+    def test_run_translation_enrichment_emits_runtime_progress_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            log_file = snapshot_dir / "enrich-translations.runtime.log"
+            core_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordnet"}],
+                        "entity_category": "general",
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "B1",
+                        "frequency_rank": 5,
+                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        "senses": [
+                            {
+                                "sense_id": "sn_lx_run_1",
+                                "wn_synset_id": "run.v.01",
+                                "pos": "verb",
+                                "sense_kind": "standard_meaning",
+                                "decision": "keep_standard",
+                                "base_word": None,
+                                "primary_domain": "general",
+                                "secondary_domains": [],
+                                "register": "neutral",
+                                "definition": "move fast by using your legs",
+                                "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": [],
+                                "usage_note": "Common learner note.",
+                                "enrichment_id": "enr_1",
+                                "generation_run_id": "run-1",
+                                "model_name": "test-model",
+                                "prompt_version": "v1",
+                                "confidence": 0.9,
+                                "generated_at": "2026-04-08T00:00:00Z",
+                            }
+                        ],
+                        "confusable_words": [],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "phonetics": _test_phonetics(),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = run_translation_enrichment(
+                snapshot_dir,
+                core_input_path=core_path,
+                translation_provider=lambda **_: _test_translations(
+                    definition="move quickly",
+                    usage_note="translation note",
+                    examples=["I run every day."],
+                ),
+                log_level="debug",
+                log_file=log_file,
+            )
+
+            self.assertEqual(result.translation_row_count, 5)
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            events = [row["event"] for row in log_rows]
+            self.assertIn("sense-start", events)
+            self.assertIn("sense-complete", events)
+            complete_rows = [row for row in log_rows if row["event"] == "sense-complete"]
+            self.assertTrue(
+                any(
+                    row["fields"]["entry_id"] == "lx_run"
+                    and row["fields"]["sense_id"] == "sn_lx_run_1"
+                    and row["fields"]["locale_count"] == 5
+                    for row in complete_rows
+                )
+            )
+
     def test_run_translation_enrichment_resume_backfills_completed_rows_without_truncating_partial_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -7192,6 +7273,78 @@ class StagedEnrichmentArtifactTests(unittest.TestCase):
             self.assertEqual([row["entry_id"] for row in rows], ["lx_alpha", "lx_beta"])
             self.assertEqual(rows[0], compiled_alpha)
             self.assertEqual(rows[1], compiled_beta)
+
+    def test_merge_staged_enrichment_artifacts_emits_runtime_progress_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_input = tmp_path / "words.enriched.core.jsonl"
+            translations_input = tmp_path / "words.translations.jsonl"
+            output_path = tmp_path / "words.enriched.jsonl"
+            log_file = tmp_path / "merge.runtime.log"
+
+            compiled_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "translations": _test_translations("alpha definition", "alpha note", ["alpha example"]),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            core_row, translation_rows = split_compiled_row_for_staging(compiled_row)
+            write_jsonl(core_input, [core_row])
+            write_jsonl(translations_input, translation_rows)
+            logger = RuntimeLogger(RuntimeLogConfig(level="debug", log_file=log_file))
+
+            payload = merge_staged_enrichment_artifacts(
+                core_input_path=core_input,
+                translations_input_path=translations_input,
+                output_path=output_path,
+                runtime_logger=logger,
+            )
+
+            self.assertEqual(payload["merged_row_count"], 1)
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            events = [row["event"] for row in log_rows]
+            self.assertIn("merge-start", events)
+            self.assertIn("merge-validated", events)
+            self.assertIn("merge-append", events)
+            self.assertIn("merge-complete", events)
 
     def test_merge_staged_enrichment_artifacts_rejects_duplicate_existing_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

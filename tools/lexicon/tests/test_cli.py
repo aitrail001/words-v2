@@ -1738,6 +1738,7 @@ class CliTests(unittest.TestCase):
             core_path = Path(tmpdir) / "words.enriched.core.jsonl"
             translations_path = Path(tmpdir) / "words.translations.jsonl"
             output_path = Path(tmpdir) / "words.enriched.jsonl"
+            log_file = Path(tmpdir) / "merge.runtime.log"
 
             with patch(
                 "tools.lexicon.cli.merge_staged_enrichment_artifacts",
@@ -1756,6 +1757,10 @@ class CliTests(unittest.TestCase):
                     str(translations_path),
                     "--output",
                     str(output_path),
+                    "--log-level",
+                    "debug",
+                    "--log-file",
+                    str(log_file),
                 ])
 
             self.assertEqual(code, 0)
@@ -1765,6 +1770,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(mocked_merge.call_args.kwargs["core_input_path"], core_path)
             self.assertEqual(mocked_merge.call_args.kwargs["translations_input_path"], translations_path)
             self.assertEqual(mocked_merge.call_args.kwargs["output_path"], output_path)
+            self.assertIsNotNone(mocked_merge.call_args.kwargs["runtime_logger"])
 
     def test_enrich_core_command_writes_json_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

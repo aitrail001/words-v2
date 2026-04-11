@@ -3046,15 +3046,69 @@ def _normalize_merge_artifact_row(row: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _emit_translation_event(
+    runtime_logger: RuntimeLogger | None,
+    event: str,
+    message: str,
+    *,
+    entry_id: str,
+    sense_id: str,
+    status: str | None = None,
+    locale_count: int | None = None,
+    error: str | None = None,
+) -> None:
+    if runtime_logger is None:
+        return
+    fields: dict[str, Any] = {
+        "entry_id": entry_id,
+        "sense_id": sense_id,
+    }
+    if status is not None:
+        fields["status"] = status
+    if locale_count is not None:
+        fields["locale_count"] = locale_count
+    if error is not None:
+        fields["error"] = error
+    runtime_logger.info(event, message, **fields)
+
+
+def _emit_merge_event(
+    runtime_logger: RuntimeLogger | None,
+    event: str,
+    message: str,
+    **fields: Any,
+) -> None:
+    if runtime_logger is None:
+        return
+    runtime_logger.info(event, message, **fields)
+
+
 def merge_staged_enrichment_artifacts(
     *,
     core_input_path: Path,
     translations_input_path: Path,
     output_path: Path,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> dict[str, Any]:
+    _emit_merge_event(
+        runtime_logger,
+        "merge-start",
+        "Merge staged enrichment started",
+        core_input=str(core_input_path),
+        translations_input=str(translations_input_path),
+        output=str(output_path),
+    )
     core_rows = read_jsonl(core_input_path)
     translation_rows = read_jsonl(translations_input_path)
     merged_rows = merge_staged_enrichment_rows(core_rows, translation_rows)
+    _emit_merge_event(
+        runtime_logger,
+        "merge-validated",
+        "Merge staged enrichment validated inputs",
+        core_row_count=len(core_rows),
+        translation_row_count=len(translation_rows),
+        merged_row_count=len(merged_rows),
+    )
     if output_path.exists():
         existing_rows = read_jsonl(output_path)
         existing_by_entry_id: dict[str, dict[str, Any]] = {}
@@ -3082,8 +3136,31 @@ def merge_staged_enrichment_artifacts(
         ]
         if missing_rows:
             append_jsonl(output_path, missing_rows)
+        _emit_merge_event(
+            runtime_logger,
+            "merge-append",
+            "Merge staged enrichment wrote rows",
+            existing_row_count=len(existing_rows),
+            appended_row_count=len(missing_rows),
+            merged_row_count=len(merged_rows),
+        )
     else:
         write_jsonl(output_path, merged_rows)
+        _emit_merge_event(
+            runtime_logger,
+            "merge-append",
+            "Merge staged enrichment wrote rows",
+            existing_row_count=0,
+            appended_row_count=len(merged_rows),
+            merged_row_count=len(merged_rows),
+        )
+    _emit_merge_event(
+        runtime_logger,
+        "merge-complete",
+        "Merge staged enrichment completed",
+        output=str(output_path),
+        merged_row_count=len(merged_rows),
+    )
     return {
         "core_input": str(core_input_path),
         "translations_input": str(translations_input_path),
@@ -3807,6 +3884,15 @@ def run_translation_enrichment(
             "completed_at": _utc_now(),
         }])
         completed_keys.add(key)
+        _emit_translation_event(
+            runtime_logger,
+            "sense-complete",
+            "Sense translation completed",
+            entry_id=entry_id,
+            sense_id=sense_id,
+            status="completed",
+            locale_count=len(rows),
+        )
 
     def handle_failure(core_row: dict[str, Any], sense_row: dict[str, Any], exc: Exception) -> None:
         entry_id = str(core_row.get("entry_id") or "")
@@ -3820,10 +3906,29 @@ def run_translation_enrichment(
             "failed_at": _utc_now(),
             "error": str(exc),
         }])
+        _emit_translation_event(
+            runtime_logger,
+            "sense-failure",
+            "Sense translation failed",
+            entry_id=entry_id,
+            sense_id=sense_id,
+            status="failed",
+            error=str(exc),
+        )
 
     effective_max_concurrency = max(1, int(max_concurrency or 1))
     if effective_max_concurrency == 1:
         for core_row, sense_row in pending_jobs:
+            entry_id = str(core_row.get("entry_id") or "")
+            sense_id = str(sense_row.get("sense_id") or "")
+            _emit_translation_event(
+                runtime_logger,
+                "sense-start",
+                "Sense translation started",
+                entry_id=entry_id,
+                sense_id=sense_id,
+                status="started",
+            )
             try:
                 payload = provider(
                     core_row=core_row,
@@ -3840,8 +3945,19 @@ def run_translation_enrichment(
                     break
     else:
         with ThreadPoolExecutor(max_workers=effective_max_concurrency) as executor:
-            future_map = {
-                executor.submit(
+            future_map = {}
+            for core_row, sense_row in pending_jobs:
+                entry_id = str(core_row.get("entry_id") or "")
+                sense_id = str(sense_row.get("sense_id") or "")
+                _emit_translation_event(
+                    runtime_logger,
+                    "sense-start",
+                    "Sense translation started",
+                    entry_id=entry_id,
+                    sense_id=sense_id,
+                    status="started",
+                )
+                future = executor.submit(
                     provider,
                     core_row=core_row,
                     sense_row=sense_row,
@@ -3849,9 +3965,8 @@ def run_translation_enrichment(
                     generated_at=effective_generated_at,
                     generation_run_id=effective_generation_run_id,
                     prompt_version=prompt_version,
-                ): (core_row, sense_row)
-                for core_row, sense_row in pending_jobs
-            }
+                )
+                future_map[future] = (core_row, sense_row)
             for future in as_completed(future_map):
                 core_row, sense_row = future_map[future]
                 try:
