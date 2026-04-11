@@ -5488,6 +5488,66 @@ class EnrichPerWordModeTests(unittest.TestCase):
             checkpoint_rows = read_jsonl(checkpoint_path)
             self.assertEqual({row["lexeme_id"] for row in checkpoint_rows}, {"lx_run", "lx_play"})
 
+    def test_enrich_snapshot_preserve_existing_output_ignores_checkpoint_when_output_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            checkpoint_path.write_text(
+                json.dumps({
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "stale-run",
+                    "completed_at": "2026-03-07T00:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            seen_lemmas: list[str] = []
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                seen_lemmas.append(lexeme.lemma)
+                return [
+                    EnrichmentRecord(
+                        snapshot_id=sense.snapshot_id,
+                        enrichment_id=f"en_{sense.sense_id}",
+                        sense_id=sense.sense_id,
+                        definition=f"definition for {lexeme.lemma}",
+                        examples=[{"sentence": f"{lexeme.lemma} example", "difficulty": "A1"}],
+                        cefr_level="A1",
+                        primary_domain="general",
+                        secondary_domains=[],
+                        register="neutral",
+                        synonyms=[],
+                        antonyms=[],
+                        collocations=[],
+                        grammar_patterns=[],
+                        usage_note=f"note for {lexeme.lemma}",
+                        forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        confusable_words=[],
+                        model_name="test-provider",
+                        prompt_version=prompt_version,
+                        generation_run_id=generation_run_id,
+                        confidence=0.9,
+                        review_status="draft",
+                        generated_at=generated_at,
+                    )
+                    for sense in senses
+                ]
+
+            records = enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                checkpoint_path=checkpoint_path,
+                preserve_existing_output=True,
+            )
+
+            self.assertEqual(seen_lemmas, ["run", "play"])
+            self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_play", "lx_run"])
+            rows = read_jsonl(snapshot_dir / "words.enriched.jsonl")
+            self.assertEqual(sorted(row["entry_id"] for row in rows), ["lx_play", "lx_run"])
+
     def test_enrich_snapshot_per_word_resume_retries_unresolved_failed_lexemes_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -5561,7 +5621,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 resume=True,
             )
 
-            self.assertEqual(called_lemmas, ["run", "play"])
+            self.assertEqual(called_lemmas, ["alpha", "run", "play"])
 
     def test_enrich_snapshot_per_word_resume_does_not_load_failures_without_failure_mode_flags(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5618,7 +5678,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     resume=True,
                 )
 
-            self.assertEqual(called_lemmas, ["run", "play"])
+            self.assertEqual(called_lemmas, ["alpha", "run", "play"])
 
     def test_enrich_snapshot_per_word_resume_skip_failed_excludes_unresolved_failed_lexemes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5770,7 +5830,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 retry_failed_only=True,
             )
 
-            self.assertEqual(called_lemmas, ["run"])
+            self.assertEqual(called_lemmas, ["alpha", "run"])
 
     def test_enrich_snapshot_per_word_resume_retry_failed_only_dedupes_failure_history_and_preserves_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5868,10 +5928,10 @@ class EnrichPerWordModeTests(unittest.TestCase):
             failures = [json.loads(line) for line in failures_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             checkpoints = [json.loads(line) for line in checkpoint_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-            self.assertEqual(called_lemmas, ["run"])
+            self.assertEqual(called_lemmas, ["alpha", "run"])
             self.assertEqual([row["lexeme_id"] for row in failures], ["lx_alpha", "lx_run", "lx_run"])
             self.assertEqual([row["generation_run_id"] for row in failures], ["failed-alpha", "failed-run-1", "failed-run-2"])
-            self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_run"])
+            self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_alpha", "lx_run"])
 
     def test_enrich_snapshot_rejects_retry_failed_only_without_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

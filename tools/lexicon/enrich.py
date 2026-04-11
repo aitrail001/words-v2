@@ -4124,9 +4124,10 @@ def enrich_snapshot(
             decisions_destination,
             lexeme_by_entry_id=lexemes_by_id,
         )
+    should_trust_completed_lexeme_ids = destination.exists() and checkpoint_destination.exists()
     completed_lexeme_ids = (
         _load_completed_lexeme_ids(checkpoint_destination)
-        if (resume or preserve_existing_output) and checkpoint_destination.exists()
+        if should_trust_completed_lexeme_ids and (resume or preserve_existing_output)
         else set()
     )
     load_failed_lexeme_ids = resume and (retry_failed_only or skip_failed)
