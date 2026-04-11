@@ -3046,15 +3046,69 @@ def _normalize_merge_artifact_row(row: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _emit_translation_event(
+    runtime_logger: RuntimeLogger | None,
+    event: str,
+    message: str,
+    *,
+    entry_id: str,
+    sense_id: str,
+    status: str | None = None,
+    locale_count: int | None = None,
+    error: str | None = None,
+) -> None:
+    if runtime_logger is None:
+        return
+    fields: dict[str, Any] = {
+        "entry_id": entry_id,
+        "sense_id": sense_id,
+    }
+    if status is not None:
+        fields["status"] = status
+    if locale_count is not None:
+        fields["locale_count"] = locale_count
+    if error is not None:
+        fields["error"] = error
+    runtime_logger.info(event, message, **fields)
+
+
+def _emit_merge_event(
+    runtime_logger: RuntimeLogger | None,
+    event: str,
+    message: str,
+    **fields: Any,
+) -> None:
+    if runtime_logger is None:
+        return
+    runtime_logger.info(event, message, **fields)
+
+
 def merge_staged_enrichment_artifacts(
     *,
     core_input_path: Path,
     translations_input_path: Path,
     output_path: Path,
+    runtime_logger: RuntimeLogger | None = None,
 ) -> dict[str, Any]:
+    _emit_merge_event(
+        runtime_logger,
+        "merge-start",
+        "Merge staged enrichment started",
+        core_input=str(core_input_path),
+        translations_input=str(translations_input_path),
+        output=str(output_path),
+    )
     core_rows = read_jsonl(core_input_path)
     translation_rows = read_jsonl(translations_input_path)
     merged_rows = merge_staged_enrichment_rows(core_rows, translation_rows)
+    _emit_merge_event(
+        runtime_logger,
+        "merge-validated",
+        "Merge staged enrichment validated inputs",
+        core_row_count=len(core_rows),
+        translation_row_count=len(translation_rows),
+        merged_row_count=len(merged_rows),
+    )
     if output_path.exists():
         existing_rows = read_jsonl(output_path)
         existing_by_entry_id: dict[str, dict[str, Any]] = {}
@@ -3082,8 +3136,31 @@ def merge_staged_enrichment_artifacts(
         ]
         if missing_rows:
             append_jsonl(output_path, missing_rows)
+        _emit_merge_event(
+            runtime_logger,
+            "merge-append",
+            "Merge staged enrichment wrote rows",
+            existing_row_count=len(existing_rows),
+            appended_row_count=len(missing_rows),
+            merged_row_count=len(merged_rows),
+        )
     else:
         write_jsonl(output_path, merged_rows)
+        _emit_merge_event(
+            runtime_logger,
+            "merge-append",
+            "Merge staged enrichment wrote rows",
+            existing_row_count=0,
+            appended_row_count=len(merged_rows),
+            merged_row_count=len(merged_rows),
+        )
+    _emit_merge_event(
+        runtime_logger,
+        "merge-complete",
+        "Merge staged enrichment completed",
+        output=str(output_path),
+        merged_row_count=len(merged_rows),
+    )
     return {
         "core_input": str(core_input_path),
         "translations_input": str(translations_input_path),
@@ -3534,6 +3611,14 @@ def _select_coherent_completed_translation_group(rows: list[dict[str, Any]]) -> 
     return candidates[-1]
 
 
+def _normalize_staged_core_runtime_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        normalized_row, _ = split_compiled_row_for_staging(_normalize_merge_artifact_row(row))
+        normalized_rows.append(normalized_row)
+    return normalized_rows
+
+
 def run_core_enrichment(
     snapshot_dir: Path,
     *,
@@ -3572,7 +3657,7 @@ def run_core_enrichment(
         raise RuntimeError(
             "enrich-core no longer supports a separate runtime output path; use --output for the compiled core artifact"
         )
-    if resume:
+    if destination.exists():
         _backfill_checkpoint_from_existing_output(
             destination,
             checkpoint_destination,
@@ -3658,10 +3743,8 @@ def run_core_enrichment(
         max_new_completed_lexemes=max_new_completed_lexemes,
         word_provider=staged_provider,
         compiled_row_mapper=lambda row: split_compiled_row_for_staging(row)[0],
+        preserve_existing_output=True,
     )
-    destination_rows = _load_existing_output_rows(destination)
-    if not _rows_are_core_shape(destination_rows):
-        write_jsonl(destination, [split_compiled_row_for_staging(row)[0] for row in destination_rows])
     return CoreEnrichmentRunResult(
         output_path=destination,
         runtime_output_path=destination,
@@ -3719,23 +3802,33 @@ def run_translation_enrichment(
         validation_retries=validation_retries,
         runtime_logger=runtime_logger,
     )
-    core_rows = read_jsonl(core_path)
+    core_rows = _normalize_staged_core_runtime_rows(read_jsonl(core_path))
     sense_jobs: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for core_row in core_rows:
         for sense_row in core_row.get("senses") or []:
             sense_jobs.append((core_row, sense_row))
 
-    completed_keys = _load_completed_translation_keys(checkpoint_destination) if resume else set()
     if resume:
         completed_keys = _backfill_translation_ledgers_from_existing_output(
             destination,
             checkpoint_path=checkpoint_destination,
             decisions_path=decisions_destination,
         )
+    elif destination.exists():
+        completed_keys = _backfill_translation_ledgers_from_existing_output(
+            destination,
+            checkpoint_path=checkpoint_destination,
+            decisions_path=decisions_destination,
+        )
     else:
+        completed_keys = set()
+    if not destination.exists():
         write_jsonl(destination, [])
+    if not checkpoint_destination.exists():
         write_jsonl(checkpoint_destination, [])
+    if not failures_destination.exists():
         write_jsonl(failures_destination, [])
+    if not decisions_destination.exists():
         write_jsonl(decisions_destination, [])
     failed_keys = _load_failed_translation_keys(failures_destination) if resume and (retry_failed_only or skip_failed) else set()
     unresolved_failed_keys = failed_keys - completed_keys
@@ -3791,6 +3884,15 @@ def run_translation_enrichment(
             "completed_at": _utc_now(),
         }])
         completed_keys.add(key)
+        _emit_translation_event(
+            runtime_logger,
+            "sense-complete",
+            "Sense translation completed",
+            entry_id=entry_id,
+            sense_id=sense_id,
+            status="completed",
+            locale_count=len(rows),
+        )
 
     def handle_failure(core_row: dict[str, Any], sense_row: dict[str, Any], exc: Exception) -> None:
         entry_id = str(core_row.get("entry_id") or "")
@@ -3804,10 +3906,29 @@ def run_translation_enrichment(
             "failed_at": _utc_now(),
             "error": str(exc),
         }])
+        _emit_translation_event(
+            runtime_logger,
+            "sense-failure",
+            "Sense translation failed",
+            entry_id=entry_id,
+            sense_id=sense_id,
+            status="failed",
+            error=str(exc),
+        )
 
     effective_max_concurrency = max(1, int(max_concurrency or 1))
     if effective_max_concurrency == 1:
         for core_row, sense_row in pending_jobs:
+            entry_id = str(core_row.get("entry_id") or "")
+            sense_id = str(sense_row.get("sense_id") or "")
+            _emit_translation_event(
+                runtime_logger,
+                "sense-start",
+                "Sense translation started",
+                entry_id=entry_id,
+                sense_id=sense_id,
+                status="started",
+            )
             try:
                 payload = provider(
                     core_row=core_row,
@@ -3824,8 +3945,19 @@ def run_translation_enrichment(
                     break
     else:
         with ThreadPoolExecutor(max_workers=effective_max_concurrency) as executor:
-            future_map = {
-                executor.submit(
+            future_map = {}
+            for core_row, sense_row in pending_jobs:
+                entry_id = str(core_row.get("entry_id") or "")
+                sense_id = str(sense_row.get("sense_id") or "")
+                _emit_translation_event(
+                    runtime_logger,
+                    "sense-start",
+                    "Sense translation started",
+                    entry_id=entry_id,
+                    sense_id=sense_id,
+                    status="started",
+                )
+                future = executor.submit(
                     provider,
                     core_row=core_row,
                     sense_row=sense_row,
@@ -3833,9 +3965,8 @@ def run_translation_enrichment(
                     generated_at=effective_generated_at,
                     generation_run_id=effective_generation_run_id,
                     prompt_version=prompt_version,
-                ): (core_row, sense_row)
-                for core_row, sense_row in pending_jobs
-            }
+                )
+                future_map[future] = (core_row, sense_row)
             for future in as_completed(future_map):
                 core_row, sense_row = future_map[future]
                 try:
@@ -3947,6 +4078,7 @@ def enrich_snapshot(
     request_delay_seconds: float = 0.0,
     max_new_completed_lexemes: int | None = None,
     compiled_row_mapper: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    preserve_existing_output: bool = False,
 ) -> list[EnrichmentRecord]:
     if mode != 'per_word':
         raise ValueError(f'Unsupported enrichment mode: {mode}')
@@ -3981,12 +4113,28 @@ def enrich_snapshot(
         for lexeme in ordered_lexemes
     }
     lexeme_id_by_entry_id = {lexeme.entry_id: lexeme.lexeme_id for lexeme in ordered_lexemes}
-    completed_lexeme_ids = _load_completed_lexeme_ids(checkpoint_destination) if resume else set()
+    if preserve_existing_output and destination.exists():
+        _backfill_checkpoint_from_existing_output(
+            destination,
+            checkpoint_destination,
+            lexeme_by_entry_id=lexemes_by_id,
+        )
+        _backfill_decisions_from_existing_output(
+            destination,
+            decisions_destination,
+            lexeme_by_entry_id=lexemes_by_id,
+        )
+    should_trust_completed_lexeme_ids = destination.exists() and checkpoint_destination.exists()
+    completed_lexeme_ids = (
+        _load_completed_lexeme_ids(checkpoint_destination)
+        if should_trust_completed_lexeme_ids and (resume or preserve_existing_output)
+        else set()
+    )
     load_failed_lexeme_ids = resume and (retry_failed_only or skip_failed)
     failed_lexeme_ids = _load_failed_lexeme_ids(failures_destination) if load_failed_lexeme_ids else set()
     unresolved_failed_lexeme_ids = failed_lexeme_ids - completed_lexeme_ids
     completed_count_before_run = len(completed_lexeme_ids)
-    if resume:
+    if resume and not preserve_existing_output:
         _reconcile_resumable_output(
             destination,
             completed_lexeme_ids=completed_lexeme_ids,
@@ -4006,12 +4154,21 @@ def enrich_snapshot(
         ]
     else:
         pending_lexemes = [lexeme for lexeme in ordered_lexemes if lexeme.lexeme_id not in completed_lexeme_ids]
-    if not resume:
+    if not resume and not preserve_existing_output:
         write_jsonl(destination, [])
         write_jsonl(checkpoint_destination, [])
         write_jsonl(failures_destination, [])
         write_jsonl(decisions_destination, [])
         completed_count_before_run = 0
+    else:
+        if not destination.exists():
+            write_jsonl(destination, [])
+        if not checkpoint_destination.exists():
+            write_jsonl(checkpoint_destination, [])
+        if not failures_destination.exists():
+            write_jsonl(failures_destination, [])
+        if not decisions_destination.exists():
+            write_jsonl(decisions_destination, [])
 
     failures: list[str] = []
     request_start_lock = Lock()
@@ -4243,5 +4400,6 @@ def run_enrichment(
         log_file=log_file,
         request_delay_seconds=request_delay_seconds,
         max_new_completed_lexemes=max_new_completed_lexemes,
+        preserve_existing_output=True,
     )
     return EnrichmentRunResult(output_path=destination, enrichments=enrichments, lexeme_count=len(lexemes), mode=mode)

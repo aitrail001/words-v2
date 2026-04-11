@@ -646,6 +646,149 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(core_rows[0]["senses"][0]["definition"], "existing alpha")
             self.assertEqual(core_rows[1]["senses"][0]["definition"], "new beta")
 
+    def test_run_core_enrichment_without_resume_preserves_existing_rows_and_only_processes_missing_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_resume_modes_snapshot(snapshot_dir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            existing_alpha = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "existing alpha",
+                        "examples": [{"sentence": "alpha existing", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "existing alpha note",
+                        "enrichment_id": "en_alpha_existing",
+                        "generation_run_id": "existing-run",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            write_jsonl(core_path, [existing_alpha])
+            observed_lemmas: list[str] = []
+
+            def fake_enrich_snapshot(
+                snapshot_dir: Path,
+                *,
+                output_path: Path | None = None,
+                checkpoint_path: Path | None = None,
+                decisions_path: Path | None = None,
+                resume: bool = False,
+                **_: object,
+            ) -> list[EnrichmentRecord]:
+                self.assertFalse(resume)
+                assert output_path is not None
+                assert checkpoint_path is not None
+                assert decisions_path is not None
+                lexemes, _ = read_snapshot_inputs(snapshot_dir)
+                completed_lexeme_ids = {row["lexeme_id"] for row in read_jsonl(checkpoint_path)}
+                pending_lemmas = [
+                    lexeme.lemma
+                    for lexeme in sorted(lexemes, key=lambda item: (item.wordfreq_rank, item.lemma))
+                    if lexeme.lexeme_id not in completed_lexeme_ids
+                ]
+                observed_lemmas.extend(pending_lemmas)
+                self.assertEqual(pending_lemmas, ["run", "play"])
+                append_jsonl(output_path, [{
+                    "schema_version": "1.1.0",
+                    "entry_id": "lx_run",
+                    "entry_type": "word",
+                    "normalized_form": "run",
+                    "source_provenance": [{"source": "wordnet"}],
+                    "entity_category": "general",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
+                    "cefr_level": "B1",
+                    "frequency_rank": 2,
+                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "senses": [
+                        {
+                            "sense_id": "sn_lx_run_1",
+                            "wn_synset_id": "run.v.01",
+                            "pos": "verb",
+                            "sense_kind": "standard_meaning",
+                            "decision": "keep_standard",
+                            "base_word": None,
+                            "primary_domain": "general",
+                            "secondary_domains": [],
+                            "register": "neutral",
+                            "definition": "new run",
+                            "examples": [{"sentence": "run new", "difficulty": "B1"}],
+                            "synonyms": [],
+                            "antonyms": [],
+                            "collocations": [],
+                            "grammar_patterns": [],
+                            "usage_note": "new run note",
+                            "enrichment_id": "en_run_new",
+                            "generation_run_id": "run-1",
+                            "model_name": "gpt-5.4",
+                            "prompt_version": "v1",
+                            "confidence": 0.9,
+                            "generated_at": "2026-04-08T00:00:00Z",
+                        }
+                    ],
+                    "confusable_words": [],
+                    "generated_at": "2026-04-08T00:00:00Z",
+                    "phonetics": _test_phonetics(),
+                }])
+                append_jsonl(checkpoint_path, [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "run-1",
+                    "completed_at": "2026-04-08T00:00:00Z",
+                }])
+                append_jsonl(decisions_path, [{
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "run-1",
+                    "completed_at": "2026-04-08T00:00:00Z",
+                    "decision": "keep_standard",
+                    "base_word": None,
+                    "discard_reason": None,
+                    "accepted_sense_count": 1,
+                }])
+                return []
+
+            with patch("tools.lexicon.enrich.enrich_snapshot", side_effect=fake_enrich_snapshot):
+                run_core_enrichment(snapshot_dir, max_concurrency=1)
+
+            self.assertEqual(observed_lemmas, ["run", "play"])
+            core_rows = read_jsonl(core_path)
+            self.assertEqual([row["entry_id"] for row in core_rows], ["lx_alpha", "lx_run"])
+            checkpoint_rows = read_jsonl(snapshot_dir / "enrich.core.checkpoint.jsonl")
+            self.assertEqual([row["lexeme_id"] for row in checkpoint_rows], ["lx_alpha", "lx_run"])
+
     def test_run_core_enrichment_resume_skips_existing_compiled_core_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -1239,6 +1382,87 @@ class EnrichSnapshotTests(unittest.TestCase):
             self.assertEqual(len(rows), 5)
             self.assertEqual({row["locale"] for row in rows}, {"zh-Hans", "es", "ar", "pt-BR", "ja"})
 
+    def test_run_translation_enrichment_emits_runtime_progress_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            log_file = snapshot_dir / "enrich-translations.runtime.log"
+            core_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordnet"}],
+                        "entity_category": "general",
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "B1",
+                        "frequency_rank": 5,
+                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        "senses": [
+                            {
+                                "sense_id": "sn_lx_run_1",
+                                "wn_synset_id": "run.v.01",
+                                "pos": "verb",
+                                "sense_kind": "standard_meaning",
+                                "decision": "keep_standard",
+                                "base_word": None,
+                                "primary_domain": "general",
+                                "secondary_domains": [],
+                                "register": "neutral",
+                                "definition": "move fast by using your legs",
+                                "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": [],
+                                "usage_note": "Common learner note.",
+                                "enrichment_id": "enr_1",
+                                "generation_run_id": "run-1",
+                                "model_name": "test-model",
+                                "prompt_version": "v1",
+                                "confidence": 0.9,
+                                "generated_at": "2026-04-08T00:00:00Z",
+                            }
+                        ],
+                        "confusable_words": [],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "phonetics": _test_phonetics(),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = run_translation_enrichment(
+                snapshot_dir,
+                core_input_path=core_path,
+                translation_provider=lambda **_: _test_translations(
+                    definition="move quickly",
+                    usage_note="translation note",
+                    examples=["I run every day."],
+                ),
+                log_level="debug",
+                log_file=log_file,
+            )
+
+            self.assertEqual(result.translation_row_count, 5)
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            events = [row["event"] for row in log_rows]
+            self.assertIn("sense-start", events)
+            self.assertIn("sense-complete", events)
+            complete_rows = [row for row in log_rows if row["event"] == "sense-complete"]
+            self.assertTrue(
+                any(
+                    row["fields"]["entry_id"] == "lx_run"
+                    and row["fields"]["sense_id"] == "sn_lx_run_1"
+                    and row["fields"]["locale_count"] == 5
+                    for row in complete_rows
+                )
+            )
+
     def test_run_translation_enrichment_resume_backfills_completed_rows_without_truncating_partial_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
@@ -1538,6 +1762,189 @@ class EnrichSnapshotTests(unittest.TestCase):
                     row["sense_id"] == "sn_lx_run_2"
                     and row["locale"] == "zh-Hans"
                     and row["definition"] == "partial zh"
+                    for row in rows
+                )
+            )
+            self.assertEqual(result.translation_row_count, len(rows))
+
+    def test_run_translation_enrichment_without_resume_preserves_existing_completed_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            core_path = snapshot_dir / "words.enriched.core.jsonl"
+            core_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.1.0",
+                        "entry_id": "lx_run",
+                        "entry_type": "word",
+                        "normalized_form": "run",
+                        "source_provenance": [{"source": "wordnet"}],
+                        "entity_category": "general",
+                        "word": "run",
+                        "part_of_speech": ["verb"],
+                        "cefr_level": "B1",
+                        "frequency_rank": 5,
+                        "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        "senses": [
+                            {
+                                "sense_id": "sn_lx_run_1",
+                                "wn_synset_id": "run.v.01",
+                                "pos": "verb",
+                                "sense_kind": "standard_meaning",
+                                "decision": "keep_standard",
+                                "base_word": None,
+                                "primary_domain": "general",
+                                "secondary_domains": [],
+                                "register": "neutral",
+                                "definition": "move fast by using your legs",
+                                "examples": [{"sentence": "I run every day.", "difficulty": "B1"}],
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": [],
+                                "usage_note": "Common learner note.",
+                                "enrichment_id": "enr_1",
+                                "generation_run_id": "run-1",
+                                "model_name": "test-model",
+                                "prompt_version": "v1",
+                                "confidence": 0.9,
+                                "generated_at": "2026-04-08T00:00:00Z",
+                            },
+                            {
+                                "sense_id": "sn_lx_run_2",
+                                "wn_synset_id": "run.v.02",
+                                "pos": "verb",
+                                "sense_kind": "standard_meaning",
+                                "decision": "keep_standard",
+                                "base_word": None,
+                                "primary_domain": "general",
+                                "secondary_domains": [],
+                                "register": "neutral",
+                                "definition": "move along",
+                                "examples": [{"sentence": "Run to the door.", "difficulty": "B1"}],
+                                "synonyms": [],
+                                "antonyms": [],
+                                "collocations": [],
+                                "grammar_patterns": [],
+                                "usage_note": "Second sense.",
+                                "enrichment_id": "enr_2",
+                                "generation_run_id": "run-1",
+                                "model_name": "test-model",
+                                "prompt_version": "v1",
+                                "confidence": 0.9,
+                                "generated_at": "2026-04-08T00:00:00Z",
+                            },
+                        ],
+                        "confusable_words": [],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "phonetics": _test_phonetics(),
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            translations_path = snapshot_dir / "words.translations.jsonl"
+            write_jsonl(
+                translations_path,
+                [
+                    {
+                        "entry_id": "lx_run",
+                        "sense_id": "sn_lx_run_1",
+                        "locale": "zh-Hans",
+                        "definition": "existing zh",
+                        "usage_note": "existing zh note",
+                        "examples": ["existing example"],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "generation_run_id": "existing-1",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "status": "completed",
+                    },
+                    {
+                        "entry_id": "lx_run",
+                        "sense_id": "sn_lx_run_1",
+                        "locale": "es",
+                        "definition": "existing es",
+                        "usage_note": "existing es note",
+                        "examples": ["existing example"],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "generation_run_id": "existing-1",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "status": "completed",
+                    },
+                    {
+                        "entry_id": "lx_run",
+                        "sense_id": "sn_lx_run_1",
+                        "locale": "ar",
+                        "definition": "existing ar",
+                        "usage_note": "existing ar note",
+                        "examples": ["existing example"],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "generation_run_id": "existing-1",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "status": "completed",
+                    },
+                    {
+                        "entry_id": "lx_run",
+                        "sense_id": "sn_lx_run_1",
+                        "locale": "pt-BR",
+                        "definition": "existing pt",
+                        "usage_note": "existing pt note",
+                        "examples": ["existing example"],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "generation_run_id": "existing-1",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "status": "completed",
+                    },
+                    {
+                        "entry_id": "lx_run",
+                        "sense_id": "sn_lx_run_1",
+                        "locale": "ja",
+                        "definition": "existing ja",
+                        "usage_note": "existing ja note",
+                        "examples": ["existing example"],
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "generation_run_id": "existing-1",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "status": "completed",
+                    },
+                ],
+            )
+            observed_calls: list[str] = []
+
+            def translation_provider(*, core_row: dict[str, object], sense_row: dict[str, object], **_: object) -> dict[str, dict[str, object]]:
+                sense_id = str(sense_row["sense_id"])
+                observed_calls.append(sense_id)
+                self.assertEqual(sense_id, "sn_lx_run_2")
+                checkpoint_rows = read_jsonl(snapshot_dir / "enrich.translations.checkpoint.jsonl")
+                self.assertEqual({row["sense_id"] for row in checkpoint_rows}, {"sn_lx_run_1"})
+                return _test_translations(
+                    definition="new sense",
+                    usage_note="new sense note",
+                    examples=["Run to the door."],
+                )
+
+            result = run_translation_enrichment(
+                snapshot_dir,
+                core_input_path=core_path,
+                output_path=translations_path,
+                translation_provider=translation_provider,
+            )
+
+            self.assertEqual(observed_calls, ["sn_lx_run_2"])
+            checkpoint_rows = read_jsonl(snapshot_dir / "enrich.translations.checkpoint.jsonl")
+            self.assertEqual({row["sense_id"] for row in checkpoint_rows}, {"sn_lx_run_1", "sn_lx_run_2"})
+            rows = read_jsonl(translations_path)
+            self.assertEqual(len(rows), 10)
+            self.assertTrue(
+                any(
+                    row["sense_id"] == "sn_lx_run_1"
+                    and row["locale"] == "zh-Hans"
+                    and row["definition"] == "existing zh"
                     for row in rows
                 )
             )
@@ -4860,7 +5267,117 @@ class EnrichPerWordModeTests(unittest.TestCase):
 
             self.assertEqual(call_count, 1)
 
-    def test_enrich_snapshot_per_word_resume_reconciles_uncheckpointed_output_before_retry(self) -> None:
+    def test_enrich_snapshot_per_word_without_resume_preserves_existing_output_and_backfills_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            failures_path = snapshot_dir / "enrich.failures.jsonl"
+            checkpoint_path.write_text("", encoding="utf-8")
+            failures_path.write_text(
+                json.dumps({
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "failed",
+                    "generation_run_id": "failed-run",
+                    "failed_at": "2026-03-07T00:00:00Z",
+                    "error": "gateway timeout",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            (snapshot_dir / "words.enriched.jsonl").write_text(
+                json.dumps({
+                    "schema_version": "1.1.0",
+                    "entry_id": "lx_run",
+                    "entry_type": "word",
+                    "normalized_form": "run",
+                    "source_provenance": [{"source": "wordfreq"}],
+                    "entity_category": "general",
+                    "word": "run",
+                    "part_of_speech": ["verb"],
+                    "cefr_level": "A1",
+                    "frequency_rank": 5,
+                    "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                    "senses": [{
+                        "sense_id": "sn_lx_run_1",
+                        "wn_synset_id": None,
+                        "pos": "verb",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "dangling",
+                        "examples": [{"sentence": "dangling", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "dangling",
+                        "enrichment_id": "en_dangling",
+                        "generation_run_id": "dangling-run",
+                        "model_name": "test-provider",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-03-07T00:00:00Z",
+                        "translations": {},
+                    }],
+                    "confusable_words": [],
+                    "generated_at": "2026-03-07T00:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            called_lemmas: list[str] = []
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                called_lemmas.append(lexeme.lemma)
+                return [
+                    EnrichmentRecord(
+                        snapshot_id=sense.snapshot_id,
+                        enrichment_id=f"en_{sense.sense_id}",
+                        sense_id=sense.sense_id,
+                        definition=f"definition for {lexeme.lemma}",
+                        examples=[{"sentence": f"{lexeme.lemma} example", "difficulty": "A1"}],
+                        cefr_level="A1",
+                        primary_domain="general",
+                        secondary_domains=[],
+                        register="neutral",
+                        synonyms=[],
+                        antonyms=[],
+                        collocations=[],
+                        grammar_patterns=[],
+                        usage_note=f"note for {lexeme.lemma}",
+                        forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        confusable_words=[],
+                        model_name="test-provider",
+                        prompt_version=prompt_version,
+                        generation_run_id=generation_run_id,
+                        confidence=0.9,
+                        review_status="draft",
+                        generated_at=generated_at,
+                    )
+                    for sense in senses
+                ]
+
+            records = enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                checkpoint_path=checkpoint_path,
+                failures_output=failures_path,
+                preserve_existing_output=True,
+            )
+
+            self.assertEqual(called_lemmas, ["play"])
+            self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_play", "lx_run"])
+            payload = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(sorted(row["entry_id"] for row in payload), ["lx_play", "lx_run"])
+            self.assertEqual(sum(1 for row in payload if row["entry_id"] == "lx_run"), 1)
+            checkpoint_rows = read_jsonl(checkpoint_path)
+            self.assertEqual({row["lexeme_id"] for row in checkpoint_rows}, {"lx_run", "lx_play"})
+
+    def test_enrich_snapshot_per_word_resume_backfills_uncheckpointed_output_without_rewrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_dir = Path(tmpdir)
             self._write_snapshot(snapshot_dir)
@@ -4960,13 +5477,76 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 checkpoint_path=checkpoint_path,
                 failures_output=failures_path,
                 resume=True,
+                preserve_existing_output=True,
             )
 
-            self.assertEqual(called_lemmas, ["run", "play"])
+            self.assertEqual(called_lemmas, ["play"])
             self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_play", "lx_run"])
             payload = [json.loads(line) for line in (snapshot_dir / "words.enriched.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(sorted(row["entry_id"] for row in payload), ["lx_play", "lx_run"])
             self.assertEqual(sum(1 for row in payload if row["entry_id"] == "lx_run"), 1)
+            checkpoint_rows = read_jsonl(checkpoint_path)
+            self.assertEqual({row["lexeme_id"] for row in checkpoint_rows}, {"lx_run", "lx_play"})
+
+    def test_enrich_snapshot_preserve_existing_output_ignores_checkpoint_when_output_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshot_dir = Path(tmpdir)
+            self._write_snapshot(snapshot_dir)
+            checkpoint_path = snapshot_dir / "enrich.checkpoint.jsonl"
+            checkpoint_path.write_text(
+                json.dumps({
+                    "lexeme_id": "lx_run",
+                    "lemma": "run",
+                    "status": "completed",
+                    "generation_run_id": "stale-run",
+                    "completed_at": "2026-03-07T00:00:00Z",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            seen_lemmas: list[str] = []
+
+            def word_provider(*, lexeme, senses, settings, generated_at, generation_run_id, prompt_version):
+                seen_lemmas.append(lexeme.lemma)
+                return [
+                    EnrichmentRecord(
+                        snapshot_id=sense.snapshot_id,
+                        enrichment_id=f"en_{sense.sense_id}",
+                        sense_id=sense.sense_id,
+                        definition=f"definition for {lexeme.lemma}",
+                        examples=[{"sentence": f"{lexeme.lemma} example", "difficulty": "A1"}],
+                        cefr_level="A1",
+                        primary_domain="general",
+                        secondary_domains=[],
+                        register="neutral",
+                        synonyms=[],
+                        antonyms=[],
+                        collocations=[],
+                        grammar_patterns=[],
+                        usage_note=f"note for {lexeme.lemma}",
+                        forms={"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                        confusable_words=[],
+                        model_name="test-provider",
+                        prompt_version=prompt_version,
+                        generation_run_id=generation_run_id,
+                        confidence=0.9,
+                        review_status="draft",
+                        generated_at=generated_at,
+                    )
+                    for sense in senses
+                ]
+
+            records = enrich_snapshot(
+                snapshot_dir,
+                mode="per_word",
+                word_provider=word_provider,
+                checkpoint_path=checkpoint_path,
+                preserve_existing_output=True,
+            )
+
+            self.assertEqual(seen_lemmas, ["run", "play"])
+            self.assertEqual(sorted(record["entry_id"] for record in records), ["lx_play", "lx_run"])
+            rows = read_jsonl(snapshot_dir / "words.enriched.jsonl")
+            self.assertEqual(sorted(row["entry_id"] for row in rows), ["lx_play", "lx_run"])
 
     def test_enrich_snapshot_per_word_resume_retries_unresolved_failed_lexemes_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5041,7 +5621,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 resume=True,
             )
 
-            self.assertEqual(called_lemmas, ["run", "play"])
+            self.assertEqual(called_lemmas, ["alpha", "run", "play"])
 
     def test_enrich_snapshot_per_word_resume_does_not_load_failures_without_failure_mode_flags(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5098,7 +5678,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                     resume=True,
                 )
 
-            self.assertEqual(called_lemmas, ["run", "play"])
+            self.assertEqual(called_lemmas, ["alpha", "run", "play"])
 
     def test_enrich_snapshot_per_word_resume_skip_failed_excludes_unresolved_failed_lexemes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5250,7 +5830,7 @@ class EnrichPerWordModeTests(unittest.TestCase):
                 retry_failed_only=True,
             )
 
-            self.assertEqual(called_lemmas, ["run"])
+            self.assertEqual(called_lemmas, ["alpha", "run"])
 
     def test_enrich_snapshot_per_word_resume_retry_failed_only_dedupes_failure_history_and_preserves_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5348,10 +5928,10 @@ class EnrichPerWordModeTests(unittest.TestCase):
             failures = [json.loads(line) for line in failures_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             checkpoints = [json.loads(line) for line in checkpoint_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-            self.assertEqual(called_lemmas, ["run"])
+            self.assertEqual(called_lemmas, ["alpha", "run"])
             self.assertEqual([row["lexeme_id"] for row in failures], ["lx_alpha", "lx_run", "lx_run"])
             self.assertEqual([row["generation_run_id"] for row in failures], ["failed-alpha", "failed-run-1", "failed-run-2"])
-            self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_run"])
+            self.assertEqual([row["lexeme_id"] for row in checkpoints], ["lx_alpha", "lx_alpha", "lx_run"])
 
     def test_enrich_snapshot_rejects_retry_failed_only_without_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5728,6 +6308,7 @@ class EnrichmentValidationHardeningTests(unittest.TestCase):
 
         self.assertEqual(mocked_enrich.call_args.kwargs["log_level"], "debug")
         self.assertEqual(mocked_enrich.call_args.kwargs["log_file"], log_file)
+        self.assertTrue(mocked_enrich.call_args.kwargs["preserve_existing_output"])
 
     def test_generate_validated_word_payload_retries_after_validation_failure(self) -> None:
         lexeme, senses = self._build_lexeme_and_senses()
@@ -6752,6 +7333,78 @@ class StagedEnrichmentArtifactTests(unittest.TestCase):
             self.assertEqual([row["entry_id"] for row in rows], ["lx_alpha", "lx_beta"])
             self.assertEqual(rows[0], compiled_alpha)
             self.assertEqual(rows[1], compiled_beta)
+
+    def test_merge_staged_enrichment_artifacts_emits_runtime_progress_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            core_input = tmp_path / "words.enriched.core.jsonl"
+            translations_input = tmp_path / "words.translations.jsonl"
+            output_path = tmp_path / "words.enriched.jsonl"
+            log_file = tmp_path / "merge.runtime.log"
+
+            compiled_row = {
+                "schema_version": "1.1.0",
+                "entry_id": "lx_alpha",
+                "lexeme_id": "lx_alpha",
+                "entry_type": "word",
+                "normalized_form": "alpha",
+                "source_provenance": [{"source": "wordnet"}],
+                "entity_category": "general",
+                "word": "alpha",
+                "part_of_speech": ["noun"],
+                "cefr_level": "A1",
+                "frequency_rank": 1,
+                "forms": {"plural_forms": [], "verb_forms": {}, "comparative": None, "superlative": None, "derivations": []},
+                "senses": [
+                    {
+                        "sense_id": "sn_lx_alpha_1",
+                        "wn_synset_id": "alpha.n.01",
+                        "pos": "noun",
+                        "sense_kind": "standard_meaning",
+                        "decision": "keep_standard",
+                        "base_word": None,
+                        "primary_domain": "general",
+                        "secondary_domains": [],
+                        "register": "neutral",
+                        "definition": "alpha definition",
+                        "examples": [{"sentence": "alpha example", "difficulty": "A1"}],
+                        "synonyms": [],
+                        "antonyms": [],
+                        "collocations": [],
+                        "grammar_patterns": [],
+                        "usage_note": "alpha note",
+                        "enrichment_id": "en_alpha",
+                        "generation_run_id": "run-alpha",
+                        "model_name": "test-model",
+                        "prompt_version": "v1",
+                        "confidence": 0.9,
+                        "generated_at": "2026-04-08T00:00:00Z",
+                        "translations": _test_translations("alpha definition", "alpha note", ["alpha example"]),
+                    }
+                ],
+                "confusable_words": [],
+                "generated_at": "2026-04-08T00:00:00Z",
+                "phonetics": _test_phonetics(),
+            }
+            core_row, translation_rows = split_compiled_row_for_staging(compiled_row)
+            write_jsonl(core_input, [core_row])
+            write_jsonl(translations_input, translation_rows)
+            logger = RuntimeLogger(RuntimeLogConfig(level="debug", log_file=log_file))
+
+            payload = merge_staged_enrichment_artifacts(
+                core_input_path=core_input,
+                translations_input_path=translations_input,
+                output_path=output_path,
+                runtime_logger=logger,
+            )
+
+            self.assertEqual(payload["merged_row_count"], 1)
+            log_rows = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            events = [row["event"] for row in log_rows]
+            self.assertIn("merge-start", events)
+            self.assertIn("merge-validated", events)
+            self.assertIn("merge-append", events)
+            self.assertIn("merge-complete", events)
 
     def test_merge_staged_enrichment_artifacts_rejects_duplicate_existing_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

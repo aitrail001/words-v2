@@ -1033,6 +1033,7 @@ def _merge_enrich_command(args: argparse.Namespace) -> int:
             core_input_path=Path(args.core_input),
             translations_input_path=Path(args.translations_input),
             output_path=Path(args.output),
+            runtime_logger=getattr(args, 'runtime_logger', None),
         )
     except (RuntimeError, ValueError, FileNotFoundError) as exc:
         print(str(exc), file=sys.stderr)

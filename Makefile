@@ -60,7 +60,7 @@ LEXICON_NODE_STAMP := tools/lexicon/node/node_modules/.lock-$(LEXICON_NODE_LOCK_
         worktree-bootstrap clean-worktree-links \
         local-backend-dev local-worker-dev local-frontend-dev local-admin-dev \
         lint-backend lint-frontend lint-admin \
-        test-backend test-frontend test-admin smoke-local \
+        test-backend test-frontend test-admin test-lexicon stack-test-lexicon ci-test-lexicon smoke-local \
         nuc-rsync-data deploy-nuc
 
 LEXICON_ARGS ?=
@@ -97,6 +97,9 @@ help:
 	  "make test-backend          # run backend pytest" \
 	  "make test-frontend         # run learner frontend jest" \
 	  "make test-admin            # run admin frontend jest" \
+	  "make test-lexicon          # run full lexicon suite locally across lexicon/backend venvs" \
+	  "make stack-test-lexicon    # alias for full lexicon suite when working against the test stack" \
+	  "make ci-test-lexicon       # run full lexicon suite in the current CI python environment" \
 	  "make smoke-local           # run local Playwright smoke" \
 	  "make stack-up              # start persistent test stack without rebuilding" \
 	  "make stack-build           # rebuild/start persistent test stack" \
@@ -374,6 +377,15 @@ test-frontend:
 
 test-admin:
 	cd admin-frontend && npm test -- --runInBand
+
+test-lexicon: lexicon-install backend-install
+	.venv-lexicon/bin/python -m pytest tools/lexicon/tests -q --ignore=tools/lexicon/tests/test_import_db.py --ignore=tools/lexicon/tests/test_staging_import.py --ignore=tools/lexicon/tests/test_voice_import_db.py
+	.venv-backend/bin/python -m pytest tools/lexicon/tests/test_import_db.py tools/lexicon/tests/test_staging_import.py tools/lexicon/tests/test_voice_import_db.py -q
+
+stack-test-lexicon: test-lexicon
+
+ci-test-lexicon:
+	python -m pytest tools/lexicon/tests -q
 
 smoke-local:
 	bash -lc 'set -euo pipefail; \
