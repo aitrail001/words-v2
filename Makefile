@@ -391,6 +391,9 @@ e2e-install:
 		fi'
 
 worktree-bootstrap: backend-install lexicon-install frontend-install admin-install e2e-install
+	@HOOKS_PATH="$$(git rev-parse --show-toplevel)/.githooks"; \
+	git config core.hooksPath "$$HOOKS_PATH"; \
+	echo "Configured git hooks path -> $$HOOKS_PATH"
 	@echo "Worktree bootstrap complete"
 
 lexicon-enrich-core: lexicon-install
