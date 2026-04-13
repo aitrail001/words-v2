@@ -108,6 +108,8 @@ Use external workflow skills or personal tooling when helpful, but do not restat
 - Reason: they rely on Docker/Buildx and disposable test stacks, and sandbox failures are usually environmental noise rather than useful verification.
 - After each non-trivial change set, or Before push and before asking for review-facing feedback on a branch, run `make gate-fast`.
 - Before opening a PR, marking a PR ready, or pushing a PR update intended for review, run `make gate-full`.
+- Review PRs must be opened via `make pr-open GH_ARGS='...'` unless the user explicitly asks to bypass that workflow.
+- Do not open review-facing PRs through direct `gh pr create`, GitHub API calls, or other alternate flows unless the user explicitly asks for that bypass.
 - Prefer `make pr-open GH_ARGS='...'` for opening PRs so the `gate-full` requirement is enforced by the repo workflow instead of memory alone.
 - Do not open or update a PR for review if `make gate-full` fails unless the user explicitly asks for a failing PR.
 - When reporting verification, include the exact command run and whether it passed or failed.
