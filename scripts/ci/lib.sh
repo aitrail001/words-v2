@@ -46,6 +46,12 @@ artifact_dir() {
   printf '%s\n' "${out_dir}"
 }
 
+artifact_path() {
+  local label="$1"
+  local file_name="$2"
+  printf '%s/%s\n' "$(artifact_dir "${label}")" "${file_name}"
+}
+
 format_command_line() {
   local arg
   printf '$'
@@ -106,6 +112,49 @@ run_logged() {
 
   ensure_nonempty_log "${file}" "[ci-gate] command produced no output"
   return "${status}"
+}
+
+init_gate_artifacts() {
+  local gate_label="$1"
+  local out_dir
+  out_dir="$(artifact_dir "${gate_label}")"
+
+  : >"${out_dir}/steps.log"
+  {
+    printf 'gate=%s\n' "${gate_label}"
+    printf 'started_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'log_root=%s\n' "${LOG_ROOT}"
+  } >"${out_dir}/summary.log"
+}
+
+record_gate_step() {
+  local gate_label="$1"
+  local step_name="$2"
+  local suite_label="${3:-}"
+  local out_dir
+  out_dir="$(artifact_dir "${gate_label}")"
+
+  if [[ -n "${suite_label}" ]]; then
+    printf '[%s] %s -> artifacts/ci-gate/%s\n' \
+      "$(date '+%H:%M:%S')" "${step_name}" "${suite_label}" >>"${out_dir}/steps.log"
+  else
+    printf '[%s] %s\n' "$(date '+%H:%M:%S')" "${step_name}" >>"${out_dir}/steps.log"
+  fi
+}
+
+append_gate_summary() {
+  local gate_label="$1"
+  shift
+  local out_dir
+  out_dir="$(artifact_dir "${gate_label}")"
+  printf '%s\n' "$*" >>"${out_dir}/summary.log"
+}
+
+finalize_gate_artifacts() {
+  local gate_label="$1"
+  local status="$2"
+  append_gate_summary "${gate_label}" "status=${status}"
+  append_gate_summary "${gate_label}" "finished_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 }
 
 compose_infra() {
