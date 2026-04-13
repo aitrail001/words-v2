@@ -105,7 +105,13 @@ export default function SearchPage() {
         <input
           type="text"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            if (nextQuery.trim().length < 2) {
+              setResults([]);
+            }
+            setQuery(nextQuery);
+          }}
           placeholder="Search words and phrases"
           className="w-full rounded-[1rem] border border-[#ddd8ee] bg-white px-4 py-3 text-sm text-[#3d2456] outline-none placeholder:text-[#a199b3]"
         />

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SearchPage from "@/app/search/page";
 import {
@@ -96,5 +96,25 @@ describe("SearchPage", () => {
     expect(await screen.findByRole("link", { name: /bank on/i })).toHaveAttribute("href", "/phrase/phrase-1");
     expect(screen.getAllByText("To rely on someone.").length).toBeGreaterThan(0);
     expect(screen.queryByText("Pronunciation unavailable")).not.toBeInTheDocument();
+  });
+
+  it("clears stale results when the query drops below two characters", async () => {
+    jest.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    render(<SearchPage />);
+
+    await screen.findByRole("link", { name: "bank" });
+    await user.type(screen.getByPlaceholderText(/search words and phrases/i), "ba");
+    act(() => {
+      jest.advanceTimersByTime(250);
+    });
+
+    expect(await screen.findByRole("link", { name: /bank on/i })).toHaveAttribute("href", "/phrase/phrase-1");
+
+    await user.clear(screen.getByPlaceholderText(/search words and phrases/i));
+
+    expect(screen.queryByRole("link", { name: /bank on/i })).not.toBeInTheDocument();
+
+    jest.useRealTimers();
   });
 });
