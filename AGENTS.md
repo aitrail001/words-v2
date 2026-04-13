@@ -103,8 +103,13 @@ Use external workflow skills or personal tooling when helpful, but do not restat
 - Treat `make test-backend`, `make test-frontend`, `make test-admin`, and `make smoke-local` as inner-loop checks only.
 - Treat `gate-fast` and `gate-full` as the canonical local readiness entry points.
 - Keep `local-ci-*` only for CI-like stack/debugging workflows, not as the primary local readiness path.
+- For Codex runs, `make gate-fast`, `make gate-full`, and `scripts/ci/run-e2e-suite.sh *` must be run outside the sandbox on the first attempt.
+- Do not try those gate commands in the sandbox first.
+- Reason: they rely on Docker/Buildx and disposable test stacks, and sandbox failures are usually environmental noise rather than useful verification.
 - After each non-trivial change set, or Before push and before asking for review-facing feedback on a branch, run `make gate-fast`.
 - Before opening a PR, marking a PR ready, or pushing a PR update intended for review, run `make gate-full`.
+- Review PRs must be opened via `make pr-open GH_ARGS='...'` unless the user explicitly asks to bypass that workflow.
+- Do not open review-facing PRs through direct `gh pr create`, GitHub API calls, or other alternate flows unless the user explicitly asks for that bypass.
 - Prefer `make pr-open GH_ARGS='...'` for opening PRs so the `gate-full` requirement is enforced by the repo workflow instead of memory alone.
 - Do not open or update a PR for review if `make gate-full` fails unless the user explicitly asks for a failing PR.
 - When reporting verification, include the exact command run and whether it passed or failed.
