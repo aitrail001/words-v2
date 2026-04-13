@@ -12,43 +12,31 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  STACK_COMPOSE_FILES: -f compose.infra.yml -f compose.teststack.yml
-  E2E_COMPOSE_FILES: -f compose.infra.yml -f compose.teststack.yml -f compose.e2e.yml
+  COMPOSE_PROJECT_NAME: words-gate-stack
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_PORT: 55432
+  REDIS_PORT: 56379
   TEST_DB_NAME: vocabapp_test_full
   TEST_INTERNAL_API_URL: http://backend:8000/api
   TEST_BACKEND_PORT: 18000
   TEST_PUBLIC_PORT: 18088
   TEST_ADMIN_PORT: 13001
-  WORDS_DATA_DIR: ${{ github.workspace }}/data
+  WORDS_DATA_DIR: ./data
+  ENVIRONMENT: test
+  DEV_TEST_USERS_ENABLED: "true"
   JWT_SECRET: test-secret
+  LOG_LEVEL: INFO
+  CELERY_QUEUES: default,imports
+  ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
+  E2E_BASE_URL: http://frontend:3000
+  E2E_API_URL: http://backend:8000/api
+  E2E_ADMIN_URL: http://admin-frontend:3001
 
 jobs:
   backend:
     name: Backend (lint + test)
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: vocabapp_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U vocabapp -d vocabapp_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 3s
-          --health-retries 5
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
@@ -59,7 +47,7 @@ jobs:
 
       - uses: actions/setup-python@v6.2.0
         with:
-          python-version: "3.13"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: backend/requirements*.txt
 
@@ -71,37 +59,69 @@ jobs:
       - name: Lint
         run: ruff check .
 
-      - name: Review + SRS regression subset
-        env:
-          DATABASE_URL: postgresql+asyncpg://vocabapp:testpass@localhost:5432/vocabapp_test
-          DATABASE_URL_SYNC: postgresql://vocabapp:testpass@localhost:5432/vocabapp_test
-          REDIS_URL: redis://localhost:6379
-          ENVIRONMENT: test
-          JWT_SECRET: test-secret
-        run: >
-          pytest -q
-          tests/test_imports_api.py
-          tests/test_import_jobs_api.py
-          tests/test_source_imports_service.py
-          tests/test_lexicon_compiled_review_models.py
-          tests/test_review_service.py
-          tests/test_review_api.py
-          tests/test_user_preferences_api.py
-          tests/test_learner_knowledge_models.py
-          tests/test_knowledge_map_api.py
+      - name: Write gate env file
+        working-directory: .
+        run: |
+          cat > .env.stack.gate <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 
-      - name: Test
-        env:
-          DATABASE_URL: postgresql+asyncpg://vocabapp:testpass@localhost:5432/vocabapp_test
-          DATABASE_URL_SYNC: postgresql://vocabapp:testpass@localhost:5432/vocabapp_test
-          REDIS_URL: redis://localhost:6379
-          ENVIRONMENT: test
-          JWT_SECRET: test-secret
-        run: pytest -q
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=${POSTGRES_PORT}
+          REDIS_PORT=${REDIS_PORT}
+
+          TEST_DB_NAME=${TEST_DB_NAME}
+
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
+
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          TEST_INTERNAL_API_URL=${TEST_INTERNAL_API_URL}
+
+          DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          REDIS_URL=redis://redis:6379/0
+
+          ENVIRONMENT=${ENVIRONMENT}
+          DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED}
+          JWT_SECRET=${JWT_SECRET}
+          LOG_LEVEL=${LOG_LEVEL}
+          CELERY_QUEUES=${CELERY_QUEUES}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_API_URL=${E2E_API_URL}
+          E2E_ADMIN_URL=${E2E_ADMIN_URL}
+          EOF
+
+      - name: Bootstrap backend venv
+        working-directory: .
+        run: |
+          python -m venv .venv-backend
+          ./.venv-backend/bin/pip install -r backend/requirements.txt -r backend/requirements-test.txt
+
+      - name: Backend subset
+        working-directory: .
+        run: ./scripts/ci/run-backend-suite.sh subset
+
+      - name: Backend full
+        working-directory: .
+        run: ./scripts/ci/run-backend-suite.sh full
+
+      - name: Upload backend artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: backend-ci-artifacts
+          path: |
+            artifacts/ci-gate/backend-subset
+            artifacts/ci-gate/backend-full
+          if-no-files-found: ignore
 
   frontend:
     name: Frontend (lint + test + build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
@@ -112,30 +132,56 @@ jobs:
 
       - uses: actions/setup-node@v6.3.0
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
+      - name: Write gate env file
+        working-directory: .
+        run: |
+          cat > .env.stack.gate <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 
-      - name: Review + SRS regression subset
-        run: npm run test:review
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=${POSTGRES_PORT}
+          REDIS_PORT=${REDIS_PORT}
 
-      - name: Test
-        run: npm test -- --runInBand
+          TEST_DB_NAME=${TEST_DB_NAME}
 
-      - name: Build
-        env:
-          NEXT_PUBLIC_API_URL: http://backend:8000/api
-        run: npm run build
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
+
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          TEST_INTERNAL_API_URL=${TEST_INTERNAL_API_URL}
+
+          DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          REDIS_URL=redis://redis:6379/0
+
+          ENVIRONMENT=${ENVIRONMENT}
+          DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED}
+          JWT_SECRET=${JWT_SECRET}
+          LOG_LEVEL=${LOG_LEVEL}
+          CELERY_QUEUES=${CELERY_QUEUES}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_API_URL=${E2E_API_URL}
+          E2E_ADMIN_URL=${E2E_ADMIN_URL}
+          EOF
+
+      - name: Frontend full gate
+        working-directory: .
+        run: ./scripts/ci/run-frontend-suite.sh full
 
   admin-frontend:
     name: Admin Frontend (lint + test + build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
@@ -146,27 +192,56 @@ jobs:
 
       - uses: actions/setup-node@v6.3.0
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: admin-frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
+      - name: Write gate env file
+        working-directory: .
+        run: |
+          cat > .env.stack.gate <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 
-      - name: Test
-        run: npm test -- --runInBand
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=${POSTGRES_PORT}
+          REDIS_PORT=${REDIS_PORT}
 
-      - name: Build
-        env:
-          NEXT_PUBLIC_API_URL: http://backend:8000/api
-        run: npm run build
+          TEST_DB_NAME=${TEST_DB_NAME}
+
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
+
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          TEST_INTERNAL_API_URL=${TEST_INTERNAL_API_URL}
+
+          DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          REDIS_URL=redis://redis:6379/0
+
+          ENVIRONMENT=${ENVIRONMENT}
+          DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED}
+          JWT_SECRET=${JWT_SECRET}
+          LOG_LEVEL=${LOG_LEVEL}
+          CELERY_QUEUES=${CELERY_QUEUES}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_API_URL=${E2E_API_URL}
+          E2E_ADMIN_URL=${E2E_ADMIN_URL}
+          EOF
+
+      - name: Admin frontend full gate
+        working-directory: .
+        run: ./scripts/ci/run-admin-suite.sh full
 
   lexicon:
     name: Lexicon Tool (test + smoke)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       NLTK_DATA: ~/.cache/nltk_data
 
@@ -175,7 +250,7 @@ jobs:
 
       - uses: actions/setup-python@v6.2.0
         with:
-          python-version: "3.13"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: |
             tools/lexicon/requirements.txt
@@ -195,45 +270,58 @@ jobs:
       - name: Download WordNet corpora
         run: python -m nltk.downloader -d "$NLTK_DATA" wordnet omw-1.4
 
-      - name: Run full lexicon test suite
-        run: make ci-test-lexicon
-
-      - name: Run lexicon smoke flow
-        env:
-          LEXICON_SKIP_VENV_GUARD: "1"
+      - name: Write gate env file
+        working-directory: .
         run: |
-          set -euo pipefail
-          smoke_dir="${RUNNER_TEMP}/lexicon-smoke"
-          rm -rf "$smoke_dir"
-          mkdir -p "$smoke_dir"
-          python -m tools.lexicon.cli build-base run set lead --output-dir "$smoke_dir"
-          python -m tools.lexicon.cli enrich --snapshot-dir "$smoke_dir" --provider-mode placeholder
-          python -m tools.lexicon.cli validate --snapshot-dir "$smoke_dir"
-          test -f "$smoke_dir/words.enriched.jsonl"
-          python - <<'PY' "$smoke_dir/words.enriched.jsonl"
-          import json
-          import sys
-          from pathlib import Path
+          cat > .env.stack.gate <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 
-          rows = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()]
-          assert rows, "expected at least one compiled word row"
-          phonetics = rows[0]["phonetics"]
-          assert set(phonetics.keys()) == {"us", "uk", "au"}
-          assert all(isinstance(phonetics[accent]["ipa"], str) and phonetics[accent]["ipa"] for accent in ("us", "uk", "au"))
-          PY
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=${POSTGRES_PORT}
+          REDIS_PORT=${REDIS_PORT}
+
+          TEST_DB_NAME=${TEST_DB_NAME}
+
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
+
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          TEST_INTERNAL_API_URL=${TEST_INTERNAL_API_URL}
+
+          DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          REDIS_URL=redis://redis:6379/0
+
+          ENVIRONMENT=${ENVIRONMENT}
+          DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED}
+          JWT_SECRET=${JWT_SECRET}
+          LOG_LEVEL=${LOG_LEVEL}
+          CELERY_QUEUES=${CELERY_QUEUES}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_API_URL=${E2E_API_URL}
+          E2E_ADMIN_URL=${E2E_ADMIN_URL}
+          EOF
+
+      - name: Lexicon gate
+        working-directory: .
+        run: ./scripts/ci/run-lexicon-suite.sh gate
 
   e2e-smoke:
     name: E2E Smoke (required)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
-    needs: [backend, frontend, admin-frontend, lexicon, e2e-review-srs]
+    needs: [backend, frontend, admin-frontend, lexicon]
 
     steps:
       - uses: actions/checkout@v6.0.2
 
       - uses: actions/setup-node@v6.3.0
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 
@@ -242,93 +330,45 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: npm ci --prefix e2e
 
-      - name: Start app stack (docker compose)
-        env:
-          POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: change_this_password_in_production
-          NEXT_PUBLIC_API_URL: http://backend:8000/api
-          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
+      - name: Write gate env file
+        working-directory: .
         run: |
-          docker volume create words_pg_data >/dev/null
-          docker volume create words_redis_data >/dev/null
-          docker volume create words_uploads_data >/dev/null
-          mkdir -p "${WORDS_DATA_DIR}"
-          docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
+          cat > .env.stack.gate <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 
-      - name: Wait for backend and frontends
-        run: |
-          set -euo pipefail
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=${POSTGRES_PORT}
+          REDIS_PORT=${REDIS_PORT}
 
-          backend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
-              backend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${backend_ready}" -ne 1 ]; then
-            echo "Backend health endpoint did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend
-            exit 1
-          fi
+          TEST_DB_NAME=${TEST_DB_NAME}
 
-          frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
-              frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${frontend_ready}" -ne 1 ]; then
-            echo "Frontend did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend frontend nginx
-            exit 1
-          fi
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
 
-          admin_frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
-              admin_frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${admin_frontend_ready}" -ne 1 ]; then
-            echo "Admin frontend did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend admin-frontend
-            exit 1
-          fi
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          TEST_INTERNAL_API_URL=${TEST_INTERNAL_API_URL}
 
-      - name: Apply migrations
-        run: docker compose ${STACK_COMPOSE_FILES} exec -T backend alembic upgrade head
+          DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          REDIS_URL=redis://redis:6379/0
+
+          ENVIRONMENT=${ENVIRONMENT}
+          DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED}
+          JWT_SECRET=${JWT_SECRET}
+          LOG_LEVEL=${LOG_LEVEL}
+          CELERY_QUEUES=${CELERY_QUEUES}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_API_URL=${E2E_API_URL}
+          E2E_ADMIN_URL=${E2E_ADMIN_URL}
+          EOF
 
       - name: Run Playwright smoke suite
-        env:
-          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/${{ env.TEST_DB_NAME }}
-        run: |
-          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
-            -e E2E_BASE_URL=http://frontend:3000 \
-            -e E2E_API_URL=http://backend:8000/api \
-            -e E2E_ADMIN_URL=http://admin-frontend:3001 \
-            -e E2E_DB_URL=${E2E_DB_URL} \
-            playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"
-
-      - name: Collect docker compose logs
-        if: failure()
-        run: |
-          compose_logs_dir="${RUNNER_TEMP}/e2e-smoke-compose-logs"
-          mkdir -p "${compose_logs_dir}"
-          docker compose ${STACK_COMPOSE_FILES} ps > "${compose_logs_dir}/ps.txt"
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
+        working-directory: .
+        run: ENV_FILE=.env.stack.gate ./scripts/ci/run-e2e-suite.sh smoke
 
       - name: Upload Playwright smoke artifacts
         if: always()
@@ -336,26 +376,23 @@ jobs:
         with:
           name: playwright-smoke-artifacts
           path: |
+            artifacts/ci-gate/e2e-smoke
             e2e/playwright-report
             e2e/test-results
-            ${{ runner.temp }}/e2e-smoke-compose-logs
           if-no-files-found: ignore
-
-      - name: Tear down app stack
-        if: always()
-        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
   e2e-review-srs:
     name: E2E Review + SRS Scenarios (required)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
+    needs: [e2e-smoke]
 
     steps:
       - uses: actions/checkout@v6.0.2
 
       - uses: actions/setup-node@v6.3.0
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 
@@ -364,93 +401,45 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: npm ci --prefix e2e
 
-      - name: Start app stack (docker compose)
-        env:
-          POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: change_this_password_in_production
-          NEXT_PUBLIC_API_URL: http://backend:8000/api
-          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
+      - name: Write gate env file
+        working-directory: .
         run: |
-          docker volume create words_pg_data >/dev/null
-          docker volume create words_redis_data >/dev/null
-          docker volume create words_uploads_data >/dev/null
-          mkdir -p "${WORDS_DATA_DIR}"
-          docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
+          cat > .env.stack.gate <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 
-      - name: Wait for backend and frontends
-        run: |
-          set -euo pipefail
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=${POSTGRES_PORT}
+          REDIS_PORT=${REDIS_PORT}
 
-          backend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
-              backend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${backend_ready}" -ne 1 ]; then
-            echo "Backend health endpoint did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend
-            exit 1
-          fi
+          TEST_DB_NAME=${TEST_DB_NAME}
 
-          frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
-              frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${frontend_ready}" -ne 1 ]; then
-            echo "Frontend did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend frontend nginx
-            exit 1
-          fi
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
 
-          admin_frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
-              admin_frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${admin_frontend_ready}" -ne 1 ]; then
-            echo "Admin frontend did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend admin-frontend
-            exit 1
-          fi
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          TEST_INTERNAL_API_URL=${TEST_INTERNAL_API_URL}
 
-      - name: Apply migrations
-        run: docker compose ${STACK_COMPOSE_FILES} exec -T backend alembic upgrade head
+          DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          REDIS_URL=redis://redis:6379/0
 
-      - name: Run Playwright review + SRS scenario suite
-        env:
-          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/${{ env.TEST_DB_NAME }}
-        run: |
-          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
-            -e E2E_BASE_URL=http://frontend:3000 \
-            -e E2E_API_URL=http://backend:8000/api \
-            -e E2E_ADMIN_URL=http://admin-frontend:3001 \
-            -e E2E_DB_URL=${E2E_DB_URL} \
-            playwright sh -lc "cd /workspace/e2e && npm run test:review:ci"
+          ENVIRONMENT=${ENVIRONMENT}
+          DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED}
+          JWT_SECRET=${JWT_SECRET}
+          LOG_LEVEL=${LOG_LEVEL}
+          CELERY_QUEUES=${CELERY_QUEUES}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
 
-      - name: Collect docker compose logs
-        if: failure()
-        run: |
-          compose_logs_dir="${RUNNER_TEMP}/e2e-review-srs-compose-logs"
-          mkdir -p "${compose_logs_dir}"
-          docker compose ${STACK_COMPOSE_FILES} ps > "${compose_logs_dir}/ps.txt"
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_API_URL=${E2E_API_URL}
+          E2E_ADMIN_URL=${E2E_ADMIN_URL}
+          EOF
+
+      - name: Run Playwright review + SRS suite
+        working-directory: .
+        run: ENV_FILE=.env.stack.gate ./scripts/ci/run-e2e-suite.sh review-srs
 
       - name: Upload Playwright review + SRS artifacts
         if: always()
@@ -458,18 +447,14 @@ jobs:
         with:
           name: playwright-review-srs-artifacts
           path: |
+            artifacts/ci-gate/e2e-review-srs
             e2e/playwright-report
             e2e/test-results
-            ${{ runner.temp }}/e2e-review-srs-compose-logs
           if-no-files-found: ignore
-
-      - name: Tear down app stack
-        if: always()
-        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
   e2e-admin:
     name: E2E Admin (required)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [e2e-smoke]
 
@@ -478,7 +463,7 @@ jobs:
 
       - uses: actions/setup-node@v6.3.0
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 
@@ -487,93 +472,45 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: npm ci --prefix e2e
 
-      - name: Start app stack (docker compose)
-        env:
-          POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: change_this_password_in_production
-          NEXT_PUBLIC_API_URL: http://backend:8000/api
-          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
+      - name: Write gate env file
+        working-directory: .
         run: |
-          docker volume create words_pg_data >/dev/null
-          docker volume create words_redis_data >/dev/null
-          docker volume create words_uploads_data >/dev/null
-          mkdir -p "${WORDS_DATA_DIR}"
-          docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
+          cat > .env.stack.gate <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 
-      - name: Wait for backend and frontends
-        run: |
-          set -euo pipefail
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=${POSTGRES_PORT}
+          REDIS_PORT=${REDIS_PORT}
 
-          backend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
-              backend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${backend_ready}" -ne 1 ]; then
-            echo "Backend health endpoint did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend
-            exit 1
-          fi
+          TEST_DB_NAME=${TEST_DB_NAME}
 
-          frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
-              frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${frontend_ready}" -ne 1 ]; then
-            echo "Frontend did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend frontend nginx
-            exit 1
-          fi
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
 
-          admin_frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
-              admin_frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${admin_frontend_ready}" -ne 1 ]; then
-            echo "Admin frontend did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend admin-frontend
-            exit 1
-          fi
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          TEST_INTERNAL_API_URL=${TEST_INTERNAL_API_URL}
 
-      - name: Apply migrations
-        run: docker compose ${STACK_COMPOSE_FILES} exec -T backend alembic upgrade head
+          DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          REDIS_URL=redis://redis:6379/0
+
+          ENVIRONMENT=${ENVIRONMENT}
+          DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED}
+          JWT_SECRET=${JWT_SECRET}
+          LOG_LEVEL=${LOG_LEVEL}
+          CELERY_QUEUES=${CELERY_QUEUES}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_API_URL=${E2E_API_URL}
+          E2E_ADMIN_URL=${E2E_ADMIN_URL}
+          EOF
 
       - name: Run Playwright admin suite
-        env:
-          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/${{ env.TEST_DB_NAME }}
-        run: |
-          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
-            -e E2E_BASE_URL=http://frontend:3000 \
-            -e E2E_API_URL=http://backend:8000/api \
-            -e E2E_ADMIN_URL=http://admin-frontend:3001 \
-            -e E2E_DB_URL=${E2E_DB_URL} \
-            playwright sh -lc "cd /workspace/e2e && npm run test:admin"
-
-      - name: Collect docker compose logs
-        if: failure()
-        run: |
-          compose_logs_dir="${RUNNER_TEMP}/e2e-admin-compose-logs"
-          mkdir -p "${compose_logs_dir}"
-          docker compose ${STACK_COMPOSE_FILES} ps > "${compose_logs_dir}/ps.txt"
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
+        working-directory: .
+        run: ENV_FILE=.env.stack.gate ./scripts/ci/run-e2e-suite.sh admin
 
       - name: Upload Playwright admin artifacts
         if: always()
@@ -581,18 +518,14 @@ jobs:
         with:
           name: playwright-admin-artifacts
           path: |
+            artifacts/ci-gate/e2e-admin
             e2e/playwright-report
             e2e/test-results
-            ${{ runner.temp }}/e2e-admin-compose-logs
           if-no-files-found: ignore
-
-      - name: Tear down app stack
-        if: always()
-        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
   e2e-user:
     name: E2E User (required)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [e2e-smoke]
 
@@ -601,7 +534,7 @@ jobs:
 
       - uses: actions/setup-node@v6.3.0
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 
@@ -610,93 +543,45 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: npm ci --prefix e2e
 
-      - name: Start app stack (docker compose)
-        env:
-          POSTGRES_USER: vocabapp
-          POSTGRES_PASSWORD: change_this_password_in_production
-          NEXT_PUBLIC_API_URL: http://backend:8000/api
-          ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
+      - name: Write gate env file
+        working-directory: .
         run: |
-          docker volume create words_pg_data >/dev/null
-          docker volume create words_redis_data >/dev/null
-          docker volume create words_uploads_data >/dev/null
-          mkdir -p "${WORDS_DATA_DIR}"
-          docker compose ${STACK_COMPOSE_FILES} up -d --build --force-recreate postgres redis backend worker frontend admin-frontend nginx
+          cat > .env.stack.gate <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
 
-      - name: Wait for backend and frontends
-        run: |
-          set -euo pipefail
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=${POSTGRES_PORT}
+          REDIS_PORT=${REDIS_PORT}
 
-          backend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_BACKEND_PORT}/api/health >/dev/null 2>&1; then
-              backend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${backend_ready}" -ne 1 ]; then
-            echo "Backend health endpoint did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend
-            exit 1
-          fi
+          TEST_DB_NAME=${TEST_DB_NAME}
 
-          frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_PUBLIC_PORT}/register >/dev/null 2>&1; then
-              frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${frontend_ready}" -ne 1 ]; then
-            echo "Frontend did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend frontend nginx
-            exit 1
-          fi
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
 
-          admin_frontend_ready=0
-          for i in {1..60}; do
-            if curl -fsS http://localhost:${TEST_ADMIN_PORT}/login >/dev/null 2>&1; then
-              admin_frontend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "${admin_frontend_ready}" -ne 1 ]; then
-            echo "Admin frontend did not become ready in time."
-            docker compose ${STACK_COMPOSE_FILES} ps
-            docker compose ${STACK_COMPOSE_FILES} logs --tail=200 migrate worker backend admin-frontend
-            exit 1
-          fi
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          TEST_INTERNAL_API_URL=${TEST_INTERNAL_API_URL}
 
-      - name: Apply migrations
-        run: docker compose ${STACK_COMPOSE_FILES} exec -T backend alembic upgrade head
+          DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          DATABASE_URL_SYNC=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}
+          REDIS_URL=redis://redis:6379/0
+
+          ENVIRONMENT=${ENVIRONMENT}
+          DEV_TEST_USERS_ENABLED=${DEV_TEST_USERS_ENABLED}
+          JWT_SECRET=${JWT_SECRET}
+          LOG_LEVEL=${LOG_LEVEL}
+          CELERY_QUEUES=${CELERY_QUEUES}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+
+          E2E_BASE_URL=${E2E_BASE_URL}
+          E2E_API_URL=${E2E_API_URL}
+          E2E_ADMIN_URL=${E2E_ADMIN_URL}
+          EOF
 
       - name: Run Playwright user suite
-        env:
-          E2E_DB_URL: postgresql://vocabapp:change_this_password_in_production@postgres:5432/${{ env.TEST_DB_NAME }}
-        run: |
-          docker compose ${E2E_COMPOSE_FILES} --profile tests run --rm --no-deps \
-            -e E2E_BASE_URL=http://frontend:3000 \
-            -e E2E_API_URL=http://backend:8000/api \
-            -e E2E_ADMIN_URL=http://admin-frontend:3001 \
-            -e E2E_DB_URL=${E2E_DB_URL} \
-            playwright sh -lc "cd /workspace/e2e && npm run test:user"
-
-      - name: Collect docker compose logs
-        if: failure()
-        run: |
-          compose_logs_dir="${RUNNER_TEMP}/e2e-user-compose-logs"
-          mkdir -p "${compose_logs_dir}"
-          docker compose ${STACK_COMPOSE_FILES} ps > "${compose_logs_dir}/ps.txt"
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 migrate > "${compose_logs_dir}/migrate.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 worker > "${compose_logs_dir}/worker.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 backend > "${compose_logs_dir}/backend.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 frontend > "${compose_logs_dir}/frontend.log" || true
-          docker compose ${STACK_COMPOSE_FILES} logs --tail=400 admin-frontend > "${compose_logs_dir}/admin-frontend.log" || true
+        working-directory: .
+        run: ENV_FILE=.env.stack.gate ./scripts/ci/run-e2e-suite.sh user
 
       - name: Upload Playwright user artifacts
         if: always()
@@ -704,33 +589,34 @@ jobs:
         with:
           name: playwright-user-artifacts
           path: |
+            artifacts/ci-gate/e2e-user
             e2e/playwright-report
             e2e/test-results
-            ${{ runner.temp }}/e2e-user-compose-logs
           if-no-files-found: ignore
-
-      - name: Tear down app stack
-        if: always()
-        run: docker compose ${STACK_COMPOSE_FILES} down -v --remove-orphans
 
   e2e-full-gate:
     name: E2E Full (required)
-    runs-on: ubuntu-latest
-    needs: [e2e-admin, e2e-user]
+    runs-on: ubuntu-24.04
+    needs: [e2e-review-srs, e2e-admin, e2e-user]
     if: always()
 
     steps:
-      - name: Fail if admin or user E2E failed
+      - name: Fail if review/SRS, admin, or user E2E failed
         env:
+          REVIEW_SRS_RESULT: ${{ needs.e2e-review-srs.result }}
           ADMIN_RESULT: ${{ needs.e2e-admin.result }}
           USER_RESULT: ${{ needs.e2e-user.result }}
         run: |
           set -euo pipefail
-          if [ "${ADMIN_RESULT}" != "success" ] && [ "${ADMIN_RESULT}" != "skipped" ]; then
+          if [ "${REVIEW_SRS_RESULT}" != "success" ]; then
+            echo "Review/SRS result: ${REVIEW_SRS_RESULT}"
+            exit 1
+          fi
+          if [ "${ADMIN_RESULT}" != "success" ]; then
             echo "Admin result: ${ADMIN_RESULT}"
             exit 1
           fi
-          if [ "${USER_RESULT}" != "success" ] && [ "${USER_RESULT}" != "skipped" ]; then
+          if [ "${USER_RESULT}" != "success" ]; then
             echo "User result: ${USER_RESULT}"
             exit 1
           fi

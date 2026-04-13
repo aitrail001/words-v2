@@ -20,7 +20,7 @@ concurrency:
 jobs:
   lexicon-openai-compatible-smoke:
     name: Lexicon OpenAI-Compatible Smoke (manual/nightly)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     if: github.event_name != 'pull_request'
     environment: lexicon-llm
@@ -37,7 +37,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: |
             tools/lexicon/requirements.txt
@@ -62,7 +62,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: tools/lexicon/package-lock.json
 

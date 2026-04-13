@@ -49,10 +49,13 @@ E2E_STAMP := e2e/node_modules/.lock-$(E2E_LOCK_HASH)
 LEXICON_STAMP := tools/lexicon/node_modules/.lock-$(LEXICON_LOCK_HASH)
 LEXICON_NODE_STAMP := tools/lexicon/node/node_modules/.lock-$(LEXICON_NODE_LOCK_HASH)
 
+GATE_ENV_FILE ?= .env.stack.gate
+
 .PHONY: help config chmod-scripts \
         volumes infra-up infra-down tools-up tools-down tools-logs \
         stack-up stack-build stack-down stack-logs stack-ps stack-restart stack-smoke stack-full \
-        ci-config ci-stack-up ci-stack-build ci-stack-down ci-stack-logs ci-stack-ps ci-stack-restart ci-stack-smoke ci-stack-full \
+        ci-config local-ci-up local-ci-build local-ci-down local-ci-logs local-ci-ps local-ci-restart local-ci-smoke local-ci-full \
+		gate-fast gate-full gate-e2e-smoke gate-e2e-review  gate-e2e-admin gate-e2e-user \
         db-bootstrap db-backup-dev db-backup-test db-restore-dev db-restore-test db-refresh-template db-create-run \
         backend-install lexicon-install frontend-install admin-install e2e-install \
         lexicon-enrich-core lexicon-enrich-translations lexicon-merge lexicon-smoke-real \
@@ -110,14 +113,14 @@ help:
 	  "make stack-smoke           # run Playwright smoke against running test stack" \
 	  "make stack-full            # run full Playwright suite against running test stack" \
 	  "make ci-config             # validate CI-style compose config using CI_ENV_FILE" \
-	  "make ci-stack-up           # start CI-style stack without rebuilding" \
-	  "make ci-stack-build        # rebuild/start CI-style stack" \
-	  "make ci-stack-down         # stop CI-style stack" \
-	  "make ci-stack-logs         # tail CI-style stack logs" \
-	  "make ci-stack-ps           # show CI-style stack containers" \
-	  "make ci-stack-restart      # restart CI-style stack containers" \
-	  "make ci-stack-smoke        # run Playwright smoke against CI-style stack" \
-	  "make ci-stack-full         # run full Playwright suite against CI-style stack" \
+	  "make local-ci-up           # CI-like debugging: start CI-style stack without rebuilding" \
+	  "make local-ci-build        # CI-like debugging: rebuild/start CI-style stack" \
+	  "make local-ci-down         # CI-like debugging: stop CI-style stack" \
+	  "make local-ci-logs         # CI-like debugging: tail CI-style stack logs" \
+	  "make local-ci-ps           # CI-like debugging: show CI-style stack containers" \
+	  "make local-ci-restart      # CI-like debugging: restart CI-style stack containers" \
+	  "make local-ci-smoke        # CI-like debugging: run smoke e2e via the shared CI suite runner" \
+	  "make local-ci-full         # CI-like debugging: run full e2e via the shared CI suite runner" \
 	  "make db-backup-dev         # dump dev DB to DEV_FULL_DUMP_PATH" \
 	  "make db-backup-test        # dump test DB to TEST_FULL_DUMP_PATH" \
 	  "make db-restore-dev        # restore dev DB from TEST_FULL_DUMP_PATH" \
@@ -125,7 +128,13 @@ help:
 	  "make db-refresh-template   # refresh template DB from test DB" \
 	  "make db-create-run         # create disposable DB cloned from template" \
 	  "make nuc-rsync-data        # sync shared data root to NUC" \
-	  "make deploy-nuc            # pull latest code on NUC and deploy"
+	  "make deploy-nuc            # pull latest code on NUC and deploy" \
+	  "make gate-fast 			  # canonical fail-fast readiness gate" \
+	  "make gate-full			  # canonical full readiness gate mirroring required CI checks" \
+	  "make gate-e2e-smoke      # run Playwright smoke suite against disposable PR stack" \
+	  "make gate-e2e-review 	  # run Playwright review/SRS suite against disposable PR stack" \
+	  "make gate-e2e-admin 		  # run Playwright admin suite against disposable PR stack" \
+	  "make gate-e2e-user 		  # run Playwright user suite against disposable PR stack"
 
 config:
 	$(STACK_COMPOSE) config >/dev/null
@@ -185,29 +194,47 @@ stack-smoke:
 stack-full:
 	$(E2E_COMPOSE) --profile tests run --rm playwright npm run test:full
 
-ci-stack-up: volumes
+local-ci-up: volumes
 	$(CI_STACK_COMPOSE) up -d $(CI_STACK_WORKER_SCALE)
 
-ci-stack-build: volumes
+local-ci-build: volumes
 	$(CI_STACK_COMPOSE) up -d --build $(CI_STACK_WORKER_SCALE)
 
-ci-stack-down:
+local-ci-down:
 	$(CI_STACK_COMPOSE) down --remove-orphans
 
-ci-stack-logs:
+local-ci-logs:
 	$(CI_STACK_COMPOSE) logs -f --tail=200
 
-ci-stack-ps:
+local-ci-ps:
 	$(CI_STACK_COMPOSE) ps
 
-ci-stack-restart:
+local-ci-restart:
 	$(CI_STACK_COMPOSE) restart
 
-ci-stack-smoke:
-	$(CI_E2E_COMPOSE) --profile tests run --rm playwright npm run test:smoke:ci
+local-ci-smoke:
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh smoke
 
-ci-stack-full:
-	$(CI_E2E_COMPOSE) --profile tests run --rm playwright npm run test:full
+local-ci-full:
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh full
+
+gate-fast: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/gate-fast.sh
+
+gate-full: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/gate-full.sh
+
+gate-e2e-smoke: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh smoke
+
+gate-e2e-review: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh review-srs
+
+gate-e2e-admin: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh admin
+
+gate-e2e-user: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh user
 
 db-backup-dev: chmod-scripts
 	./scripts/db/backup-db.sh $(ENV_FILE) $(DEV_DB_NAME) $(DEV_FULL_DUMP_PATH)
@@ -316,8 +343,18 @@ e2e-install:
 	else \
 		echo "E2E node_modules already matches lockfile"; \
 	fi
-	@echo "Ensuring Playwright browsers exist in shared cache"
-	@cd e2e && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npx playwright install
+	@echo "Checking Playwright browsers in shared cache"
+	@bash -lc 'set -euo pipefail; \
+		cd e2e; \
+		PLAYWRIGHT_STATE="$$(PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npx playwright install --list)"; \
+		if printf "%s\n" "$$PLAYWRIGHT_STATE" | grep -q "$(PLAYWRIGHT_BROWSERS_PATH)/chromium-" \
+			&& printf "%s\n" "$$PLAYWRIGHT_STATE" | grep -q "$(PLAYWRIGHT_BROWSERS_PATH)/chromium_headless_shell-" \
+			&& printf "%s\n" "$$PLAYWRIGHT_STATE" | grep -q "$(PLAYWRIGHT_BROWSERS_PATH)/ffmpeg-"; then \
+			echo "Playwright Chromium browsers already present in shared cache"; \
+		else \
+			echo "Installing Playwright Chromium browsers into shared cache"; \
+			PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npx playwright install chromium; \
+		fi'
 
 worktree-bootstrap: backend-install lexicon-install frontend-install admin-install e2e-install
 	@echo "Worktree bootstrap complete"
@@ -385,7 +422,19 @@ test-lexicon: lexicon-install backend-install
 stack-test-lexicon: test-lexicon
 
 ci-test-lexicon:
-	python -m pytest tools/lexicon/tests -q
+	@if [ -x .venv-lexicon/bin/python ] && [ -x .venv-backend/bin/python ]; then \
+		.venv-lexicon/bin/python -m pytest tools/lexicon/tests -q --ignore=tools/lexicon/tests/test_import_db.py --ignore=tools/lexicon/tests/test_staging_import.py --ignore=tools/lexicon/tests/test_voice_import_db.py; \
+		.venv-backend/bin/python -m pytest tools/lexicon/tests/test_import_db.py tools/lexicon/tests/test_staging_import.py tools/lexicon/tests/test_voice_import_db.py -q; \
+	else \
+		PY_BIN=""; \
+		if command -v python3 >/dev/null 2>&1; then \
+			PY_BIN="$$(command -v python3)"; \
+		elif command -v python >/dev/null 2>&1; then \
+			PY_BIN="$$(command -v python)"; \
+		fi; \
+		test -n "$$PY_BIN"; \
+		"$$PY_BIN" -m pytest tools/lexicon/tests -q; \
+	fi
 
 smoke-local:
 	bash -lc 'set -euo pipefail; \

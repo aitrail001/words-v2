@@ -20,7 +20,7 @@ env:
 jobs:
   preprod-readiness:
     name: "Rehearsal: Rollback + Smoke Health"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       POSTGRES_USER: vocabapp
@@ -38,7 +38,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 
