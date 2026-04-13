@@ -1,11 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
 
+const getPostLoginPath = (nextPath: string | null): string => {
+  if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return "/";
+  }
+
+  return nextPath;
+};
+
+const getRequestedPostLoginPath = (): string => {
+  if (typeof window === "undefined") {
+    return "/";
+  }
+
+  return getPostLoginPath(new URLSearchParams(window.location.search).get("next"));
+};
+
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -25,7 +39,7 @@ export default function LoginPage() {
         { email, password }
       );
       apiClient.setTokens(response.access_token, response.refresh_token);
-      router.push("/");
+      window.location.assign(getRequestedPostLoginPath());
     } catch (err: any) {
       setError(err.message || "Login failed");
     } finally {

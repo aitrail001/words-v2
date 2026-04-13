@@ -22,6 +22,8 @@ export default function SearchPage() {
   const [results, setResults] = useState<KnowledgeMapEntrySummary[]>([]);
   const [history, setHistory] = useState<SearchHistoryItem[]>([]);
   const [showTranslations, setShowTranslations] = useState(true);
+  const trimmedQuery = query.trim();
+  const visibleResults = trimmedQuery.length < 2 ? [] : results;
 
   useEffect(() => {
     let active = true;
@@ -49,14 +51,12 @@ export default function SearchPage() {
 
   useEffect(() => {
     let active = true;
-    const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      setResults([]);
+    if (trimmedQuery.length < 2) {
       return;
     }
 
     const timer = setTimeout(() => {
-      searchKnowledgeMap(trimmed)
+      searchKnowledgeMap(trimmedQuery)
         .then((response) => {
           if (active) {
             setResults(response.items);
@@ -73,7 +73,7 @@ export default function SearchPage() {
       active = false;
       clearTimeout(timer);
     };
-  }, [query]);
+  }, [trimmedQuery]);
 
   const rememberSearch = async (item: KnowledgeMapEntrySummary) => {
     const historyItem = await createKnowledgeMapSearchHistory({
@@ -105,7 +105,13 @@ export default function SearchPage() {
         <input
           type="text"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            if (nextQuery.trim().length < 2) {
+              setResults([]);
+            }
+            setQuery(nextQuery);
+          }}
           placeholder="Search words and phrases"
           className="w-full rounded-[1rem] border border-[#ddd8ee] bg-white px-4 py-3 text-sm text-[#3d2456] outline-none placeholder:text-[#a199b3]"
         />
@@ -143,7 +149,7 @@ export default function SearchPage() {
 
       {results.length > 0 && (
         <div className="space-y-3">
-          {results.map((item) => {
+          {visibleResults.map((item) => {
             const summaryTranslation = showTranslations
               ? item.translation ?? item.primary_definition ?? null
               : null;

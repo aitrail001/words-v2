@@ -1,22 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { redirectToLogin } from "@/lib/auth-redirect";
-import { readAccessToken } from "@/lib/auth-session";
+import { AUTH_TOKEN_CHANGED_EVENT, readAccessToken } from "@/lib/auth-session";
+
+const subscribeToHydration = () => () => undefined;
+
+const subscribeToAuth = (onStoreChange: () => void) => {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  window.addEventListener(AUTH_TOKEN_CHANGED_EVENT, onStoreChange);
+  return () => {
+    window.removeEventListener(AUTH_TOKEN_CHANGED_EVENT, onStoreChange);
+  };
+};
 
 export default function AdminHomePage() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const isHydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false);
+  const hasAccessToken = useSyncExternalStore(
+    subscribeToAuth,
+    () => Boolean(readAccessToken()),
+    () => false,
+  );
 
   useEffect(() => {
-    const hasToken = Boolean(readAccessToken());
-    setIsAuthenticated(hasToken);
-    if (!hasToken) {
+    if (isHydrated && !hasAccessToken) {
       redirectToLogin("/");
     }
-  }, []);
+  }, [hasAccessToken, isHydrated]);
 
-  if (!isAuthenticated) {
+  if (!isHydrated || !hasAccessToken) {
     return <div data-testid="admin-auth-loading" className="text-sm text-gray-500">Checking authentication…</div>;
   }
 

@@ -36,20 +36,18 @@ export default function ReviewQueueBucketPage() {
   const order = isReviewQueueBucketOrder(rawOrder)
     ? rawOrder
     : DEFAULT_ORDER;
+  const requestKey = bucket ? `${bucket}:${sort}:${order}` : null;
   const [detail, setDetail] = useState<ReviewQueueBucketDetailResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [resolvedRequestKey, setResolvedRequestKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loading = requestKey !== null && resolvedRequestKey !== requestKey;
 
   useEffect(() => {
     if (!bucket) {
-      setLoading(false);
-      setError(null);
       return;
     }
 
     let active = true;
-    setLoading(true);
-    setError(null);
 
     getReviewQueueBucketDetail(bucket, sort, order)
       .then((response) => {
@@ -57,20 +55,21 @@ export default function ReviewQueueBucketPage() {
           return;
         }
         setDetail(response);
-        setLoading(false);
+        setError(null);
+        setResolvedRequestKey(requestKey);
       })
       .catch(() => {
         if (!active) {
           return;
         }
         setError("Unable to load this review bucket.");
-        setLoading(false);
+        setResolvedRequestKey(requestKey);
       });
 
     return () => {
       active = false;
     };
-  }, [bucket, order, sort]);
+  }, [bucket, order, requestKey, sort]);
 
   if (!bucket) {
     return (

@@ -1,7 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import AdminHomePage from "@/app/page";
 import { getAuthRedirectPath } from "@/lib/auth-route-guard";
 import { AuthNavigation } from "@/lib/auth-nav";
+import { redirectToLogin } from "@/lib/auth-redirect";
+import { readAccessToken } from "@/lib/auth-session";
 
 jest.mock("next/link", () => {
   const MockLink = ({ children, href, ...props }: any) => (
@@ -23,20 +25,38 @@ jest.mock("@/lib/auth-redirect", () => ({
 }));
 
 describe("AdminHomePage", () => {
-  it("renders admin dashboard and lexicon ops link", () => {
+  const mockRedirectToLogin = redirectToLogin as jest.MockedFunction<typeof redirectToLogin>;
+  const mockReadAccessToken = readAccessToken as jest.MockedFunction<typeof readAccessToken>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockReadAccessToken.mockReturnValue("active-token");
+  });
+
+  it("renders admin dashboard and lexicon ops link", async () => {
     render(<AdminHomePage />);
 
-    expect(screen.getByTestId("admin-home-page")).toBeInTheDocument();
+    expect(await screen.findByTestId("admin-home-page")).toBeInTheDocument();
     expect(screen.getByText(/Compiled Review as the default review path/i)).toBeInTheDocument();
     expect(screen.getByTestId("admin-home-lexicon-link")).toHaveAttribute(
       "href",
       "/lexicon/ops",
     );
   });
+
+  it("redirects unauthenticated users after mount", async () => {
+    mockReadAccessToken.mockReturnValue(null);
+    render(<AdminHomePage />);
+
+    expect(screen.getByTestId("admin-auth-loading")).toBeInTheDocument();
+    await waitFor(() => expect(mockRedirectToLogin).toHaveBeenCalledWith("/"));
+  });
 });
 
 describe("AuthNavigation", () => {
-  it("renders the compact top-level lexicon menu", () => {
+  it("renders the compact top-level lexicon menu", async () => {
+    const mockReadAccessToken = readAccessToken as jest.MockedFunction<typeof readAccessToken>;
+    mockReadAccessToken.mockReturnValue("active-token");
     render(<AuthNavigation />);
 
     expect(screen.getByTestId("nav-home-link")).toHaveTextContent("Home");
@@ -47,7 +67,7 @@ describe("AuthNavigation", () => {
     expect(screen.getByTestId("nav-lexicon-epub-cache-link")).toHaveTextContent("EPUB Cache");
     expect(screen.getByTestId("nav-lexicon-import-db-link")).toHaveTextContent("DB Management");
     expect(screen.getByTestId("nav-lexicon-import-db-link")).toHaveAttribute("href", "/lexicon/import-db");
-    expect(screen.getByTestId("nav-logout-button")).toHaveTextContent("Logout");
+    expect(await screen.findByTestId("nav-logout-button")).toHaveTextContent("Logout");
     expect(screen.queryByTestId("nav-lexicon-jsonl-review-link")).not.toBeInTheDocument();
     expect(screen.queryByTestId("nav-lexicon-db-inspector-link")).not.toBeInTheDocument();
   });
@@ -60,7 +80,7 @@ describe("Auth middleware", () => {
 
   it("redirects unauthenticated /lexicon requests", () => {
     expect(getAuthRedirectPath("/lexicon", false)).toBe(
-      "/login?next=%2Flexicon",
+      "/login?next=%2Flexicon%2Fops",
     );
   });
 

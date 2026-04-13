@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useMemo, useState } from "react";
 
 type PagedRecordListProps<T> = {
   items: T[];
@@ -27,14 +27,11 @@ export function PagedRecordList<T>({
 }: PagedRecordListProps<T>) {
   const [page, setPage] = useState(0);
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
-
-  useEffect(() => {
-    setPage((current) => Math.min(current, pageCount - 1));
-  }, [pageCount]);
+  const clampedPage = Math.min(page, pageCount - 1);
 
   const pagedItems = useMemo(
-    () => items.slice(page * pageSize, page * pageSize + pageSize),
-    [items, page, pageSize],
+    () => items.slice(clampedPage * pageSize, clampedPage * pageSize + pageSize),
+    [clampedPage, items, pageSize],
   );
 
   return (
@@ -42,7 +39,7 @@ export function PagedRecordList<T>({
       <div className="flex items-center justify-between gap-3">
         <h5 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">{title}</h5>
         <span className="text-xs text-gray-500">
-          page {page + 1} / {pageCount}
+          page {clampedPage + 1} / {pageCount}
         </span>
       </div>
       <div className="space-y-2">
@@ -66,8 +63,8 @@ export function PagedRecordList<T>({
         <button
           type="button"
           data-testid={`${testId}-prev-page`}
-          onClick={() => setPage((current) => Math.max(0, current - 1))}
-          disabled={page === 0}
+          onClick={() => setPage((current) => Math.max(0, Math.min(current, pageCount - 1) - 1))}
+          disabled={clampedPage === 0}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50"
         >
           Previous
@@ -75,8 +72,8 @@ export function PagedRecordList<T>({
         <button
           type="button"
           data-testid={`${testId}-next-page`}
-          onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
-          disabled={page >= pageCount - 1}
+          onClick={() => setPage((current) => Math.min(pageCount - 1, Math.min(current, pageCount - 1) + 1))}
+          disabled={clampedPage >= pageCount - 1}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50"
         >
           Next

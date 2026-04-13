@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 
 import { EpubCacheNav } from "@/components/lexicon/epub-cache-nav";
 import { ApiError } from "@/lib/api-client";
@@ -67,7 +67,7 @@ export default function EpubCacheBatchDetailPage() {
   const [selectedJobDetail, setSelectedJobDetail] = useState<AdminImportJobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadBatch = useCallback(async () => {
+  const loadBatch = useEffectEvent(async () => {
     if (!batchId) return;
     try {
       const [batchResponse, jobsResponse] = await Promise.all([
@@ -82,7 +82,16 @@ export default function EpubCacheBatchDetailPage() {
     } catch (nextError) {
       setError(resolveUiErrorMessage(nextError, "Failed to load batch"));
     }
-  }, [batchId, selectedJobId]);
+  });
+
+  const loadSelectedJobDetail = useEffectEvent(async (jobId: string) => {
+    try {
+      const detail = await getAdminImportJob(jobId);
+      setSelectedJobDetail(detail);
+    } catch (nextError) {
+      setError(resolveUiErrorMessage(nextError, "Failed to load import job detail"));
+    }
+  });
 
   useEffect(() => {
     if (!readAccessToken()) {
@@ -90,7 +99,7 @@ export default function EpubCacheBatchDetailPage() {
       return;
     }
     void loadBatch();
-  }, [batchId, loadBatch]);
+  }, [batchId]);
 
   useEffect(() => {
     if (!batchId) return;
@@ -99,17 +108,18 @@ export default function EpubCacheBatchDetailPage() {
       void loadBatch();
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [batch, batchId, loadBatch]);
+  }, [batch, batchId]);
 
   useEffect(() => {
     if (!selectedJobId) {
-      setSelectedJobDetail(null);
       return;
     }
-    getAdminImportJob(selectedJobId)
-      .then((detail) => setSelectedJobDetail(detail))
-      .catch((nextError) => setError(resolveUiErrorMessage(nextError, "Failed to load import job detail")));
+    void loadSelectedJobDetail(selectedJobId);
   }, [selectedJobId]);
+
+  const visibleSelectedJobDetail = selectedJobDetail?.id === selectedJobId
+    ? selectedJobDetail
+    : null;
 
   const summary = useMemo(() => {
     if (!batch) return "-";
@@ -156,23 +166,23 @@ export default function EpubCacheBatchDetailPage() {
 
         <div className="rounded-lg border border-slate-200 bg-white p-4" data-testid="epub-cache-batch-job-detail">
           <h3 className="text-sm font-semibold text-slate-900">Book Import Detail</h3>
-          {!selectedJobDetail ? (
+          {!visibleSelectedJobDetail ? (
             <p className="mt-2 text-xs text-slate-500">Select a book import to inspect details.</p>
           ) : (
             <div className="mt-3 space-y-2 text-sm text-slate-700">
-              <p><span className="font-medium">Title:</span> {selectedJobDetail.source_title || selectedJobDetail.list_name || "-"}</p>
-              <p><span className="font-medium">Filename:</span> {selectedJobDetail.source_filename}</p>
-              <p><span className="font-medium">Author:</span> {selectedJobDetail.source_author || "-"}</p>
-              <p><span className="font-medium">Status:</span> {selectedJobDetail.status}</p>
-              <p><span className="font-medium">From cache:</span> {selectedJobDetail.from_cache ? "yes" : "no"}</p>
-              <p><span className="font-medium">Matched entries:</span> {selectedJobDetail.matched_entry_count}</p>
-              <p><span className="font-medium">Words:</span> {selectedJobDetail.word_entry_count}</p>
-              <p><span className="font-medium">Phrases:</span> {selectedJobDetail.phrase_entry_count}</p>
-              <p><span className="font-medium">Progress:</span> {selectedJobDetail.progress_completed}/{selectedJobDetail.progress_total}</p>
-              <p><span className="font-medium">Duration:</span> {formatDetailDuration(selectedJobDetail.processing_duration_seconds, selectedJobDetail.from_cache)}</p>
-              <p><span className="font-medium">Started:</span> {formatStarted(selectedJobDetail.started_at, selectedJobDetail.from_cache)}</p>
-              <p><span className="font-medium">Completed:</span> {formatDate(selectedJobDetail.completed_at)}</p>
-              {selectedJobDetail.error_message ? <p className="text-rose-700"><span className="font-medium">Error:</span> {selectedJobDetail.error_message}</p> : null}
+              <p><span className="font-medium">Title:</span> {visibleSelectedJobDetail.source_title || visibleSelectedJobDetail.list_name || "-"}</p>
+              <p><span className="font-medium">Filename:</span> {visibleSelectedJobDetail.source_filename}</p>
+              <p><span className="font-medium">Author:</span> {visibleSelectedJobDetail.source_author || "-"}</p>
+              <p><span className="font-medium">Status:</span> {visibleSelectedJobDetail.status}</p>
+              <p><span className="font-medium">From cache:</span> {visibleSelectedJobDetail.from_cache ? "yes" : "no"}</p>
+              <p><span className="font-medium">Matched entries:</span> {visibleSelectedJobDetail.matched_entry_count}</p>
+              <p><span className="font-medium">Words:</span> {visibleSelectedJobDetail.word_entry_count}</p>
+              <p><span className="font-medium">Phrases:</span> {visibleSelectedJobDetail.phrase_entry_count}</p>
+              <p><span className="font-medium">Progress:</span> {visibleSelectedJobDetail.progress_completed}/{visibleSelectedJobDetail.progress_total}</p>
+              <p><span className="font-medium">Duration:</span> {formatDetailDuration(visibleSelectedJobDetail.processing_duration_seconds, visibleSelectedJobDetail.from_cache)}</p>
+              <p><span className="font-medium">Started:</span> {formatStarted(visibleSelectedJobDetail.started_at, visibleSelectedJobDetail.from_cache)}</p>
+              <p><span className="font-medium">Completed:</span> {formatDate(visibleSelectedJobDetail.completed_at)}</p>
+              {visibleSelectedJobDetail.error_message ? <p className="text-rose-700"><span className="font-medium">Error:</span> {visibleSelectedJobDetail.error_message}</p> : null}
             </div>
           )}
         </div>
