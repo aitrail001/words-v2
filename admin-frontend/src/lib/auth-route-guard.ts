@@ -9,5 +9,6 @@ export const getAuthRedirectPath = (
     return null;
   }
 
-  return `/login?next=${encodeURIComponent(pathname)}`;
+  const normalizedPath = pathname === "/lexicon" ? "/lexicon/ops" : pathname;
+  return `/login?next=${encodeURIComponent(normalizedPath)}`;
 };

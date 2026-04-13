@@ -60,7 +60,7 @@ describe("Auth middleware", () => {
 
   it("redirects unauthenticated /lexicon requests", () => {
     expect(getAuthRedirectPath("/lexicon", false)).toBe(
-      "/login?next=%2Flexicon",
+      "/login?next=%2Flexicon%2Fops",
     );
   });
 

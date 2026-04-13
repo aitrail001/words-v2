@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useMemo, useState } from "react";
 
 type HorizontalRecordRailProps<T> = {
   items: T[];
@@ -24,14 +24,12 @@ export function HorizontalRecordRail<T>({
   windowSize = 3,
 }: HorizontalRecordRailProps<T>) {
   const [windowStart, setWindowStart] = useState(0);
-
-  useEffect(() => {
-    setWindowStart((current) => Math.min(current, Math.max(0, items.length - windowSize)));
-  }, [items.length, windowSize]);
+  const maxWindowStart = Math.max(0, items.length - windowSize);
+  const clampedWindowStart = Math.min(windowStart, maxWindowStart);
 
   const visibleItems = useMemo(
-    () => items.slice(windowStart, windowStart + windowSize),
-    [items, windowStart, windowSize],
+    () => items.slice(clampedWindowStart, clampedWindowStart + windowSize),
+    [clampedWindowStart, items, windowSize],
   );
 
   return (
@@ -42,8 +40,8 @@ export function HorizontalRecordRail<T>({
           <button
             type="button"
             data-testid={`${testId}-prev`}
-            onClick={() => setWindowStart((current) => Math.max(0, current - 1))}
-            disabled={windowStart === 0}
+            onClick={() => setWindowStart((current) => Math.max(0, Math.min(current, maxWindowStart) - 1))}
+            disabled={clampedWindowStart === 0}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50"
           >
             Previous
@@ -51,8 +49,8 @@ export function HorizontalRecordRail<T>({
           <button
             type="button"
             data-testid={`${testId}-next`}
-            onClick={() => setWindowStart((current) => Math.min(Math.max(0, items.length - windowSize), current + 1))}
-            disabled={windowStart + windowSize >= items.length}
+            onClick={() => setWindowStart((current) => Math.min(maxWindowStart, Math.min(current, maxWindowStart) + 1))}
+            disabled={clampedWindowStart + windowSize >= items.length}
             className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50"
           >
             Next

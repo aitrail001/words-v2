@@ -6,15 +6,13 @@ import { redirectToLogin } from "@/lib/auth-redirect";
 import { readAccessToken } from "@/lib/auth-session";
 
 export default function AdminHomePage() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [isAuthenticated] = useState(() => Boolean(readAccessToken()));
 
   useEffect(() => {
-    const hasToken = Boolean(readAccessToken());
-    setIsAuthenticated(hasToken);
-    if (!hasToken) {
+    if (!isAuthenticated) {
       redirectToLogin("/");
     }
-  }, []);
+  }, [isAuthenticated]);
 
   if (!isAuthenticated) {
     return <div data-testid="admin-auth-loading" className="text-sm text-gray-500">Checking authentication…</div>;

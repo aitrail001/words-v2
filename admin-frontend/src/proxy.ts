@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { ACCESS_TOKEN_COOKIE_KEY } from "./src/lib/auth-session";
-import { getAuthRedirectPath } from "./src/lib/auth-route-guard";
+import { ACCESS_TOKEN_COOKIE_KEY } from "./lib/auth-session";
+import { getAuthRedirectPath } from "./lib/auth-route-guard";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const isAuthenticated = Boolean(
     request.cookies.get(ACCESS_TOKEN_COOKIE_KEY)?.value,
   );
