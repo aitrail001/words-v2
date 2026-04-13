@@ -50,12 +50,15 @@ LEXICON_STAMP := tools/lexicon/node_modules/.lock-$(LEXICON_LOCK_HASH)
 LEXICON_NODE_STAMP := tools/lexicon/node/node_modules/.lock-$(LEXICON_NODE_LOCK_HASH)
 
 GATE_ENV_FILE ?= .env.stack.gate
+E2E_SUITE ?= e2e-smoke
+E2E_REPORT_DIR ?= artifacts/ci-gate/$(E2E_SUITE)/playwright/html-report
 
 .PHONY: help config chmod-scripts \
         volumes infra-up infra-down tools-up tools-down tools-logs \
         stack-up stack-build stack-down stack-logs stack-ps stack-restart stack-smoke stack-full \
-        ci-config local-ci-up local-ci-build local-ci-down local-ci-logs local-ci-ps local-ci-restart local-ci-smoke local-ci-full \
+        ci-config local-ci-up local-ci-build local-ci-down local-ci-logs local-ci-ps local-ci-restart local-ci-smoke local-ci-smoke-debug local-ci-full \
 		gate-fast gate-full gate-e2e-smoke gate-e2e-review  gate-e2e-admin gate-e2e-user \
+        gate-clean-postgres-volumes \
         pr-open \
         db-bootstrap db-backup-dev db-backup-test db-restore-dev db-restore-test db-refresh-template db-create-run \
         backend-install lexicon-install frontend-install admin-install e2e-install \
@@ -64,7 +67,8 @@ GATE_ENV_FILE ?= .env.stack.gate
         worktree-bootstrap clean-worktree-links \
         local-backend-dev local-worker-dev local-frontend-dev local-admin-dev \
         lint-backend lint-frontend lint-admin \
-        test-backend test-frontend test-admin test-lexicon stack-test-lexicon ci-test-lexicon smoke-local \
+        test-backend test-frontend test-admin test-lexicon stack-test-lexicon ci-test-lexicon smoke-local smoke-local-debug \
+        open-e2e-report show-e2e-report \
         nuc-rsync-data deploy-nuc
 
 LEXICON_ARGS ?=
@@ -104,7 +108,8 @@ help:
 	  "make test-lexicon          # run full lexicon suite locally across lexicon/backend venvs" \
 	  "make stack-test-lexicon    # alias for full lexicon suite when working against the test stack" \
 	  "make ci-test-lexicon       # run full lexicon suite in the current CI python environment" \
-	  "make smoke-local           # run local Playwright smoke" \
+	  "make smoke-local           # ensure infra is up, then run local Playwright smoke" \
+	  "make smoke-local-debug     # ensure infra is up, then run local Playwright smoke with passing screenshots preserved" \
 	  "make stack-up              # start persistent test stack without rebuilding" \
 	  "make stack-build           # rebuild/start persistent test stack" \
 	  "make stack-down            # stop persistent test stack" \
@@ -121,7 +126,11 @@ help:
 	  "make local-ci-ps           # CI-like debugging: show CI-style stack containers" \
 	  "make local-ci-restart      # CI-like debugging: restart CI-style stack containers" \
 	  "make local-ci-smoke        # CI-like debugging: run smoke e2e via the shared CI suite runner" \
+	  "make local-ci-smoke-debug  # CI-like debugging: run smoke e2e with passing screenshots preserved" \
 	  "make local-ci-full         # CI-like debugging: run full e2e via the shared CI suite runner" \
+	  "make open-e2e-report       # open the saved HTML report for E2E_REPORT_DIR (defaults from E2E_SUITE)" \
+	  "make show-e2e-report       # open the Playwright native report viewer for E2E_REPORT_DIR" \
+	  "make gate-clean-postgres-volumes # remove dangling anonymous postgres data volumes left from old runs" \
 	  "make pr-open               # run gate-full, then gh pr create (pass GH_ARGS='...')" \
 	  "make db-backup-dev         # dump dev DB to DEV_FULL_DUMP_PATH" \
 	  "make db-backup-test        # dump test DB to TEST_FULL_DUMP_PATH" \
@@ -191,10 +200,18 @@ stack-restart:
 	$(STACK_COMPOSE) restart
 
 stack-smoke:
-	$(E2E_COMPOSE) --profile tests run --rm playwright npm run test:smoke:ci
+	$(E2E_COMPOSE) --profile tests run --rm \
+		-e PLAYWRIGHT_HTML_OUTPUT_DIR=artifacts/stack-smoke/html-report \
+		-e PLAYWRIGHT_RESULTS_DIR=artifacts/stack-smoke/test-results \
+		-e PLAYWRIGHT_JUNIT_OUTPUT_FILE=artifacts/stack-smoke/results.xml \
+		playwright npm run test:smoke:ci
 
 stack-full:
-	$(E2E_COMPOSE) --profile tests run --rm playwright npm run test:full
+	$(E2E_COMPOSE) --profile tests run --rm \
+		-e PLAYWRIGHT_HTML_OUTPUT_DIR=artifacts/stack-full/html-report \
+		-e PLAYWRIGHT_RESULTS_DIR=artifacts/stack-full/test-results \
+		-e PLAYWRIGHT_JUNIT_OUTPUT_FILE=artifacts/stack-full/results.xml \
+		playwright npm run test:full
 
 local-ci-up: volumes
 	$(CI_STACK_COMPOSE) up -d $(CI_STACK_WORKER_SCALE)
@@ -217,6 +234,15 @@ local-ci-restart:
 local-ci-smoke:
 	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh smoke
 
+local-ci-smoke-debug:
+	PLAYWRIGHT_SCREENSHOT_MODE=on PLAYWRIGHT_LABEL_SUFFIX=-debug ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh smoke
+
+open-e2e-report:
+	open "$(PWD)/$(E2E_REPORT_DIR)/index.html"
+
+show-e2e-report:
+	cd e2e && npx playwright show-report "../$(E2E_REPORT_DIR)"
+
 local-ci-full:
 	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh full
 
@@ -237,6 +263,9 @@ gate-e2e-admin: chmod-scripts
 
 gate-e2e-user: chmod-scripts
 	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh user
+
+gate-clean-postgres-volumes: chmod-scripts
+	./scripts/ci/cleanup-postgres-anonymous-volumes.sh
 
 pr-open: chmod-scripts
 	ENV_FILE=$(GATE_ENV_FILE) bash ./scripts/ci/open-pr.sh $(GH_ARGS)
@@ -390,16 +419,16 @@ gh-resolve-review-thread:
 clean-worktree-links:
 	rm -f .venv-backend
 
-local-backend-dev:
+local-backend-dev: backend-install
 	bash -lc 'source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && uvicorn app.main:app --host 0.0.0.0 --port $$BACKEND_PORT --reload'
 
-local-worker-dev:
+local-worker-dev: backend-install
 	bash -lc 'source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && celery -A app.celery_app:celery_app worker --loglevel=info --concurrency=2 --queues=$${CELERY_QUEUES:-default,imports}'
 
-local-frontend-dev:
+local-frontend-dev: frontend-install
 	bash -lc 'set -a && source .env.localdev && set +a && cd frontend && NEXT_PUBLIC_API_URL=http://localhost:$$BACKEND_PORT/api npm run dev -- --hostname 0.0.0.0 -p $$FRONTEND_PORT'
 
-local-admin-dev:
+local-admin-dev: admin-install
 	bash -lc 'set -a && source .env.localdev && set +a && cd admin-frontend && NEXT_PUBLIC_API_URL=http://localhost:$$BACKEND_PORT/api npm run dev'
 
 lint-backend:
@@ -411,7 +440,7 @@ lint-frontend:
 lint-admin:
 	cd admin-frontend && npm run lint
 
-test-backend:
+test-backend: backend-install
 	bash -lc 'source .venv-backend/bin/activate && set -a && source .env.localdev && set +a && cd backend && pytest -q'
 
 test-frontend:
@@ -441,10 +470,41 @@ ci-test-lexicon:
 		"$$PY_BIN" -m pytest tools/lexicon/tests -q; \
 	fi
 
-smoke-local:
+smoke-local: infra-up
 	bash -lc 'set -euo pipefail; \
 		set -a; source .env.localdev; set +a; \
 		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)"; \
+		export PLAYWRIGHT_HTML_OUTPUT_DIR=e2e/artifacts/smoke-local/html-report; \
+		export PLAYWRIGHT_RESULTS_DIR=e2e/artifacts/smoke-local/test-results; \
+		export PLAYWRIGHT_JUNIT_OUTPUT_FILE=e2e/artifacts/smoke-local/results.xml; \
+		export E2E_BASE_URL=http://localhost:$$FRONTEND_PORT; \
+		export E2E_API_URL=http://localhost:$$BACKEND_PORT/api; \
+		export E2E_ADMIN_URL=http://localhost:$$ADMIN_FRONTEND_PORT; \
+		export E2E_DB_NAME=$${E2E_DB_NAME:-$$DEV_DB_NAME}; \
+		export E2E_WORDS_DATA_ROOT=$${E2E_WORDS_DATA_ROOT:-$$WORDS_DATA_DIR}; \
+		WORKER_LOG=/tmp/words-local-worker.log; \
+		source .venv-backend/bin/activate; \
+		cd backend; \
+		celery -A app.celery_app:celery_app worker --loglevel=info --concurrency=2 --queues=$${CELERY_QUEUES:-default,imports} >"$$WORKER_LOG" 2>&1 & \
+		WORKER_PID=$$!; \
+		cd ..; \
+		trap "kill $$WORKER_PID >/dev/null 2>&1 || true" EXIT INT TERM; \
+		for _ in $$(seq 1 30); do \
+			if grep -q "ready" "$$WORKER_LOG"; then \
+				break; \
+			fi; \
+			sleep 1; \
+		done; \
+		./e2e/node_modules/.bin/playwright test -c e2e/playwright.local.config.ts --grep @smoke'
+
+smoke-local-debug: infra-up
+	bash -lc 'set -euo pipefail; \
+		set -a; source .env.localdev; set +a; \
+		export PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)"; \
+		export PLAYWRIGHT_HTML_OUTPUT_DIR=e2e/artifacts/smoke-local-debug/html-report; \
+		export PLAYWRIGHT_RESULTS_DIR=e2e/artifacts/smoke-local-debug/test-results; \
+		export PLAYWRIGHT_JUNIT_OUTPUT_FILE=e2e/artifacts/smoke-local-debug/results.xml; \
+		export PLAYWRIGHT_SCREENSHOT_MODE=on; \
 		export E2E_BASE_URL=http://localhost:$$FRONTEND_PORT; \
 		export E2E_API_URL=http://localhost:$$BACKEND_PORT/api; \
 		export E2E_ADMIN_URL=http://localhost:$$ADMIN_FRONTEND_PORT; \

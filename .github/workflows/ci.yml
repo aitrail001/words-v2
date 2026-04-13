@@ -377,8 +377,6 @@ jobs:
           name: playwright-smoke-artifacts
           path: |
             artifacts/ci-gate/e2e-smoke
-            e2e/playwright-report
-            e2e/test-results
           if-no-files-found: ignore
 
   e2e-review-srs:
@@ -448,8 +446,6 @@ jobs:
           name: playwright-review-srs-artifacts
           path: |
             artifacts/ci-gate/e2e-review-srs
-            e2e/playwright-report
-            e2e/test-results
           if-no-files-found: ignore
 
   e2e-admin:
@@ -519,8 +515,6 @@ jobs:
           name: playwright-admin-artifacts
           path: |
             artifacts/ci-gate/e2e-admin
-            e2e/playwright-report
-            e2e/test-results
           if-no-files-found: ignore
 
   e2e-user:
@@ -590,8 +584,6 @@ jobs:
           name: playwright-user-artifacts
           path: |
             artifacts/ci-gate/e2e-user
-            e2e/playwright-report
-            e2e/test-results
           if-no-files-found: ignore
 
   e2e-full-gate:

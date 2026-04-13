@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/lib.sh"
 suite="${1:-smoke}"
 npm_script=""
 label=""
+label_suffix="${PLAYWRIGHT_LABEL_SUFFIX:-}"
 
 case "${suite}" in
   smoke)
@@ -35,6 +36,8 @@ case "${suite}" in
     exit 1
     ;;
 esac
+
+label="${label}${label_suffix}"
 
 load_env
 

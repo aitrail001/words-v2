@@ -6,6 +6,10 @@ const BACKEND_PORT = process.env.BACKEND_PORT ?? "8000";
 const FRONTEND_PORT = process.env.FRONTEND_PORT ?? "3000";
 const ADMIN_FRONTEND_PORT = process.env.ADMIN_FRONTEND_PORT ?? "3001";
 const REPO_ROOT = path.resolve(__dirname, "..");
+const htmlReportDir = process.env.PLAYWRIGHT_HTML_OUTPUT_DIR ?? "playwright-report";
+const junitReportFile = process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? "test-results/results.xml";
+const resultsDir = process.env.PLAYWRIGHT_RESULTS_DIR ?? "test-results";
+const screenshotMode = process.env.PLAYWRIGHT_SCREENSHOT_MODE ?? "only-on-failure";
 
 export default defineConfig({
   testDir: "./tests",
@@ -19,14 +23,14 @@ export default defineConfig({
   },
   reporter: [
     ["list"],
-    ["html", { open: "never", outputFolder: "playwright-report" }],
-    ["junit", { outputFile: "test-results/results.xml" }],
+    ["html", { open: "never", outputFolder: htmlReportDir }],
+    ["junit", { outputFile: junitReportFile }],
   ],
-  outputDir: "test-results",
+  outputDir: resultsDir,
   use: {
     baseURL: process.env.E2E_BASE_URL ?? `http://localhost:${FRONTEND_PORT}`,
     trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    screenshot: screenshotMode as "off" | "on" | "only-on-failure",
     video: "retain-on-failure",
     viewport: { width: 1440, height: 900 },
     actionTimeout: 10_000,

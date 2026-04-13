@@ -18,6 +18,15 @@ print_section() {
   printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
 }
 
+print_note() {
+  local message="$1"
+  if [[ -t 1 ]]; then
+    printf '\033[1;36m%s\033[0m\n' "${message}"
+  else
+    printf '%s\n' "${message}"
+  fi
+}
+
 cd_repo_root() {
   cd "${REPO_ROOT}"
 }
@@ -168,6 +177,27 @@ compose_infra() {
   )
 }
 
+compose_infra_with() {
+  local env_file="$1"
+  local project_name="$2"
+  shift 2
+  (
+    cd "${REPO_ROOT}"
+    env \
+      -u COMPOSE_PROJECT_NAME \
+      -u POSTGRES_USER \
+      -u POSTGRES_PASSWORD \
+      -u TEST_DB_NAME \
+      -u POSTGRES_PORT \
+      -u REDIS_PORT \
+      docker compose \
+      --env-file "${env_file}" \
+      -p "${project_name}" \
+      -f "${PR_INFRA_COMPOSE_FILE}" \
+      "$@"
+  )
+}
+
 compose_stack() {
   (
     cd "${REPO_ROOT}"
@@ -307,6 +337,86 @@ teardown_infra() {
   fi
 }
 
+start_gate_postgres_instance() {
+  local project_name="$1"
+  local requested_port="$2"
+  local db_name="$3"
+  local user="${4:-vocabapp}"
+  local password="${5:-devpassword}"
+  local env_file
+  local attempts=60
+  local mapped_host=""
+  local mapped_port=""
+
+  env_file="$(mktemp "${TMPDIR:-/tmp}/gate-postgres-env.XXXXXX")"
+  cat >"${env_file}" <<EOF
+COMPOSE_PROJECT_NAME=${project_name}
+POSTGRES_USER=${user}
+POSTGRES_PASSWORD=${password}
+TEST_DB_NAME=${db_name}
+POSTGRES_PORT=${requested_port}
+REDIS_PORT=0
+EOF
+
+  if ! compose_infra_with "${env_file}" "${project_name}" up -d postgres >/dev/null; then
+    rm -f "${env_file}"
+    return 1
+  fi
+
+  for _ in $(seq 1 "${attempts}"); do
+    if compose_infra_with "${env_file}" "${project_name}" exec -T postgres pg_isready -U "${user}" -d "${db_name}" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+
+  if ! mapped_host="$(compose_infra_with "${env_file}" "${project_name}" port postgres 5432 2>/dev/null | tail -n 1)"; then
+    mapped_host=""
+  fi
+
+  if [[ "${mapped_host}" == *:* ]]; then
+    mapped_port="${mapped_host##*:}"
+  fi
+
+  if [[ -z "${mapped_port}" ]]; then
+    compose_infra_with "${env_file}" "${project_name}" ps >&2 || true
+    compose_infra_with "${env_file}" "${project_name}" logs --tail=200 postgres >&2 || true
+    compose_infra_with "${env_file}" "${project_name}" down -v --remove-orphans >/dev/null || true
+    rm -f "${env_file}"
+    return 1
+  fi
+
+  for _ in $(seq 1 "${attempts}"); do
+    if nc -z 127.0.0.1 "${mapped_port}" >/dev/null 2>&1; then
+      rm -f "${env_file}"
+      printf '{"project":"%s","database_url":"postgresql://%s:%s@127.0.0.1:%s/%s"}\n' \
+        "${project_name}" "${user}" "${password}" "${mapped_port}" "${db_name}"
+      return 0
+    fi
+    sleep 1
+  done
+
+  compose_infra_with "${env_file}" "${project_name}" ps >&2 || true
+  compose_infra_with "${env_file}" "${project_name}" logs --tail=200 postgres >&2 || true
+  compose_infra_with "${env_file}" "${project_name}" down -v --remove-orphans >/dev/null || true
+
+  rm -f "${env_file}"
+  return 1
+}
+
+stop_gate_postgres_instance() {
+  local project_name="$1"
+  local env_file
+
+  env_file="$(mktemp "${TMPDIR:-/tmp}/gate-postgres-env.XXXXXX")"
+  cat >"${env_file}" <<EOF
+COMPOSE_PROJECT_NAME=${project_name}
+EOF
+
+  compose_infra_with "${env_file}" "${project_name}" down -v --remove-orphans >/dev/null || true
+  rm -f "${env_file}"
+}
+
 teardown_stack() {
   print_section "Tearing down disposable full app stack"
   if ! compose_e2e down -v --remove-orphans; then
@@ -332,10 +442,35 @@ run_backend_pytest() {
 run_playwright_script() {
   local label="$1"
   local npm_script="$2"
+  local suite_dir
+  local html_dir
+  local results_dir
+  local junit_file
+  local container_html_dir
+  local container_results_dir
+  local container_junit_file
+
+  suite_dir="$(artifact_dir "${label}")/playwright"
+  html_dir="${suite_dir}/html-report"
+  results_dir="${suite_dir}/test-results"
+  junit_file="${suite_dir}/results.xml"
+  container_html_dir="/workspace/artifacts/ci-gate/${label}/playwright/html-report"
+  container_results_dir="/workspace/artifacts/ci-gate/${label}/playwright/test-results"
+  container_junit_file="/workspace/artifacts/ci-gate/${label}/playwright/results.xml"
+
+  mkdir -p "${html_dir}" "${results_dir}"
+
   run_logged "${label}" "playwright.log" compose_e2e --profile tests run --rm --no-deps \
     -e E2E_BASE_URL="http://frontend:3000" \
     -e E2E_API_URL="http://backend:8000/api" \
     -e E2E_ADMIN_URL="http://admin-frontend:3001" \
     -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}" \
+    -e PLAYWRIGHT_HTML_OUTPUT_DIR="${container_html_dir}" \
+    -e PLAYWRIGHT_RESULTS_DIR="${container_results_dir}" \
+    -e PLAYWRIGHT_JUNIT_OUTPUT_FILE="${container_junit_file}" \
     playwright npm run "${npm_script}"
+
+  print_section "Playwright HTML report: ${html_dir}/index.html"
+  print_note "Open with: make open-e2e-report E2E_REPORT_DIR=artifacts/ci-gate/${label}/playwright/html-report"
+  print_note "Show with: make show-e2e-report E2E_REPORT_DIR=artifacts/ci-gate/${label}/playwright/html-report"
 }

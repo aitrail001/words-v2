@@ -134,6 +134,12 @@ When adding, removing, renaming, or reclassifying tests that affect release conf
 - Keep fast/high-signal backend tests in a shared backend subset definition, not hardcoded in multiple places.
 - Keep E2E suite groupings in shared CI scripts or manifests, with `scripts/ci/test-groups.sh` as the starting point for CI-relevant test grouping changes, not duplicated across Makefiles and workflow YAML.
 
+### Playwright artifact rule
+
+- Do not make multiple repo-owned E2E runners write to the same Playwright report folder.
+- Gate and CI E2E runs write per-suite artifacts under `artifacts/ci-gate/<suite>/playwright/`.
+- Scripted local wrappers write to runner-specific folders under `e2e/artifacts/<runner>/`.
+- Raw ad hoc `npm --prefix e2e ...` or `playwright test` runs may use the default `e2e/playwright-report` and `e2e/test-results`, but any new repo-owned wrapper must set explicit `PLAYWRIGHT_HTML_OUTPUT_DIR`, `PLAYWRIGHT_RESULTS_DIR`, and `PLAYWRIGHT_JUNIT_OUTPUT_FILE`.
 
 
 ### Gate stack
@@ -142,3 +148,12 @@ When adding, removing, renaming, or reclassifying tests that affect release conf
   - `.env.stack.gate`
   - `docker compose down -v  --remove-orphans` is allowed for this disposable stack, and you should when finish because it is supposed to be disposable.
 - Do not use the shared persistent test stack as PR sign-off.
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `uv run --with graphifyy python3.13 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` to keep the graph current

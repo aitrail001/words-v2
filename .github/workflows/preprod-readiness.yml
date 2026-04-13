@@ -151,6 +151,9 @@ jobs:
             -e E2E_API_URL="${E2E_API_URL}" \
             -e E2E_ADMIN_URL="${E2E_ADMIN_URL}" \
             -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}" \
+            -e PLAYWRIGHT_HTML_OUTPUT_DIR="artifacts/preprod/review-smoke/html-report" \
+            -e PLAYWRIGHT_RESULTS_DIR="artifacts/preprod/review-smoke/test-results" \
+            -e PLAYWRIGHT_JUNIT_OUTPUT_FILE="artifacts/preprod/review-smoke/results.xml" \
             playwright sh -lc "cd /workspace/e2e && npm run test:review:ci"
 
       - name: Run Playwright smoke tests
@@ -161,6 +164,9 @@ jobs:
             -e E2E_API_URL="${E2E_API_URL}" \
             -e E2E_ADMIN_URL="${E2E_ADMIN_URL}" \
             -e E2E_DB_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_DB_NAME}" \
+            -e PLAYWRIGHT_HTML_OUTPUT_DIR="artifacts/preprod/smoke/html-report" \
+            -e PLAYWRIGHT_RESULTS_DIR="artifacts/preprod/smoke/test-results" \
+            -e PLAYWRIGHT_JUNIT_OUTPUT_FILE="artifacts/preprod/smoke/results.xml" \
             playwright sh -lc "cd /workspace/e2e && npm run test:smoke:ci"
 
       - name: Validate observability signal
@@ -206,8 +212,7 @@ jobs:
         with:
           name: preprod-playwright-smoke-artifacts
           path: |
-            e2e/playwright-report
-            e2e/test-results
+            e2e/artifacts/preprod
           if-no-files-found: ignore
 
       - name: Tear down app stack
