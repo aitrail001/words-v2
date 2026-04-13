@@ -154,19 +154,25 @@ class CliTests(unittest.TestCase):
         self.assertIn("voice-import-db", stdout)
 
     def test_voice_generate_rejects_retry_failed_only_with_skip_failed(self) -> None:
-        code, _, stderr = self.run_cli([
-            "voice-generate",
-            "--input",
-            "approved.jsonl",
-            "--output-dir",
-            "voice-out",
-            "--resume",
-            "--retry-failed-only",
-            "--skip-failed",
-        ])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "voice-out"
+            log_file = Path(tmpdir) / "voice-generate.runtime.log"
+            code, _, stderr = self.run_cli([
+                "voice-generate",
+                "--input",
+                "approved.jsonl",
+                "--output-dir",
+                str(output_dir),
+                "--log-file",
+                str(log_file),
+                "--resume",
+                "--retry-failed-only",
+                "--skip-failed",
+            ])
 
-        self.assertEqual(code, 2)
-        self.assertIn("cannot be combined", stderr)
+            self.assertEqual(code, 2)
+            self.assertIn("cannot be combined", stderr)
+            self.assertTrue(log_file.exists())
 
     def test_voice_generate_emits_runtime_progress_events(self) -> None:
         def fake_run_voice_generation(**kwargs):
@@ -205,56 +211,67 @@ class CliTests(unittest.TestCase):
                 "plan_path": "voice-out/voice_plan.jsonl",
             }
 
-        with patch("tools.lexicon.cli.run_voice_generation", side_effect=fake_run_voice_generation):
-            code, stdout, stderr = self.run_cli([
-                "voice-generate",
-                "--input",
-                "approved.jsonl",
-                "--output-dir",
-                "voice-out",
-                "--locales",
-                "en-US",
-            ])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "voice-out"
+            log_file = Path(tmpdir) / "voice-generate.runtime.log"
+            with patch("tools.lexicon.cli.run_voice_generation", side_effect=fake_run_voice_generation):
+                code, stdout, stderr = self.run_cli([
+                    "voice-generate",
+                    "--input",
+                    "approved.jsonl",
+                    "--output-dir",
+                    str(output_dir),
+                    "--log-file",
+                    str(log_file),
+                    "--locales",
+                    "en-US",
+                ])
 
-        self.assertEqual(code, 0)
-        self.assertIn("voice-generate-start", stderr)
-        self.assertIn("voice-generate-plan", stderr)
-        self.assertIn("voice-generate-complete", stderr)
-        payload = json.loads(stdout)
-        self.assertEqual(payload["planned_count"], 6)
+            self.assertEqual(code, 0)
+            self.assertIn("voice-generate-start", stderr)
+            self.assertIn("voice-generate-plan", stderr)
+            self.assertIn("voice-generate-complete", stderr)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["planned_count"], 6)
+            self.assertTrue(log_file.exists())
 
     def test_voice_sync_storage_dry_run_emits_summary(self) -> None:
-        with patch("tools.lexicon.cli.run_voice_storage_sync", return_value={
-            "matched_count": 6,
-            "updated_count": 0,
-            "dry_run": True,
-            "storage_kind": "s3",
-            "storage_base": "https://cdn.example.com/voice",
-            "fallback_storage_kind": "http",
-            "fallback_storage_base": "https://backup.example.com/voice",
-        }):
-            code, stdout, _ = self.run_cli([
-                "voice-sync-storage",
-                "--source-reference",
-                "voice-roundtrip",
-                "--storage-kind",
-                "s3",
-                "--storage-base",
-                "https://cdn.example.com/voice",
-                "--fallback-storage-kind",
-                "http",
-                "--fallback-storage-base",
-                "https://backup.example.com/voice",
-                "--dry-run",
-            ])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_file = Path(tmpdir) / "voice-sync-storage.runtime.log"
+            with patch("tools.lexicon.cli.run_voice_storage_sync", return_value={
+                "matched_count": 6,
+                "updated_count": 0,
+                "dry_run": True,
+                "storage_kind": "s3",
+                "storage_base": "https://cdn.example.com/voice",
+                "fallback_storage_kind": "http",
+                "fallback_storage_base": "https://backup.example.com/voice",
+            }):
+                code, stdout, _ = self.run_cli([
+                    "voice-sync-storage",
+                    "--source-reference",
+                    "voice-roundtrip",
+                    "--storage-kind",
+                    "s3",
+                    "--storage-base",
+                    "https://cdn.example.com/voice",
+                    "--fallback-storage-kind",
+                    "http",
+                    "--fallback-storage-base",
+                    "https://backup.example.com/voice",
+                    "--log-file",
+                    str(log_file),
+                    "--dry-run",
+                ])
 
-        self.assertEqual(code, 0)
-        payload = json.loads(stdout)
-        self.assertEqual(payload["command"], "voice-sync-storage")
-        self.assertTrue(payload["dry_run"])
-        self.assertEqual(payload["matched_count"], 6)
-        self.assertEqual(payload["fallback_storage_kind"], "http")
-        self.assertEqual(payload["fallback_storage_base"], "https://backup.example.com/voice")
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "voice-sync-storage")
+            self.assertTrue(payload["dry_run"])
+            self.assertEqual(payload["matched_count"], 6)
+            self.assertEqual(payload["fallback_storage_kind"], "http")
+            self.assertEqual(payload["fallback_storage_base"], "https://backup.example.com/voice")
+            self.assertTrue(log_file.exists())
 
     def test_voice_import_db_emits_runtime_progress_events(self) -> None:
         def fake_run_voice_import_file(*args, progress_callback=None, **kwargs):
@@ -264,34 +281,50 @@ class CliTests(unittest.TestCase):
             progress_callback(row={"entry_id": "word:harbor", "entry_type": "word", "word": "harbor", "_progress_label": "Skipping existing word: harbor", "content_scope": "word", "locale": "en-GB", "voice_role": "female"}, completed_rows=2, total_rows=2)
             return {"created_assets": 1, "updated_assets": 0, "skipped_rows": 1, "failed_rows": 0}
 
-        with patch("tools.lexicon.cli.load_voice_manifest_rows", return_value=[{"entry_id": "word:bank"}, {"entry_id": "word:harbor"}]), \
-             patch("tools.lexicon.cli.run_voice_import_file", side_effect=fake_run_voice_import_file) as mocked_run:
-            code, stdout, stderr = self.run_cli([
-                "voice-import-db",
-                "--input",
-                "voice_manifest.jsonl",
-            ])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_file = Path(tmpdir) / "voice-import-db.runtime.log"
+            with patch("tools.lexicon.cli.load_voice_manifest_rows", return_value=[{"entry_id": "word:bank"}, {"entry_id": "word:harbor"}]), \
+                 patch("tools.lexicon.cli.run_voice_import_file", side_effect=fake_run_voice_import_file) as mocked_run:
+                code, stdout, stderr = self.run_cli([
+                    "voice-import-db",
+                    "--input",
+                    "voice_manifest.jsonl",
+                    "--log-file",
+                    str(log_file),
+                ])
 
-        self.assertEqual(code, 0)
-        self.assertIn("item-progress", stderr)
-        self.assertIn("item_type=voice-manifest-group", stderr)
-        self.assertIn("entry_label=bank", stderr)
-        self.assertIn("action=skip", stderr)
-        self.assertNotIn(" row=", stderr)
-        self.assertEqual(mocked_run.call_args.kwargs["error_mode"], "continue")
-        payload = json.loads(stdout)
-        self.assertEqual(payload["command"], "voice-import-db")
-        self.assertFalse(payload["dry_run"])
+            self.assertEqual(code, 0)
+            self.assertIn("item-progress", stderr)
+            self.assertIn("item_type=voice-manifest-group", stderr)
+            self.assertIn("entry_label=bank", stderr)
+            self.assertIn("action=skip", stderr)
+            self.assertNotIn(" row=", stderr)
+            self.assertEqual(mocked_run.call_args.kwargs["error_mode"], "continue")
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "voice-import-db")
+            self.assertFalse(payload["dry_run"])
+            self.assertTrue(log_file.exists())
 
     def test_build_base_command_emits_json_summary(self) -> None:
-        with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: {"run": 5, "set": 10}[word], lambda word: [{"wn_synset_id": f"{word}.n.01", "part_of_speech": "noun", "canonical_gloss": f"gloss for {word}", "canonical_label": word}])):
-            code, stdout, _ = self.run_cli(["build-base", "--rerun-existing", "Run", "SET", "run"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_file = Path(tmpdir) / "build-base.runtime.log"
+            with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: {"run": 5, "set": 10}[word], lambda word: [{"wn_synset_id": f"{word}.n.01", "part_of_speech": "noun", "canonical_gloss": f"gloss for {word}", "canonical_label": word}])):
+                code, stdout, _ = self.run_cli([
+                    "build-base",
+                    "--rerun-existing",
+                    "--log-file",
+                    str(log_file),
+                    "Run",
+                    "SET",
+                    "run",
+                ])
 
-        self.assertEqual(code, 0)
-        payload = json.loads(stdout)
-        self.assertEqual(payload["command"], "build-base")
-        self.assertEqual(payload["words"], ["run", "set"])
-        self.assertEqual(payload["lexeme_count"], 2)
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["command"], "build-base")
+            self.assertEqual(payload["words"], ["run", "set"])
+            self.assertEqual(payload["lexeme_count"], 2)
+            self.assertTrue(log_file.exists())
 
     def test_build_base_command_can_source_top_words_inventory(self) -> None:
         with patch("tools.lexicon.cli._load_build_base_providers", return_value=(lambda word: 10, lambda word: [])), \
