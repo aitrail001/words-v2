@@ -56,6 +56,7 @@ GATE_ENV_FILE ?= .env.stack.gate
         stack-up stack-build stack-down stack-logs stack-ps stack-restart stack-smoke stack-full \
         ci-config local-ci-up local-ci-build local-ci-down local-ci-logs local-ci-ps local-ci-restart local-ci-smoke local-ci-full \
 		gate-fast gate-full gate-e2e-smoke gate-e2e-review  gate-e2e-admin gate-e2e-user \
+        pr-open \
         db-bootstrap db-backup-dev db-backup-test db-restore-dev db-restore-test db-refresh-template db-create-run \
         backend-install lexicon-install frontend-install admin-install e2e-install \
         lexicon-enrich-core lexicon-enrich-translations lexicon-merge lexicon-smoke-real \
@@ -121,6 +122,7 @@ help:
 	  "make local-ci-restart      # CI-like debugging: restart CI-style stack containers" \
 	  "make local-ci-smoke        # CI-like debugging: run smoke e2e via the shared CI suite runner" \
 	  "make local-ci-full         # CI-like debugging: run full e2e via the shared CI suite runner" \
+	  "make pr-open               # run gate-full, then gh pr create (pass GH_ARGS='...')" \
 	  "make db-backup-dev         # dump dev DB to DEV_FULL_DUMP_PATH" \
 	  "make db-backup-test        # dump test DB to TEST_FULL_DUMP_PATH" \
 	  "make db-restore-dev        # restore dev DB from TEST_FULL_DUMP_PATH" \
@@ -235,6 +237,9 @@ gate-e2e-admin: chmod-scripts
 
 gate-e2e-user: chmod-scripts
 	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh user
+
+pr-open: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) bash ./scripts/ci/open-pr.sh $(GH_ARGS)
 
 db-backup-dev: chmod-scripts
 	./scripts/db/backup-db.sh $(ENV_FILE) $(DEV_DB_NAME) $(DEV_FULL_DUMP_PATH)

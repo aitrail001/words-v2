@@ -84,6 +84,7 @@ Use external workflow skills or personal tooling when helpful, but do not restat
 - Prefer `gh` for GitHub operations when available.
 - Use first-class `gh pr ...` / `gh issue ...` commands when they exist.
 - If there is no first-class command, use `gh api` instead of manual browser-only workflows.
+- Prefer `make pr-open GH_ARGS='...'` over raw `gh pr create` when opening a review PR so `gate-full` is enforced first.
 - For repeated GitHub review housekeeping, prefer a helper script or documented workflow over ad hoc command reconstruction.
 - After addressing an inline PR review comment, reply and resolve the thread in the same session. Use `make gh-resolve-review-thread GH_ARGS='--pr <pr> --comment-id <id> --body-file <path>'` or `--body '...'` instead of leaving addressed threads open.
 - bring local main branch up to date after merge if you can
@@ -104,6 +105,7 @@ Use external workflow skills or personal tooling when helpful, but do not restat
 - Keep `local-ci-*` only for CI-like stack/debugging workflows, not as the primary local readiness path.
 - After each non-trivial change set, or Before push and before asking for review-facing feedback on a branch, run `make gate-fast`.
 - Before opening a PR, marking a PR ready, or pushing a PR update intended for review, run `make gate-full`.
+- Prefer `make pr-open GH_ARGS='...'` for opening PRs so the `gate-full` requirement is enforced by the repo workflow instead of memory alone.
 - Do not open or update a PR for review if `make gate-full` fails unless the user explicitly asks for a failing PR.
 - When reporting verification, include the exact command run and whether it passed or failed.
 
