@@ -22,6 +22,9 @@ export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://localhost:3000,http://localhos
 
 E2E_SMOKE_CLEANUP="${E2E_SMOKE_CLEANUP:-0}"
 E2E_LEXICON_FIXTURE="${E2E_LEXICON_FIXTURE:-none}"
+PLAYWRIGHT_HTML_OUTPUT_DIR="${PLAYWRIGHT_HTML_OUTPUT_DIR:-artifacts/local-smoke/html-report}"
+PLAYWRIGHT_RESULTS_DIR="${PLAYWRIGHT_RESULTS_DIR:-artifacts/local-smoke/test-results}"
+PLAYWRIGHT_JUNIT_OUTPUT_FILE="${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-artifacts/local-smoke/results.xml}"
 
 compose() {
   docker compose -f "${COMPOSE_FILE}" --profile tests "$@"
@@ -77,5 +80,5 @@ compose exec -T playwright sh -lc "
   if [ ! -d node_modules ]; then
     npm ci --prefer-offline --no-audit --no-fund
   fi
-  E2E_BASE_URL='${E2E_BASE_URL}' E2E_API_URL='${E2E_API_URL}' E2E_ADMIN_URL='${E2E_ADMIN_URL}' E2E_DB_URL='${E2E_DB_URL}' npm run test:smoke:ci
+  E2E_BASE_URL='${E2E_BASE_URL}' E2E_API_URL='${E2E_API_URL}' E2E_ADMIN_URL='${E2E_ADMIN_URL}' E2E_DB_URL='${E2E_DB_URL}' PLAYWRIGHT_HTML_OUTPUT_DIR='${PLAYWRIGHT_HTML_OUTPUT_DIR}' PLAYWRIGHT_RESULTS_DIR='${PLAYWRIGHT_RESULTS_DIR}' PLAYWRIGHT_JUNIT_OUTPUT_FILE='${PLAYWRIGHT_JUNIT_OUTPUT_FILE}' npm run test:smoke:ci
 "

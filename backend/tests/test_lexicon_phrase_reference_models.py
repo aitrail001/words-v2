@@ -1,5 +1,5 @@
+import json
 import os
-import socket
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -69,7 +69,7 @@ def _create_phrase_entries_source_table(connection) -> Table:
 def _temporary_postgres_lexicon_connection():
     database_url = _database_url_sync()
     engine = None
-    container_name = None
+    project_name = None
     if database_url:
         engine = create_engine(database_url, future=True)
         try:
@@ -89,7 +89,7 @@ def _temporary_postgres_lexicon_connection():
                 engine.dispose()
             return
 
-    container_name, database_url = _start_temporary_postgres_container()
+    project_name, database_url = _start_temporary_postgres_container()
     engine = create_engine(database_url, future=True)
     connection = engine.connect()
 
@@ -101,48 +101,56 @@ def _temporary_postgres_lexicon_connection():
         transaction.rollback()
         connection.close()
         engine.dispose()
-        if container_name is not None:
-            subprocess.run(["docker", "rm", "-f", container_name], check=False, capture_output=True)
+        if project_name is not None:
+            subprocess.run(
+                [
+                    "bash",
+                    str(Path(__file__).resolve().parents[2] / "scripts" / "ci" / "gate-postgres.sh"),
+                    "stop",
+                    "--project",
+                    project_name,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
 
 
 def _start_temporary_postgres_container():
-    port = _find_free_port()
-    container_name = f"words-v2-test-postgres-{uuid.uuid4().hex[:8]}"
-    database_url = f"postgresql://vocabapp:devpassword@127.0.0.1:{port}/vocabapp_dev"
-    subprocess.run(
+    project_name = f"words-v2-test-postgres-{uuid.uuid4().hex[:8]}"
+    result = subprocess.run(
         [
-            "docker",
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            container_name,
-            "-e",
-            "POSTGRES_USER=vocabapp",
-            "-e",
-            "POSTGRES_PASSWORD=devpassword",
-            "-e",
-            "POSTGRES_DB=vocabapp_dev",
-            "-p",
-            f"{port}:5432",
-            "postgres:18-alpine",
+            "bash",
+            str(Path(__file__).resolve().parents[2] / "scripts" / "ci" / "gate-postgres.sh"),
+            "start",
+            "--project",
+            project_name,
+            "--db",
+            "vocabapp_dev",
         ],
         check=True,
         capture_output=True,
         text=True,
     )
+    payload = json.loads(result.stdout)
+    database_url = str(payload["database_url"])
     try:
         _wait_for_postgres(database_url)
     except Exception:
-        subprocess.run(["docker", "rm", "-f", container_name], check=False, capture_output=True)
+        subprocess.run(
+            [
+                "bash",
+                str(Path(__file__).resolve().parents[2] / "scripts" / "ci" / "gate-postgres.sh"),
+                "stop",
+                "--project",
+                project_name,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
         raise
-    return container_name, database_url
-
-
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    return project_name, database_url
 
 
 def _wait_for_postgres(database_url: str) -> None:

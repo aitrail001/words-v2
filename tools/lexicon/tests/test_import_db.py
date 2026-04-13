@@ -1,6 +1,6 @@
 import json
+import importlib
 import os
-import socket
 import sys
 import subprocess
 import tempfile
@@ -9,11 +9,11 @@ import uuid
 from contextlib import contextmanager
 import time
 from dataclasses import dataclass, field
-from types import ModuleType
 from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
+import sqlalchemy
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -69,35 +69,67 @@ class _FakeSelectStatement:
         return self
 
 
-def _install_fake_sqlalchemy_module() -> None:
-    module = ModuleType("sqlalchemy")
-    module.select = lambda model: _FakeSelectStatement(model)
-    sys.modules["sqlalchemy"] = module
+def _clear_backend_model_modules() -> None:
+    stale_prefixes = (
+        "app.core.config",
+        "app.core.database",
+        "app.models",
+    )
+    for module_name in tuple(sys.modules):
+        if module_name.startswith(stale_prefixes):
+            sys.modules.pop(module_name, None)
+
+
+def _fake_backend_settings():
+    return type(
+        "Settings",
+        (),
+        {
+            "database_url": "postgresql+asyncpg://example/test",
+            "database_url_sync": "postgresql://example/test",
+            "environment": "test",
+        },
+    )()
 
 
 def _load_real_models():
     _ensure_backend_path()
-    from app.core.database import Base
-    from app.models.learner_catalog_entry import LearnerCatalogEntry
-    from app.models.meaning_metadata import MeaningMetadata
-    from app.models.meaning import Meaning
-    from app.models.meaning_example import MeaningExample
-    from app.models.phrase_entry import PhraseEntry
-    from app.models.phrase_sense import PhraseSense
-    from app.models.phrase_sense_example import PhraseSenseExample
-    from app.models.phrase_sense_example_localization import PhraseSenseExampleLocalization
-    from app.models.phrase_sense_localization import PhraseSenseLocalization
-    from app.models.reference_entry import ReferenceEntry
-    from app.models.reference_localization import ReferenceLocalization
-    from app.models.translation import Translation
-    from app.models.translation_example import TranslationExample
-    from app.models.word import Word
-    from app.models.word_confusable import WordConfusable
-    from app.models.word_form import WordForm
-    from app.models.word_part_of_speech import WordPartOfSpeech
-    from app.models.word_relation import WordRelation
-    from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
-    from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
+    with patch.dict(
+        os.environ,
+        {
+            "DATABASE_URL": "postgresql+asyncpg://vocabapp:devpassword@localhost:5432/vocabapp_dev",
+            "DATABASE_URL_SYNC": "postgresql://vocabapp:devpassword@localhost:5432/vocabapp_dev",
+            "ENVIRONMENT": "test",
+        },
+        clear=False,
+    ):
+        import app.core.config as config_module
+
+        config_module.get_settings.cache_clear()
+        _clear_backend_model_modules()
+        importlib.invalidate_caches()
+
+        from app.core.database import Base
+        from app.models.learner_catalog_entry import LearnerCatalogEntry
+        from app.models.meaning_metadata import MeaningMetadata
+        from app.models.meaning import Meaning
+        from app.models.meaning_example import MeaningExample
+        from app.models.phrase_entry import PhraseEntry
+        from app.models.phrase_sense import PhraseSense
+        from app.models.phrase_sense_example import PhraseSenseExample
+        from app.models.phrase_sense_example_localization import PhraseSenseExampleLocalization
+        from app.models.phrase_sense_localization import PhraseSenseLocalization
+        from app.models.reference_entry import ReferenceEntry
+        from app.models.reference_localization import ReferenceLocalization
+        from app.models.translation import Translation
+        from app.models.translation_example import TranslationExample
+        from app.models.word import Word
+        from app.models.word_confusable import WordConfusable
+        from app.models.word_form import WordForm
+        from app.models.word_part_of_speech import WordPartOfSpeech
+        from app.models.word_relation import WordRelation
+        from app.models.lexicon_enrichment_job import LexiconEnrichmentJob
+        from app.models.lexicon_enrichment_run import LexiconEnrichmentRun
 
     return {
         "Base": Base,
@@ -126,7 +158,7 @@ def _load_real_models():
 
 @contextmanager
 def _temporary_postgres_lexicon_connection():
-    container_name = None
+    project_name = None
     database_url = ""
     if os.environ.get("LEXICON_TEST_USE_EXISTING_POSTGRES") == "1":
         database_url = os.environ.get(
@@ -158,7 +190,7 @@ def _temporary_postgres_lexicon_connection():
                 engine.dispose()
             return
 
-    container_name, database_url = _start_temporary_postgres_container()
+    project_name, database_url = _start_temporary_postgres_container()
     engine = create_engine(database_url, future=True)
     connection = engine.connect()
 
@@ -171,48 +203,56 @@ def _temporary_postgres_lexicon_connection():
         transaction.rollback()
         connection.close()
         engine.dispose()
-        if container_name is not None:
-            subprocess.run(["docker", "rm", "-f", container_name], check=False, capture_output=True)
+        if project_name is not None:
+            subprocess.run(
+                [
+                    "bash",
+                    str(Path(__file__).resolve().parents[3] / "scripts" / "ci" / "gate-postgres.sh"),
+                    "stop",
+                    "--project",
+                    project_name,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
 
 
 def _start_temporary_postgres_container():
-    port = _find_free_port()
-    container_name = f"words-v2-test-postgres-{uuid.uuid4().hex[:8]}"
-    database_url = f"postgresql://vocabapp:devpassword@127.0.0.1:{port}/vocabapp_dev"
-    subprocess.run(
+    project_name = f"words-v2-test-postgres-{uuid.uuid4().hex[:8]}"
+    result = subprocess.run(
         [
-            "docker",
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            container_name,
-            "-e",
-            "POSTGRES_USER=vocabapp",
-            "-e",
-            "POSTGRES_PASSWORD=devpassword",
-            "-e",
-            "POSTGRES_DB=vocabapp_dev",
-            "-p",
-            f"{port}:5432",
-            "postgres:18-alpine",
+            "bash",
+            str(Path(__file__).resolve().parents[3] / "scripts" / "ci" / "gate-postgres.sh"),
+            "start",
+            "--project",
+            project_name,
+            "--db",
+            "vocabapp_dev",
         ],
         check=True,
         capture_output=True,
         text=True,
     )
+    payload = json.loads(result.stdout)
+    database_url = str(payload["database_url"])
     try:
         _wait_for_postgres(database_url)
     except Exception:
-        subprocess.run(["docker", "rm", "-f", container_name], check=False, capture_output=True)
+        subprocess.run(
+            [
+                "bash",
+                str(Path(__file__).resolve().parents[3] / "scripts" / "ci" / "gate-postgres.sh"),
+                "stop",
+                "--project",
+                project_name,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
         raise
-    return container_name, database_url
-
-
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    return project_name, database_url
 
 
 def _wait_for_postgres(database_url: str) -> None:
@@ -670,12 +710,15 @@ class _ListResult:
 
 
 class ImportCompiledRowsTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        _clear_backend_model_modules()
+        super().tearDown()
+
     def test_load_existing_examples_ignores_source_filter_for_sqlalchemy_models(self) -> None:
         session = MagicMock()
         session.execute.return_value = _ListResult([])
-        _install_fake_sqlalchemy_module()
-
-        _load_existing_examples(session, SqlMeaningExample, uuid.uuid4(), "snapshot_refresh")
+        with patch.object(sqlalchemy, "select", side_effect=lambda model: _FakeSelectStatement(model)):
+            _load_existing_examples(session, SqlMeaningExample, uuid.uuid4(), "snapshot_refresh")
 
         statement = session.execute.call_args[0][0]
         where_clause = str(statement.whereclause)
@@ -685,9 +728,8 @@ class ImportCompiledRowsTests(unittest.TestCase):
     def test_load_existing_relations_ignores_source_filter_for_sqlalchemy_models(self) -> None:
         session = MagicMock()
         session.execute.return_value = _ListResult([])
-        _install_fake_sqlalchemy_module()
-
-        _load_existing_relations(session, SqlWordRelation, uuid.uuid4(), "snapshot_refresh")
+        with patch.object(sqlalchemy, "select", side_effect=lambda model: _FakeSelectStatement(model)):
+            _load_existing_relations(session, SqlWordRelation, uuid.uuid4(), "snapshot_refresh")
 
         statement = session.execute.call_args[0][0]
         where_clause = str(statement.whereclause)
@@ -3044,7 +3086,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
              patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
              patch("sqlalchemy.orm.Session", _FakeSessionContext), \
              patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             summary = run_import_file(
                 "/tmp/fake.jsonl",
                 source_type="repo_fixture",
@@ -3124,7 +3166,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
                  patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
                  patch("sqlalchemy.orm.Session", _FakeSessionContext), \
                  patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
-                 patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+                 patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
                 summary = run_import_file(
                     str(root),
                     source_type="repo_fixture",
@@ -3185,7 +3227,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
              patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
              patch("sqlalchemy.orm.Session", _FakeSessionContext), \
              patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             run_import_file(
                 "/tmp/fake.jsonl",
                 source_type="repo_fixture",
@@ -3223,7 +3265,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
              patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
              patch("sqlalchemy.orm.Session", _FakeSessionContext), \
              patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             summary = run_import_file(
                 "/tmp/fake.jsonl",
                 source_type="repo_fixture",
@@ -3269,7 +3311,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
              patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
              patch("sqlalchemy.orm.Session", _FakeSessionContext), \
              patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             summary = run_import_file(
                 "/tmp/fake.jsonl",
                 source_type="repo_fixture",
@@ -3310,7 +3352,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
              patch("sqlalchemy.engine.create.create_engine", return_value=fake_engine), \
              patch("sqlalchemy.orm.Session", _FakeSessionContext), \
              patch("sqlalchemy.orm.session.Session", _FakeSessionContext), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             with self.assertRaises(OperationalError):
                 run_import_file(
                     "/tmp/fake.jsonl",
@@ -3335,7 +3377,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
 
         with patch("tools.lexicon.import_db.import_compiled_rows", side_effect=AssertionError("write path should not run")), \
              patch("sqlalchemy.engine.create.create_engine", return_value=MagicMock()), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             summary = run_import_file(
                 "/tmp/fake.jsonl",
                 source_type="repo_fixture",
@@ -3382,7 +3424,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
         error_samples: list[dict[str, Any]] = []
         with patch("tools.lexicon.import_db.import_compiled_rows", side_effect=AssertionError("write path should not run")), \
              patch("sqlalchemy.engine.create.create_engine", return_value=MagicMock()), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             summary = run_import_file(
                 "/tmp/fake.jsonl",
                 source_type="repo_fixture",
@@ -3430,7 +3472,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
 
         with patch("tools.lexicon.import_db.import_compiled_rows", side_effect=AssertionError("write path should not run")), \
              patch("sqlalchemy.engine.create.create_engine", return_value=MagicMock()), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             summary = run_import_file(
                 "/tmp/fake.jsonl",
                 source_type="repo_fixture",
@@ -3474,7 +3516,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
 
         with patch("tools.lexicon.import_db.import_compiled_rows", side_effect=AssertionError("write path should not run")), \
              patch("sqlalchemy.engine.create.create_engine", return_value=MagicMock()), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             with self.assertRaisesRegex(RuntimeError, "usage_note must be a non-empty string"):
                 run_import_file(
                     "/tmp/fake.jsonl",
@@ -3516,7 +3558,7 @@ class ImportCompiledRowsTests(unittest.TestCase):
         with patch("tools.lexicon.import_db._preflight_validate_compiled_rows", wraps=sys.modules["tools.lexicon.import_db"]._preflight_validate_compiled_rows) as preflight_validate, \
              patch("tools.lexicon.import_db.import_compiled_rows", side_effect=AssertionError("write path should not run")), \
              patch("sqlalchemy.engine.create.create_engine", return_value=MagicMock()), \
-             patch("app.core.config.get_settings", return_value=type("Settings", (), {"database_url_sync": "postgresql://example/test"})()):
+             patch("app.core.config.get_settings", return_value=_fake_backend_settings()):
             with self.assertRaisesRegex(RuntimeError, "usage_note must be a non-empty string"):
                 run_import_file(
                     "/tmp/fake.jsonl",

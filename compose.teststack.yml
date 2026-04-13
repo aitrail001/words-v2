@@ -131,7 +131,7 @@ services:
       dockerfile: deploy/nginx/Dockerfile
     restart: unless-stopped
     ports:
-      - "${TEST_PUBLIC_PORT:-18088}:80"
+      - "${TEST_PUBLIC_PORT:-13000}:80"
     depends_on:
       backend:
         condition: service_healthy
