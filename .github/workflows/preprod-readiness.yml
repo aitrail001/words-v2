@@ -23,8 +23,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
+      COMPOSE_PROJECT_NAME: words-preprod-readiness
       POSTGRES_USER: vocabapp
       POSTGRES_PASSWORD: devpassword
+      PG_BOOT_DB: postgres
+      DEV_DB_NAME: vocabapp_dev_full
+      TEST_TEMPLATE_DB_NAME: vocabapp_test_template_full
+      SMOKE_TEMPLATE_DB_NAME: vocabapp_test_template_smoke
       NEXT_PUBLIC_API_URL: http://backend:8000/api
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://frontend:3000,http://admin-frontend:3001
       E2E_BASE_URL: http://frontend:3000
@@ -47,14 +52,41 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: npm ci --prefix e2e
 
-      - name: Start app stack (docker compose)
+      - name: Write preprod stack env file
+        run: |
+          cat > .env.stack.preprod-readiness <<EOF
+          COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
+
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          PG_BOOT_DB=${PG_BOOT_DB}
+          POSTGRES_PORT=5432
+          REDIS_PORT=6379
+
+          DEV_DB_NAME=${DEV_DB_NAME}
+          TEST_DB_NAME=${TEST_DB_NAME}
+          TEST_TEMPLATE_DB_NAME=${TEST_TEMPLATE_DB_NAME}
+          SMOKE_TEMPLATE_DB_NAME=${SMOKE_TEMPLATE_DB_NAME}
+
+          TEST_BACKEND_PORT=${TEST_BACKEND_PORT}
+          TEST_PUBLIC_PORT=${TEST_PUBLIC_PORT}
+          TEST_ADMIN_PORT=${TEST_ADMIN_PORT}
+
+          WORDS_DATA_DIR=${WORDS_DATA_DIR}
+          JWT_SECRET=${JWT_SECRET}
+          ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+          EOF
+
+      - name: Start infra and bootstrap long-lived databases
         id: start_stack
         run: |
           docker volume create words_pg_data >/dev/null
           docker volume create words_redis_data >/dev/null
           docker volume create words_uploads_data >/dev/null
           mkdir -p "${WORDS_DATA_DIR}"
-          docker compose ${STACK_COMPOSE_FILES} up -d --build postgres redis backend worker frontend admin-frontend nginx
+          docker compose -f compose.infra.yml up -d postgres redis
+          ./scripts/db/bootstrap-long-lived.sh .env.stack.preprod-readiness
+          docker compose ${STACK_COMPOSE_FILES} up -d --build backend worker frontend admin-frontend nginx
 
       - name: Wait for backend, learner frontend, and admin frontend readiness
         id: readiness
