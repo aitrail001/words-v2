@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LoginPage from "@/app/login/page";
+import * as browserLocation from "@/lib/browser-location";
 import { apiClient } from "@/lib/api-client";
-import { locationAssignCalls } from "@/test/location-spies";
 
 jest.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -17,12 +17,17 @@ describe("LoginPage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(browserLocation, "assignLocation");
     window.history.pushState({}, "", "/?next=%2Flexicon%2Fcompiled-review");
     mockPost.mockResolvedValue({
       access_token: "access-token",
       refresh_token: "refresh-token",
     });
     mockSetTokens.mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it("navigates to the requested path after successful login", async () => {
@@ -38,6 +43,6 @@ describe("LoginPage", () => {
       password: "password",
     });
     expect(mockSetTokens).toHaveBeenCalledWith("access-token", "refresh-token");
-    expect(locationAssignCalls).toEqual(["/lexicon/compiled-review"]);
+    expect(browserLocation.assignLocation).toHaveBeenCalledWith("/lexicon/compiled-review");
   });
 });

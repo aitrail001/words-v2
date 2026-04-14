@@ -1,3 +1,5 @@
+import { assignLocation } from "@/lib/browser-location";
+
 export const redirectToLogin = (nextPath?: string): void => {
   if (typeof window === "undefined") return;
 
@@ -5,9 +7,9 @@ export const redirectToLogin = (nextPath?: string): void => {
   const normalizedPath = currentPath || "/";
 
   if (normalizedPath === "/login") {
-    window.location.assign("/login");
+    assignLocation("/login");
     return;
   }
 
-  window.location.assign(`/login?next=${encodeURIComponent(normalizedPath)}`);
+  assignLocation(`/login?next=${encodeURIComponent(normalizedPath)}`);
 };
