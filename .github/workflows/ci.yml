@@ -256,19 +256,26 @@ jobs:
             tools/lexicon/requirements.txt
             tools/lexicon/requirements-dev.txt
 
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            tools/lexicon/package-lock.json
+            tools/lexicon/node/package-lock.json
+
       - name: Cache WordNet corpora
         uses: actions/cache@v5.0.4
         with:
           path: ~/.cache/nltk_data
           key: ${{ runner.os }}-nltk-wordnet-v1
 
-      - name: Install lexicon dependencies
-        run: pip install -r tools/lexicon/requirements-dev.txt
-      - name: Install shared backend model dependencies
-        run: pip install -r backend/requirements.txt
-
       - name: Download WordNet corpora
         run: python -m nltk.downloader -d "$NLTK_DATA" wordnet omw-1.4
+
+      - name: Bootstrap worktree
+        working-directory: .
+        run: make worktree-bootstrap
 
       - name: Write gate env file
         working-directory: .
