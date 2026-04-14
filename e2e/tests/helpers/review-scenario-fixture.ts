@@ -1643,12 +1643,14 @@ export const seedLegacyDuplicateReviewQueueFixture = async (
     await upsertLearnerStatus(client, userId, secondScenario, "learning");
     await insertReviewQueueState(client, userId, firstScenario, {
       scenarioKey: firstScenario.key,
+      status: "learning",
       nextDueAt: now,
       lastReviewedAt: reviewedAt,
       srsBucket: "1d",
     });
     await insertReviewQueueState(client, userId, secondScenario, {
       scenarioKey: secondScenario.key,
+      status: "learning",
       nextDueAt: now,
       lastReviewedAt: reviewedAt,
       srsBucket: "1d",

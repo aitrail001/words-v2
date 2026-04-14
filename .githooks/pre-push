@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${SKIP_GATE_FAST:-0}" == "1" ]]; then
+  echo "Skipping make pr-fast because SKIP_GATE_FAST=1"
+  exit 0
+fi
+
+echo "Running make gate-fast before push..."
+make gate-fast

@@ -6,12 +6,12 @@ const config = {
   },
   transform: {
     "^.+\\.tsx?$": ["ts-jest", {
-      tsconfig: {
-        jsx: "react-jsx",
-      },
+      tsconfig: "<rootDir>/tsconfig.json",
     }],
   },
   testPathIgnorePatterns: ["<rootDir>/node_modules/", "<rootDir>/.next/"],
+  modulePathIgnorePatterns: ["<rootDir>/.next/"],
+  watchPathIgnorePatterns: ["<rootDir>/.next/"],
 };
 
 module.exports = config;

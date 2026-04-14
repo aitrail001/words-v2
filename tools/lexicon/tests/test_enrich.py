@@ -1,5 +1,6 @@
 import json
 import io
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import subprocess
 import tempfile
 import threading
@@ -3478,6 +3479,90 @@ class EnrichSnapshotTests(unittest.TestCase):
                 _default_node_runner({'prompt': 'hello'}, timeout_seconds=90)
 
         self.assertEqual(mocked_run.call_args.kwargs['timeout'], 90)
+
+    def test_default_node_runner_round_trips_real_node_bridge_to_local_openai_compatible_server(self) -> None:
+        received_requests: list[dict[str, object]] = []
+        response_text = json.dumps({"definition": "bridge ok"})
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802 - HTTP server callback
+                content_length = int(self.headers.get("Content-Length") or "0")
+                body = self.rfile.read(content_length).decode("utf-8")
+                received_requests.append(json.loads(body))
+
+                payload = json.dumps(
+                    {
+                        "id": "resp_123",
+                        "object": "response",
+                        "created_at": 1710000000,
+                        "model": "gpt-test",
+                        "status": "completed",
+                        "output": [
+                            {
+                                "type": "message",
+                                "id": "msg_123",
+                                "role": "assistant",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": response_text,
+                                    }
+                                ],
+                            }
+                        ],
+                        "usage": {
+                            "input_tokens": 1,
+                            "output_tokens": 1,
+                            "total_tokens": 2,
+                        },
+                    }
+                ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format: str, *args: object) -> None:  # noqa: A003 - HTTP server callback
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        try:
+            response = _default_node_runner(
+                {
+                    "base_url": f"http://127.0.0.1:{server.server_address[1]}/v1",
+                    "api_key": "secret-key",
+                    "model": "gpt-test",
+                    "prompt": "hello",
+                    "system_prompt": "system prompt",
+                    "response_schema": {
+                        "name": "test_schema",
+                        "schema": {
+                            "type": "object",
+                            "properties": {"definition": {"type": "string"}},
+                            "required": ["definition"],
+                            "additionalProperties": False,
+                        },
+                        "strict": True,
+                    },
+                }
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=5)
+
+        self.assertEqual(len(received_requests), 1)
+        request = received_requests[0]
+        self.assertEqual(request["model"], "gpt-test")
+        self.assertEqual(request["text"]["format"]["type"], "json_schema")
+        self.assertEqual(request["input"][0]["role"], "system")
+        self.assertEqual(request["input"][1]["content"][0]["text"], "hello")
+        self.assertTrue(response["ok"])
+        self.assertIsNone(response["request_id"])
+        self.assertEqual(json.loads(response["response"]["output"][0]["content"][0]["text"]), {"definition": "bridge ok"})
 
     def test_parse_json_payload_text_salvages_markdown_fenced_output(self) -> None:
         payload = _parse_json_payload_text(

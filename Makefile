@@ -390,6 +390,9 @@ e2e-install:
 			PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npx playwright install chromium; \
 		fi'
 
+lexicon-ci-bootstrap: backend-install lexicon-install
+	@echo "Lexicon CI bootstrap complete"
+
 worktree-bootstrap: backend-install lexicon-install frontend-install admin-install e2e-install
 	@echo "Worktree bootstrap complete"
 
@@ -460,6 +463,13 @@ ci-test-lexicon:
 		.venv-lexicon/bin/python -m pytest tools/lexicon/tests -q --ignore=tools/lexicon/tests/test_import_db.py --ignore=tools/lexicon/tests/test_staging_import.py --ignore=tools/lexicon/tests/test_voice_import_db.py; \
 		.venv-backend/bin/python -m pytest tools/lexicon/tests/test_import_db.py tools/lexicon/tests/test_staging_import.py tools/lexicon/tests/test_voice_import_db.py -q; \
 	else \
+		mkdir -p "$(NPM_CACHE)"; \
+		echo "Installing lexicon tool npm dependencies"; \
+		rm -rf tools/lexicon/node_modules; \
+		cd tools/lexicon && npm ci --cache "$(NPM_CACHE)"; \
+		echo "Installing lexicon node transport npm dependencies"; \
+		rm -rf tools/lexicon/node/node_modules; \
+		cd tools/lexicon/node && npm ci --cache "$(NPM_CACHE)"; \
 		PY_BIN=""; \
 		if command -v python3 >/dev/null 2>&1; then \
 			PY_BIN="$$(command -v python3)"; \

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { apiClient } from "@/lib/api-client";
+import { assignLocation } from "@/lib/browser-location";
 
 const getPostLoginPath = (nextPath: string | null): string => {
   if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
@@ -39,7 +40,7 @@ export default function LoginPage() {
         { email, password }
       );
       apiClient.setTokens(response.access_token, response.refresh_token);
-      window.location.assign(getRequestedPostLoginPath());
+      assignLocation(getRequestedPostLoginPath());
     } catch (err: any) {
       setError(err.message || "Login failed");
     } finally {
