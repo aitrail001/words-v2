@@ -270,12 +270,13 @@ jobs:
           path: ~/.cache/nltk_data
           key: ${{ runner.os }}-nltk-wordnet-v1
 
-      - name: Download WordNet corpora
-        run: python -m nltk.downloader -d "$NLTK_DATA" wordnet omw-1.4
-
       - name: Bootstrap worktree
         working-directory: .
         run: make worktree-bootstrap
+
+      - name: Download WordNet corpora
+        working-directory: .
+        run: .venv-lexicon/bin/python -m nltk.downloader -d "$NLTK_DATA" wordnet omw-1.4
 
       - name: Write gate env file
         working-directory: .
