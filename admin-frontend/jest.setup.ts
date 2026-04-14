@@ -1,5 +1,10 @@
 import { TextDecoder, TextEncoder } from "node:util";
 import "@testing-library/jest-dom";
+import {
+  recordLocationAssign,
+  recordLocationReplace,
+  resetLocationSpies,
+} from "./src/test/location-spies";
 
 if (typeof globalThis.TextEncoder === "undefined") {
   globalThis.TextEncoder = TextEncoder;
@@ -17,22 +22,21 @@ if (!implSymbol) {
   throw new Error("Unable to locate the jsdom Location implementation symbol");
 }
 
-const locationImpl = (window.location as unknown as Record<symbol, any>)[implSymbol];
+const locationImpl = (window.location as unknown as Record<symbol, { assign?: (url: string) => void; replace?: (url: string) => void }>)[implSymbol];
+const locationImplProto = Object.getPrototypeOf(locationImpl);
 
-const updateLocation = (url: string): void => {
-  const parsedUrl = locationImpl._relevantDocument.encodingParseAURL(url);
-
-  if (parsedUrl === null) {
-    throw new TypeError(`Could not resolve "${url}" against the current document URL`);
-  }
-
-  locationImpl._relevantDocument._URL = parsedUrl;
+locationImplProto.assign = function assign(url: string): void {
+  recordLocationAssign(url);
 };
 
-locationImpl.assign = function assign(url: string): void {
-  updateLocation(url);
+locationImplProto.replace = function replace(url: string): void {
+  recordLocationReplace(url);
 };
 
-locationImpl.replace = function replace(url: string): void {
-  updateLocation(url);
-};
+const registerBeforeEach = (globalThis as { beforeEach?: (callback: () => void) => void }).beforeEach;
+
+if (typeof registerBeforeEach === "function") {
+  registerBeforeEach(() => {
+    resetLocationSpies();
+  });
+}

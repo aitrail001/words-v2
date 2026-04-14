@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LoginPage from "@/app/login/page";
 import { apiClient } from "@/lib/api-client";
+import { locationAssignCalls } from "@/test/location-spies";
 
 jest.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -37,6 +38,6 @@ describe("LoginPage", () => {
       password: "password",
     });
     expect(mockSetTokens).toHaveBeenCalledWith("access-token", "refresh-token");
-    expect(window.location.pathname).toBe("/lexicon/compiled-review");
+    expect(locationAssignCalls).toEqual(["/lexicon/compiled-review"]);
   });
 });
