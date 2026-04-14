@@ -270,9 +270,9 @@ jobs:
           path: ~/.cache/nltk_data
           key: ${{ runner.os }}-nltk-wordnet-v1
 
-      - name: Bootstrap worktree
+      - name: Bootstrap lexicon CI dependencies
         working-directory: .
-        run: make worktree-bootstrap
+        run: make lexicon-ci-bootstrap
 
       - name: Download WordNet corpora
         working-directory: .

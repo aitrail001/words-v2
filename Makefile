@@ -390,6 +390,9 @@ e2e-install:
 			PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npx playwright install chromium; \
 		fi'
 
+lexicon-ci-bootstrap: backend-install lexicon-install
+	@echo "Lexicon CI bootstrap complete"
+
 worktree-bootstrap: backend-install lexicon-install frontend-install admin-install e2e-install
 	@echo "Worktree bootstrap complete"
 
