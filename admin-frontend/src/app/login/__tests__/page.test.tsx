@@ -13,22 +13,15 @@ jest.mock("@/lib/api-client", () => ({
 describe("LoginPage", () => {
   const mockPost = apiClient.post as jest.MockedFunction<typeof apiClient.post>;
   const mockSetTokens = apiClient.setTokens as jest.MockedFunction<typeof apiClient.setTokens>;
-  const assign = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
+    window.history.pushState({}, "", "/?next=%2Flexicon%2Fcompiled-review");
     mockPost.mockResolvedValue({
       access_token: "access-token",
       refresh_token: "refresh-token",
     });
     mockSetTokens.mockImplementation(() => undefined);
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: {
-        assign,
-        search: "?next=%2Flexicon%2Fcompiled-review",
-      },
-    });
   });
 
   it("navigates to the requested path after successful login", async () => {
@@ -44,6 +37,6 @@ describe("LoginPage", () => {
       password: "password",
     });
     expect(mockSetTokens).toHaveBeenCalledWith("access-token", "refresh-token");
-    expect(assign).toHaveBeenCalledWith("/lexicon/compiled-review");
+    expect(window.location.pathname).toBe("/lexicon/compiled-review");
   });
 });
