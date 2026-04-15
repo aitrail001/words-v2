@@ -1480,7 +1480,10 @@ class TestGroupedQueue:
 
         assert payload["current_schedule_value"] == "1d"
         assert payload["current_schedule_label"] == "Tomorrow"
-        assert payload["next_review_at"] == state.next_due_at.isoformat()
+        assert payload["due_review_date"] == "2026-04-11"
+        assert payload["min_due_at_utc"] == state.min_due_at_utc.isoformat()
+        assert "next_review_at" not in payload
+        assert "current_schedule_source" not in payload
 
     def test_build_current_schedule_payload_serializes_canonical_fields_without_legacy_normal_schedule_keys(
         self,
@@ -1536,7 +1539,10 @@ class TestGroupedQueue:
 
         assert payload["current_schedule_value"] == "1d"
         assert payload["current_schedule_label"] == "Tomorrow"
-        assert payload["next_review_at"] == state.min_due_at_utc.isoformat()
+        assert payload["due_review_date"] == "2026-04-11"
+        assert payload["min_due_at_utc"] == state.min_due_at_utc.isoformat()
+        assert "next_review_at" not in payload
+        assert "current_schedule_source" not in payload
 
     def test_effective_due_at_prefers_official_review_day_fields_over_legacy_next_due_at(self):
         state = EntryReviewState(
@@ -1579,7 +1585,10 @@ class TestGroupedQueue:
 
         assert payload["current_schedule_value"] == "1d"
         assert payload["current_schedule_label"] == "Tomorrow"
-        assert payload["next_review_at"] == state.min_due_at_utc.isoformat()
+        assert payload["due_review_date"] == "2026-04-11"
+        assert payload["min_due_at_utc"] == state.min_due_at_utc.isoformat()
+        assert "next_review_at" not in payload
+        assert "current_schedule_source" not in payload
 
     def test_long_horizon_success_sequence_reaches_multi_month_bucket(self):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)

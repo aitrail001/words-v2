@@ -996,6 +996,122 @@ class TestKnowledgeMapDetail:
         assert "next_review_at" not in data["review_queue"]
 
     @pytest.mark.asyncio
+    async def test_phrase_detail_review_queue_uses_canonical_schedule_contract(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        preferences = UserPreference(user_id=user_id, translation_locale="zh-Hans")
+        phrase = PhraseEntry(
+            id=uuid.uuid4(),
+            phrase_text="bank on",
+            normalized_form="bank on",
+            phrase_kind="phrasal_verb",
+            language="en",
+            compiled_payload={
+                "senses": [
+                    {
+                        "definition": "To depend on someone.",
+                        "translations": {
+                            "zh-Hans": {
+                                "definition": "依赖",
+                                "examples": [],
+                                "usage_note": None,
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+        phrase_sense = PhraseSense(
+            id=uuid.uuid4(),
+            phrase_entry_id=phrase.id,
+            definition="To depend on someone.",
+            part_of_speech="phrasal_verb",
+            order_index=0,
+        )
+        phrase_sense_localization = PhraseSenseLocalization(
+            id=uuid.uuid4(),
+            phrase_sense_id=phrase_sense.id,
+            locale="zh-Hans",
+            localized_definition="依赖",
+        )
+        phrase_example = PhraseSenseExample(
+            id=uuid.uuid4(),
+            phrase_sense_id=phrase_sense.id,
+            sentence="You can bank on me.",
+            difficulty="B1",
+            order_index=0,
+        )
+        phrase_example_localization = PhraseSenseExampleLocalization(
+            id=uuid.uuid4(),
+            phrase_sense_example_id=phrase_example.id,
+            locale="zh-Hans",
+            translation="你可以指望我。",
+        )
+        status = LearnerEntryStatus(user_id=user_id, entry_type="phrase", entry_id=phrase.id, status="learning")
+
+        async def fake_get_entry_queue_schedule(self, *, user_id, entry_type, entry_id):
+            assert entry_type == "phrase"
+            return {
+                "queue_item_id": "queue-phrase-1",
+                "next_review_at": "2026-04-05T00:00:00+00:00",
+                "due_review_date": "2026-04-05",
+                "min_due_at_utc": "2026-04-05T00:00:00+00:00",
+                "recheck_due_at": None,
+                "current_schedule_value": "1d",
+                "current_schedule_label": "Tomorrow",
+                "schedule_options": [
+                    {"value": "10m", "label": "Later today", "is_default": False},
+                    {"value": "1d", "label": "Tomorrow", "is_default": True},
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.knowledge_map.ReviewService.get_entry_queue_schedule",
+            fake_get_entry_queue_schedule,
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(preferences),
+            scalar_one_or_none_result(phrase),
+            scalar_one_or_none_result(status),
+            mappings_all_result(
+                [
+                    {
+                        "entry_type": "phrase",
+                        "entry_id": phrase.id,
+                        "display_text": "bank on",
+                        "browse_rank": 141,
+                        "status": "learning",
+                        "cefr_level": None,
+                    }
+                ]
+            ),
+            mappings_all_result([]),
+            scalars_all_result([phrase_sense]),
+            scalars_all_result([phrase_sense_localization]),
+            scalars_all_result([phrase_example]),
+            scalars_all_result([phrase_example_localization]),
+            scalars_all_result([]),
+            mappings_all_result([]),
+            mappings_all_result([]),
+        ]
+
+        response = await client.get(
+            f"/api/knowledge-map/entries/phrase/{phrase.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["review_queue"]["queue_item_id"] == "queue-phrase-1"
+        assert data["review_queue"]["due_review_date"] == "2026-04-05"
+        assert data["review_queue"]["min_due_at_utc"] == "2026-04-05T00:00:00+00:00"
+        assert "next_review_at" not in data["review_queue"]
+
+    @pytest.mark.asyncio
     async def test_status_update_to_learning_ensures_review_state(
         self, client, mock_db, auth_token, monkeypatch
     ):
