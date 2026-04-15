@@ -5,6 +5,7 @@
   "scripts": {
     "test": "playwright test",
     "test:smoke": "playwright test --grep @smoke",
+    "test:route-runtime:smoke": "playwright test tests/smoke/route-runtime-smoke.spec.ts",
     "test:smoke:ci": "playwright test --grep @smoke --max-failures=1",
     "test:review:ci": "playwright test tests/smoke/user-review-submit.smoke.spec.ts tests/smoke/user-review-prompt-families.smoke.spec.ts tests/smoke/user-review-typed-normalization.smoke.spec.ts tests/smoke/user-learner-audio.smoke.spec.ts tests/full/user-review-queue-srs.full.spec.ts --max-failures=1",
     "smoke:local": "bash ./scripts/run-local-smoke.sh",
