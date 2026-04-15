@@ -1482,6 +1482,37 @@ class TestGroupedQueue:
         assert payload["current_schedule_label"] == "Tomorrow"
         assert payload["next_review_at"] == state.next_due_at.isoformat()
 
+    def test_build_current_schedule_payload_serializes_canonical_fields_without_legacy_normal_schedule_keys(
+        self,
+    ):
+        now = datetime(2026, 4, 10, 14, 30, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        state.due_review_date = date(2026, 4, 11)
+        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
+        state.next_due_at = datetime(2026, 4, 10, 23, 0, tzinfo=timezone.utc)
+        state.recheck_due_at = None
+
+        payload = ReviewService._build_current_schedule_payload(
+            state,
+            now=now,
+            user_timezone="Australia/Melbourne",
+        )
+
+        assert payload["queue_item_id"] == str(state.id)
+        assert payload["current_schedule_value"] == "1d"
+        assert payload["current_schedule_label"] == "Tomorrow"
+        assert payload["due_review_date"] == "2026-04-11"
+        assert payload["min_due_at_utc"] == state.min_due_at_utc.isoformat()
+        assert "next_review_at" not in payload
+        assert "current_schedule_source" not in payload
+
     def test_build_current_schedule_payload_uses_sticky_due_for_westward_timezone_change(self):
         now = datetime(2026, 4, 10, 20, 0, tzinfo=timezone.utc)
         state = EntryReviewState(
@@ -1781,6 +1812,85 @@ class TestQueueSubmit:
         assert updated.needs_relearn is True
         assert updated.recheck_planned is True
         mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_submit_queue_review_rolls_late_night_recheck_to_next_day_canonical_release(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        word_id = uuid.uuid4()
+        reviewed_at = datetime(2026, 4, 15, 13, 55, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            stability=6,
+            difficulty=0.5,
+            success_streak=2,
+        )
+        state_lookup_result = MagicMock()
+        state_lookup_result.scalar_one_or_none.return_value = state
+        learner_status_result = MagicMock()
+        learner_status_result.scalar_one_or_none.return_value = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=word_id,
+            status="learning",
+        )
+        prompt_token = review_service._encode_prompt_token(
+            {
+                "prompt_id": str(uuid.uuid4()),
+                "user_id": str(user_id),
+                "queue_item_id": str(state.id),
+                "prompt_type": ReviewService.PROMPT_TYPE_SENTENCE_GAP,
+                "review_mode": ReviewService.REVIEW_MODE_MCQ,
+                "source_entry_type": "word",
+                "source_entry_id": str(word_id),
+                "source_meaning_id": str(uuid.uuid4()),
+                "correct_option_id": "A",
+            }
+        )
+        mock_db.execute.side_effect = [
+            state_lookup_result,
+            learner_status_result,
+        ]
+        review_service._get_user_review_preferences = AsyncMock(
+            return_value=MagicMock(
+                timezone="Australia/Melbourne",
+                review_depth_preset="balanced",
+                enable_confidence_check=True,
+            )
+        )
+        review_service._build_detail_payload_for_word_id = AsyncMock(
+            return_value={"entry_type": "word", "entry_id": str(word_id), "display_text": "barely"}
+        )
+        monkeypatch.setattr(review_submission_module, "datetime", _frozen_datetime_class(reviewed_at))
+
+        updated = await review_service.submit_queue_review(
+            item_id=state.id,
+            quality=1,
+            time_spent_ms=1500,
+            user_id=user_id,
+            outcome="wrong",
+            prompt_token=prompt_token,
+        )
+
+        assert updated.outcome == "wrong"
+        assert updated.relearning is True
+        assert updated.relearning_trigger == "wrong"
+        assert updated.due_review_date == due_review_date_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone="Australia/Melbourne",
+            bucket="1d",
+        )
+        assert updated.min_due_at_utc == min_due_at_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone="Australia/Melbourne",
+            bucket="1d",
+        )
+        assert updated.recheck_due_at == updated.min_due_at_utc
+        assert updated.recheck_due_at != reviewed_at + timedelta(minutes=10)
 
     @pytest.mark.asyncio
     async def test_submit_queue_review_records_typed_analytics_fields(
