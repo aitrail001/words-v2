@@ -325,38 +325,31 @@ class TestEntryQueueSchedule:
         assert payload is None
 
     @pytest.mark.asyncio
-    async def test_get_entry_queue_schedule_preserves_next_step_for_learning_entries_without_canonical_schedule(
-        self, review_service, mock_db
+    async def test_get_grouped_review_queue_excludes_rows_without_explicit_learning_status(
+        self, review_service
     ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
         user_id = uuid.uuid4()
-        entry_id = uuid.uuid4()
         state = EntryReviewState(
             id=uuid.uuid4(),
             user_id=user_id,
             entry_type="word",
-            entry_id=entry_id,
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
             stability=3,
             difficulty=0.5,
         )
-        learner_status = LearnerEntryStatus(
-            user_id=user_id,
-            entry_type="word",
-            entry_id=entry_id,
-            status="learning",
-        )
-        learner_status_result = MagicMock()
-        learner_status_result.scalar_one_or_none.return_value = learner_status
-        state_result = MagicMock()
-        state_result.scalar_one_or_none.return_value = state
-        mock_db.execute.side_effect = [learner_status_result, state_result]
+        _set_canonical_schedule(state, now + timedelta(days=1))
+        state.entry_text = "judicial"
+        state.srs_bucket = "1d"
 
-        payload = await review_service.get_entry_queue_schedule(
-            user_id=user_id,
-            entry_type="word",
-            entry_id=entry_id,
-        )
+        review_service._list_active_queue_states = AsyncMock(return_value=[state])
 
-        assert payload is not None
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload["total_count"] == 0
+        assert payload["groups"] == []
 
 
 class TestQueueDue:
