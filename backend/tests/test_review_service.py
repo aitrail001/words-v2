@@ -19,7 +19,7 @@ from app.models.user_preference import UserPreference
 from app.models.word import Word
 from app.models.meaning import Meaning
 from app.spaced_repetition import calculate_next_review
-from app.services.review_schedule import due_review_date_for_bucket, min_due_at_for_bucket
+from app.services.review_schedule import effective_review_date, due_review_date_for_bucket, min_due_at_for_bucket
 
 
 @pytest.fixture
@@ -77,6 +77,20 @@ def _frozen_datetime_class(fixed_now: datetime):
     return FrozenDateTime
 
 
+def _set_canonical_schedule(
+    state: EntryReviewState,
+    due_at: datetime | None,
+    *,
+    user_timezone: str = "UTC",
+) -> None:
+    state.min_due_at_utc = due_at
+    state.due_review_date = (
+        effective_review_date(instant_utc=due_at, user_timezone=user_timezone)
+        if due_at is not None
+        else None
+    )
+
+
 class TestQueueAdd:
     @pytest.mark.asyncio
     async def test_add_to_queue_is_idempotent_per_user_and_meaning(
@@ -99,7 +113,7 @@ class TestQueueAdd:
             stability=0.3,
             difficulty=0.5,
         )
-        existing_state.next_due_at = datetime.now(timezone.utc) + timedelta(days=1)
+        _set_canonical_schedule(existing_state, datetime.now(timezone.utc) + timedelta(days=1))
 
         meaning_result = MagicMock()
         meaning_result.scalar_one_or_none.return_value = meaning
@@ -236,7 +250,7 @@ class TestEntryQueueSchedule:
             stability=0.3,
             difficulty=0.5,
         )
-        created_state.next_due_at = None
+        _set_canonical_schedule(created_state, None)
         created_state.recheck_due_at = None
         mock_db.execute.side_effect = [learner_status_result, empty_state_result]
         review_service._ensure_entry_review_state = AsyncMock(return_value=created_state)
@@ -247,7 +261,7 @@ class TestEntryQueueSchedule:
             entry_id=entry_id,
         )
 
-        assert created_state.next_due_at is None
+        assert created_state.min_due_at_utc is None
         assert payload == {
             "queue_item_id": str(created_state.id),
             "next_review_at": None,
@@ -340,7 +354,7 @@ class TestQueueDue:
             stability=3,
             difficulty=0.5,
         )
-        state.next_due_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        _set_canonical_schedule(state, datetime.now(timezone.utc) - timedelta(hours=1))
         word = Word(id=word_id, word="serendipity", language="en")
         meanings = [Meaning(id=meaning_id, word_id=word_id, definition="lucky chance")]
 
@@ -384,9 +398,7 @@ class TestQueueDue:
             stability=3,
             difficulty=0.5,
         )
-        state.next_due_at = now - timedelta(minutes=5)
-        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
-        state.due_review_date = date(2026, 4, 11)
+        _set_canonical_schedule(state, datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc), user_timezone="Asia/Tokyo")
         word = Word(id=word_id, word="candidate", language="en")
         meanings = [Meaning(id=meaning_id, word_id=word_id, definition="A person under consideration.")]
 
@@ -439,9 +451,7 @@ class TestQueueDue:
             stability=3,
             difficulty=0.5,
         )
-        state.next_due_at = now
-        state.min_due_at_utc = now
-        state.due_review_date = date(2026, 4, 11)
+        _set_canonical_schedule(state, now, user_timezone="America/Los_Angeles")
         word = Word(id=word_id, word="candidate", language="en")
         meanings = [Meaning(id=meaning_id, word_id=word_id, definition="A person under consideration.")]
 
@@ -491,9 +501,7 @@ class TestQueueDue:
             stability=3,
             difficulty=0.5,
         )
-        state.next_due_at = now
-        state.min_due_at_utc = now
-        state.due_review_date = date(2026, 4, 11)
+        _set_canonical_schedule(state, now, user_timezone="America/Los_Angeles")
         word = Word(id=word_id, word="candidate", language="en")
         meanings = [Meaning(id=meaning_id, word_id=word_id, definition="A person under consideration.")]
 
@@ -552,9 +560,7 @@ class TestGroupedReviewQueue:
             stability=3,
             difficulty=0.5,
         )
-        state.next_due_at = now + timedelta(days=1)
-        state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
-        state.due_review_date = date(2026, 4, 11)
+        _set_canonical_schedule(state, datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc), user_timezone="America/Los_Angeles")
         state.entry_text = "candidate"
         state.learner_status = "learning"
 
@@ -593,7 +599,7 @@ class TestGroupedReviewQueue:
             exposure_count=5,
             times_remembered=4,
         )
-        state.next_due_at = datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc)
+        _set_canonical_schedule(state, datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc))
         state.last_reviewed_at = datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc)
         state.created_at = datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc)
         state.srs_bucket = "3d"
@@ -682,7 +688,7 @@ class TestGroupedReviewQueue:
             stability=6,
             difficulty=0.5,
         )
-        state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        _set_canonical_schedule(state, datetime.now(timezone.utc) - timedelta(minutes=5))
         word = Word(id=word_id, word="jump the gun", language="en")
         meanings = [
             Meaning(id=meaning_id, word_id=word_id, definition="To do something too soon."),
@@ -747,7 +753,7 @@ class TestGroupedReviewQueue:
             difficulty=0.5,
             last_submission_prompt_id="manual_prompt_type:speak_recall",
         )
-        state.next_due_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        _set_canonical_schedule(state, datetime.now(timezone.utc) - timedelta(hours=1))
         word = Word(id=word_id, word="candidate", language="en")
         meanings = [Meaning(id=meaning_id, word_id=word_id, definition="A person who applies for a role.")]
 
@@ -793,7 +799,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        overdue.next_due_at = now - timedelta(hours=2)
+        _set_canonical_schedule(overdue, now - timedelta(hours=2))
         overdue.last_reviewed_at = now - timedelta(days=1)
         overdue.entry_text = "alpha"
         overdue.learner_status = "learning"
@@ -809,7 +815,7 @@ class TestGroupedQueue:
             stability=14,
             difficulty=0.5,
         )
-        tomorrow.next_due_at = now + timedelta(days=1, hours=1)
+        _set_canonical_schedule(tomorrow, now + timedelta(days=1, hours=1))
         tomorrow.last_reviewed_at = None
         tomorrow.entry_text = "break down"
         tomorrow.learner_status = "learning"
@@ -833,9 +839,9 @@ class TestGroupedQueue:
                             "entry_type": "word",
                             "text": "alpha",
                             "status": "learning",
-                            "next_review_at": overdue.next_due_at.isoformat(),
-                            "due_review_date": None,
-                            "min_due_at_utc": None,
+                            "next_review_at": overdue.min_due_at_utc.isoformat(),
+                            "due_review_date": overdue.due_review_date.isoformat(),
+                            "min_due_at_utc": overdue.min_due_at_utc.isoformat(),
                             "last_reviewed_at": overdue.last_reviewed_at.isoformat(),
                             "bucket": "1d",
                         }
@@ -851,9 +857,9 @@ class TestGroupedQueue:
                             "entry_type": "phrase",
                             "text": "break down",
                             "status": "learning",
-                            "next_review_at": tomorrow.next_due_at.isoformat(),
-                            "due_review_date": None,
-                            "min_due_at_utc": None,
+                            "next_review_at": tomorrow.min_due_at_utc.isoformat(),
+                            "due_review_date": tomorrow.due_review_date.isoformat(),
+                            "min_due_at_utc": tomorrow.min_due_at_utc.isoformat(),
                             "last_reviewed_at": None,
                             "bucket": "7d",
                         }
@@ -879,7 +885,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        learning_state.next_due_at = now + timedelta(hours=3)
+        _set_canonical_schedule(learning_state, now + timedelta(hours=3))
         learning_state.last_reviewed_at = now - timedelta(days=1)
         learning_state.srs_bucket = "1d"
 
@@ -893,7 +899,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        known_state.next_due_at = now + timedelta(days=1)
+        _set_canonical_schedule(known_state, now + timedelta(days=1))
         known_state.srs_bucket = "180d"
 
         to_learn_state = EntryReviewState(
@@ -906,7 +912,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        to_learn_state.next_due_at = now + timedelta(days=2)
+        _set_canonical_schedule(to_learn_state, now + timedelta(days=2))
         to_learn_state.srs_bucket = "2d"
 
         learning_status = LearnerEntryStatus(
@@ -962,9 +968,9 @@ class TestGroupedQueue:
                         "entry_type": "word",
                         "text": "alpha",
                         "status": "learning",
-                        "next_review_at": learning_state.next_due_at.isoformat(),
-                        "due_review_date": None,
-                        "min_due_at_utc": None,
+                        "next_review_at": learning_state.min_due_at_utc.isoformat(),
+                        "due_review_date": learning_state.due_review_date.isoformat(),
+                        "min_due_at_utc": learning_state.min_due_at_utc.isoformat(),
                         "last_reviewed_at": learning_state.last_reviewed_at.isoformat(),
                         "bucket": "1d",
                     }
@@ -998,7 +1004,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        first_sibling.next_due_at = now + timedelta(hours=1)
+        _set_canonical_schedule(first_sibling, now + timedelta(hours=1))
 
         second_sibling = EntryReviewState(
             id=uuid.uuid4(),
@@ -1010,7 +1016,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        second_sibling.next_due_at = now + timedelta(hours=2)
+        _set_canonical_schedule(second_sibling, now + timedelta(hours=2))
 
         other_entry = EntryReviewState(
             id=uuid.uuid4(),
@@ -1022,7 +1028,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        other_entry.next_due_at = now + timedelta(days=1)
+        _set_canonical_schedule(other_entry, now + timedelta(days=1))
 
         state_result = MagicMock()
         state_result.all.return_value = [
@@ -1066,7 +1072,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        valid_state.next_due_at = now + timedelta(hours=1)
+        _set_canonical_schedule(valid_state, now + timedelta(hours=1))
         valid_state.srs_bucket = "1d"
 
         missing_state = EntryReviewState(
@@ -1079,7 +1085,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        missing_state.next_due_at = now + timedelta(hours=2)
+        _set_canonical_schedule(missing_state, now + timedelta(hours=2))
         missing_state.srs_bucket = "2d"
 
         state_result = MagicMock()
@@ -1107,9 +1113,9 @@ class TestGroupedQueue:
                         "entry_type": "word",
                         "text": "alpha",
                         "status": "learning",
-                        "next_review_at": valid_state.next_due_at.isoformat(),
-                        "due_review_date": None,
-                        "min_due_at_utc": None,
+                        "next_review_at": valid_state.min_due_at_utc.isoformat(),
+                        "due_review_date": valid_state.due_review_date.isoformat(),
+                        "min_due_at_utc": valid_state.min_due_at_utc.isoformat(),
                         "last_reviewed_at": None,
                         "bucket": "1d",
                     }
@@ -1166,7 +1172,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        overdue.next_due_at = now - timedelta(hours=2)
+        _set_canonical_schedule(overdue, now - timedelta(hours=2))
         overdue.entry_text = "alpha"
         overdue.learner_status = "learning"
         overdue.srs_bucket = "1d"
@@ -1181,7 +1187,7 @@ class TestGroupedQueue:
             stability=14,
             difficulty=0.5,
         )
-        tomorrow.next_due_at = now + timedelta(days=1, hours=1)
+        _set_canonical_schedule(tomorrow, now + timedelta(days=1, hours=1))
         tomorrow.entry_text = "break down"
         tomorrow.learner_status = "learning"
         tomorrow.srs_bucket = "7d"
@@ -1216,7 +1222,7 @@ class TestGroupedQueue:
             stability=1,
             difficulty=0.5,
         )
-        unscheduled.next_due_at = None
+        _set_canonical_schedule(unscheduled, None)
         unscheduled.entry_text = "alpha"
         unscheduled.learner_status = "learning"
         unscheduled.srs_bucket = "1d"
@@ -1246,7 +1252,7 @@ class TestGroupedQueue:
             stability=1,
             difficulty=0.5,
         )
-        due_now_state.next_due_at = None
+        _set_canonical_schedule(due_now_state, None)
         due_now_state.entry_text = "persistence"
         due_now_state.learner_status = "learning"
         due_now_state.srs_bucket = "1d"
@@ -1261,7 +1267,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        future_state.next_due_at = datetime(2026, 4, 7, 10, 0, tzinfo=timezone.utc)
+        _set_canonical_schedule(future_state, datetime(2026, 4, 7, 10, 0, tzinfo=timezone.utc))
         future_state.entry_text = "jump the gun"
         future_state.learner_status = "learning"
         future_state.srs_bucket = "3d"
@@ -1307,8 +1313,8 @@ class TestGroupedQueue:
                         "text": "jump the gun",
                         "status": "learning",
                         "next_review_at": "2026-04-07T10:00:00+00:00",
-                        "due_review_date": None,
-                        "min_due_at_utc": None,
+                        "due_review_date": future_state.due_review_date.isoformat(),
+                        "min_due_at_utc": future_state.min_due_at_utc.isoformat(),
                         "last_reviewed_at": None,
                         "bucket": "3d",
                     }
@@ -1333,7 +1339,7 @@ class TestGroupedQueue:
             stability=1,
             difficulty=0.5,
         )
-        due_now_state.next_due_at = now
+        _set_canonical_schedule(due_now_state, now)
         due_now_state.entry_text = "alpha"
         due_now_state.learner_status = "learning"
         due_now_state.srs_bucket = "1d"
@@ -1348,7 +1354,7 @@ class TestGroupedQueue:
             stability=1,
             difficulty=0.5,
         )
-        later_today_state.next_due_at = now + timedelta(seconds=1)
+        _set_canonical_schedule(later_today_state, now + timedelta(seconds=1))
         later_today_state.entry_text = "beta"
         later_today_state.learner_status = "learning"
         later_today_state.srs_bucket = "1d"
@@ -1379,7 +1385,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        earliest.next_due_at = now + timedelta(minutes=15)
+        _set_canonical_schedule(earliest, now + timedelta(minutes=15))
         earliest.last_reviewed_at = now - timedelta(days=3)
         earliest.entry_text = "gamma"
         earliest.learner_status = "learning"
@@ -1395,7 +1401,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        latest.next_due_at = now + timedelta(hours=4)
+        _set_canonical_schedule(latest, now + timedelta(hours=4))
         latest.last_reviewed_at = now - timedelta(days=1)
         latest.entry_text = "alpha"
         latest.learner_status = "learning"
@@ -1411,7 +1417,7 @@ class TestGroupedQueue:
             stability=3,
             difficulty=0.5,
         )
-        middle.next_due_at = now + timedelta(hours=2)
+        _set_canonical_schedule(middle, now + timedelta(hours=2))
         middle.last_reviewed_at = now - timedelta(days=2)
         middle.entry_text = "beta"
         middle.learner_status = "learning"
@@ -1433,7 +1439,7 @@ class TestGroupedQueue:
         assert payload["order"] == "asc"
         assert [item["text"] for item in payload["items"]] == ["gamma", "beta", "alpha"]
 
-    def test_build_current_schedule_payload_uses_actual_due_time_for_display(self):
+    def test_build_current_schedule_payload_serializes_canonical_due_time_for_display(self):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
         state = EntryReviewState(
             id=uuid.uuid4(),
@@ -1443,16 +1449,18 @@ class TestGroupedQueue:
             stability=7,
             difficulty=0.5,
         )
-        state.next_due_at = now + timedelta(days=3)
+        _set_canonical_schedule(state, now + timedelta(days=3))
         state.recheck_due_at = None
 
-        payload = ReviewService._build_current_schedule_payload(state, now=now)
+        payload = ReviewService._build_current_schedule_payload(state, now=now, user_timezone="UTC")
 
         assert payload["queue_item_id"] == str(state.id)
-        assert payload["next_review_at"] == state.next_due_at.isoformat()
+        assert payload["due_review_date"] == state.due_review_date.isoformat()
+        assert payload["min_due_at_utc"] == state.min_due_at_utc.isoformat()
         assert payload["current_schedule_value"] == "3d"
         assert payload["current_schedule_label"] == "In 3 days"
-        assert payload["current_schedule_source"] == "scheduled_timestamp"
+        assert "next_review_at" not in payload
+        assert "current_schedule_source" not in payload
         assert next(
             option for option in payload["schedule_options"] if option["value"] == "3d"
         )["is_default"] is True
@@ -1469,7 +1477,6 @@ class TestGroupedQueue:
         )
         state.due_review_date = date(2026, 4, 11)
         state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
-        state.next_due_at = state.min_due_at_utc
         state.recheck_due_at = None
 
         payload = ReviewService._build_current_schedule_payload(
@@ -1499,7 +1506,6 @@ class TestGroupedQueue:
         )
         state.due_review_date = date(2026, 4, 11)
         state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
-        state.next_due_at = datetime(2026, 4, 10, 23, 0, tzinfo=timezone.utc)
         state.recheck_due_at = None
 
         payload = ReviewService._build_current_schedule_payload(
@@ -1528,7 +1534,6 @@ class TestGroupedQueue:
         )
         state.due_review_date = date(2026, 4, 11)
         state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
-        state.next_due_at = state.min_due_at_utc
         state.recheck_due_at = None
 
         payload = ReviewService._build_current_schedule_payload(
@@ -1544,7 +1549,7 @@ class TestGroupedQueue:
         assert "next_review_at" not in payload
         assert "current_schedule_source" not in payload
 
-    def test_effective_due_at_prefers_official_review_day_fields_over_legacy_next_due_at(self):
+    def test_effective_due_at_uses_official_review_day_fields(self):
         state = EntryReviewState(
             id=uuid.uuid4(),
             user_id=uuid.uuid4(),
@@ -1556,11 +1561,9 @@ class TestGroupedQueue:
         state.recheck_due_at = None
         state.due_review_date = date(2026, 4, 11)
         state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
-        state.next_due_at = datetime(2026, 4, 10, 23, 0, tzinfo=timezone.utc)
-
         assert ReviewService._effective_due_at(state) == state.min_due_at_utc
 
-    def test_build_current_schedule_payload_ignores_stale_legacy_next_due_at_when_official_fields_exist(
+    def test_build_current_schedule_payload_uses_official_fields_when_present(
         self,
     ):
         now = datetime(2026, 4, 10, 14, 30, tzinfo=timezone.utc)
@@ -1575,8 +1578,6 @@ class TestGroupedQueue:
         state.recheck_due_at = None
         state.due_review_date = date(2026, 4, 11)
         state.min_due_at_utc = datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc)
-        state.next_due_at = datetime(2026, 4, 10, 23, 0, tzinfo=timezone.utc)
-
         payload = ReviewService._build_current_schedule_payload(
             state,
             now=now,
@@ -1601,8 +1602,6 @@ class TestGroupedQueue:
             difficulty=0.5,
         )
         state.recheck_due_at = now + timedelta(minutes=10)
-        state.next_due_at = state.recheck_due_at
-
         payload = ReviewService._build_current_schedule_payload(state, now=now)
 
         assert payload["current_schedule_value"] == "10m"
@@ -1627,8 +1626,6 @@ class TestGroupedQueue:
         state.due_review_date = date(2026, 4, 16)
         state.min_due_at_utc = datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc)
         state.recheck_due_at = state.min_due_at_utc
-        state.next_due_at = state.min_due_at_utc
-
         payload = ReviewService._build_current_schedule_payload(
             state,
             now=now,
@@ -3399,12 +3396,12 @@ class TestQueueStats:
                 target_id=uuid.uuid4(),
             ),
         ]
-        visible_states[0].next_due_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        _set_canonical_schedule(visible_states[0], datetime.now(timezone.utc) - timedelta(minutes=5))
         visible_states[1].recheck_due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
-        visible_states[1].next_due_at = datetime.now(timezone.utc) + timedelta(days=1)
-        visible_states[2].next_due_at = datetime.now(timezone.utc) + timedelta(days=2)
-        visible_states[3].next_due_at = datetime.now(timezone.utc) + timedelta(days=3)
-        visible_states[4].next_due_at = datetime.now(timezone.utc) + timedelta(days=4)
+        _set_canonical_schedule(visible_states[1], datetime.now(timezone.utc) + timedelta(days=1))
+        _set_canonical_schedule(visible_states[2], datetime.now(timezone.utc) + timedelta(days=2))
+        _set_canonical_schedule(visible_states[3], datetime.now(timezone.utc) + timedelta(days=3))
+        _set_canonical_schedule(visible_states[4], datetime.now(timezone.utc) + timedelta(days=4))
         review_service._list_active_queue_states = AsyncMock(return_value=visible_states)
 
         stats = await review_service.get_queue_stats(user_id=user_id)
@@ -3458,7 +3455,7 @@ class TestQueueStats:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        visible_state_one.next_due_at = None
+        _set_canonical_schedule(visible_state_one, None)
         visible_state_two = EntryReviewState(
             id=uuid.uuid4(),
             user_id=user_id,
@@ -3467,7 +3464,7 @@ class TestQueueStats:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        visible_state_two.next_due_at = now + timedelta(days=1)
+        _set_canonical_schedule(visible_state_two, now + timedelta(days=1))
         review_service._list_active_queue_states = AsyncMock(
             return_value=[visible_state_one, visible_state_two]
         )
@@ -3520,7 +3517,7 @@ class TestUpdateQueueItemSchedule:
         assert updated["current_schedule_value"] == "7d"
         assert entry_state.srs_bucket == "7d"
         assert entry_state.interval_days == 7
-        assert entry_state.next_due_at is not None
+        assert entry_state.min_due_at_utc is not None
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -3609,7 +3606,7 @@ class TestLearningStart:
         target_state.srs_bucket = "1d"
         target_state.cadence_step = 0
         target_state.interval_days = 1
-        target_state.next_due_at = datetime.now(timezone.utc) + timedelta(days=1)
+        _set_canonical_schedule(target_state, datetime.now(timezone.utc) + timedelta(days=1))
         review_service._ensure_target_review_state = AsyncMock(return_value=target_state)
         review_service._build_word_detail_payload = AsyncMock(
             return_value={
@@ -3640,7 +3637,7 @@ class TestLearningStart:
         created_status = mock_db.add.call_args_list[0].args[0]
         assert isinstance(created_status, LearnerEntryStatus)
         assert created_status.status == "learning"
-        assert target_state.next_due_at is not None
+        assert target_state.min_due_at_utc is not None
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -3674,8 +3671,8 @@ class TestLearningStart:
         assert state.srs_bucket == "1d"
         assert state.interval_days == 1
         assert state.cadence_step == 0
-        assert state.next_due_at is not None
-        assert state.next_due_at > datetime.now(timezone.utc)
+        assert state.min_due_at_utc is not None
+        assert state.min_due_at_utc > datetime.now(timezone.utc)
 
     @pytest.mark.asyncio
     async def test_start_learning_entry_for_phrase_uses_phrase_target_state_as_queue_item_id(
@@ -3990,7 +3987,7 @@ class TestReviewRedesignGaps:
             stability=5,
             difficulty=0.5,
         )
-        state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        _set_canonical_schedule(state, datetime.now(timezone.utc) - timedelta(minutes=5))
 
         word = Word(id=word_id, word="resilience", language="en")
         first_meaning = Meaning(
@@ -4065,7 +4062,7 @@ class TestReviewRedesignGaps:
             stability=5,
             difficulty=0.5,
         )
-        legacy_state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        _set_canonical_schedule(legacy_state, datetime.now(timezone.utc) - timedelta(minutes=5))
 
         first_meaning_state = EntryReviewState(
             id=uuid.uuid4(),
@@ -4077,7 +4074,7 @@ class TestReviewRedesignGaps:
             stability=3,
             difficulty=0.5,
         )
-        first_meaning_state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=4)
+        _set_canonical_schedule(first_meaning_state, datetime.now(timezone.utc) - timedelta(minutes=4))
 
         word = Word(id=word_id, word="resilience", language="en")
         first_meaning = Meaning(
@@ -4222,7 +4219,7 @@ class TestReviewRedesignGaps:
             stability=2,
             difficulty=0.5,
         )
-        first_state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+        _set_canonical_schedule(first_state, datetime.now(timezone.utc) - timedelta(minutes=6))
         second_state = EntryReviewState(
             id=uuid.uuid4(),
             user_id=user_id,
@@ -4233,7 +4230,7 @@ class TestReviewRedesignGaps:
             stability=4,
             difficulty=0.5,
         )
-        second_state.next_due_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        _set_canonical_schedule(second_state, datetime.now(timezone.utc) - timedelta(minutes=5))
 
         state_result = MagicMock()
         state_result.scalars.return_value.all.return_value = [first_state, second_state]
@@ -4533,7 +4530,6 @@ class TestEntryReviewStateConcurrency:
             difficulty=0.4,
         )
         entry_state.interval_days = 1
-        entry_state.next_due_at = original_due_at
         entry_state.last_reviewed_at = original_reviewed_at
         entry_state.due_review_date = due_review_date_for_bucket(
             reviewed_at_utc=original_reviewed_at,
@@ -4609,8 +4605,12 @@ class TestEntryReviewStateConcurrency:
             user_timezone="Australia/Melbourne",
             bucket="7d",
         )
-        assert updated.next_due_at == updated.min_due_at_utc
-        assert updated.next_due_at != min_due_at_for_bucket(
+        assert updated.min_due_at_utc == min_due_at_for_bucket(
+            reviewed_at_utc=original_reviewed_at,
+            user_timezone="Australia/Melbourne",
+            bucket="7d",
+        )
+        assert updated.min_due_at_utc != min_due_at_for_bucket(
             reviewed_at_utc=retried_at,
             user_timezone="Australia/Melbourne",
             bucket="7d",
@@ -4843,8 +4843,7 @@ class TestEntryReviewStateConcurrency:
         assert updated.outcome == "wrong"
         assert updated.srs_bucket == "7d"
         assert updated.interval_days == 7
-        assert updated.next_due_at is not None
-        assert updated.next_due_at == updated.min_due_at_utc
+        assert updated.min_due_at_utc is not None
         assert updated.due_review_date is not None
         assert updated.due_review_date in {
             due_review_date_for_bucket(
@@ -4973,7 +4972,7 @@ class TestEntryReviewStateConcurrency:
         assert updated.outcome == "remember"
         assert updated.srs_bucket == "180d"
         assert updated.interval_days == 180
-        assert updated.next_due_at is not None
+        assert updated.min_due_at_utc is not None
         assert learner_status.status == "learning"
 
     @pytest.mark.asyncio
@@ -5038,7 +5037,7 @@ class TestEntryReviewStateConcurrency:
         assert updated.outcome == "correct_tested"
         assert updated.srs_bucket == "known"
         assert updated.interval_days is None
-        assert updated.next_due_at is None
+        assert updated.min_due_at_utc is None
         assert learner_status.status == "known"
 
     @pytest.mark.asyncio

@@ -245,7 +245,8 @@ class TestQueueDue:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        learning_state.next_due_at = now + timedelta(hours=1)
+        learning_state.min_due_at_utc = now + timedelta(hours=1)
+        learning_state.due_review_date = learning_state.min_due_at_utc.date()
         learning_state.last_reviewed_at = now - timedelta(days=1)
         learning_state.srs_bucket = "1d"
 
@@ -257,7 +258,8 @@ class TestQueueDue:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        known_state.next_due_at = now + timedelta(days=1)
+        known_state.min_due_at_utc = now + timedelta(days=1)
+        known_state.due_review_date = known_state.min_due_at_utc.date()
         known_state.srs_bucket = "180d"
 
         to_learn_state = EntryReviewState(
@@ -268,7 +270,8 @@ class TestQueueDue:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        to_learn_state.next_due_at = now + timedelta(days=2)
+        to_learn_state.min_due_at_utc = now + timedelta(days=2)
+        to_learn_state.due_review_date = to_learn_state.min_due_at_utc.date()
         to_learn_state.srs_bucket = "2d"
 
         phrase_state = EntryReviewState(
@@ -279,7 +282,8 @@ class TestQueueDue:
             target_type="phrase_sense",
             target_id=uuid.uuid4(),
         )
-        phrase_state.next_due_at = now + timedelta(days=1)
+        phrase_state.min_due_at_utc = now + timedelta(days=1)
+        phrase_state.due_review_date = phrase_state.min_due_at_utc.date()
         phrase_state.srs_bucket = "7d"
 
         user_result = MagicMock()
@@ -414,7 +418,8 @@ class TestQueueDue:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        future_state.next_due_at = datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+        future_state.min_due_at_utc = datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+        future_state.due_review_date = future_state.min_due_at_utc.date()
         future_state.srs_bucket = "180d"
         state_result = MagicMock()
         state_result.all.return_value = [(future_state, "learning")]
@@ -697,7 +702,6 @@ class TestQueueDue:
                         "target_type": "meaning",
                         "target_id": str(uuid.uuid4()),
                         "recheck_due_at": None,
-                        "next_due_at": "2026-10-05T09:00:00+00:00",
                         "last_outcome": "correct_tested",
                         "relearning": False,
                         "relearning_trigger": None,
@@ -1123,8 +1127,7 @@ class TestQueueSubmit:
         state.recheck_planned = False
         state.due_review_date = date(2026, 4, 13)
         state.min_due_at_utc = datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc)
-        state.next_due_at = state.min_due_at_utc
-        state.next_review = state.next_due_at
+        state.next_review = state.min_due_at_utc
         state.detail = {
             "entry_type": "word",
             "entry_id": str(state.entry_id),

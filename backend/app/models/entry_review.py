@@ -50,7 +50,6 @@ class EntryReviewState(Base):
     relearning_trigger: Mapped[str | None] = mapped_column(String(32), nullable=True)
     recheck_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    next_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     due_review_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     min_due_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -78,12 +77,6 @@ class EntryReviewState(Base):
             "user_id",
             "is_suspended",
             "recheck_due_at",
-        ),
-        Index(
-            "ix_entry_review_states_user_next_due",
-            "user_id",
-            "is_suspended",
-            "next_due_at",
         ),
         UniqueConstraint("user_id", "target_type", "target_id", name="uq_entry_review_state_user_target"),
     )

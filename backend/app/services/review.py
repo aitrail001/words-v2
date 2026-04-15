@@ -44,7 +44,6 @@ from app.services.review_srs_v1 import (
     bucket_to_interval_days,
     bucket_to_label,
     cadence_step_for_bucket,
-    due_at_for_bucket,
 )
 from app.services.review_submission import (
     apply_entry_state_review_result as apply_entry_state_review_result_impl,
@@ -540,9 +539,10 @@ class ReviewService:
             & (EntryReviewState.recheck_due_at >= day_start)
             & (EntryReviewState.recheck_due_at < day_end)
         ) | (
-            (EntryReviewState.next_due_at.is_not(None))
-            & (EntryReviewState.next_due_at >= day_start)
-            & (EntryReviewState.next_due_at < day_end)
+            (EntryReviewState.recheck_due_at.is_(None))
+            & (EntryReviewState.min_due_at_utc.is_not(None))
+            & (EntryReviewState.min_due_at_utc >= day_start)
+            & (EntryReviewState.min_due_at_utc < day_end)
         )
 
     @classmethod
@@ -839,7 +839,7 @@ class ReviewService:
                     .where(self._same_day_due_condition(day_start, day_end))
                     .order_by(
                         EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                        EntryReviewState.next_due_at.asc().nullsfirst(),
+                        EntryReviewState.min_due_at_utc.asc().nullsfirst(),
                         PhraseEntry.phrase_text.asc(),
                         PhraseSense.order_index.asc(),
                     )
@@ -861,7 +861,7 @@ class ReviewService:
                     .where(self._same_day_due_condition(day_start, day_end))
                     .order_by(
                         EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                        EntryReviewState.next_due_at.asc().nullsfirst(),
+                        EntryReviewState.min_due_at_utc.asc().nullsfirst(),
                         Word.frequency_rank.asc().nullslast(),
                         Meaning.order_index.asc(),
                     )
@@ -982,7 +982,7 @@ class ReviewService:
                     .where(self._same_day_due_condition(day_start, day_end))
                     .order_by(
                         EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                        EntryReviewState.next_due_at.asc().nullsfirst(),
+                        EntryReviewState.min_due_at_utc.asc().nullsfirst(),
                         PhraseEntry.phrase_text.asc(),
                     )
                     .limit(self.SAME_DAY_DISTRACTOR_POOL_LIMIT)
@@ -1002,7 +1002,7 @@ class ReviewService:
                     .where(self._same_day_due_condition(day_start, day_end))
                     .order_by(
                         EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                        EntryReviewState.next_due_at.asc().nullsfirst(),
+                        EntryReviewState.min_due_at_utc.asc().nullsfirst(),
                         Word.frequency_rank.asc().nullslast(),
                     )
                     .limit(self.SAME_DAY_DISTRACTOR_POOL_LIMIT)
@@ -1422,7 +1422,6 @@ class ReviewService:
         if resolved_bucket == "known":
             state.srs_bucket = "known"
             state.interval_days = None
-            state.next_due_at = None
             state.cadence_step = cadence_step_for_bucket("known")
             state.stability = max(0.15, float(state.stability or 180))
             return
@@ -1447,13 +1446,25 @@ class ReviewService:
         )
         if existing is not None:
             return existing
+        prefs = await self._get_user_review_preferences(user_id)
+        user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
+        reviewed_at = datetime.now(timezone.utc)
         state = EntryReviewState(
             user_id=user_id,
             entry_type=entry_type,
             entry_id=entry_id,
             stability=1.0,
             difficulty=0.5,
-            next_due_at=due_at_for_bucket("1d"),
+            due_review_date=due_review_date_for_bucket(
+                reviewed_at_utc=reviewed_at,
+                user_timezone=user_timezone,
+                bucket="1d",
+            ),
+            min_due_at_utc=min_due_at_for_bucket(
+                reviewed_at_utc=reviewed_at,
+                user_timezone=user_timezone,
+                bucket="1d",
+            ),
             srs_bucket="1d",
             cadence_step=cadence_step_for_bucket("1d"),
             success_streak=0,
@@ -1509,6 +1520,9 @@ class ReviewService:
         )
         if existing is not None:
             return existing
+        prefs = await self._get_user_review_preferences(user_id)
+        user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
+        reviewed_at = datetime.now(timezone.utc)
 
         state = EntryReviewState(
             user_id=user_id,
@@ -1518,7 +1532,16 @@ class ReviewService:
             entry_id=entry_id,
             stability=1.0,
             difficulty=0.5,
-            next_due_at=due_at_for_bucket("1d"),
+            due_review_date=due_review_date_for_bucket(
+                reviewed_at_utc=reviewed_at,
+                user_timezone=user_timezone,
+                bucket="1d",
+            ),
+            min_due_at_utc=min_due_at_for_bucket(
+                reviewed_at_utc=reviewed_at,
+                user_timezone=user_timezone,
+                bucket="1d",
+            ),
             srs_bucket="1d",
             cadence_step=cadence_step_for_bucket("1d"),
             success_streak=0,
@@ -2191,7 +2214,7 @@ class ReviewService:
         schedule_override: str | None,
     ) -> tuple[int | None, Any, datetime | None, str]:
         prefs = await self._get_user_review_preferences(user_id)
-        user_timezone = getattr(prefs, "timezone", None) or "UTC"
+        user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
         schedule_value = self._resolve_official_schedule_value(
             resolved_bucket=resolved_bucket,
             resolved_outcome=resolved_outcome,
@@ -2315,6 +2338,12 @@ class ReviewService:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+    @staticmethod
+    def _resolve_user_timezone(value: Any) -> str:
+        if isinstance(value, str) and value.strip():
+            return value
+        return "UTC"
+
     @classmethod
     def _uses_official_review_day_schedule(
         cls,
@@ -2348,7 +2377,6 @@ class ReviewService:
         return (
             cls._normalize_bucket_datetime(getattr(state, "recheck_due_at", None))
             or cls._official_due_at(state)
-            or cls._normalize_bucket_datetime(getattr(state, "next_due_at", None))
         )
 
     @classmethod
@@ -2403,8 +2431,7 @@ class ReviewService:
                 now=resolved_now,
                 user_timezone=user_timezone,
             )
-        due_at = cls._normalize_bucket_datetime(getattr(state, "next_due_at", None))
-        return due_at is None or due_at <= resolved_now
+        return True
 
     @classmethod
     def _due_queue_filter(cls, now: datetime):
@@ -2422,14 +2449,7 @@ class ReviewService:
             ),
             and_(
                 EntryReviewState.recheck_due_at.is_(None),
-                or_(
-                    EntryReviewState.due_review_date.is_(None),
-                    EntryReviewState.min_due_at_utc.is_(None),
-                ),
-                or_(
-                    EntryReviewState.next_due_at.is_(None),
-                    EntryReviewState.next_due_at <= resolved_now,
-                ),
+                or_(EntryReviewState.due_review_date.is_(None), EntryReviewState.min_due_at_utc.is_(None)),
             ),
         )
 
@@ -2493,7 +2513,7 @@ class ReviewService:
                 due_at=state.min_due_at_utc,
                 now=resolved_now,
             )
-        return cls._resolve_schedule_value_from_due_at(due_at=state.next_due_at, now=resolved_now)
+        return "1d"
 
     @classmethod
     def classify_review_bucket(
@@ -2624,7 +2644,7 @@ class ReviewService:
             .where(EntryReviewState.is_suspended.is_(False))
             .order_by(
                 EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                EntryReviewState.next_due_at.asc().nullsfirst(),
+                EntryReviewState.min_due_at_utc.asc().nullsfirst(),
                 EntryReviewState.created_at.asc(),
             )
         )
@@ -2723,7 +2743,6 @@ class ReviewService:
                     "recheck_due_at": state.recheck_due_at.isoformat()
                     if state.recheck_due_at is not None
                     else None,
-                    "next_due_at": state.next_due_at.isoformat() if state.next_due_at is not None else None,
                     "last_outcome": state.last_outcome,
                     "relearning": bool(state.relearning),
                     "relearning_trigger": state.relearning_trigger,
@@ -2918,7 +2937,7 @@ class ReviewService:
         user_timezone = None
         if any(self._state_has_official_review_day_fields(state) for state in states):
             prefs = await self._get_user_review_preferences(user_id)
-            user_timezone = getattr(prefs, "timezone", None) or "UTC"
+            user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
         for state in states:
             self._normalize_active_review_state_schedule(state)
         groups = self._group_review_queue_rows_by_due(
@@ -2949,7 +2968,7 @@ class ReviewService:
         user_timezone = None
         if any(self._state_has_official_review_day_fields(state) for state in states):
             prefs = await self._get_user_review_preferences(user_id)
-            user_timezone = getattr(prefs, "timezone", None) or "UTC"
+            user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
         for state in states:
             self._normalize_active_review_state_schedule(state)
         groups = self._group_review_queue_rows(states=states, now=resolved_now)
@@ -3058,7 +3077,7 @@ class ReviewService:
             .where(or_(LearnerEntryStatus.id.is_(None), LearnerEntryStatus.status == "learning"))
             .order_by(
                 EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                EntryReviewState.next_due_at.asc().nullsfirst(),
+                EntryReviewState.min_due_at_utc.asc().nullsfirst(),
                 EntryReviewState.created_at.asc(),
             )
             .limit(1)
@@ -3077,7 +3096,7 @@ class ReviewService:
         user_timezone = None
         if self._state_has_official_review_day_fields(state):
             prefs = await self._get_user_review_preferences(user_id)
-            user_timezone = getattr(prefs, "timezone", None) or "UTC"
+            user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
         return self._build_current_schedule_payload(state, user_timezone=user_timezone)
 
     async def update_queue_item_schedule(
@@ -3088,7 +3107,7 @@ class ReviewService:
         schedule_override: str,
     ) -> dict[str, Any]:
         prefs = await self._get_user_review_preferences(user_id)
-        user_timezone = getattr(prefs, "timezone", None) or "UTC"
+        user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
         state_result = await self.db.execute(
             select(EntryReviewState)
             .where(
@@ -3108,7 +3127,6 @@ class ReviewService:
                 reviewed_at_utc=resolved_now,
                 user_timezone=user_timezone,
             )
-            state.next_due_at = resolved_next_review
             state.next_review = resolved_next_review
             state.last_reviewed_at = resolved_now
             state.relearning = True
@@ -3137,7 +3155,6 @@ class ReviewService:
             state.cadence_step = cadence_step_for_bucket(resolved_bucket)
             state.due_review_date = resolved_due_review_date
             state.min_due_at_utc = resolved_min_due_at_utc
-            state.next_due_at = resolved_min_due_at_utc
             state.next_review = resolved_min_due_at_utc
             state.last_reviewed_at = resolved_now
             state.relearning = False
@@ -3186,7 +3203,7 @@ class ReviewService:
         target_state.meaning_id = meaning_id
         target_state.word_id = meaning.word_id
         target_state.card_type = "flashcard"
-        target_state.next_review = target_state.next_due_at
+        target_state.next_review = self._effective_due_at(target_state)
 
         logger.info(
             "Queue item created",
@@ -3228,7 +3245,7 @@ class ReviewService:
             state_query
             .order_by(
                 EntryReviewState.recheck_due_at.asc().nullsfirst(),
-                EntryReviewState.next_due_at.asc().nullsfirst(),
+                EntryReviewState.min_due_at_utc.asc().nullsfirst(),
                 EntryReviewState.created_at.asc(),
             )
             .limit(fetch_limit)
@@ -3240,7 +3257,7 @@ class ReviewService:
             self._state_has_official_review_day_fields(state) for state in review_states
         ):
             prefs = await self._get_user_review_preferences(user_id)
-            user_timezone = getattr(prefs, "timezone", None) or "UTC"
+            user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
             review_states = [
                 state
                 for state in review_states
@@ -3365,7 +3382,7 @@ class ReviewService:
                             "definition": meaning.definition,
                             "target_type": "meaning",
                             "target_id": str(meaning.id),
-                            "next_review": state.next_due_at,
+                            "next_review": self._effective_due_at(state),
                             "review_mode": review_mode,
                             "source_entry_type": "word",
                             "source_entry_id": str(word.id),
@@ -3430,7 +3447,7 @@ class ReviewService:
                         "definition": sense.definition,
                         "target_type": "phrase_sense",
                         "target_id": str(sense.id),
-                        "next_review": state.next_due_at,
+                        "next_review": self._effective_due_at(state),
                         "review_mode": review_mode,
                         "source_entry_type": "phrase",
                         "source_entry_id": str(phrase.id),
@@ -3796,7 +3813,15 @@ class ReviewService:
         for state in visible_states:
             self._normalize_active_review_state_schedule(state)
         total_items = len(visible_states)
-        due_items = sum(1 for state in visible_states if self._is_queue_state_due_now(state, now=now))
+        user_timezone = None
+        if any(self._state_has_official_review_day_fields(state) for state in visible_states):
+            prefs = await self._get_user_review_preferences(user_id)
+            user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
+        due_items = sum(
+            1
+            for state in visible_states
+            if self._is_queue_state_due_now(state, now=now, user_timezone=user_timezone)
+        )
 
         aggregate_result = await self.db.execute(
             select(

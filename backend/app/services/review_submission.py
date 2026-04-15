@@ -115,7 +115,6 @@ def apply_entry_state_review_result(
     entry_state.last_outcome = resolved_outcome
     entry_state.is_fragile = review_result.is_fragile
     entry_state.last_reviewed_at = reviewed_at
-    entry_state.next_due_at = resolved_next_review
     entry_state.srs_bucket = resolved_bucket
     entry_state.cadence_step = cadence_step_for_bucket(resolved_bucket)
     entry_state.due_review_date = due_review_date
@@ -223,7 +222,6 @@ async def submit_entry_state_review(
                 entry_state.interval_days = resolved_interval_days
                 entry_state.due_review_date = resolved_due_review_date
                 entry_state.min_due_at_utc = resolved_min_due_at_utc
-                entry_state.next_due_at = resolved_min_due_at_utc
                 entry_state.next_review = resolved_min_due_at_utc
                 entry_state.srs_bucket = resolved_bucket
                 entry_state.cadence_step = cadence_step_for_bucket(resolved_bucket)
@@ -304,7 +302,7 @@ async def submit_entry_state_review(
     reviewed_at = datetime.now(timezone.utc)
     scheduled_by = "manual_override" if schedule_override else "recommended"
     prefs = await service._get_user_review_preferences(user_id)
-    user_timezone = getattr(prefs, "timezone", None) or "UTC"
+    user_timezone = service._resolve_user_timezone(getattr(prefs, "timezone", None))
     (
         resolved_interval_days,
         resolved_due_review_date,
