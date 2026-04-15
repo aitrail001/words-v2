@@ -63,6 +63,7 @@ from app.services.review_schedule import (
     due_review_date_for_bucket,
     effective_review_date,
     min_due_at_for_bucket,
+    recheck_due_at_for_retry,
     sticky_due,
 )
 
@@ -2262,6 +2263,22 @@ class ReviewService:
             current_value,
             "Later today" if current_value == "10m" else "Tomorrow",
         )
+        if cls._state_has_official_review_day_fields(state):
+            return {
+                "queue_item_id": str(state.id),
+                "due_review_date": getattr(state, "due_review_date", None).isoformat()
+                if getattr(state, "due_review_date", None) is not None
+                else None,
+                "min_due_at_utc": getattr(state, "min_due_at_utc", None).isoformat()
+                if getattr(state, "min_due_at_utc", None) is not None
+                else None,
+                "recheck_due_at": cls._normalize_bucket_datetime(getattr(state, "recheck_due_at", None)).isoformat()
+                if cls._normalize_bucket_datetime(getattr(state, "recheck_due_at", None)) is not None
+                else None,
+                "current_schedule_value": current_value,
+                "current_schedule_label": current_label,
+                "schedule_options": schedule_options,
+            }
         return {
             "queue_item_id": str(state.id),
             "next_review_at": due_at.isoformat() if due_at is not None else None,
@@ -3039,7 +3056,12 @@ class ReviewService:
 
         if schedule_override == "10m":
             resolved_now = datetime.now(timezone.utc)
-            resolved_next_review = resolved_now + timedelta(minutes=10)
+            prefs = await self._get_user_review_preferences(user_id)
+            user_timezone = getattr(prefs, "timezone", None) or "UTC"
+            resolved_next_review = recheck_due_at_for_retry(
+                reviewed_at_utc=resolved_now,
+                user_timezone=user_timezone,
+            )
             state.next_due_at = resolved_next_review
             state.next_review = resolved_next_review
             state.last_reviewed_at = resolved_now

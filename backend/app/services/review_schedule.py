@@ -96,6 +96,32 @@ def min_due_at_for_bucket(
     return local_due.astimezone(timezone.utc)
 
 
+def recheck_due_at_for_retry(
+    *,
+    reviewed_at_utc: datetime,
+    user_timezone: str,
+    retry_delay_minutes: int = 10,
+    release_hour_local: int = REVIEW_RELEASE_HOUR_LOCAL,
+) -> datetime:
+    reviewed_at = _normalize_utc_instant(reviewed_at_utc)
+    candidate_due_at = reviewed_at + timedelta(minutes=retry_delay_minutes)
+    user_zone = _user_zone(user_timezone)
+    reviewed_local_date = reviewed_at.astimezone(user_zone).date()
+    candidate_local_date = candidate_due_at.astimezone(user_zone).date()
+
+    if candidate_local_date != reviewed_local_date:
+        rolled_due_at = min_due_at_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone=user_timezone,
+            bucket="1d",
+            release_hour_local=release_hour_local,
+        )
+        if rolled_due_at is not None:
+            return rolled_due_at
+
+    return candidate_due_at
+
+
 def due_now(
     *,
     now_utc: datetime,
