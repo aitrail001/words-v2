@@ -308,7 +308,8 @@ Audit run on branch `feat/review-schedule-canonicalization` against the current 
 
 ### Convert to admin diagnostics
 
-- Keep `recheck_due_at`, `last_outcome`, `relearning`, `relearning_trigger`, `target_type`, and `target_id` as admin/support diagnostics only.
+- Keep `recheck_due_at` as a sanctioned product retry field that admin/support may also display as a diagnostic.
+- Keep `last_outcome`, `relearning`, `relearning_trigger`, `target_type`, and `target_id` as admin/support diagnostics only.
 - Keep one admin-visible exact normal-schedule diagnostic only if operators still need it during cutover; the current repo uses `next_due_at` for that purpose on admin bucket detail pages.
 - Do not let admin diagnostics drive the primary schedule copy. Admin should show the same canonical learner-facing message first, then show diagnostics in a separate block.
 
