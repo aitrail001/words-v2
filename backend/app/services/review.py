@@ -3041,6 +3041,8 @@ class ReviewService:
         item_id: uuid.UUID,
         schedule_override: str,
     ) -> dict[str, Any]:
+        prefs = await self._get_user_review_preferences(user_id)
+        user_timezone = getattr(prefs, "timezone", None) or "UTC"
         state_result = await self.db.execute(
             select(EntryReviewState)
             .where(
@@ -3056,8 +3058,6 @@ class ReviewService:
 
         if schedule_override == "10m":
             resolved_now = datetime.now(timezone.utc)
-            prefs = await self._get_user_review_preferences(user_id)
-            user_timezone = getattr(prefs, "timezone", None) or "UTC"
             resolved_next_review = recheck_due_at_for_retry(
                 reviewed_at_utc=resolved_now,
                 user_timezone=user_timezone,
@@ -3116,7 +3116,7 @@ class ReviewService:
             learner_status.status = "known" if resolved_bucket == "known" else "learning"
         await self.db.commit()
         self._invalidate_queue_stats_cache(user_id)
-        return self._build_current_schedule_payload(state)
+        return self._build_current_schedule_payload(state, user_timezone=user_timezone)
 
     async def add_to_queue(self, user_id: uuid.UUID, meaning_id: uuid.UUID) -> Any:
         """Add a meaning to a user's queue in an idempotent way."""
