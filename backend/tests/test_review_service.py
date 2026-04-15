@@ -325,26 +325,27 @@ class TestEntryQueueSchedule:
         assert payload is None
 
     @pytest.mark.asyncio
-    async def test_get_grouped_review_queue_excludes_rows_without_explicit_learning_status(
+    async def test_get_grouped_review_queue_excludes_unscheduled_learning_rows(
         self, review_service
     ):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
         user_id = uuid.uuid4()
-        state = EntryReviewState(
+        unscheduled = EntryReviewState(
             id=uuid.uuid4(),
             user_id=user_id,
             entry_type="word",
             entry_id=uuid.uuid4(),
             target_type="meaning",
             target_id=uuid.uuid4(),
-            stability=3,
+            stability=1,
             difficulty=0.5,
         )
-        _set_canonical_schedule(state, now + timedelta(days=1))
-        state.entry_text = "judicial"
-        state.srs_bucket = "1d"
+        _set_canonical_schedule(unscheduled, None)
+        unscheduled.entry_text = "judicial"
+        unscheduled.learner_status = "learning"
+        unscheduled.srs_bucket = "1d"
 
-        review_service._list_active_queue_states = AsyncMock(return_value=[state])
+        review_service._list_active_queue_states = AsyncMock(return_value=[unscheduled])
 
         payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
 
