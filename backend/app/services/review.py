@@ -2142,6 +2142,14 @@ class ReviewService:
     def _build_schedule_options_for_value(cls, current_value: str) -> list[dict[str, Any]]:
         labels = cls._schedule_option_labels()
         order = list(REVIEW_SRS_V1_BUCKETS)
+        if current_value == "10m":
+            return [
+                {"value": "10m", "label": "Later today", "is_default": True},
+                *[
+                    {"value": value, "label": labels[value], "is_default": False}
+                    for value in order
+                ],
+            ]
         return [
             {"value": value, "label": labels[value], "is_default": value == current_value}
             for value in order
@@ -2230,10 +2238,19 @@ class ReviewService:
             return "1d"
 
         resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
-        if resolved_due_at > resolved_now and (resolved_due_at - resolved_now) < timedelta(days=1):
-            return "10m"
         delta_days = max((resolved_due_at - resolved_now).days, 1)
         return bucket_for_interval_days(delta_days)
+
+    @classmethod
+    def _is_recheck_rolled_to_canonical_release(cls, state: EntryReviewState) -> bool:
+        recheck_due_at = cls._normalize_bucket_datetime(getattr(state, "recheck_due_at", None))
+        min_due_at_utc = cls._normalize_bucket_datetime(getattr(state, "min_due_at_utc", None))
+        return (
+            recheck_due_at is not None
+            and min_due_at_utc is not None
+            and getattr(state, "due_review_date", None) is not None
+            and recheck_due_at == min_due_at_utc
+        )
 
     @classmethod
     def _resolve_schedule_value_from_review_day_delta(cls, day_delta: int) -> str:
@@ -2424,8 +2441,38 @@ class ReviewService:
         now: datetime | None = None,
         user_timezone: str | None = None,
     ) -> str:
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        recheck_due_at = cls._normalize_bucket_datetime(getattr(state, "recheck_due_at", None))
+        if recheck_due_at is not None:
+            if cls._is_recheck_rolled_to_canonical_release(state) and user_timezone:
+                if cls._is_state_officially_due(
+                    state,
+                    now=resolved_now,
+                    user_timezone=user_timezone,
+                ):
+                    return cls._resolve_schedule_value_from_due_at(
+                        due_at=getattr(state, "min_due_at_utc", None),
+                        now=resolved_now,
+                    )
+                current_review_date = effective_review_date(
+                    instant_utc=resolved_now,
+                    user_timezone=user_timezone,
+                )
+                day_delta = (state.due_review_date - current_review_date).days
+                if day_delta > 0:
+                    return cls._resolve_schedule_value_from_review_day_delta(day_delta)
+                return cls._resolve_schedule_value_from_due_at(
+                    due_at=getattr(state, "min_due_at_utc", None),
+                    now=resolved_now,
+                )
+            if recheck_due_at > resolved_now:
+                return "10m"
+            return cls._resolve_schedule_value_from_due_at(
+                due_at=recheck_due_at,
+                now=resolved_now,
+            )
+
         if cls._uses_official_review_day_schedule(state, user_timezone=user_timezone):
-            resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
             if cls._is_state_officially_due(
                 state,
                 now=resolved_now,
@@ -2446,10 +2493,7 @@ class ReviewService:
                 due_at=state.min_due_at_utc,
                 now=resolved_now,
             )
-        return cls._resolve_schedule_value_from_due_at(
-            due_at=state.recheck_due_at or state.next_due_at,
-            now=now,
-        )
+        return cls._resolve_schedule_value_from_due_at(due_at=state.next_due_at, now=resolved_now)
 
     @classmethod
     def classify_review_bucket(

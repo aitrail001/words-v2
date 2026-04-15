@@ -1608,6 +1608,36 @@ class TestGroupedQueue:
         assert payload["current_schedule_value"] == "10m"
         assert payload["current_schedule_label"] == "Later today"
         assert payload["next_review_at"] == state.recheck_due_at.isoformat()
+        assert payload["schedule_options"][0] == {
+            "value": "10m",
+            "label": "Later today",
+            "is_default": True,
+        }
+
+    def test_build_current_schedule_payload_keeps_next_day_meaning_for_rolled_recheck(self):
+        now = datetime(2026, 4, 15, 13, 55, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        state.due_review_date = date(2026, 4, 16)
+        state.min_due_at_utc = datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc)
+        state.recheck_due_at = state.min_due_at_utc
+        state.next_due_at = state.min_due_at_utc
+
+        payload = ReviewService._build_current_schedule_payload(
+            state,
+            now=now,
+            user_timezone="Australia/Melbourne",
+        )
+
+        assert payload["current_schedule_value"] == "1d"
+        assert payload["current_schedule_label"] == "Tomorrow"
+        assert payload["schedule_options"][0]["value"] == "1d"
 
     def test_long_horizon_success_sequence_reaches_multi_month_bucket(self):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
