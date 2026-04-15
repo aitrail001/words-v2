@@ -227,7 +227,7 @@ class TestEntryQueueSchedule:
         assert state.min_due_at_utc == min_due_at_utc
 
     @pytest.mark.asyncio
-    async def test_get_entry_queue_schedule_creates_state_for_learning_entry_without_schedule(
+    async def test_get_entry_queue_schedule_returns_canonical_schedule_for_created_learning_entry(
         self, review_service, mock_db
     ):
         user_id = uuid.uuid4()
@@ -250,7 +250,8 @@ class TestEntryQueueSchedule:
             stability=0.3,
             difficulty=0.5,
         )
-        _set_canonical_schedule(created_state, None)
+        canonical_due_at = datetime.now(timezone.utc) + timedelta(days=1)
+        _set_canonical_schedule(created_state, canonical_due_at)
         created_state.recheck_due_at = None
         mock_db.execute.side_effect = [learner_status_result, empty_state_result]
         review_service._ensure_entry_review_state = AsyncMock(return_value=created_state)
@@ -261,13 +262,14 @@ class TestEntryQueueSchedule:
             entry_id=entry_id,
         )
 
-        assert created_state.min_due_at_utc is None
+        assert created_state.min_due_at_utc == canonical_due_at
         assert payload == {
             "queue_item_id": str(created_state.id),
-            "next_review_at": None,
+            "due_review_date": created_state.due_review_date.isoformat(),
+            "min_due_at_utc": canonical_due_at.isoformat(),
+            "recheck_due_at": None,
             "current_schedule_value": "1d",
             "current_schedule_label": "Tomorrow",
-            "current_schedule_source": "scheduled_timestamp",
             "schedule_options": [
                 {"value": "1d", "label": "Tomorrow", "is_default": True},
                 {"value": "2d", "label": "In 2 days", "is_default": False},
@@ -1206,7 +1208,7 @@ class TestGroupedQueue:
         }
 
     @pytest.mark.asyncio
-    async def test_get_grouped_review_queue_summary_treats_unscheduled_items_as_due_now(
+    async def test_get_grouped_review_queue_summary_excludes_items_missing_canonical_schedule(
         self, review_service
     ):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
@@ -1231,12 +1233,11 @@ class TestGroupedQueue:
 
         payload = await review_service.get_grouped_review_queue_summary(user_id=user_id, now=now)
 
-        assert payload["groups"] == [
-            {"bucket": "1d", "count": 1, "has_due_now": True},
-        ]
+        assert payload["total_count"] == 0
+        assert payload["groups"] == []
 
     @pytest.mark.asyncio
-    async def test_get_grouped_review_queue_by_due_groups_due_now_and_future_days(
+    async def test_get_grouped_review_queue_by_due_excludes_items_missing_canonical_schedule(
         self, review_service
     ):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
@@ -1278,28 +1279,8 @@ class TestGroupedQueue:
 
         payload = await review_service.get_grouped_review_queue_by_due(user_id=user_id, now=now)
 
-        assert payload["total_count"] == 2
+        assert payload["total_count"] == 1
         assert payload["groups"] == [
-            {
-                "group_key": "due_now",
-                "label": "Due now",
-                "due_in_days": 0,
-                "count": 1,
-                "items": [
-                    {
-                        "queue_item_id": str(due_now_state.id),
-                        "entry_id": str(due_now_state.entry_id),
-                        "entry_type": "word",
-                        "text": "persistence",
-                        "status": "learning",
-                        "next_review_at": None,
-                        "due_review_date": None,
-                        "min_due_at_utc": None,
-                        "last_reviewed_at": None,
-                        "bucket": "1d",
-                    }
-                ],
-            },
             {
                 "group_key": "in_2_days",
                 "label": "In 2 days",
@@ -3471,8 +3452,8 @@ class TestQueueStats:
 
         stats = await review_service.get_queue_stats(user_id=user_id)
 
-        assert stats["total_items"] == 2
-        assert stats["due_items"] == 1
+        assert stats["total_items"] == 1
+        assert stats["due_items"] == 0
         assert stats["review_count"] == 4
         assert stats["correct_count"] == 2
         assert stats["accuracy"] == 0.5

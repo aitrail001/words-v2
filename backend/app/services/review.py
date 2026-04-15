@@ -2367,6 +2367,13 @@ class ReviewService:
         )
 
     @classmethod
+    def _state_has_supported_schedule(cls, state: EntryReviewState) -> bool:
+        return cls._normalize_bucket_datetime(getattr(state, "recheck_due_at", None)) is not None or (
+            getattr(state, "due_review_date", None) is not None
+            and cls._normalize_bucket_datetime(getattr(state, "min_due_at_utc", None)) is not None
+        )
+
+    @classmethod
     def _official_due_at(cls, state: EntryReviewState) -> datetime | None:
         if not cls._state_has_official_review_day_fields(state):
             return None
@@ -2431,7 +2438,7 @@ class ReviewService:
                 now=resolved_now,
                 user_timezone=user_timezone,
             )
-        return True
+        return False
 
     @classmethod
     def _due_queue_filter(cls, now: datetime):
@@ -2446,10 +2453,6 @@ class ReviewService:
                 EntryReviewState.due_review_date.is_not(None),
                 EntryReviewState.min_due_at_utc.is_not(None),
                 EntryReviewState.min_due_at_utc <= resolved_now,
-            ),
-            and_(
-                EntryReviewState.recheck_due_at.is_(None),
-                or_(EntryReviewState.due_review_date.is_(None), EntryReviewState.min_due_at_utc.is_(None)),
             ),
         )
 
@@ -2513,7 +2516,7 @@ class ReviewService:
                 due_at=state.min_due_at_utc,
                 now=resolved_now,
             )
-        return "1d"
+        raise ValueError("Entry review state is missing canonical schedule fields")
 
     @classmethod
     def classify_review_bucket(
@@ -2654,6 +2657,8 @@ class ReviewService:
             if learner_status not in {None, "learning"}:
                 continue
             self._normalize_active_review_state_schedule(state)
+            if not self._state_has_supported_schedule(state):
+                continue
             state.learner_status = learner_status or "learning"
             states.append(state)
         if not states:
@@ -2906,7 +2911,11 @@ class ReviewService:
         include_debug_fields: bool = False,
     ) -> dict[str, Any]:
         resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
-        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        states = [
+            state
+            for state in await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+            if self._state_has_supported_schedule(state)
+        ]
         for state in states:
             self._normalize_active_review_state_schedule(state)
         groups = self._group_review_queue_rows(
@@ -2933,7 +2942,11 @@ class ReviewService:
         include_debug_fields: bool = False,
     ) -> dict[str, Any]:
         resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
-        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        states = [
+            state
+            for state in await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+            if self._state_has_supported_schedule(state)
+        ]
         user_timezone = None
         if any(self._state_has_official_review_day_fields(state) for state in states):
             prefs = await self._get_user_review_preferences(user_id)
@@ -2964,7 +2977,11 @@ class ReviewService:
         now: datetime,
     ) -> dict[str, Any]:
         resolved_now = self._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
-        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        states = [
+            state
+            for state in await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+            if self._state_has_supported_schedule(state)
+        ]
         user_timezone = None
         if any(self._state_has_official_review_day_fields(state) for state in states):
             prefs = await self._get_user_review_preferences(user_id)
@@ -3007,7 +3024,11 @@ class ReviewService:
         resolved_bucket = self._validate_review_queue_bucket(bucket)
         resolved_sort = self._validate_review_queue_sort(sort)
         resolved_order = self._validate_review_queue_order(order)
-        states = await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+        states = [
+            state
+            for state in await self._list_active_queue_states(user_id=user_id, now=resolved_now)
+            if self._state_has_supported_schedule(state)
+        ]
         bucket_states = [
             state
             for state in states
@@ -3093,6 +3114,8 @@ class ReviewService:
             )
             await self.db.commit()
         self._normalize_active_review_state_schedule(state)
+        if not self._state_has_supported_schedule(state):
+            return None
         user_timezone = None
         if self._state_has_official_review_day_fields(state):
             prefs = await self._get_user_review_preferences(user_id)
@@ -3251,7 +3274,11 @@ class ReviewService:
             .limit(fetch_limit)
         )
         due_items: list[dict[str, Any]] = []
-        review_states = self._apply_sibling_bury_rule(list(state_result.scalars().all()))
+        review_states = [
+            state
+            for state in self._apply_sibling_bury_rule(list(state_result.scalars().all()))
+            if self._state_has_supported_schedule(state)
+        ]
         prefs = None
         if item_id is None and review_states and any(
             self._state_has_official_review_day_fields(state) for state in review_states
@@ -3809,7 +3836,11 @@ class ReviewService:
         if cached is not None:
             return cached
         now = datetime.now(timezone.utc)
-        visible_states = await self._list_active_queue_states(user_id=user_id, now=now)
+        visible_states = [
+            state
+            for state in await self._list_active_queue_states(user_id=user_id, now=now)
+            if self._state_has_supported_schedule(state)
+        ]
         for state in visible_states:
             self._normalize_active_review_state_schedule(state)
         total_items = len(visible_states)
