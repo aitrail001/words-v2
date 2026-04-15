@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import {
   REVIEWABLE_BUCKETS,
   REVIEW_QUEUE_ORDER_OPTIONS,
@@ -23,6 +23,11 @@ import type {
   ReviewQueueItem,
   ReviewQueueSummaryBucket,
 } from "@/lib/knowledge-map-client";
+
+type ReviewQueueSupplementalField = {
+  label: string;
+  value: boolean | string | null | undefined;
+};
 
 function buildQueryString(params?: Record<string, string | undefined>): string {
   const searchParams = new URLSearchParams();
@@ -290,13 +295,13 @@ export function ReviewQueueItemCard({
   bucket,
   allowStartReview = true,
   showStageLabel = false,
-  renderSupplementalFields,
+  supplementalFields,
 }: {
   item: ReviewQueueItem | AdminReviewQueueItem;
   bucket?: ReviewQueueBucket;
   allowStartReview?: boolean;
   showStageLabel?: boolean;
-  renderSupplementalFields?: (item: ReviewQueueItem | AdminReviewQueueItem) => ReactNode;
+  supplementalFields?: ReviewQueueSupplementalField[];
 }) {
   const resolvedBucket = bucket ?? item.bucket ?? null;
   const exactDueAt = item.min_due_at_utc ?? item.next_review_at;
@@ -393,9 +398,11 @@ export function ReviewQueueItemCard({
               </div>
             ) : null}
           </div>
-          {renderSupplementalFields ? (
+          {supplementalFields && supplementalFields.length > 0 ? (
             <div className="mt-3 space-y-1">
-              {renderSupplementalFields(item)}
+              {supplementalFields.map((field) => (
+                <ReviewQueueDebugField key={field.label} label={field.label} value={field.value} />
+              ))}
             </div>
           ) : null}
         </div>

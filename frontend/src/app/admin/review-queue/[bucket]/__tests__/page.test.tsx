@@ -1,6 +1,8 @@
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cookies } from "next/headers";
 import AdminReviewQueueBucketPage from "@/app/admin/review-queue/[bucket]/page";
+import { ReviewQueueItemCard } from "@/components/review-queue/review-queue-shared";
 
 jest.mock("next/headers", () => ({
   cookies: jest.fn(),
@@ -20,6 +22,29 @@ describe("AdminReviewQueueBucketPage", () => {
   afterEach(() => {
     global.fetch = originalFetch;
   });
+
+  function findElementByType(node: ReactNode, type: unknown): ReactElement | null {
+    if (!isValidElement(node)) {
+      return null;
+    }
+    if (node.type === type) {
+      return node;
+    }
+
+    const children = node.props?.children;
+    if (!children) {
+      return null;
+    }
+
+    for (const child of Array.isArray(children) ? children : [children]) {
+      const match = findElementByType(child, type);
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
+  }
 
   it("renders admin bucket detail rows with debug fields and preserved controls", async () => {
     global.fetch = jest.fn().mockResolvedValue({
@@ -105,6 +130,63 @@ describe("AdminReviewQueueBucketPage", () => {
       "href",
       "/admin/review-queue/7d?effective_now=2026-10-05T09%3A00%3A00%2B00%3A00&sort=text&order=asc",
     );
+  });
+
+  it("passes serialized supplemental fields instead of a function prop into the client card", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        generated_at: "2026-10-05T09:00:00+00:00",
+        bucket: "7d",
+        count: 1,
+        sort: "text",
+        order: "desc",
+        debug: {
+          effective_now: "2026-10-05T09:00:00+00:00",
+        },
+        items: [
+          {
+            queue_item_id: "queue-1",
+            entry_id: "word-1",
+            entry_type: "word",
+            text: "candidate",
+            status: "learning",
+            next_review_at: "2026-10-05T09:00:00+00:00",
+            last_reviewed_at: "2026-10-04T09:00:00+00:00",
+            success_streak: 5,
+            lapse_count: 2,
+            times_remembered: 6,
+            exposure_count: 8,
+            history: [],
+            target_type: "meaning",
+            target_id: "meaning-1",
+            recheck_due_at: null,
+            next_due_at: "2026-10-05T09:00:00+00:00",
+            last_outcome: "correct_tested",
+            relearning: false,
+            relearning_trigger: null,
+          },
+        ],
+      }),
+    } as Response);
+
+    const tree = await AdminReviewQueueBucketPage({
+      params: Promise.resolve({ bucket: "7d" }),
+      searchParams: Promise.resolve({}),
+    });
+
+    const cardElement = findElementByType(tree, ReviewQueueItemCard);
+    expect(cardElement).not.toBeNull();
+    expect(cardElement?.props.renderSupplementalFields).toBeUndefined();
+    expect(cardElement?.props.supplementalFields).toEqual([
+      { label: "target_type", value: "meaning" },
+      { label: "target_id", value: "meaning-1" },
+      { label: "recheck_due_at", value: null },
+      { label: "next_due_at", value: "2026-10-05T09:00:00+00:00" },
+      { label: "last_outcome", value: "correct_tested" },
+      { label: "relearning", value: false },
+      { label: "relearning_trigger", value: null },
+    ]);
   });
 
   it("shows an explicit admin-access message when the backend returns 401", async () => {
