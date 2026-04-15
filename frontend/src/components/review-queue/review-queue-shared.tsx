@@ -304,7 +304,7 @@ export function ReviewQueueItemCard({
   supplementalFields?: ReviewQueueSupplementalField[];
 }) {
   const resolvedBucket = bucket ?? item.bucket ?? null;
-  const exactDueAt = item.min_due_at_utc ?? item.next_review_at;
+  const exactDueAt = item.min_due_at_utc ?? item.next_review_at ?? null;
   const isDueNow = isReviewQueueItemDueNow(exactDueAt);
   const canStartReview =
     allowStartReview &&
