@@ -1590,6 +1590,25 @@ class TestGroupedQueue:
         assert "next_review_at" not in payload
         assert "current_schedule_source" not in payload
 
+    def test_build_current_schedule_payload_uses_short_horizon_value_for_same_day_recheck(self):
+        now = datetime(2026, 4, 10, 14, 30, tzinfo=timezone.utc)
+        state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        state.recheck_due_at = now + timedelta(minutes=10)
+        state.next_due_at = state.recheck_due_at
+
+        payload = ReviewService._build_current_schedule_payload(state, now=now)
+
+        assert payload["current_schedule_value"] == "10m"
+        assert payload["current_schedule_label"] == "Later today"
+        assert payload["next_review_at"] == state.recheck_due_at.isoformat()
+
     def test_long_horizon_success_sequence_reaches_multi_month_bucket(self):
         now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
         due_at = now

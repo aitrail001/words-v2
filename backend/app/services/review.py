@@ -2230,6 +2230,8 @@ class ReviewService:
             return "1d"
 
         resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        if resolved_due_at > resolved_now and (resolved_due_at - resolved_now) < timedelta(days=1):
+            return "10m"
         delta_days = max((resolved_due_at - resolved_now).days, 1)
         return bucket_for_interval_days(delta_days)
 
