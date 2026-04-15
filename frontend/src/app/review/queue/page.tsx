@@ -49,7 +49,7 @@ export default function ReviewQueuePage() {
     queue?.groups.some(
       (group) =>
         REVIEWABLE_BUCKETS.includes(group.bucket) &&
-        group.items.some((item) => isReviewQueueItemDueNow(item.next_review_at)),
+        group.items.some((item) => isReviewQueueItemDueNow(item.next_review_at ?? null)),
     ),
   );
 
