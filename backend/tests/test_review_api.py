@@ -245,7 +245,8 @@ class TestQueueDue:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        learning_state.next_due_at = now + timedelta(hours=1)
+        learning_state.min_due_at_utc = now + timedelta(hours=1)
+        learning_state.due_review_date = learning_state.min_due_at_utc.date()
         learning_state.last_reviewed_at = now - timedelta(days=1)
         learning_state.srs_bucket = "1d"
 
@@ -257,7 +258,8 @@ class TestQueueDue:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        known_state.next_due_at = now + timedelta(days=1)
+        known_state.min_due_at_utc = now + timedelta(days=1)
+        known_state.due_review_date = known_state.min_due_at_utc.date()
         known_state.srs_bucket = "180d"
 
         to_learn_state = EntryReviewState(
@@ -268,7 +270,8 @@ class TestQueueDue:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        to_learn_state.next_due_at = now + timedelta(days=2)
+        to_learn_state.min_due_at_utc = now + timedelta(days=2)
+        to_learn_state.due_review_date = to_learn_state.min_due_at_utc.date()
         to_learn_state.srs_bucket = "2d"
 
         phrase_state = EntryReviewState(
@@ -279,7 +282,8 @@ class TestQueueDue:
             target_type="phrase_sense",
             target_id=uuid.uuid4(),
         )
-        phrase_state.next_due_at = now + timedelta(days=1)
+        phrase_state.min_due_at_utc = now + timedelta(days=1)
+        phrase_state.due_review_date = phrase_state.min_due_at_utc.date()
         phrase_state.srs_bucket = "7d"
 
         user_result = MagicMock()
@@ -414,7 +418,8 @@ class TestQueueDue:
             target_type="meaning",
             target_id=uuid.uuid4(),
         )
-        future_state.next_due_at = datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+        future_state.min_due_at_utc = datetime(2026, 10, 5, 9, 0, tzinfo=timezone.utc)
+        future_state.due_review_date = future_state.min_due_at_utc.date()
         future_state.srs_bucket = "180d"
         state_result = MagicMock()
         state_result.all.return_value = [(future_state, "learning")]
@@ -605,7 +610,9 @@ class TestQueueDue:
                         "entry_type": "word",
                         "text": "zeta",
                         "status": "learning",
-                        "next_review_at": "2026-04-05T12:00:00+00:00",
+                        "due_review_date": "2026-04-05",
+                        "min_due_at_utc": "2026-04-05T12:00:00+00:00",
+                        "recheck_due_at": None,
                         "last_reviewed_at": "2026-04-04T09:00:00+00:00",
                     },
                     {
@@ -614,7 +621,9 @@ class TestQueueDue:
                         "entry_type": "word",
                         "text": "alpha",
                         "status": "learning",
-                        "next_review_at": "2026-04-05T10:00:00+00:00",
+                        "due_review_date": "2026-04-05",
+                        "min_due_at_utc": "2026-04-05T10:00:00+00:00",
+                        "recheck_due_at": "2026-04-05T10:10:00+00:00",
                         "last_reviewed_at": None,
                     },
                 ],
@@ -637,6 +646,10 @@ class TestQueueDue:
         assert data["sort"] == "text"
         assert data["order"] == "desc"
         assert [item["text"] for item in data["items"]] == ["zeta", "alpha"]
+        assert data["items"][0]["due_review_date"] == "2026-04-05"
+        assert data["items"][0]["min_due_at_utc"] == "2026-04-05T12:00:00Z"
+        assert "next_review_at" not in data["items"][0]
+        assert data["items"][1]["recheck_due_at"] == "2026-04-05T10:10:00Z"
 
     @pytest.mark.asyncio
     async def test_get_admin_review_queue_bucket_detail_applies_effective_now(
@@ -689,7 +702,6 @@ class TestQueueDue:
                         "target_type": "meaning",
                         "target_id": str(uuid.uuid4()),
                         "recheck_due_at": None,
-                        "next_due_at": "2026-10-05T09:00:00+00:00",
                         "last_outcome": "correct_tested",
                         "relearning": False,
                         "relearning_trigger": None,
@@ -729,13 +741,14 @@ class TestQueueScheduleUpdate:
             assert schedule_override == "7d"
             return {
                 "queue_item_id": str(item_id),
-                "next_review_at": "2026-04-11T00:00:00+00:00",
+                "due_review_date": "2026-04-11",
+                "min_due_at_utc": "2026-04-11T00:00:00+00:00",
+                "recheck_due_at": None,
                 "current_schedule_value": "7d",
                 "current_schedule_label": "In a week",
-                "current_schedule_source": "scheduled_timestamp",
                 "schedule_options": [
-                    {"value": "1d", "label": "Tomorrow", "is_default": True},
-                    {"value": "7d", "label": "In a week", "is_default": False},
+                    {"value": "1d", "label": "Tomorrow", "is_default": False},
+                    {"value": "7d", "label": "In a week", "is_default": True},
                 ],
             }
 
@@ -754,10 +767,12 @@ class TestQueueScheduleUpdate:
         assert response.status_code == 200
         data = response.json()
         assert data["queue_item_id"] == str(item_id)
-        assert data["next_review_at"] == "2026-04-11T00:00:00Z"
+        assert data["due_review_date"] == "2026-04-11"
+        assert data["min_due_at_utc"] == "2026-04-11T00:00:00Z"
         assert data["current_schedule_value"] == "7d"
         assert data["current_schedule_label"] == "In a week"
-        assert data["current_schedule_source"] == "scheduled_timestamp"
+        assert "next_review_at" not in data
+        assert "current_schedule_source" not in data
 
     @pytest.mark.asyncio
     async def test_update_queue_schedule_rejects_invalid_override(self, client, mock_db, auth_token):
@@ -1112,8 +1127,7 @@ class TestQueueSubmit:
         state.recheck_planned = False
         state.due_review_date = date(2026, 4, 13)
         state.min_due_at_utc = datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc)
-        state.next_due_at = state.min_due_at_utc
-        state.next_review = state.next_due_at
+        state.next_review = state.min_due_at_utc
         state.detail = {
             "entry_type": "word",
             "entry_id": str(state.entry_id),

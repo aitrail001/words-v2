@@ -85,8 +85,8 @@ test("@smoke learn-now word detail flow enters the learning pass before review p
   await expect(page.getByText(/queue item .* not found/i)).toHaveCount(0);
 
   await page.goto(`/word/${fixture.learnWordId}`);
-  await expect(page.getByText(/approximately: tomorrow/i)).toBeVisible();
-  await expect(page.getByText(/next review scheduled:/i)).toBeVisible();
+  await expect(page.getByText(/^next review scheduled: tomorrow$/i)).toBeVisible();
+  await expect(page.getByText(/scheduled release:/i)).toBeVisible();
 
   await page.goto("/review");
   await expect(page.getByTestId("review-empty-state")).toBeVisible();

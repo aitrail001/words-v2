@@ -117,6 +117,7 @@ describe("AdminReviewQueueBucketPage", () => {
     expect(screen.getByText("1 item in this bucket")).toBeInTheDocument();
     expect(screen.getByText("candidate")).toBeInTheDocument();
     expect(screen.getByText(/success streak 5/i)).toBeInTheDocument();
+    expect(screen.getByText(/admin diagnostics/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /show review history for candidate/i }));
     expect(screen.getByText(/confidence_check/i)).toBeInTheDocument();
     expect(screen.getByText(/target_type: meaning/i)).toBeInTheDocument();

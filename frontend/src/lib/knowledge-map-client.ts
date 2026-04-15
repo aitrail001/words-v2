@@ -147,10 +147,11 @@ export type ReviewQueueItem = {
   entry_type: KnowledgeEntryType;
   text: string;
   status: KnowledgeStatus;
-  next_review_at: string | null;
+  next_review_at?: string | null;
   due_review_date?: string | null;
   min_due_at_utc?: string | null;
-  last_reviewed_at: string | null;
+  recheck_due_at?: string | null;
+  last_reviewed_at?: string | null;
   bucket?: ReviewQueueBucket;
   success_streak: number;
   lapse_count: number;
@@ -207,13 +208,13 @@ export type DueGroupedReviewQueueResponse = {
 };
 
 export type AdminReviewQueueItem = ReviewQueueItem & {
-  target_type: string | null;
-  target_id: string | null;
-  recheck_due_at: string | null;
-  next_due_at: string | null;
-  last_outcome: string | null;
-  relearning: boolean | null;
-  relearning_trigger: string | null;
+  target_type?: string | null;
+  target_id?: string | null;
+  recheck_due_at?: string | null;
+  next_due_at?: string | null;
+  last_outcome?: string | null;
+  relearning?: boolean | null;
+  relearning_trigger?: string | null;
 };
 
 export type AdminReviewQueueSummaryResponse = {
@@ -319,9 +320,10 @@ export type ReviewScheduleOption = {
 
 export type EntryReviewQueue = {
   queue_item_id: string;
-  next_review_at: string | null;
+  next_review_at?: string | null;
   due_review_date?: string | null;
   min_due_at_utc?: string | null;
+  recheck_due_at?: string | null;
   current_schedule_value: string;
   current_schedule_label: string;
   current_schedule_source?: string;

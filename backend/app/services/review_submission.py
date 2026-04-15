@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +19,7 @@ from app.services.review_srs_v1 import (
     interval_days_for_bucket,
     resolve_bucket_after_review,
 )
+from app.services.review_schedule import recheck_due_at_for_retry
 
 if TYPE_CHECKING:
     from app.services.review import ReviewService
@@ -104,6 +105,7 @@ def apply_entry_state_review_result(
     resolved_interval_days: int | None,
     resolved_next_review: datetime | None,
     reviewed_at: datetime,
+    user_timezone: str,
     due_review_date: date | None,
     min_due_at_utc: datetime | None,
 ) -> None:
@@ -113,7 +115,6 @@ def apply_entry_state_review_result(
     entry_state.last_outcome = resolved_outcome
     entry_state.is_fragile = review_result.is_fragile
     entry_state.last_reviewed_at = reviewed_at
-    entry_state.next_due_at = resolved_next_review
     entry_state.srs_bucket = resolved_bucket
     entry_state.cadence_step = cadence_step_for_bucket(resolved_bucket)
     entry_state.due_review_date = due_review_date
@@ -132,7 +133,10 @@ def apply_entry_state_review_result(
         entry_state.lapse_count = int(entry_state.lapse_count or 0) + 1
     entry_state.relearning = True
     entry_state.relearning_trigger = resolved_outcome
-    entry_state.recheck_due_at = reviewed_at + timedelta(minutes=10)
+    entry_state.recheck_due_at = recheck_due_at_for_retry(
+        reviewed_at_utc=reviewed_at,
+        user_timezone=user_timezone,
+    )
 
 
 async def submit_entry_state_review(
@@ -218,7 +222,6 @@ async def submit_entry_state_review(
                 entry_state.interval_days = resolved_interval_days
                 entry_state.due_review_date = resolved_due_review_date
                 entry_state.min_due_at_utc = resolved_min_due_at_utc
-                entry_state.next_due_at = resolved_min_due_at_utc
                 entry_state.next_review = resolved_min_due_at_utc
                 entry_state.srs_bucket = resolved_bucket
                 entry_state.cadence_step = cadence_step_for_bucket(resolved_bucket)
@@ -298,6 +301,8 @@ async def submit_entry_state_review(
 
     reviewed_at = datetime.now(timezone.utc)
     scheduled_by = "manual_override" if schedule_override else "recommended"
+    prefs = await service._get_user_review_preferences(user_id)
+    user_timezone = service._resolve_user_timezone(getattr(prefs, "timezone", None))
     (
         resolved_interval_days,
         resolved_due_review_date,
@@ -321,6 +326,7 @@ async def submit_entry_state_review(
         resolved_interval_days=resolved_interval_days,
         resolved_next_review=resolved_min_due_at_utc,
         reviewed_at=reviewed_at,
+        user_timezone=user_timezone,
         due_review_date=resolved_due_review_date,
         min_due_at_utc=resolved_min_due_at_utc,
     )

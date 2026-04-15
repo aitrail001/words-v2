@@ -267,7 +267,7 @@ export function formatReviewQueueSchedule(
   item: Pick<ReviewQueueItem, "due_review_date" | "min_due_at_utc" | "next_review_at">,
 ): string {
   const dueLabel = formatReviewQueueDueLabel(item);
-  const exactDueAt = item.min_due_at_utc ?? item.next_review_at;
+  const exactDueAt = item.min_due_at_utc ?? item.next_review_at ?? null;
   const exactTime = formatReviewQueueTime(exactDueAt, {
     emptyLabel: dueLabel ? "" : "Time to be scheduled",
   }).trim();

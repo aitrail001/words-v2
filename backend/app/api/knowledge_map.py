@@ -2,7 +2,7 @@ import uuid
 from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
@@ -277,9 +277,33 @@ class ReviewScheduleOptionResponse(BaseModel):
 class EntryReviewQueueResponse(BaseModel):
     queue_item_id: str
     next_review_at: str | None = None
+    due_review_date: str | None = None
+    min_due_at_utc: str | None = None
+    recheck_due_at: str | None = None
     current_schedule_value: str
     current_schedule_label: str
     schedule_options: list[ReviewScheduleOptionResponse] = []
+
+    @model_serializer(mode="plain")
+    def serialize_model(self) -> dict[str, object]:
+        uses_canonical_schedule = (
+            self.due_review_date is not None and self.min_due_at_utc is not None
+        )
+        payload: dict[str, object] = {
+            "queue_item_id": self.queue_item_id,
+            "current_schedule_value": self.current_schedule_value,
+            "current_schedule_label": self.current_schedule_label,
+            "schedule_options": self.schedule_options,
+        }
+        if self.next_review_at is not None and not uses_canonical_schedule:
+            payload["next_review_at"] = self.next_review_at
+        if self.due_review_date is not None:
+            payload["due_review_date"] = self.due_review_date
+        if self.min_due_at_utc is not None:
+            payload["min_due_at_utc"] = self.min_due_at_utc
+        if self.recheck_due_at is not None:
+            payload["recheck_due_at"] = self.recheck_due_at
+        return payload
 
 
 class KnowledgeMapDetailResponse(BaseModel):
@@ -887,7 +911,10 @@ async def get_knowledge_map_entry_detail(
             review_queue=(
                 EntryReviewQueueResponse(
                     queue_item_id=review_queue["queue_item_id"],
-                    next_review_at=review_queue["next_review_at"],
+                    next_review_at=review_queue.get("next_review_at"),
+                    due_review_date=review_queue.get("due_review_date"),
+                    min_due_at_utc=review_queue.get("min_due_at_utc"),
+                    recheck_due_at=review_queue.get("recheck_due_at"),
                     current_schedule_value=review_queue["current_schedule_value"],
                     current_schedule_label=review_queue["current_schedule_label"],
                     schedule_options=[
@@ -1059,7 +1086,10 @@ async def get_knowledge_map_entry_detail(
         review_queue=(
             EntryReviewQueueResponse(
                 queue_item_id=review_queue["queue_item_id"],
-                next_review_at=review_queue["next_review_at"],
+                next_review_at=review_queue.get("next_review_at"),
+                due_review_date=review_queue.get("due_review_date"),
+                min_due_at_utc=review_queue.get("min_due_at_utc"),
+                recheck_due_at=review_queue.get("recheck_due_at"),
                 current_schedule_value=review_queue["current_schedule_value"],
                 current_schedule_label=review_queue["current_schedule_label"],
                 schedule_options=[

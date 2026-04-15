@@ -304,7 +304,7 @@ export function ReviewQueueItemCard({
   supplementalFields?: ReviewQueueSupplementalField[];
 }) {
   const resolvedBucket = bucket ?? item.bucket ?? null;
-  const exactDueAt = item.min_due_at_utc ?? item.next_review_at;
+  const exactDueAt = item.min_due_at_utc ?? item.next_review_at ?? null;
   const isDueNow = isReviewQueueItemDueNow(exactDueAt);
   const canStartReview =
     allowStartReview &&
@@ -313,6 +313,7 @@ export function ReviewQueueItemCard({
     isDueNow;
   const [historyOpen, setHistoryOpen] = useState(false);
   const dueLabel = formatReviewQueueDueLabel(item) ?? "Due now";
+  const exactDueLabel = exactDueAt ? formatReviewQueueTime(exactDueAt) : null;
   const history = item.history ?? [];
   const successStreak = item.success_streak ?? 0;
   const lapseCount = item.lapse_count ?? 0;
@@ -332,10 +333,10 @@ export function ReviewQueueItemCard({
               {formatReviewQueueStatus(item.status)}
             </span>
           </div>
-          <p className="mt-2 text-sm text-[#7b6795]">
-            <span className="font-semibold text-[#5a357b]">{dueLabel}</span>
-            {!isDueNow ? ` · ${formatReviewQueueTime(exactDueAt)}` : ""}
-          </p>
+          <p className="mt-2 text-sm font-semibold text-[#5a357b]">{dueLabel}</p>
+          {exactDueLabel ? (
+            <p className="mt-1 text-sm text-[#7b6795]">Scheduled release: {exactDueLabel}</p>
+          ) : null}
           {showStageLabel && resolvedBucket ? (
             <p className="mt-1 text-sm text-[#8f7ba8]">SRS stage {formatReviewQueueBucketLabel(resolvedBucket)}</p>
           ) : null}
@@ -399,10 +400,15 @@ export function ReviewQueueItemCard({
             ) : null}
           </div>
           {supplementalFields && supplementalFields.length > 0 ? (
-            <div className="mt-3 space-y-1">
-              {supplementalFields.map((field) => (
-                <ReviewQueueDebugField key={field.label} label={field.label} value={field.value} />
-              ))}
+            <div className="mt-3 rounded-[0.7rem] border border-[#efe6fa] bg-[#f7f2fc] px-3 py-3">
+              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]">
+                Admin diagnostics
+              </p>
+              <div className="mt-2 space-y-1">
+                {supplementalFields.map((field) => (
+                  <ReviewQueueDebugField key={field.label} label={field.label} value={field.value} />
+                ))}
+              </div>
             </div>
           ) : null}
         </div>

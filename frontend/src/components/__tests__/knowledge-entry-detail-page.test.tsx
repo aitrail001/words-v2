@@ -809,7 +809,7 @@ describe("KnowledgeEntryDetailPage", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /^override$/i }));
-    expect(screen.getByText(/approximately: tomorrow/i)).toBeInTheDocument();
+    expect(screen.queryByText(/scheduled release:/i)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/choose next review timing/i), { target: { value: "7d" } });
     fireEvent.click(screen.getByRole("button", { name: /confirm next review change/i }));
     fireEvent.click(screen.getByRole("button", { name: /continue review/i }));
@@ -837,7 +837,8 @@ describe("KnowledgeEntryDetailPage", () => {
   it("persists next-review changes from the detail bottom bar for queued entries", async () => {
     mockPut.mockResolvedValue({
       queue_item_id: "queue-1",
-      next_review_at: "2026-04-10T00:00:00+00:00",
+      due_review_date: "2026-04-10",
+      min_due_at_utc: "2026-04-10T00:00:00+00:00",
       current_schedule_value: "7d",
       current_schedule_label: "In a week",
       schedule_options: [
@@ -860,7 +861,8 @@ describe("KnowledgeEntryDetailPage", () => {
       primary_definition: "To depend on someone.",
       review_queue: {
         queue_item_id: "queue-1",
-        next_review_at: "2026-04-04T00:00:00+00:00",
+        due_review_date: "2026-04-04",
+        min_due_at_utc: "2026-04-04T00:00:00+00:00",
         current_schedule_value: "1d",
         current_schedule_label: "Tomorrow",
         schedule_options: [
@@ -896,8 +898,10 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
 
-    expect(await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`)).toBeInTheDocument();
-    expect(screen.getByText(/approximately: tomorrow/i)).toBeInTheDocument();
+    expect(await screen.findByText(/next review scheduled: tomorrow/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(`Scheduled release: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^override$/i }));
     expect(screen.getByLabelText(/choose next review timing/i)).toHaveValue("1d");
     fireEvent.change(screen.getByLabelText(/choose next review timing/i), { target: { value: "7d" } });
@@ -908,8 +912,10 @@ describe("KnowledgeEntryDetailPage", () => {
         schedule_override: "7d",
       }),
     );
-    expect(await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-10T00:00:00+00:00")}`)).toBeInTheDocument();
-    expect(screen.getByText(/approximately: in a week/i)).toBeInTheDocument();
+    expect(await screen.findByText(/next review scheduled: in a week/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(`Scheduled release: ${formatReviewTime("2026-04-10T00:00:00+00:00")}`),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /override \(manual override\)/i })).toBeInTheDocument();
   });
 
@@ -963,8 +969,10 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
 
-    expect(await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`)).toBeInTheDocument();
-    expect(screen.getByText(/approximately: pause review/i)).toBeInTheDocument();
+    expect(await screen.findByText(/next review scheduled: pause review/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(`Scheduled release: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /override \(manual override\)/i }));
     expect(screen.getByLabelText(/choose next review timing/i)).toHaveValue("never_for_now");
     fireEvent.change(screen.getByLabelText(/choose next review timing/i), { target: { value: "1d" } });
@@ -972,7 +980,7 @@ describe("KnowledgeEntryDetailPage", () => {
 
     expect(mockPut).not.toHaveBeenCalled();
     expect(screen.queryByLabelText(/choose next review timing/i)).not.toBeInTheDocument();
-    expect(screen.getByText(`Next review scheduled: ${formatReviewTime("2026-04-04T00:00:00+00:00")}`)).toBeInTheDocument();
+    expect(screen.getByText(/next review scheduled: pause review/i)).toBeInTheDocument();
   });
 
   it("shows next-review controls for learning entries even when no next review date exists yet", async () => {
@@ -1084,10 +1092,62 @@ describe("KnowledgeEntryDetailPage", () => {
 
     render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
 
+    expect(await screen.findByText(/next review scheduled: in a week/i)).toBeInTheDocument();
     expect(
-      await screen.findByText(`Next review scheduled: ${formatReviewTime("2026-04-10T18:00:00Z")}`),
+      screen.getByText(`Scheduled release: ${formatReviewTime("2026-04-10T18:00:00Z")}`),
     ).toBeInTheDocument();
-    expect(screen.getByText(/approximately: in a week/i)).toBeInTheDocument();
+  });
+
+  it("keeps the canonical next-review summary visible when no exact release time or override options exist", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      display_text: "bank on",
+      normalized_form: "bank on",
+      browse_rank: 141,
+      status: "learning",
+      cefr_level: "B1",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "依赖",
+      primary_definition: "To depend on someone.",
+      review_queue: {
+        queue_item_id: "queue-1",
+        next_review_at: null,
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [],
+      },
+      meanings: [],
+      senses: [
+        {
+          sense_id: "sense-1",
+          definition: "To depend on someone.",
+          localized_definition: "依赖",
+          part_of_speech: "phrasal_verb",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+        },
+      ],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
+
+    expect(await screen.findByText(/next review scheduled: tomorrow/i)).toBeInTheDocument();
+    expect(screen.queryByText(/scheduled release:/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^override/i })).not.toBeInTheDocument();
   });
 
   it("clears next-review controls immediately when an entry is marked as already knew", async () => {

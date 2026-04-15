@@ -55,6 +55,26 @@ def test_min_due_at_for_bucket_aligns_same_day_reviews_to_same_release_instant()
     assert first.astimezone(ZoneInfo("Australia/Melbourne")).hour == REVIEW_RELEASE_HOUR_LOCAL
 
 
+def test_min_due_at_for_bucket_uses_next_day_canonical_release_after_late_night_review() -> None:
+    late_night_review = datetime(2026, 4, 15, 13, 55, tzinfo=timezone.utc)
+
+    due_at = min_due_at_for_bucket(
+        reviewed_at_utc=late_night_review,
+        user_timezone="Australia/Melbourne",
+        bucket="1d",
+    )
+
+    assert due_at == datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc)
+    assert due_at.astimezone(ZoneInfo("Australia/Melbourne")) == datetime(
+        2026,
+        4,
+        16,
+        REVIEW_RELEASE_HOUR_LOCAL,
+        0,
+        tzinfo=ZoneInfo("Australia/Melbourne"),
+    )
+
+
 def test_bucket_days_maps_known_bucket_to_none() -> None:
     assert bucket_days("Known") is None
 

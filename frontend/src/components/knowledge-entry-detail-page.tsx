@@ -93,12 +93,26 @@ function formatScheduledReviewTime(reviewQueue: DetailReviewQueue | null | undef
 function buildScheduledReviewMessage(
   reviewQueue: DetailReviewQueue | null | undefined,
   fallbackLabel: string | null | undefined,
-): string {
+): string | null {
+  if (!resolveScheduledReviewInstant(reviewQueue) && !fallbackLabel) {
+    return null;
+  }
   const formattedTime = formatScheduledReviewTime(reviewQueue);
   if ((!resolveScheduledReviewInstant(reviewQueue) || formattedTime === "Scheduled time not set yet") && fallbackLabel) {
     return fallbackLabel;
   }
   return formattedTime;
+}
+
+function buildLearnerScheduledReviewSummary(
+  reviewQueue: DetailReviewQueue | null | undefined,
+  fallbackLabel: string | null | undefined,
+): string | null {
+  const canonicalLabel = formatApproximateScheduledReviewTime(reviewQueue);
+  if (canonicalLabel) {
+    return canonicalLabel;
+  }
+  return buildScheduledReviewMessage(reviewQueue, fallbackLabel);
 }
 
 function formatLegacyApproximateScheduledReviewTime(value: string | null | undefined): string | null {
@@ -650,17 +664,26 @@ export function KnowledgeEntryDetailPage({
     activeReviewScheduleOptions,
     activeReviewScheduleValue,
   );
-  const approximateScheduledReview = matchingReviewReveal
+  const learnerScheduledReviewSummary = matchingReviewReveal
     ? null
-    : formatApproximateScheduledReviewTime(detailReviewQueue);
-  const scheduleSheetApproximateReview =
-    approximateScheduledReview ?? activeReviewScheduleLabel;
-  const scheduledReviewMessage = matchingReviewReveal
-    ? "Next review scheduled: Scheduled time will be set when you continue review."
-    : `Next review scheduled: ${buildScheduledReviewMessage(
+    : buildLearnerScheduledReviewSummary(
         detailReviewQueue,
         detailReviewQueue?.current_schedule_label ?? activeReviewScheduleLabel,
-      )}`;
+      );
+  const exactScheduledReviewTime = matchingReviewReveal
+    ? null
+    : resolveScheduledReviewInstant(detailReviewQueue)
+      ? formatScheduledReviewTime(detailReviewQueue)
+      : null;
+  const scheduledReviewSecondaryMessage =
+    exactScheduledReviewTime && learnerScheduledReviewSummary !== exactScheduledReviewTime
+      ? `Scheduled release: ${exactScheduledReviewTime}`
+      : null;
+  const shouldShowReviewScheduleCard =
+    matchingReviewReveal !== null || learnerScheduledReviewSummary !== null;
+  const scheduledReviewMessage = matchingReviewReveal
+    ? "Next review scheduled: Scheduled time will be set when you continue review."
+    : `Next review scheduled: ${learnerScheduledReviewSummary}`;
 
   const updateAccentPreference = (accent: UserPreferences["accent_preference"]) => {
     setPreferences((current) => {
@@ -1233,28 +1256,30 @@ export function KnowledgeEntryDetailPage({
                 </button>
               ))}
             </div>
-            {activeReviewScheduleOptions.length > 0 ? (
+            {shouldShowReviewScheduleCard ? (
               <div className="w-[11.5rem] shrink-0 rounded-[0.95rem] border border-[#d9dcec] bg-white px-3 py-2.5">
                 <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]">
                   Next Review
                 </p>
                 <p className="mt-2 text-sm font-semibold text-[#53287c]">{scheduledReviewMessage}</p>
-                {approximateScheduledReview ? (
+                {scheduledReviewSecondaryMessage ? (
                   <p className="mt-2 text-[0.72rem] text-[#6e5a86]">
-                    Approximately: {approximateScheduledReview}
+                    {scheduledReviewSecondaryMessage}
                   </p>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setScheduleDraftValue(activeReviewScheduleValue);
-                    setIsScheduleSheetOpen(true);
-                  }}
-                  disabled={queueScheduleSaving || reviewSaving}
-                  className="mt-2 w-full rounded-[0.6rem] border border-[#d9dcec] px-3 py-2 text-sm font-semibold text-[#684f85] disabled:opacity-50"
-                >
-                  Override{hasManualScheduleOverride ? " (manual override)" : ""}
-                </button>
+                {activeReviewScheduleOptions.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScheduleDraftValue(activeReviewScheduleValue);
+                      setIsScheduleSheetOpen(true);
+                    }}
+                    disabled={queueScheduleSaving || reviewSaving}
+                    className="mt-2 w-full rounded-[0.6rem] border border-[#d9dcec] px-3 py-2 text-sm font-semibold text-[#684f85] disabled:opacity-50"
+                  >
+                    Override{hasManualScheduleOverride ? " (manual override)" : ""}
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1275,14 +1300,11 @@ export function KnowledgeEntryDetailPage({
             <p className="mt-2 text-sm font-semibold text-[#53287c]">
               {matchingReviewReveal
                 ? "Next review scheduled: Scheduled time will be set when you continue review."
-                : `Next review scheduled: ${buildScheduledReviewMessage(
-                    detailReviewQueue,
-                    detailReviewQueue?.current_schedule_label ?? activeReviewScheduleLabel,
-                  )}`}
+                : `Next review scheduled: ${learnerScheduledReviewSummary}`}
             </p>
-            {scheduleSheetApproximateReview ? (
+            {scheduledReviewSecondaryMessage ? (
               <p className="mt-1 text-sm text-[#6e5a86]">
-                Approximately: {scheduleSheetApproximateReview}
+                {scheduledReviewSecondaryMessage}
               </p>
             ) : null}
             <p className="mt-2 text-sm leading-6 text-[#6e5a86]">

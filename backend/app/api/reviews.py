@@ -4,7 +4,7 @@ from time import perf_counter
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_admin_user, get_current_user
@@ -186,9 +186,12 @@ class QueueScheduleUpdateRequest(BaseModel):
 class QueueScheduleResponse(BaseModel):
     queue_item_id: str
     next_review_at: datetime | None = None
+    due_review_date: str | None = None
+    min_due_at_utc: datetime | None = None
+    recheck_due_at: datetime | None = None
     current_schedule_value: str
     current_schedule_label: str
-    current_schedule_source: str = "scheduled_timestamp"
+    current_schedule_source: str | None = None
     schedule_options: list[ScheduleOptionResponse] = []
 
 
@@ -221,6 +224,9 @@ class GroupedQueueItemResponse(BaseModel):
     text: str
     status: str
     next_review_at: datetime | None = None
+    due_review_date: str | None = None
+    min_due_at_utc: datetime | None = None
+    recheck_due_at: datetime | None = None
     last_reviewed_at: datetime | None = None
     bucket: str | None = None
     success_streak: int = 0
@@ -228,6 +234,37 @@ class GroupedQueueItemResponse(BaseModel):
     times_remembered: int = 0
     exposure_count: int = 0
     history: list[ReviewQueueHistoryEventResponse] = []
+
+    @model_serializer(mode="plain")
+    def serialize_model(self) -> dict[str, Any]:
+        uses_canonical_schedule = (
+            self.due_review_date is not None and self.min_due_at_utc is not None
+        )
+        payload: dict[str, Any] = {
+            "queue_item_id": self.queue_item_id,
+            "entry_id": self.entry_id,
+            "entry_type": self.entry_type,
+            "text": self.text,
+            "status": self.status,
+            "success_streak": self.success_streak,
+            "lapse_count": self.lapse_count,
+            "times_remembered": self.times_remembered,
+            "exposure_count": self.exposure_count,
+            "history": self.history,
+        }
+        if self.next_review_at is not None and not uses_canonical_schedule:
+            payload["next_review_at"] = self.next_review_at
+        if self.due_review_date is not None:
+            payload["due_review_date"] = self.due_review_date
+        if self.min_due_at_utc is not None:
+            payload["min_due_at_utc"] = self.min_due_at_utc
+        if self.recheck_due_at is not None:
+            payload["recheck_due_at"] = self.recheck_due_at
+        if self.last_reviewed_at is not None:
+            payload["last_reviewed_at"] = self.last_reviewed_at
+        if self.bucket is not None:
+            payload["bucket"] = self.bucket
+        return payload
 
 
 class GroupedQueueBucketResponse(BaseModel):
@@ -259,11 +296,27 @@ class DueGroupedQueueResponse(BaseModel):
 class AdminGroupedQueueItemResponse(GroupedQueueItemResponse):
     target_type: str | None = None
     target_id: str | None = None
-    recheck_due_at: datetime | None = None
     next_due_at: datetime | None = None
     last_outcome: str | None = None
     relearning: bool | None = None
     relearning_trigger: str | None = None
+
+    @model_serializer(mode="plain")
+    def serialize_model(self) -> dict[str, Any]:
+        payload = super().serialize_model()
+        if self.target_type is not None:
+            payload["target_type"] = self.target_type
+        if self.target_id is not None:
+            payload["target_id"] = self.target_id
+        if self.next_due_at is not None:
+            payload["next_due_at"] = self.next_due_at
+        if self.last_outcome is not None:
+            payload["last_outcome"] = self.last_outcome
+        if self.relearning is not None:
+            payload["relearning"] = self.relearning
+        if self.relearning_trigger is not None:
+            payload["relearning_trigger"] = self.relearning_trigger
+        return payload
 
 
 class AdminGroupedQueueBucketResponse(BaseModel):
@@ -508,7 +561,11 @@ async def submit_queue_review(
     )
 
 
-@router.put("/queue/{item_id}/schedule", response_model=QueueScheduleResponse)
+@router.put(
+    "/queue/{item_id}/schedule",
+    response_model=QueueScheduleResponse,
+    response_model_exclude_none=True,
+)
 async def update_queue_schedule(
     item_id: uuid.UUID,
     request: QueueScheduleUpdateRequest,
@@ -545,10 +602,25 @@ async def update_queue_schedule(
     logger.info("reviews_request", route_name="queue_schedule_update", **metrics)
     return QueueScheduleResponse(
         queue_item_id=payload["queue_item_id"],
-        next_review_at=datetime.fromisoformat(payload["next_review_at"]) if payload["next_review_at"] else None,
+        next_review_at=(
+            datetime.fromisoformat(payload["next_review_at"])
+            if payload.get("next_review_at")
+            else None
+        ),
+        due_review_date=payload.get("due_review_date"),
+        min_due_at_utc=(
+            datetime.fromisoformat(payload["min_due_at_utc"])
+            if payload.get("min_due_at_utc")
+            else None
+        ),
+        recheck_due_at=(
+            datetime.fromisoformat(payload["recheck_due_at"])
+            if payload.get("recheck_due_at")
+            else None
+        ),
         current_schedule_value=payload["current_schedule_value"],
         current_schedule_label=payload["current_schedule_label"],
-        current_schedule_source=payload.get("current_schedule_source", "scheduled_timestamp"),
+        current_schedule_source=payload.get("current_schedule_source"),
         schedule_options=[ScheduleOptionResponse(**option) for option in payload["schedule_options"]],
     )
 
