@@ -489,6 +489,29 @@ def _dashboard_entry(item: dict | None) -> KnowledgeMapAdjacentEntryResponse | N
     )
 
 
+def _resolve_detail_status(
+    *,
+    status_row: LearnerEntryStatus | None,
+    review_queue: dict[str, object] | None,
+    matching_review_status: str | None = None,
+    entry_type: str,
+    entry_id: uuid.UUID,
+) -> str:
+    resolved_status = status_row.status if status_row else "undecided"
+    if (
+        resolved_status == "learning"
+        and review_queue is None
+        and matching_review_status != "learning"
+    ):
+        logger.warning(
+            "knowledge_map_learning_status_missing_review_queue",
+            entry_type=entry_type,
+            entry_id=str(entry_id),
+        )
+        return "to_learn"
+    return resolved_status
+
+
 def _finalize_knowledge_map_metrics(
     response: Response,
     request: Request,
@@ -778,13 +801,20 @@ async def get_knowledge_map_entry_detail(
             entry_type="word",
             entry_id=word.id,
         )
+        resolved_status = _resolve_detail_status(
+            status_row=status_row,
+            review_queue=review_queue,
+            matching_review_status=current_entry.get("status") if current_entry else None,
+            entry_type="word",
+            entry_id=word.id,
+        )
         detail_response = KnowledgeMapDetailResponse(
             entry_type="word",
             entry_id=str(word.id),
             display_text=word.word,
             normalized_form=word.word,
             browse_rank=int(current_entry["browse_rank"]) if current_entry is not None else (word.frequency_rank or 0),
-            status=status_row.status if status_row else "undecided",
+            status=resolved_status,
             cefr_level=word.cefr_level,
             pronunciation=select_pronunciation(word, preferences.accent_preference),
             translation=translation,
@@ -1064,6 +1094,13 @@ async def get_knowledge_map_entry_detail(
         entry_type="phrase",
         entry_id=phrase.id,
     )
+    resolved_status = _resolve_detail_status(
+        status_row=status_row,
+        review_queue=review_queue,
+        matching_review_status=current_entry.get("status") if current_entry else None,
+        entry_type="phrase",
+        entry_id=phrase.id,
+    )
 
     detail_response = KnowledgeMapDetailResponse(
         entry_type="phrase",
@@ -1071,7 +1108,7 @@ async def get_knowledge_map_entry_detail(
         display_text=phrase.phrase_text,
         normalized_form=phrase.normalized_form,
         browse_rank=int(current_entry["browse_rank"]) if current_entry is not None else 0,
-        status=status_row.status if status_row else "undecided",
+        status=resolved_status,
         cefr_level=phrase.cefr_level,
         pronunciation=None,
         pronunciations={},
