@@ -7,6 +7,7 @@ import {
   type ImportJobSnapshot,
   waitForImportJobTerminal,
 } from "./import-jobs";
+import { seedCustomReviewQueue } from "./review-scenario-fixture";
 
 type ImportReviewEntry = {
   entry_type: string;
@@ -20,6 +21,67 @@ type ImportEntriesResponse = {
 type WordListResponse = {
   id: string;
   name: string;
+};
+
+export type RouteRuntimeCanonicalScheduleFixture = {
+  wordEntryId: string;
+  wordText: string;
+  phraseEntryId: string;
+  phraseText: string;
+};
+
+function buildTomorrowReleaseInstant(): Date {
+  const now = new Date();
+  return new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+      18,
+      0,
+      0,
+      0,
+    ),
+  );
+}
+
+export const seedRouteRuntimeCanonicalScheduleFixture = async (
+  userId: string,
+): Promise<RouteRuntimeCanonicalScheduleFixture> => {
+  const releaseAt = buildTomorrowReleaseInstant();
+  const phraseReleaseAt = new Date(releaseAt.getTime() + 5 * 60 * 1000);
+  const reviewedAt = new Date(releaseAt.getTime() - 24 * 60 * 60 * 1000);
+
+  const scenarios = await seedCustomReviewQueue(userId, {
+    timezone: "UTC",
+    items: [
+      {
+        scenarioKey: "entry-to-definition",
+        status: "learning",
+        dueAt: releaseAt,
+        dueReviewDate: releaseAt.toISOString().slice(0, 10),
+        minDueAtUtc: releaseAt,
+        lastReviewedAt: reviewedAt,
+        srsBucket: "1d",
+      },
+      {
+        scenarioKey: "definition-to-entry",
+        status: "learning",
+        dueAt: phraseReleaseAt,
+        dueReviewDate: phraseReleaseAt.toISOString().slice(0, 10),
+        minDueAtUtc: phraseReleaseAt,
+        lastReviewedAt: reviewedAt,
+        srsBucket: "1d",
+      },
+    ],
+  });
+
+  return {
+    wordEntryId: scenarios["entry-to-definition"].resolvedEntryId,
+    wordText: scenarios["entry-to-definition"].displayText,
+    phraseEntryId: scenarios["definition-to-entry"].resolvedEntryId,
+    phraseText: scenarios["definition-to-entry"].displayText,
+  };
 };
 
 export const createCompletedImportJob = async (

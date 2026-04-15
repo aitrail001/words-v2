@@ -1037,13 +1037,15 @@ const insertReviewQueueState = async (
     );
   }
 
-  const nextDueAt = item.nextDueAt ?? item.minDueAtUtc ?? item.dueAt ?? null;
-  if (nextDueAt === null) {
+  const minDueAtUtc = item.minDueAtUtc ?? item.nextDueAt ?? item.dueAt ?? null;
+  if (minDueAtUtc === null) {
     throw new Error(`Scenario ${item.scenarioKey} is missing a due timestamp.`);
   }
 
-  const createdAt = new Date(nextDueAt.getTime() - 3_600_000);
-  const reviewedAt = item.lastReviewedAt ?? new Date(nextDueAt.getTime() - 86_400_000);
+  const dueReviewDate = item.dueReviewDate ?? minDueAtUtc.toISOString().slice(0, 10);
+
+  const createdAt = new Date(minDueAtUtc.getTime() - 3_600_000);
+  const reviewedAt = item.lastReviewedAt ?? new Date(minDueAtUtc.getTime() - 86_400_000);
   const srsBucket = item.srsBucket ?? "1d";
   const cadenceStep = {
     "1d": 0,
@@ -1093,7 +1095,6 @@ const insertReviewQueueState = async (
       relearning_trigger,
       recheck_due_at,
       last_reviewed_at,
-      next_due_at,
       due_review_date,
       min_due_at_utc,
       created_at,
@@ -1123,11 +1124,10 @@ const insertReviewQueueState = async (
       NULL,
       $12::timestamptz,
       $13::timestamptz,
-      $14::timestamptz,
-      $15::date,
+      $14::date,
+      $15::timestamptz,
       $16::timestamptz,
-      $17::timestamptz,
-      $17::timestamptz
+      $16::timestamptz
     )
     `,
     [
@@ -1144,9 +1144,8 @@ const insertReviewQueueState = async (
       `manual_prompt_type:${scenario.expectedPromptType}`,
       item.recheckDueAt?.toISOString() ?? null,
       reviewedAt.toISOString(),
-      nextDueAt.toISOString(),
-      item.dueReviewDate ?? null,
-      item.minDueAtUtc?.toISOString() ?? null,
+      dueReviewDate,
+      minDueAtUtc.toISOString(),
       createdAt.toISOString(),
     ],
   );
