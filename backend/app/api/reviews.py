@@ -186,9 +186,12 @@ class QueueScheduleUpdateRequest(BaseModel):
 class QueueScheduleResponse(BaseModel):
     queue_item_id: str
     next_review_at: datetime | None = None
+    due_review_date: str | None = None
+    min_due_at_utc: datetime | None = None
+    recheck_due_at: datetime | None = None
     current_schedule_value: str
     current_schedule_label: str
-    current_schedule_source: str = "scheduled_timestamp"
+    current_schedule_source: str | None = None
     schedule_options: list[ScheduleOptionResponse] = []
 
 
@@ -508,7 +511,11 @@ async def submit_queue_review(
     )
 
 
-@router.put("/queue/{item_id}/schedule", response_model=QueueScheduleResponse)
+@router.put(
+    "/queue/{item_id}/schedule",
+    response_model=QueueScheduleResponse,
+    response_model_exclude_none=True,
+)
 async def update_queue_schedule(
     item_id: uuid.UUID,
     request: QueueScheduleUpdateRequest,
@@ -545,10 +552,25 @@ async def update_queue_schedule(
     logger.info("reviews_request", route_name="queue_schedule_update", **metrics)
     return QueueScheduleResponse(
         queue_item_id=payload["queue_item_id"],
-        next_review_at=datetime.fromisoformat(payload["next_review_at"]) if payload["next_review_at"] else None,
+        next_review_at=(
+            datetime.fromisoformat(payload["next_review_at"])
+            if payload.get("next_review_at")
+            else None
+        ),
+        due_review_date=payload.get("due_review_date"),
+        min_due_at_utc=(
+            datetime.fromisoformat(payload["min_due_at_utc"])
+            if payload.get("min_due_at_utc")
+            else None
+        ),
+        recheck_due_at=(
+            datetime.fromisoformat(payload["recheck_due_at"])
+            if payload.get("recheck_due_at")
+            else None
+        ),
         current_schedule_value=payload["current_schedule_value"],
         current_schedule_label=payload["current_schedule_label"],
-        current_schedule_source=payload.get("current_schedule_source", "scheduled_timestamp"),
+        current_schedule_source=payload.get("current_schedule_source"),
         schedule_options=[ScheduleOptionResponse(**option) for option in payload["schedule_options"]],
     )
 

@@ -319,9 +319,10 @@ export type ReviewScheduleOption = {
 
 export type EntryReviewQueue = {
   queue_item_id: string;
-  next_review_at: string | null;
+  next_review_at?: string | null;
   due_review_date?: string | null;
   min_due_at_utc?: string | null;
+  recheck_due_at?: string | null;
   current_schedule_value: string;
   current_schedule_label: string;
   current_schedule_source?: string;

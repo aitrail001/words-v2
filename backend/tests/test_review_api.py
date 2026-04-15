@@ -729,13 +729,14 @@ class TestQueueScheduleUpdate:
             assert schedule_override == "7d"
             return {
                 "queue_item_id": str(item_id),
-                "next_review_at": "2026-04-11T00:00:00+00:00",
+                "due_review_date": "2026-04-11",
+                "min_due_at_utc": "2026-04-11T00:00:00+00:00",
+                "recheck_due_at": None,
                 "current_schedule_value": "7d",
                 "current_schedule_label": "In a week",
-                "current_schedule_source": "scheduled_timestamp",
                 "schedule_options": [
-                    {"value": "1d", "label": "Tomorrow", "is_default": True},
-                    {"value": "7d", "label": "In a week", "is_default": False},
+                    {"value": "1d", "label": "Tomorrow", "is_default": False},
+                    {"value": "7d", "label": "In a week", "is_default": True},
                 ],
             }
 
@@ -754,10 +755,12 @@ class TestQueueScheduleUpdate:
         assert response.status_code == 200
         data = response.json()
         assert data["queue_item_id"] == str(item_id)
-        assert data["next_review_at"] == "2026-04-11T00:00:00Z"
+        assert data["due_review_date"] == "2026-04-11"
+        assert data["min_due_at_utc"] == "2026-04-11T00:00:00Z"
         assert data["current_schedule_value"] == "7d"
         assert data["current_schedule_label"] == "In a week"
-        assert data["current_schedule_source"] == "scheduled_timestamp"
+        assert "next_review_at" not in data
+        assert "current_schedule_source" not in data
 
     @pytest.mark.asyncio
     async def test_update_queue_schedule_rejects_invalid_override(self, client, mock_db, auth_token):
