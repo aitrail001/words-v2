@@ -15,6 +15,10 @@ case "${suite}" in
     npm_script="test:smoke:ci"
     label="e2e-smoke"
     ;;
+  route-runtime-smoke)
+    npm_script="test:route-runtime:smoke"
+    label="e2e-route-runtime-smoke"
+    ;;
   review-srs)
     npm_script="test:review:ci"
     label="e2e-review-srs"
@@ -27,12 +31,16 @@ case "${suite}" in
     npm_script="test:user"
     label="e2e-user"
     ;;
+  route-runtime-full)
+    npm_script="test:route-runtime:full"
+    label="e2e-route-runtime-full"
+    ;;
   full)
     npm_script="test:full"
     label="e2e-full"
     ;;
   *)
-    echo "Unknown E2E suite '${suite}'. Use smoke|review-srs|admin|user|full." >&2
+    echo "Unknown E2E suite '${suite}'. Use smoke|route-runtime-smoke|review-srs|admin|user|route-runtime-full|full." >&2
     exit 1
     ;;
 esac
