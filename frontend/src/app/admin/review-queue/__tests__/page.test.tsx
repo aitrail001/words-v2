@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import AdminReviewQueuePage from "@/app/admin/review-queue/page";
+import AdminReviewQueueBucketPage from "@/app/admin/review-queue/[bucket]/page";
 import { cookies } from "next/headers";
-import { ReviewQueueDebugField } from "@/components/review-queue/review-queue-shared";
 
 jest.mock("next/headers", () => ({
   cookies: jest.fn(),
@@ -150,10 +150,51 @@ describe("AdminReviewQueuePage", () => {
     ).toBeInTheDocument();
   });
 
-  it("omits empty admin diagnostics values instead of rendering none placeholders", () => {
-    render(<ReviewQueueDebugField label="next_due_at" value={null} />);
+  it("omits empty admin diagnostics rows on the real admin bucket page", async () => {
+    mockFetchJson({
+      generated_at: "2026-10-05T09:00:00+00:00",
+      bucket: "7d",
+      count: 1,
+      sort: "text",
+      order: "desc",
+      debug: {
+        effective_now: "2026-10-05T09:00:00+00:00",
+      },
+      items: [
+        {
+          queue_item_id: "queue-1",
+          entry_id: "word-1",
+          entry_type: "word",
+          text: "candidate",
+          status: "learning",
+          next_review_at: "2026-10-05T09:00:00+00:00",
+          last_reviewed_at: "2026-10-04T09:00:00+00:00",
+          success_streak: 5,
+          lapse_count: 2,
+          times_remembered: 6,
+          exposure_count: 8,
+          history: [],
+          target_type: "meaning",
+          target_id: "meaning-1",
+          recheck_due_at: null,
+          next_due_at: null,
+          last_outcome: "correct_tested",
+          relearning: false,
+          relearning_trigger: null,
+        },
+      ],
+    });
 
-    expect(screen.getByText(/next_due_at:/i)).toBeInTheDocument();
-    expect(screen.queryByText(/none/i)).not.toBeInTheDocument();
+    render(
+      await AdminReviewQueueBucketPage({
+        params: Promise.resolve({ bucket: "7d" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(await screen.findByText("candidate")).toBeInTheDocument();
+    expect(screen.getByText(/target_type: meaning/i)).toBeInTheDocument();
+    expect(screen.queryByText("next_due_at: none")).not.toBeInTheDocument();
+    expect(screen.queryByText("recheck_due_at: none")).not.toBeInTheDocument();
   });
 });

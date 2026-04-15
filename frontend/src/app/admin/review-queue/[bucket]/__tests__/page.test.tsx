@@ -121,7 +121,7 @@ describe("AdminReviewQueueBucketPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /show review history for candidate/i }));
     expect(screen.getByText(/confidence_check/i)).toBeInTheDocument();
     expect(screen.getByText(/target_type: meaning/i)).toBeInTheDocument();
-    expect(screen.getByText("next_due_at: none")).not.toBeInTheDocument();
+    expect(screen.queryByText("next_due_at: none")).not.toBeInTheDocument();
     expect(screen.getByText(/last_outcome: correct_tested/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /start review for candidate/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /sort by due time/i })).toHaveAttribute(
