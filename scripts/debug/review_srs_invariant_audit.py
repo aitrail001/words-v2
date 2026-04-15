@@ -162,36 +162,65 @@ def main() -> None:
 
         findings: list[Finding] = []
 
-        duplicate_entry_groups: dict[tuple[str, Any], list[EntryReviewState]] = defaultdict(list)
+        sibling_groups: dict[tuple[str, Any], list[EntryReviewState]] = defaultdict(list)
         for state in states:
-            duplicate_entry_groups[(state.entry_type, state.entry_id)].append(state)
+            sibling_groups[(state.entry_type, state.entry_id)].append(state)
 
+        sibling_schedule_classes: dict[str, list[str]] = defaultdict(list)
+        sibling_schedule_examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for (entry_type, entry_id), group in sorted(
-            duplicate_entry_groups.items(),
+            sibling_groups.items(),
             key=lambda item: (item[0][0], str(item[0][1])),
         ):
             if len(group) < 2:
                 continue
-            label = labels.get((entry_type, entry_id))
+            label = labels.get((entry_type, entry_id)) or "UNKNOWN"
+            has_schedule = [
+                state.recheck_due_at is not None
+                or (state.due_review_date is not None and state.min_due_at_utc is not None)
+                for state in group
+            ]
+            if all(has_schedule):
+                schedule_class = "all_siblings_have_schedule"
+            elif any(has_schedule):
+                schedule_class = "mixed_sibling_schedule_population"
+            else:
+                schedule_class = "no_sibling_has_schedule"
+
+            sibling_schedule_classes[schedule_class].append(label)
+            sibling_schedule_examples[schedule_class].append(
+                {
+                    "label": label,
+                    "entry_type": entry_type,
+                    "entry_id": str(entry_id),
+                    "state_ids": [str(state.id) for state in group],
+                    "target_shapes": [
+                        {
+                            "state_id": str(state.id),
+                            "target_type": state.target_type,
+                            "target_id": str(state.target_id) if state.target_id is not None else None,
+                            "due_review_date": _iso(state.due_review_date),
+                            "min_due_at_utc": _iso(state.min_due_at_utc),
+                            "recheck_due_at": _iso(state.recheck_due_at),
+                        }
+                        for state in group
+                    ],
+                }
+            )
+
+        if len(sibling_schedule_classes) > 1:
             findings.append(
                 Finding(
-                    code="duplicate_active_entry_state",
-                    label=label or "UNKNOWN",
+                    code="sibling_schedule_population_inconsistent",
+                    label="entry_review_state siblings",
                     details={
-                        "entry_type": entry_type,
-                        "entry_id": str(entry_id),
-                        "state_ids": [str(state.id) for state in group],
-                        "target_shapes": [
-                            {
-                                "state_id": str(state.id),
-                                "target_type": state.target_type,
-                                "target_id": str(state.target_id) if state.target_id is not None else None,
-                                "due_review_date": _iso(state.due_review_date),
-                                "min_due_at_utc": _iso(state.min_due_at_utc),
-                                "recheck_due_at": _iso(state.recheck_due_at),
-                            }
-                            for state in group
-                        ],
+                        "classes": {
+                            key: sorted(value) for key, value in sorted(sibling_schedule_classes.items())
+                        },
+                        "examples": {
+                            key: sibling_schedule_examples[key]
+                            for key in sorted(sibling_schedule_examples.keys())
+                        },
                     },
                 )
             )
@@ -262,18 +291,6 @@ def main() -> None:
                 and state.min_due_at_utc is None
             ):
                 findings.append(Finding("learning_state_without_next_step", label or "UNKNOWN", payload))
-
-            if event_counts.get(state.id, 0) == 0:
-                findings.append(
-                    Finding(
-                        "state_without_events",
-                        label or "UNKNOWN",
-                        {
-                            **payload,
-                            "event_count": 0,
-                        },
-                    )
-                )
 
         print(f"findings={len(findings)}")
         for index, finding in enumerate(findings, start=1):
