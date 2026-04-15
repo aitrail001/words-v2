@@ -32,14 +32,19 @@ class AdminQueuePageError extends Error {
 }
 
 function buildAdminSupplementalFields(item: AdminReviewQueueItem) {
-  return [
+  const fields = [
     { label: "target_type", value: item.target_type },
     { label: "target_id", value: item.target_id },
-    { label: "recheck_due_at", value: item.recheck_due_at },
     { label: "last_outcome", value: item.last_outcome },
     { label: "relearning", value: item.relearning },
     { label: "relearning_trigger", value: item.relearning_trigger },
   ];
+
+  if (item.recheck_due_at !== null && item.recheck_due_at !== undefined && item.recheck_due_at !== "") {
+    fields.splice(2, 0, { label: "recheck_due_at", value: item.recheck_due_at });
+  }
+
+  return fields;
 }
 
 async function fetchAdminReviewQueueBucketDetail(
