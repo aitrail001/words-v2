@@ -605,7 +605,9 @@ class TestQueueDue:
                         "entry_type": "word",
                         "text": "zeta",
                         "status": "learning",
-                        "next_review_at": "2026-04-05T12:00:00+00:00",
+                        "due_review_date": "2026-04-05",
+                        "min_due_at_utc": "2026-04-05T12:00:00+00:00",
+                        "recheck_due_at": None,
                         "last_reviewed_at": "2026-04-04T09:00:00+00:00",
                     },
                     {
@@ -614,7 +616,9 @@ class TestQueueDue:
                         "entry_type": "word",
                         "text": "alpha",
                         "status": "learning",
-                        "next_review_at": "2026-04-05T10:00:00+00:00",
+                        "due_review_date": "2026-04-05",
+                        "min_due_at_utc": "2026-04-05T10:00:00+00:00",
+                        "recheck_due_at": "2026-04-05T10:10:00+00:00",
                         "last_reviewed_at": None,
                     },
                 ],
@@ -637,6 +641,10 @@ class TestQueueDue:
         assert data["sort"] == "text"
         assert data["order"] == "desc"
         assert [item["text"] for item in data["items"]] == ["zeta", "alpha"]
+        assert data["items"][0]["due_review_date"] == "2026-04-05"
+        assert data["items"][0]["min_due_at_utc"] == "2026-04-05T12:00:00Z"
+        assert "next_review_at" not in data["items"][0]
+        assert data["items"][1]["recheck_due_at"] == "2026-04-05T10:10:00Z"
 
     @pytest.mark.asyncio
     async def test_get_admin_review_queue_bucket_detail_applies_effective_now(
