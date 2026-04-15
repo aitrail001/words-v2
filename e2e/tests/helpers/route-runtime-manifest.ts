@@ -27,20 +27,18 @@ const roleMarker = (role: RouteRuntimeMarkerRole, name: string | RegExp): RouteR
   name,
 });
 
+const testIdMarker = (testId: string): RouteRuntimeMarker => ({
+  kind: "test-id",
+  testId,
+});
+
 export const SMOKE_ROUTE_RUNTIME_TARGETS = [
   {
-    name: "learner-home",
+    name: "learner-review-queue-1d",
     app: "learner",
-    path: "/",
+    path: "/review/queue/1d?sort=next_review_at&order=asc",
     auth: "learner",
-    marker: roleMarker("heading", "Knowledge Map"),
-  },
-  {
-    name: "learner-review-queue",
-    app: "learner",
-    path: "/review/queue",
-    auth: "learner",
-    marker: roleMarker("heading", /review queue/i),
+    marker: roleMarker("heading", /^1d$/i),
   },
   {
     name: "learner-review-queue-by-due",
@@ -50,40 +48,58 @@ export const SMOKE_ROUTE_RUNTIME_TARGETS = [
     marker: roleMarker("heading", /review queue by due date/i),
   },
   {
-    name: "learner-knowledge-map",
+    name: "learner-knowledge-list-learning",
     app: "learner",
-    path: "/knowledge-map",
+    path: "/knowledge-list/learning",
     auth: "learner",
-    marker: roleMarker("heading", "Full Knowledge Map"),
-  },
-  {
-    name: "learner-settings",
-    app: "learner",
-    path: "/settings",
-    auth: "learner",
-    marker: roleMarker("heading", "Settings"),
-  },
-  {
-    name: "learner-admin-review-queue",
-    app: "learner",
-    path: "/admin/review-queue",
-    auth: "admin",
-    marker: roleMarker("heading", /admin review queue/i),
-  },
-  {
-    name: "admin-home",
-    app: "admin",
-    path: "/",
-    auth: "admin",
-    marker: roleMarker("heading", "Admin Dashboard"),
-  },
-  {
-    name: "admin-lexicon-ops",
-    app: "admin",
-    path: "/lexicon/ops",
-    auth: "admin",
-    marker: roleMarker("heading", "Lexicon Operations"),
+    marker: roleMarker("heading", "Learning Words"),
   },
 ] as const satisfies readonly RouteRuntimeTarget[];
 
-export const FULL_ROUTE_RUNTIME_TARGETS = [...SMOKE_ROUTE_RUNTIME_TARGETS] satisfies readonly RouteRuntimeTarget[];
+export const FULL_ROUTE_RUNTIME_TARGETS = [
+  ...SMOKE_ROUTE_RUNTIME_TARGETS,
+  {
+    name: "learner-knowledge-map-range-1",
+    app: "learner",
+    path: "/knowledge-map/range/1",
+    auth: "learner",
+    marker: testIdMarker("knowledge-range-strip"),
+  },
+] as const satisfies readonly RouteRuntimeTarget[];
+
+export const buildAdminReviewQueueBucketTarget = (
+  effectiveNow: string,
+  bucket = "1d",
+): RouteRuntimeTarget => ({
+  name: `learner-admin-review-queue-${bucket}`,
+  app: "learner",
+  path: `/admin/review-queue/${bucket}?effective_now=${encodeURIComponent(effectiveNow)}&sort=next_review_at&order=asc`,
+  auth: "admin",
+  marker: roleMarker("heading", new RegExp(`^${bucket}$`, "i")),
+});
+
+export const buildAdminReviewQueueSummaryTarget = (
+  effectiveNow: string,
+): RouteRuntimeTarget => ({
+  name: "learner-admin-review-queue-summary",
+  app: "learner",
+  path: `/admin/review-queue?effective_now=${encodeURIComponent(effectiveNow)}`,
+  auth: "admin",
+  marker: roleMarker("heading", /admin review queue/i),
+});
+
+export const buildImportJobTarget = (jobId: string): RouteRuntimeTarget => ({
+  name: "learner-import-job-detail",
+  app: "learner",
+  path: `/imports/${jobId}`,
+  auth: "learner",
+  marker: testIdMarker("imports-review-panel"),
+});
+
+export const buildWordListTarget = (wordListId: string): RouteRuntimeTarget => ({
+  name: "learner-word-list-detail",
+  app: "learner",
+  path: `/word-lists/${wordListId}`,
+  auth: "learner",
+  marker: testIdMarker("word-list-detail-title"),
+});

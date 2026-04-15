@@ -255,6 +255,9 @@ gate-full: chmod-scripts
 gate-e2e-smoke: chmod-scripts
 	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh smoke
 
+gate-e2e-route-runtime-smoke: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh route-runtime-smoke
+
 gate-e2e-review: chmod-scripts
 	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh review-srs
 
@@ -263,6 +266,9 @@ gate-e2e-admin: chmod-scripts
 
 gate-e2e-user: chmod-scripts
 	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh user
+
+gate-e2e-route-runtime-full: chmod-scripts
+	ENV_FILE=$(GATE_ENV_FILE) ./scripts/ci/run-e2e-suite.sh route-runtime-full
 
 gate-clean-postgres-volumes: chmod-scripts
 	./scripts/ci/cleanup-postgres-anonymous-volumes.sh

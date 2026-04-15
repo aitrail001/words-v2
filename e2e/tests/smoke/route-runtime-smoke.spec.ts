@@ -3,7 +3,11 @@ import {
   expectNoNextRuntimeFailure,
   expectStableRouteMarker,
 } from "../helpers/route-runtime-assertions";
-import type { RouteRuntimeTarget } from "../helpers/route-runtime-manifest";
+import {
+  buildAdminReviewQueueBucketTarget,
+  SMOKE_ROUTE_RUNTIME_TARGETS,
+  type RouteRuntimeTarget,
+} from "../helpers/route-runtime-manifest";
 import {
   injectToken,
   registerAdminViaApi,
@@ -15,42 +19,6 @@ import { seedAdminTimeTravelReviewFixture } from "../helpers/review-scenario-fix
 import { seedDueReviewItem } from "../helpers/review-seed";
 
 const LEARNER_APP_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
-
-const LEARNER_ROUTE_RUNTIME_TARGETS = [
-  {
-    name: "learner-review-queue-1d",
-    app: "learner",
-    path: "/review/queue/1d?sort=next_review_at&order=asc",
-    auth: "learner",
-    marker: {
-      kind: "role",
-      role: "heading",
-      name: /^1d$/i,
-    },
-  },
-  {
-    name: "learner-review-queue-by-due",
-    app: "learner",
-    path: "/review/queue/by-due",
-    auth: "learner",
-    marker: {
-      kind: "role",
-      role: "heading",
-      name: /review queue by due date/i,
-    },
-  },
-  {
-    name: "learner-knowledge-list-learning",
-    app: "learner",
-    path: "/knowledge-list/learning",
-    auth: "learner",
-    marker: {
-      kind: "role",
-      role: "heading",
-      name: "Learning Words",
-    },
-  },
-] as const satisfies readonly RouteRuntimeTarget[];
 
 const visitAndAssertRouteRuntime = async (
   page: Page,
@@ -73,7 +41,7 @@ test("@smoke route runtime sweep covers learner review and knowledge-list routes
 
   await injectToken(page, user.token);
 
-  for (const target of LEARNER_ROUTE_RUNTIME_TARGETS) {
+  for (const target of SMOKE_ROUTE_RUNTIME_TARGETS) {
     await test.step(`visit ${target.name}`, async () => {
       await visitAndAssertRouteRuntime(page, target);
     });
@@ -88,17 +56,7 @@ test("@smoke route runtime sweep covers admin review bucket time-travel route", 
 
   const admin = await registerAdminViaApi(request, "route-runtime-admin-smoke");
   const fixture = await seedAdminTimeTravelReviewFixture(admin.id);
-  const target = {
-    name: "learner-admin-review-queue-1d",
-    app: "learner",
-    path: `/admin/review-queue/1d?effective_now=${encodeURIComponent(fixture.effectiveNow)}&sort=next_review_at&order=asc`,
-    auth: "admin",
-    marker: {
-      kind: "role",
-      role: "heading",
-      name: /^1d$/i,
-    },
-  } as const satisfies RouteRuntimeTarget;
+  const target = buildAdminReviewQueueBucketTarget(fixture.effectiveNow);
 
   await injectToken(page, admin.token);
   await visitAndAssertRouteRuntime(page, target);
