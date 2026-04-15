@@ -440,6 +440,68 @@ class TestQueueDue:
         assert data["groups"][0]["items"][0]["target_type"] == "meaning"
 
     @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_admin_omits_dead_legacy_next_due_at(
+        self, client, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        token = create_access_token(subject=str(user_id))
+        admin_user = User(
+            id=user_id,
+            email="admin@example.com",
+            password_hash="hashed",
+            role="admin",
+        )
+
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = admin_user
+        mock_db.execute.side_effect = [user_result]
+
+        async def fake_get_grouped_review_queue(
+            self, *, user_id, now, include_debug_fields=False
+        ):
+            assert include_debug_fields is True
+            return {
+                "generated_at": "2026-04-05T09:00:00+00:00",
+                "total_count": 1,
+                "groups": [
+                    {
+                        "bucket": "1d",
+                        "count": 1,
+                        "items": [
+                            {
+                                "queue_item_id": "queue-1",
+                                "entry_id": "word-1",
+                                "entry_type": "word",
+                                "text": "judicial",
+                                "status": "learning",
+                                "next_review_at": None,
+                                "next_due_at": "2026-04-16T18:00:00+00:00",
+                                "last_reviewed_at": None,
+                                "bucket": "1d",
+                                "target_type": "meaning",
+                                "target_id": "meaning-1",
+                            }
+                        ],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(
+            "app.api.reviews.ReviewService.get_grouped_review_queue",
+            fake_get_grouped_review_queue,
+            raising=False,
+        )
+
+        response = await client.get(
+            "/api/reviews/admin/queue/grouped",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "next_due_at" not in data["groups"][0]["items"][0]
+
+    @pytest.mark.asyncio
     async def test_get_grouped_review_queue_admin_normalizes_naive_effective_time(
         self, client, mock_db
     ):

@@ -996,6 +996,81 @@ class TestKnowledgeMapDetail:
         assert "next_review_at" not in data["review_queue"]
 
     @pytest.mark.asyncio
+    async def test_word_detail_learning_status_requires_review_queue(
+        self, client, mock_db, auth_token, monkeypatch
+    ):
+        token, user_id = auth_token
+        user = make_user(user_id)
+        word = Word(
+            id=uuid.uuid4(),
+            word="judicial",
+            language="en",
+            frequency_rank=20,
+            phonetic="/dʒuˈdɪʃəl/",
+        )
+        meaning = Meaning(id=uuid.uuid4(), word_id=word.id, definition="Relating to courts", order_index=0)
+        preferences = UserPreference(user_id=user_id, accent_preference="us", translation_locale="zh-Hans")
+
+        async def fake_get_entry_queue_schedule(self, *, user_id, entry_type, entry_id):
+            assert entry_type == "word"
+            return None
+
+        monkeypatch.setattr(
+            "app.api.knowledge_map.ReviewService.get_entry_queue_schedule",
+            fake_get_entry_queue_schedule,
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.get_preferences",
+            AsyncMock(return_value=preferences),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.get_status_row",
+            AsyncMock(return_value=MagicMock(status="learning")),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.load_catalog_neighbors",
+            AsyncMock(
+                return_value=(
+                    {
+                        "browse_rank": 20,
+                        "entry_type": "word",
+                        "entry_id": word.id,
+                        "display_text": "judicial",
+                    },
+                    None,
+                    None,
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.load_word_detail_relations",
+            AsyncMock(return_value=({}, {}, {})),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.load_word_voice_assets",
+            AsyncMock(return_value=[]),
+        )
+        monkeypatch.setattr(
+            "app.api.knowledge_map.load_entry_lookup_for_terms",
+            AsyncMock(return_value={}),
+        )
+
+        mock_db.execute.side_effect = [
+            scalar_one_or_none_result(user),
+            scalar_one_or_none_result(word),
+            scalars_all_result([meaning]),
+        ]
+
+        response = await client.get(
+            f"/api/knowledge-map/entries/word/{word.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] != "learning" or data["review_queue"] is not None
+
+    @pytest.mark.asyncio
     async def test_phrase_detail_review_queue_uses_canonical_schedule_contract(
         self, client, mock_db, auth_token, monkeypatch
     ):
