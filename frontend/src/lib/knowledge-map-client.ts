@@ -151,7 +151,7 @@ export type ReviewQueueItem = {
   due_review_date?: string | null;
   min_due_at_utc?: string | null;
   recheck_due_at?: string | null;
-  last_reviewed_at: string | null;
+  last_reviewed_at?: string | null;
   bucket?: ReviewQueueBucket;
   success_streak: number;
   lapse_count: number;
@@ -208,13 +208,13 @@ export type DueGroupedReviewQueueResponse = {
 };
 
 export type AdminReviewQueueItem = ReviewQueueItem & {
-  target_type: string | null;
-  target_id: string | null;
-  recheck_due_at: string | null;
-  next_due_at: string | null;
-  last_outcome: string | null;
-  relearning: boolean | null;
-  relearning_trigger: string | null;
+  target_type?: string | null;
+  target_id?: string | null;
+  recheck_due_at?: string | null;
+  next_due_at?: string | null;
+  last_outcome?: string | null;
+  relearning?: boolean | null;
+  relearning_trigger?: string | null;
 };
 
 export type AdminReviewQueueSummaryResponse = {
