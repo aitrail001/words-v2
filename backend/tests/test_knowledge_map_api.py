@@ -1013,7 +1013,15 @@ class TestKnowledgeMapDetail:
 
         async def fake_get_entry_queue_schedule(self, *, user_id, entry_type, entry_id):
             assert entry_type == "word"
-            return None
+            return {
+                "queue_item_id": "queue-learning-1",
+                "due_review_date": "2026-04-06",
+                "min_due_at_utc": "2026-04-06T00:00:00+00:00",
+                "recheck_due_at": None,
+                "current_schedule_value": "1d",
+                "current_schedule_label": "Tomorrow",
+                "schedule_options": [],
+            }
 
         monkeypatch.setattr(
             "app.api.knowledge_map.ReviewService.get_entry_queue_schedule",

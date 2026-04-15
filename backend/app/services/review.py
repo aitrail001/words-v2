@@ -1432,6 +1432,41 @@ class ReviewService:
         state.cadence_step = cadence_step_for_bucket(resolved_bucket)
         state.stability = max(0.15, float(resolved_interval_days or state.stability or 1))
 
+    async def _repair_active_review_state_schedule(
+        self,
+        *,
+        user_id: uuid.UUID,
+        state: EntryReviewState,
+    ) -> bool:
+        if self._state_has_supported_schedule(state):
+            return False
+
+        self._normalize_active_review_state_schedule(state)
+        resolved_bucket = self._resolve_srs_bucket(state=state)
+        if resolved_bucket == "known":
+            return False
+
+        prefs = await self._get_user_review_preferences(user_id)
+        user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
+        reviewed_at = self._schedule_anchor_reviewed_at(state=state)
+        schedule_value = self._resolve_official_schedule_value(
+            resolved_bucket=resolved_bucket,
+            resolved_outcome=getattr(state, "last_outcome", None),
+            schedule_override=None,
+        )
+        state.due_review_date = due_review_date_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone=user_timezone,
+            bucket=schedule_value,
+        )
+        state.min_due_at_utc = min_due_at_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone=user_timezone,
+            bucket=schedule_value,
+        )
+        state.recheck_due_at = None
+        return True
+
     async def _ensure_entry_review_state(
         self,
         *,
@@ -3114,6 +3149,12 @@ class ReviewService:
             )
             await self.db.commit()
         self._normalize_active_review_state_schedule(state)
+        repaired_schedule = await self._repair_active_review_state_schedule(
+            user_id=user_id,
+            state=state,
+        )
+        if repaired_schedule:
+            await self.db.commit()
         if not self._state_has_supported_schedule(state):
             return None
         user_timezone = None
