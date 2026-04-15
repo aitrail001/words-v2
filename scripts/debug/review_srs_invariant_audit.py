@@ -62,9 +62,9 @@ def _entry_labels(session: Session, states: list[EntryReviewState]) -> dict[tupl
         labels.update({("word", row.id): row.word for row in rows})
     if phrase_ids:
         rows = session.execute(
-            select(PhraseEntry.id, PhraseEntry.phrase).where(PhraseEntry.id.in_(phrase_ids))
+            select(PhraseEntry.id, PhraseEntry.phrase_text).where(PhraseEntry.id.in_(phrase_ids))
         ).all()
-        labels.update({("phrase", row.id): row.phrase for row in rows})
+        labels.update({("phrase", row.id): row.phrase_text for row in rows})
     return labels
 
 
