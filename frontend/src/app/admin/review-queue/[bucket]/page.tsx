@@ -32,25 +32,16 @@ class AdminQueuePageError extends Error {
 }
 
 function buildAdminSupplementalFields(item: AdminReviewQueueItem) {
-  const fields: Array<{ label: string; value: boolean | string }> = [];
+  const fields: Array<{ label: string; value: boolean | string | null | undefined }> = [
+    { label: "target_type", value: item.target_type },
+    { label: "target_id", value: item.target_id },
+    { label: "last_outcome", value: item.last_outcome },
+    { label: "relearning", value: item.relearning },
+    { label: "relearning_trigger", value: item.relearning_trigger },
+  ];
 
-  if (item.target_type) {
-    fields.push({ label: "target_type", value: item.target_type });
-  }
-  if (item.target_id) {
-    fields.push({ label: "target_id", value: item.target_id });
-  }
   if (item.recheck_due_at) {
-    fields.push({ label: "recheck_due_at", value: item.recheck_due_at });
-  }
-  if (item.last_outcome) {
-    fields.push({ label: "last_outcome", value: item.last_outcome });
-  }
-  if (item.relearning !== null && item.relearning !== undefined) {
-    fields.push({ label: "relearning", value: item.relearning });
-  }
-  if (item.relearning_trigger) {
-    fields.push({ label: "relearning_trigger", value: item.relearning_trigger });
+    fields.splice(2, 0, { label: "recheck_due_at", value: item.recheck_due_at });
   }
 
   return fields;
