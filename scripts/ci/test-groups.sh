@@ -17,8 +17,8 @@ declare -p FAST_BACKEND_SUBSET >/dev/null 2>&1 || readonly -a FAST_BACKEND_SUBSE
 
 declare -p FAST_FRONTEND_SUBSET_COMMAND >/dev/null 2>&1 || readonly -a FAST_FRONTEND_SUBSET_COMMAND=(npm run test:review)
 
-declare -p E2E_SMOKE_SUITES >/dev/null 2>&1 || readonly -a E2E_SMOKE_SUITES=(smoke)
-declare -p E2E_REQUIRED_FULL_SUITES >/dev/null 2>&1 || readonly -a E2E_REQUIRED_FULL_SUITES=(review-srs admin user)
+declare -p E2E_SMOKE_SUITES >/dev/null 2>&1 || readonly -a E2E_SMOKE_SUITES=(smoke route-runtime-smoke)
+declare -p E2E_REQUIRED_FULL_SUITES >/dev/null 2>&1 || readonly -a E2E_REQUIRED_FULL_SUITES=(review-srs admin user route-runtime-full)
 
 declare -p FRONTEND_FAST_MODES >/dev/null 2>&1 || readonly -a FRONTEND_FAST_MODES=(lint subset)
 declare -p FRONTEND_FULL_MODES >/dev/null 2>&1 || readonly -a FRONTEND_FULL_MODES=(lint subset test build)

@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 import {
-  ReviewQueueDebugField,
   ReviewQueueItemCard,
   ReviewQueueSortControls,
 } from "@/components/review-queue/review-queue-shared";
@@ -30,6 +29,18 @@ class AdminQueuePageError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+function buildAdminSupplementalFields(item: AdminReviewQueueItem) {
+  return [
+    { label: "target_type", value: item.target_type },
+    { label: "target_id", value: item.target_id },
+    { label: "recheck_due_at", value: item.recheck_due_at },
+    { label: "next_due_at", value: item.next_due_at },
+    { label: "last_outcome", value: item.last_outcome },
+    { label: "relearning", value: item.relearning },
+    { label: "relearning_trigger", value: item.relearning_trigger },
+  ];
 }
 
 async function fetchAdminReviewQueueBucketDetail(
@@ -178,20 +189,7 @@ export default async function AdminReviewQueueBucketPage({
               item={item}
               bucket={bucket}
               allowStartReview={false}
-              renderSupplementalFields={(rawItem) => {
-                const adminItem = rawItem as AdminReviewQueueItem;
-                return (
-                  <>
-                    <ReviewQueueDebugField label="target_type" value={adminItem.target_type} />
-                    <ReviewQueueDebugField label="target_id" value={adminItem.target_id} />
-                    <ReviewQueueDebugField label="recheck_due_at" value={adminItem.recheck_due_at} />
-                    <ReviewQueueDebugField label="next_due_at" value={adminItem.next_due_at} />
-                    <ReviewQueueDebugField label="last_outcome" value={adminItem.last_outcome} />
-                    <ReviewQueueDebugField label="relearning" value={adminItem.relearning} />
-                    <ReviewQueueDebugField label="relearning_trigger" value={adminItem.relearning_trigger} />
-                  </>
-                );
-              }}
+              supplementalFields={buildAdminSupplementalFields(item)}
             />
           ))}
         </ul>

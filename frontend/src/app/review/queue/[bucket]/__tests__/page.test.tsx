@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useParams, useSearchParams } from "next/navigation";
 import ReviewQueueBucketPage from "@/app/review/queue/[bucket]/page";
+import * as reviewQueueShared from "@/components/review-queue/review-queue-shared";
 import { getReviewQueueBucketDetail } from "@/lib/knowledge-map-client";
 
 jest.mock("next/navigation", () => ({
@@ -117,5 +118,68 @@ describe("ReviewQueueBucketPage", () => {
 
     expect(await screen.findByText(/unknown review bucket/i)).toBeInTheDocument();
     expect(mockGetReviewQueueBucketDetail).not.toHaveBeenCalled();
+  });
+
+  it("passes only serializable baseline props into the shared client card", async () => {
+    let capturedProps: Record<string, unknown> | null = null;
+    const reviewQueueItemCardSpy = jest
+      .spyOn(reviewQueueShared, "ReviewQueueItemCard")
+      .mockImplementation((props) => {
+        capturedProps = props as Record<string, unknown>;
+        return <li data-testid="review-queue-item-card">{props.item.text}</li>;
+      });
+
+    try {
+      mockGetReviewQueueBucketDetail.mockResolvedValue({
+        generated_at: "2026-04-05T09:00:00+00:00",
+        bucket: "1d",
+        count: 1,
+        sort: "text",
+        order: "desc",
+        items: [
+          {
+            queue_item_id: "queue-1",
+            entry_id: "word-1",
+            entry_type: "word",
+            text: "zeta",
+            status: "learning",
+            next_review_at: "2000-04-05T12:00:00+00:00",
+            last_reviewed_at: "2000-04-04T09:00:00+00:00",
+            success_streak: 3,
+            lapse_count: 1,
+            times_remembered: 4,
+            exposure_count: 5,
+            history: [],
+          },
+        ],
+      });
+
+      render(<ReviewQueueBucketPage />);
+
+      await waitFor(() => expect(reviewQueueItemCardSpy).toHaveBeenCalledTimes(1));
+
+      expect(capturedProps).toEqual({
+        bucket: "1d",
+        item: {
+          queue_item_id: "queue-1",
+          entry_id: "word-1",
+          entry_type: "word",
+          text: "zeta",
+          status: "learning",
+          next_review_at: "2000-04-05T12:00:00+00:00",
+          last_reviewed_at: "2000-04-04T09:00:00+00:00",
+          success_streak: 3,
+          lapse_count: 1,
+          times_remembered: 4,
+          exposure_count: 5,
+          history: [],
+        },
+      });
+      expect(Object.keys(capturedProps ?? {}).sort()).toEqual(["bucket", "item"]);
+      expect(() => JSON.stringify(capturedProps)).not.toThrow();
+      expect(JSON.parse(JSON.stringify(capturedProps))).toEqual(capturedProps);
+    } finally {
+      reviewQueueItemCardSpy.mockRestore();
+    }
   });
 });
