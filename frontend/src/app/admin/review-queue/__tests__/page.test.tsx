@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import AdminReviewQueuePage from "@/app/admin/review-queue/page";
 import { cookies } from "next/headers";
+import { ReviewQueueDebugField } from "@/components/review-queue/review-queue-shared";
 
 jest.mock("next/headers", () => ({
   cookies: jest.fn(),
@@ -147,5 +148,12 @@ describe("AdminReviewQueuePage", () => {
     expect(
       await screen.findByText(/admin access required\. sign in as an admin account/i),
     ).toBeInTheDocument();
+  });
+
+  it("omits empty admin diagnostics values instead of rendering none placeholders", () => {
+    render(<ReviewQueueDebugField label="next_due_at" value={null} />);
+
+    expect(screen.getByText(/next_due_at:/i)).toBeInTheDocument();
+    expect(screen.queryByText(/none/i)).not.toBeInTheDocument();
   });
 });

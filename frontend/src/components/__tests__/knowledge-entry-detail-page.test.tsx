@@ -291,6 +291,50 @@ describe("KnowledgeEntryDetailPage", () => {
     expect(screen.queryByText("Translation unavailable")).not.toBeInTheDocument();
   });
 
+  it("shows a learning invariant warning when a learning entry has no review queue", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      display_text: "Bank on",
+      normalized_form: "bank on",
+      browse_rank: 21,
+      status: "learning",
+      cefr_level: "B1",
+      pronunciation: null,
+      translation: "依靠",
+      primary_definition: "To rely on someone.",
+      meanings: [],
+      senses: [
+        {
+          sense_id: "sense-1",
+          definition: "To rely on someone.",
+          localized_definition: "依靠",
+          part_of_speech: "phrasal verb",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+        },
+      ],
+      review_queue: null,
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    });
+
+    render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
+
+    expect(await screen.findByText(/review state is unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Next Review$/i)).not.toBeInTheDocument();
+  });
+
   it("does not recompute the main detail translation when opening an overlay", async () => {
     mockGetKnowledgeMapEntryDetail.mockImplementation(async (entryType, entryId) => {
       if (entryType === "phrase" && entryId === "phrase-1") {
