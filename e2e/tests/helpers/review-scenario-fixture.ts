@@ -1030,6 +1030,7 @@ const insertReviewQueueState = async (
   userId: string,
   scenario: ResolvedReviewScenarioDefinition,
   item: ReviewQueueSeedItem,
+  timezone = "UTC",
 ): Promise<void> => {
   if (Boolean(item.dueReviewDate) !== Boolean(item.minDueAtUtc)) {
     throw new Error(
@@ -1042,7 +1043,14 @@ const insertReviewQueueState = async (
     throw new Error(`Scenario ${item.scenarioKey} is missing a due timestamp.`);
   }
 
-  const dueReviewDate = item.dueReviewDate ?? minDueAtUtc.toISOString().slice(0, 10);
+  const dueReviewDate =
+    item.dueReviewDate ??
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(minDueAtUtc);
 
   const createdAt = new Date(minDueAtUtc.getTime() - 3_600_000);
   const reviewedAt = item.lastReviewedAt ?? new Date(minDueAtUtc.getTime() - 86_400_000);
@@ -1172,7 +1180,7 @@ export const seedCustomReviewQueue = async (
       }
       await upsertLearnerStatus(client, userId, scenario, item.status);
       if (item.status === "learning") {
-        await insertReviewQueueState(client, userId, scenario, item);
+        await insertReviewQueueState(client, userId, scenario, item, timezone);
       }
     }
 
