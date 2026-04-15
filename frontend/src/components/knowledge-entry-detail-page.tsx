@@ -101,6 +101,17 @@ function buildScheduledReviewMessage(
   return formattedTime;
 }
 
+function buildLearnerScheduledReviewSummary(
+  reviewQueue: DetailReviewQueue | null | undefined,
+  fallbackLabel: string | null | undefined,
+): string {
+  const canonicalLabel = formatApproximateScheduledReviewTime(reviewQueue);
+  if (canonicalLabel) {
+    return canonicalLabel;
+  }
+  return buildScheduledReviewMessage(reviewQueue, fallbackLabel);
+}
+
 function formatLegacyApproximateScheduledReviewTime(value: string | null | undefined): string | null {
   if (!value) {
     return null;
@@ -650,17 +661,24 @@ export function KnowledgeEntryDetailPage({
     activeReviewScheduleOptions,
     activeReviewScheduleValue,
   );
-  const approximateScheduledReview = matchingReviewReveal
+  const learnerScheduledReviewSummary = matchingReviewReveal
     ? null
-    : formatApproximateScheduledReviewTime(detailReviewQueue);
-  const scheduleSheetApproximateReview =
-    approximateScheduledReview ?? activeReviewScheduleLabel;
-  const scheduledReviewMessage = matchingReviewReveal
-    ? "Next review scheduled: Scheduled time will be set when you continue review."
-    : `Next review scheduled: ${buildScheduledReviewMessage(
+    : buildLearnerScheduledReviewSummary(
         detailReviewQueue,
         detailReviewQueue?.current_schedule_label ?? activeReviewScheduleLabel,
-      )}`;
+      );
+  const exactScheduledReviewTime = matchingReviewReveal
+    ? null
+    : resolveScheduledReviewInstant(detailReviewQueue)
+      ? formatScheduledReviewTime(detailReviewQueue)
+      : null;
+  const scheduledReviewSecondaryMessage =
+    exactScheduledReviewTime && learnerScheduledReviewSummary !== exactScheduledReviewTime
+      ? `Scheduled release: ${exactScheduledReviewTime}`
+      : null;
+  const scheduledReviewMessage = matchingReviewReveal
+    ? "Next review scheduled: Scheduled time will be set when you continue review."
+    : `Next review scheduled: ${learnerScheduledReviewSummary}`;
 
   const updateAccentPreference = (accent: UserPreferences["accent_preference"]) => {
     setPreferences((current) => {
@@ -1239,9 +1257,9 @@ export function KnowledgeEntryDetailPage({
                   Next Review
                 </p>
                 <p className="mt-2 text-sm font-semibold text-[#53287c]">{scheduledReviewMessage}</p>
-                {approximateScheduledReview ? (
+                {scheduledReviewSecondaryMessage ? (
                   <p className="mt-2 text-[0.72rem] text-[#6e5a86]">
-                    Approximately: {approximateScheduledReview}
+                    {scheduledReviewSecondaryMessage}
                   </p>
                 ) : null}
                 <button
@@ -1275,14 +1293,11 @@ export function KnowledgeEntryDetailPage({
             <p className="mt-2 text-sm font-semibold text-[#53287c]">
               {matchingReviewReveal
                 ? "Next review scheduled: Scheduled time will be set when you continue review."
-                : `Next review scheduled: ${buildScheduledReviewMessage(
-                    detailReviewQueue,
-                    detailReviewQueue?.current_schedule_label ?? activeReviewScheduleLabel,
-                  )}`}
+                : `Next review scheduled: ${learnerScheduledReviewSummary}`}
             </p>
-            {scheduleSheetApproximateReview ? (
+            {scheduledReviewSecondaryMessage ? (
               <p className="mt-1 text-sm text-[#6e5a86]">
-                Approximately: {scheduleSheetApproximateReview}
+                {scheduledReviewSecondaryMessage}
               </p>
             ) : null}
             <p className="mt-2 text-sm leading-6 text-[#6e5a86]">
