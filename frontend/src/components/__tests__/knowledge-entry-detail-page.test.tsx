@@ -1098,6 +1098,58 @@ describe("KnowledgeEntryDetailPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the canonical next-review summary visible when no exact release time or override options exist", async () => {
+    mockGetKnowledgeMapEntryDetail.mockResolvedValue({
+      entry_type: "phrase",
+      entry_id: "phrase-1",
+      display_text: "bank on",
+      normalized_form: "bank on",
+      browse_rank: 141,
+      status: "learning",
+      cefr_level: "B1",
+      pronunciation: null,
+      pronunciations: {},
+      translation: "依赖",
+      primary_definition: "To depend on someone.",
+      review_queue: {
+        queue_item_id: "queue-1",
+        next_review_at: null,
+        current_schedule_value: "1d",
+        current_schedule_label: "Tomorrow",
+        schedule_options: [],
+      },
+      meanings: [],
+      senses: [
+        {
+          sense_id: "sense-1",
+          definition: "To depend on someone.",
+          localized_definition: "依赖",
+          part_of_speech: "phrasal_verb",
+          usage_note: null,
+          localized_usage_note: null,
+          register: null,
+          primary_domain: null,
+          secondary_domains: [],
+          grammar_patterns: [],
+          synonyms: [],
+          antonyms: [],
+          collocations: [],
+          examples: [],
+        },
+      ],
+      relation_groups: [],
+      confusable_words: [],
+      previous_entry: null,
+      next_entry: null,
+    } as never);
+
+    render(<KnowledgeEntryDetailPage entryType="phrase" entryId="phrase-1" />);
+
+    expect(await screen.findByText(/next review scheduled: tomorrow/i)).toBeInTheDocument();
+    expect(screen.queryByText(/scheduled release:/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^override/i })).not.toBeInTheDocument();
+  });
+
   it("clears next-review controls immediately when an entry is marked as already knew", async () => {
     mockGetKnowledgeMapEntryDetail.mockResolvedValue({
       entry_type: "word",

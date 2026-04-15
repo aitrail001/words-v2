@@ -1159,6 +1159,14 @@ const insertReviewQueueState = async (
   );
 };
 
+const formatReviewDateInTimezone = (value: Date, timezone = "UTC"): string =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+
 export const seedCustomReviewQueue = async (
   userId: string,
   options: SeedCustomReviewQueueOptions,
@@ -1223,6 +1231,7 @@ export const seedDueReviewScenarioItem = async (
 
 export const seedReviewScenarioQueue = async (userId: string): Promise<void> => {
   const resolvedScenarios = await ensureScenarioCatalog();
+  const timezone = "UTC";
 
   const client = await connectClient();
 
@@ -1277,6 +1286,7 @@ export const seedReviewScenarioQueue = async (userId: string): Promise<void> => 
 
     const baseTs = Date.parse("2024-01-01T00:00:00.000Z");
     for (const [index, scenario] of resolvedScenarios.entries()) {
+      const dueAt = new Date(baseTs + index * 1000);
       await client.query(
         `
         INSERT INTO entry_review_states (
@@ -1301,7 +1311,8 @@ export const seedReviewScenarioQueue = async (userId: string): Promise<void> => 
           relearning_trigger,
           recheck_due_at,
           last_reviewed_at,
-          next_due_at,
+          due_review_date,
+          min_due_at_utc,
           created_at,
           updated_at
         )
@@ -1327,9 +1338,10 @@ export const seedReviewScenarioQueue = async (userId: string): Promise<void> => 
           NULL,
           NULL,
           NULL,
-          $9::timestamptz,
+          $9::date,
           $10::timestamptz,
-          $10::timestamptz
+          $11::timestamptz,
+          $11::timestamptz
         )
         `,
         [
@@ -1341,8 +1353,9 @@ export const seedReviewScenarioQueue = async (userId: string): Promise<void> => 
           scenario.resolvedEntryId,
           scenario.lastPromptType ?? null,
           `manual_prompt_type:${scenario.expectedPromptType}`,
-          new Date(baseTs + index * 1000).toISOString(),
-          new Date(baseTs + index * 1000).toISOString(),
+          formatReviewDateInTimezone(dueAt, timezone),
+          dueAt.toISOString(),
+          dueAt.toISOString(),
         ],
       );
     }
@@ -1537,79 +1550,24 @@ export const seedEntryDetailNullScheduleFixture = async (
   }
 
   const client = await connectClient();
+  const timezone = "UTC";
+  const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   try {
     await client.query("BEGIN");
-    await upsertUserPreferences(client, userId);
+    await upsertUserPreferences(client, userId, timezone);
     await client.query(`DELETE FROM entry_review_states WHERE user_id = $1::uuid`, [userId]);
     await upsertLearnerStatus(client, userId, scenario, "learning");
-    await client.query(
-      `
-      INSERT INTO entry_review_states (
-        id,
-        user_id,
-        target_type,
-        target_id,
-        entry_type,
-        entry_id,
-        stability,
-        difficulty,
-        success_streak,
-        lapse_count,
-        exposure_count,
-        times_remembered,
-        srs_bucket,
-        cadence_step,
-        last_prompt_type,
-        last_submission_prompt_id,
-        last_outcome,
-        is_fragile,
-        is_suspended,
-        relearning,
-        relearning_trigger,
-        recheck_due_at,
-        last_reviewed_at,
-        next_due_at,
-        created_at,
-        updated_at
-      )
-      VALUES (
-        $1::uuid,
-        $2::uuid,
-        $3,
-        $4::uuid,
-        $5,
-        $6::uuid,
-        1.0,
-        0.45,
-        0,
-        0,
-        0,
-        0,
-        '1d',
-        0,
-        NULL,
-        $7,
-        NULL,
-        false,
-        false,
-        false,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        now(),
-        now()
-      )
-      `,
-      [
-        randomUUID(),
-        userId,
-        scenario.entryType === "word" ? "meaning" : "phrase_sense",
-        scenario.resolvedTargetId,
-        scenario.entryType,
-        scenario.resolvedEntryId,
-        `manual_prompt_type:${scenario.expectedPromptType}`,
-      ],
+    await insertReviewQueueState(
+      client,
+      userId,
+      scenario,
+      {
+        scenarioKey: scenario.key,
+        status: "learning",
+        dueAt,
+        srsBucket: "1d",
+      },
+      timezone,
     );
     await client.query("COMMIT");
   } catch (error) {
@@ -1690,7 +1648,8 @@ export const seedLegacyDuplicateReviewQueueFixture = async (
           relearning_trigger,
           recheck_due_at,
           last_reviewed_at,
-          next_due_at,
+          due_review_date,
+          min_due_at_utc,
           created_at,
           updated_at
         )
@@ -1715,6 +1674,7 @@ export const seedLegacyDuplicateReviewQueueFixture = async (
           false,
           false,
           false,
+          NULL,
           NULL,
           NULL,
           NULL,
@@ -1767,7 +1727,8 @@ export const forceScenarioDueNow = async (
       `
       UPDATE entry_review_states
       SET
-        next_due_at = now() - interval '1 minute',
+        due_review_date = CURRENT_DATE,
+        min_due_at_utc = now() - interval '1 minute',
         recheck_due_at = NULL,
         relearning = false,
         relearning_trigger = NULL,
@@ -1834,7 +1795,6 @@ export const fetchReviewScenarioStateSnapshot = async (
       id: string;
       due_review_date: string | null;
       min_due_at_utc: string | null;
-      next_due_at: string | null;
       recheck_due_at: string | null;
       last_reviewed_at: string | null;
       last_outcome: string | null;
@@ -1844,7 +1804,6 @@ export const fetchReviewScenarioStateSnapshot = async (
         id::text AS id,
         due_review_date::text AS due_review_date,
         min_due_at_utc::text AS min_due_at_utc,
-        next_due_at::text AS next_due_at,
         recheck_due_at::text AS recheck_due_at,
         last_reviewed_at::text AS last_reviewed_at,
         last_outcome
@@ -1863,7 +1822,7 @@ export const fetchReviewScenarioStateSnapshot = async (
       queueItemId: row.id,
       dueReviewDate: row.due_review_date,
       minDueAtUtc: row.min_due_at_utc,
-      nextDueAt: row.next_due_at,
+      nextDueAt: row.min_due_at_utc,
       recheckDueAt: row.recheck_due_at,
       lastReviewedAt: row.last_reviewed_at,
       lastOutcome: row.last_outcome,

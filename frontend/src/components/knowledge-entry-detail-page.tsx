@@ -93,7 +93,10 @@ function formatScheduledReviewTime(reviewQueue: DetailReviewQueue | null | undef
 function buildScheduledReviewMessage(
   reviewQueue: DetailReviewQueue | null | undefined,
   fallbackLabel: string | null | undefined,
-): string {
+): string | null {
+  if (!resolveScheduledReviewInstant(reviewQueue) && !fallbackLabel) {
+    return null;
+  }
   const formattedTime = formatScheduledReviewTime(reviewQueue);
   if ((!resolveScheduledReviewInstant(reviewQueue) || formattedTime === "Scheduled time not set yet") && fallbackLabel) {
     return fallbackLabel;
@@ -104,7 +107,7 @@ function buildScheduledReviewMessage(
 function buildLearnerScheduledReviewSummary(
   reviewQueue: DetailReviewQueue | null | undefined,
   fallbackLabel: string | null | undefined,
-): string {
+): string | null {
   const canonicalLabel = formatApproximateScheduledReviewTime(reviewQueue);
   if (canonicalLabel) {
     return canonicalLabel;
@@ -676,6 +679,8 @@ export function KnowledgeEntryDetailPage({
     exactScheduledReviewTime && learnerScheduledReviewSummary !== exactScheduledReviewTime
       ? `Scheduled release: ${exactScheduledReviewTime}`
       : null;
+  const shouldShowReviewScheduleCard =
+    matchingReviewReveal !== null || learnerScheduledReviewSummary !== null;
   const scheduledReviewMessage = matchingReviewReveal
     ? "Next review scheduled: Scheduled time will be set when you continue review."
     : `Next review scheduled: ${learnerScheduledReviewSummary}`;
@@ -1251,7 +1256,7 @@ export function KnowledgeEntryDetailPage({
                 </button>
               ))}
             </div>
-            {activeReviewScheduleOptions.length > 0 ? (
+            {shouldShowReviewScheduleCard ? (
               <div className="w-[11.5rem] shrink-0 rounded-[0.95rem] border border-[#d9dcec] bg-white px-3 py-2.5">
                 <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]">
                   Next Review
@@ -1262,17 +1267,19 @@ export function KnowledgeEntryDetailPage({
                     {scheduledReviewSecondaryMessage}
                   </p>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setScheduleDraftValue(activeReviewScheduleValue);
-                    setIsScheduleSheetOpen(true);
-                  }}
-                  disabled={queueScheduleSaving || reviewSaving}
-                  className="mt-2 w-full rounded-[0.6rem] border border-[#d9dcec] px-3 py-2 text-sm font-semibold text-[#684f85] disabled:opacity-50"
-                >
-                  Override{hasManualScheduleOverride ? " (manual override)" : ""}
-                </button>
+                {activeReviewScheduleOptions.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScheduleDraftValue(activeReviewScheduleValue);
+                      setIsScheduleSheetOpen(true);
+                    }}
+                    disabled={queueScheduleSaving || reviewSaving}
+                    className="mt-2 w-full rounded-[0.6rem] border border-[#d9dcec] px-3 py-2 text-sm font-semibold text-[#684f85] disabled:opacity-50"
+                  >
+                    Override{hasManualScheduleOverride ? " (manual override)" : ""}
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>

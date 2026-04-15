@@ -187,7 +187,7 @@ test("long-horizon SRS items render in the learner queue without waiting months"
   await expect(page.getByText(new RegExp(`^${escapeRegExp(fixture.reviewText)}$`, "i"))).toBeVisible();
 });
 
-test("detail page falls back to the bucket label when legacy schedule timestamps are missing", async ({
+test("detail page keeps the canonical label even when the exact release time is unavailable", async ({
   page,
   request,
 }) => {
@@ -198,9 +198,12 @@ test("detail page falls back to the bucket label when legacy schedule timestamps
   await page.goto(`/${fixture.entryType}/${fixture.entryId}`);
 
   await expect(page.getByText(new RegExp(`^${escapeRegExp(fixture.displayText)}$`, "i")).first()).toBeVisible();
+  await expect(page.getByText(/^next review scheduled:/i)).toBeVisible();
   await expect(
-    page.getByText(new RegExp(`next review scheduled: ${escapeRegExp(fixture.expectedScheduleLabel)}`, "i")),
+    page.getByText(new RegExp(`^next review scheduled: ${escapeRegExp(fixture.expectedScheduleLabel)}$`, "i")),
   ).toBeVisible();
+  await expect(page.getByText(/approximately:/i)).toHaveCount(0);
+  await expect(page.getByText(/scheduled release:/i)).toBeVisible();
   await expect(page.getByText(/scheduled time not set yet/i)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^override$/i })).toBeVisible();
 });
@@ -285,9 +288,18 @@ test("same-day reviews align to one release instant", async ({ request }) => {
   expect(beforeBucketResponse.ok()).toBeTruthy();
   const beforeBucket = await beforeBucketResponse.json();
   expect(beforeBucket.items).toHaveLength(3);
-  expect(new Set(beforeBucket.items.map((item: { next_review_at: string | null }) => item.next_review_at))).toEqual(
+  expect(
+    new Set(
+      beforeBucket.items.map((item: { min_due_at_utc: string | null }) => item.min_due_at_utc),
+    ),
+  ).toEqual(
     new Set([releaseInstant]),
   );
+  expect(
+    new Set(
+      beforeBucket.items.map((item: { due_review_date: string | null }) => item.due_review_date),
+    ),
+  ).toEqual(new Set(["2026-04-13"]));
 
   const releaseSummaryResponse = await request.get(
     `${apiBaseUrl}/reviews/admin/queue/summary?effective_now=${encodeURIComponent(releaseInstant)}`,
