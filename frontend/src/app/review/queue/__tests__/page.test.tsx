@@ -2,7 +2,10 @@ import { render, screen } from "@testing-library/react";
 import ReviewQueuePage from "@/app/review/queue/page";
 import { getGroupedReviewQueue } from "@/lib/knowledge-map-client";
 import { ReviewQueueItemCard } from "@/components/review-queue/review-queue-shared";
-import { formatReviewQueueDueLabel } from "@/components/review-queue/review-queue-utils";
+import {
+  formatReviewQueueDueLabel,
+  formatReviewQueueTime,
+} from "@/components/review-queue/review-queue-utils";
 
 jest.mock("@/lib/knowledge-map-client");
 
@@ -154,9 +157,10 @@ describe("ReviewQueuePage", () => {
       />,
     );
 
+    expect(screen.getByText(/^Tomorrow$/i)).toBeInTheDocument();
     expect(
-      screen.getAllByText((_, node) => Boolean(node?.textContent?.includes("Tomorrow"))).length,
-    ).toBeGreaterThan(0);
+      screen.getByText(`Scheduled release: ${formatReviewQueueTime("2026-04-10T18:00:00Z")}`),
+    ).toBeInTheDocument();
   });
 
   it("uses an explicit timezone when formatting cutoff-sensitive due labels", () => {

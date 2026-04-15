@@ -313,6 +313,7 @@ export function ReviewQueueItemCard({
     isDueNow;
   const [historyOpen, setHistoryOpen] = useState(false);
   const dueLabel = formatReviewQueueDueLabel(item) ?? "Due now";
+  const exactDueLabel = exactDueAt ? formatReviewQueueTime(exactDueAt) : null;
   const history = item.history ?? [];
   const successStreak = item.success_streak ?? 0;
   const lapseCount = item.lapse_count ?? 0;
@@ -332,10 +333,10 @@ export function ReviewQueueItemCard({
               {formatReviewQueueStatus(item.status)}
             </span>
           </div>
-          <p className="mt-2 text-sm text-[#7b6795]">
-            <span className="font-semibold text-[#5a357b]">{dueLabel}</span>
-            {!isDueNow ? ` · ${formatReviewQueueTime(exactDueAt)}` : ""}
-          </p>
+          <p className="mt-2 text-sm font-semibold text-[#5a357b]">{dueLabel}</p>
+          {exactDueLabel ? (
+            <p className="mt-1 text-sm text-[#7b6795]">Scheduled release: {exactDueLabel}</p>
+          ) : null}
           {showStageLabel && resolvedBucket ? (
             <p className="mt-1 text-sm text-[#8f7ba8]">SRS stage {formatReviewQueueBucketLabel(resolvedBucket)}</p>
           ) : null}
