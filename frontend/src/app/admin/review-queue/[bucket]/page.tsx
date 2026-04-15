@@ -36,7 +36,6 @@ function buildAdminSupplementalFields(item: AdminReviewQueueItem) {
     { label: "target_type", value: item.target_type },
     { label: "target_id", value: item.target_id },
     { label: "recheck_due_at", value: item.recheck_due_at },
-    { label: "next_due_at", value: item.next_due_at },
     { label: "last_outcome", value: item.last_outcome },
     { label: "relearning", value: item.relearning },
     { label: "relearning_trigger", value: item.relearning_trigger },

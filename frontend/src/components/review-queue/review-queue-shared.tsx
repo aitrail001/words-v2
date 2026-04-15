@@ -283,6 +283,10 @@ export function ReviewQueueDebugField({
   label: string;
   value: boolean | string | null | undefined;
 }) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
   return (
     <p className="text-sm text-[#6e5a86]">
       {label}: {renderDebugValue(value)}
@@ -319,6 +323,9 @@ export function ReviewQueueItemCard({
   const lapseCount = item.lapse_count ?? 0;
   const timesRemembered = item.times_remembered ?? 0;
   const exposureCount = item.exposure_count ?? 0;
+  const visibleSupplementalFields = supplementalFields?.filter(
+    (field) => field.value !== null && field.value !== undefined && field.value !== "",
+  );
 
   return (
     <li className="rounded-[0.8rem] border border-[#ece1f7] bg-[#faf7ff] px-3 py-3">
@@ -399,13 +406,13 @@ export function ReviewQueueItemCard({
               </div>
             ) : null}
           </div>
-          {supplementalFields && supplementalFields.length > 0 ? (
+          {visibleSupplementalFields && visibleSupplementalFields.length > 0 ? (
             <div className="mt-3 rounded-[0.7rem] border border-[#efe6fa] bg-[#f7f2fc] px-3 py-3">
               <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-[#8c7aa7]">
                 Admin diagnostics
               </p>
               <div className="mt-2 space-y-1">
-                {supplementalFields.map((field) => (
+                {visibleSupplementalFields.map((field) => (
                   <ReviewQueueDebugField key={field.label} label={field.label} value={field.value} />
                 ))}
               </div>
