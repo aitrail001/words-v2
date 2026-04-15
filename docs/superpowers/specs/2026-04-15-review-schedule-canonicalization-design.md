@@ -266,6 +266,68 @@ High-level migration phases:
 
 The implementation may use a temporary internal transition step, but the final state should not preserve legacy normal-schedule schema "just in case."
 
+## Implementation Audit Notes
+
+Audit run on branch `feat/review-schedule-canonicalization` against the current worktree state.
+
+### Backend persistence and schedule writers
+
+- `backend/app/models/entry_review.py` currently persists four schedule-related state fields on `entry_review_states`: `recheck_due_at`, `next_due_at`, `due_review_date`, and `min_due_at_utc`.
+- `backend/alembic/versions/028_add_entry_review_tables.py` introduced `recheck_due_at` and `next_due_at`.
+- `backend/alembic/versions/041_add_due_queue_indexes_to_entry_review_states.py` added dedicated composite indexes for `recheck_due_at` and `next_due_at`.
+- `backend/alembic/versions/051_timezone_safe_review_sched.py` introduced `due_review_date` and `min_due_at_utc` and backfilled them from existing `next_due_at`.
+- `backend/app/services/review_schedule.py` is already the canonical helper for computing `due_review_date`, `min_due_at_utc`, and due-state checks from review-day semantics.
+- `backend/app/services/review_submission.py` writes the canonical fields for normal schedules, but still mirrors the normal due instant into `next_due_at`; failed reviews still set `recheck_due_at = reviewed_at + 10 minutes`.
+- `backend/app/services/review.py` still contains a three-path model for due-state resolution: `recheck_due_at` first, then canonical `due_review_date` + `min_due_at_utc`, then legacy `next_due_at` fallback. `_effective_due_at`, `_is_state_due`, `_due_queue_filter`, `_resolve_schedule_value_for_state`, and queue ordering still preserve that fallback.
+
+### API and contract usage
+
+- `backend/app/api/reviews.py` learner queue responses still name the primary exact timestamp field `next_review_at`, even when the serializer also includes `due_review_date` and `min_due_at_utc`.
+- `backend/app/api/reviews.py` learner schedule update responses still expose `next_review_at` plus `current_schedule_source = "scheduled_timestamp"`.
+- Learner queue bucket routes and admin queue bucket routes both still default to `sort=next_review_at`.
+- `backend/app/api/knowledge_map.py` learner detail responses currently serialize `next_review_at`, `current_schedule_value`, `current_schedule_label`, and `schedule_options`, but do not serialize `due_review_date` or `min_due_at_utc` at all. The detail contract is therefore still legacy-shaped even though queue contracts have begun carrying canonical fields.
+- Admin review queue detail routes intentionally add raw/internal timing diagnostics today: `recheck_due_at`, `next_due_at`, `last_outcome`, `relearning`, `relearning_trigger`, `target_type`, and `target_id`.
+
+### Learner and admin frontend usage
+
+- `frontend/src/components/review-queue/review-queue-utils.ts` already knows how to classify due labels from `due_review_date` + `min_due_at_utc`, but still falls back to `next_review_at` for exact-time rendering and exact-due comparisons.
+- `frontend/src/components/review-queue/review-queue-shared.tsx` still renders the visible exact time from `min_due_at_utc ?? next_review_at` and still computes due-now state from that exact timestamp.
+- `frontend/src/app/review/queue/page.tsx` still decides whether the learner can start review by checking `isReviewQueueItemDueNow(item.next_review_at)`.
+- `frontend/src/components/knowledge-entry-detail-page.tsx` still builds the visible "Next review scheduled" message from `min_due_at_utc ?? next_review_at`, with the canonical label used only as a fallback. This is the main learner-facing exact-time path still conflicting with the approved design.
+- `frontend/src/app/admin/review-queue/[bucket]/page.tsx` intentionally renders a supplemental diagnostics block that includes `recheck_due_at` and `next_due_at`. That is the current operator-facing diagnostic surface worth preserving in some form.
+
+## Audit Results
+
+### Keep
+
+- Keep `due_review_date` as the canonical persisted review-day field for normal schedules.
+- Keep `min_due_at_utc` as the canonical persisted release-instant floor for normal schedules.
+- Keep `recheck_due_at` as the only sanctioned exact-time retry mechanism for relearning.
+- Keep the review-day helper logic in `backend/app/services/review_schedule.py`.
+- Keep learner/admin schedule labels and options, but have them derive from canonical schedule state rather than legacy timestamp fallback.
+
+### Convert to admin diagnostics
+
+- Keep `recheck_due_at`, `last_outcome`, `relearning`, `relearning_trigger`, `target_type`, and `target_id` as admin/support diagnostics only.
+- Keep one admin-visible exact normal-schedule diagnostic only if operators still need it during cutover; the current repo uses `next_due_at` for that purpose on admin bucket detail pages.
+- Do not let admin diagnostics drive the primary schedule copy. Admin should show the same canonical learner-facing message first, then show diagnostics in a separate block.
+
+### Remove from learner-facing contracts
+
+- Remove `next_review_at` from learner queue payloads, learner schedule-update payloads, and learner detail payloads as a named learner-facing contract field for normal schedules.
+- Remove `current_schedule_source = "scheduled_timestamp"` from learner contracts; it encodes legacy transport semantics rather than the approved canonical model.
+- Remove learner sort/query naming that exposes legacy semantics such as `sort=next_review_at`; replace it with a canonical due sort name or an internal default.
+- Remove learner UI paths that render exact schedule meaning from `next_review_at` or `min_due_at_utc ?? next_review_at` instead of the shared canonical formatter.
+- Expand the learner detail contract to carry canonical schedule data or a canonical formatted schedule payload. The current knowledge-map detail response is the biggest gap because it still omits `due_review_date` and `min_due_at_utc`.
+
+### Schema to drop after cutover
+
+- Drop `entry_review_states.next_due_at` once no learner or queue logic depends on it for normal scheduling.
+- Drop the legacy composite index `ix_entry_review_states_user_next_due` at the same time as `next_due_at`.
+- Drop normal-schedule fallback branches that read or sort by `next_due_at` in `backend/app/services/review.py`.
+- Stop writing compatibility mirrors from canonical schedule resolution into `next_due_at` in `backend/app/services/review_submission.py` and `backend/app/services/review.py`.
+- Keep `recheck_due_at` and its index; keep `due_review_date` and `min_due_at_utc` plus their supporting indexes.
+
 ## Risks
 
 ### Risk: hidden dependency on legacy timestamp fields
