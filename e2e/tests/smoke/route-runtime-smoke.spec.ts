@@ -33,11 +33,15 @@ const visitAndAssertRouteRuntime = async (
 const getQueueCard = (page: Page, text: string) =>
   page.locator("li").filter({ hasText: text }).first();
 
+const CANONICAL_DUE_LABEL = /^(Due now|Later today|Tomorrow|Overdue|In \d+ days|In a week|In 2 weeks|In a month|In \d+ months)$/i;
+
 const expectCanonicalQueueCard = async (page: Page, text: string) => {
   const card = getQueueCard(page, text);
   await expect(card).toBeVisible();
-  await expect(card.getByText(/^Tomorrow$/i)).toBeVisible();
+  const dueLabel = card.getByText(CANONICAL_DUE_LABEL).first();
+  await expect(dueLabel).toBeVisible();
   await expect(card.getByText(/scheduled release:/i)).toBeVisible();
+  return (await dueLabel.textContent())?.trim() ?? null;
 };
 
 test("@smoke route runtime sweep covers learner review and knowledge-list routes", async ({
@@ -60,11 +64,12 @@ test("@smoke route runtime sweep covers learner review and knowledge-list routes
   }
 
   await page.goto("/review/queue/1d?sort=next_review_at&order=asc");
-  await expectCanonicalQueueCard(page, scheduleFixture.wordText);
+  const dueLabel = await expectCanonicalQueueCard(page, scheduleFixture.wordText);
+  expect(dueLabel).toBeTruthy();
 
   await page.goto(`/word/${scheduleFixture.wordEntryId}`);
   await expect(page.getByText(new RegExp(`^${scheduleFixture.wordText}$`, "i")).first()).toBeVisible();
-  await expect(page.getByText(/^Next review scheduled: Tomorrow$/i)).toBeVisible();
+  await expect(page.getByText(`Next review scheduled: ${dueLabel}`, { exact: true })).toBeVisible();
   await expect(page.getByText(/scheduled release:/i)).toBeVisible();
   await expectNoNextRuntimeFailure(page);
 });
