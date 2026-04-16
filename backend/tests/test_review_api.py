@@ -305,7 +305,7 @@ class TestQueueDue:
         phrase_result.all.return_value = [(phrase_state.entry_id, "break down")]
         prefs_result = MagicMock()
         prefs_result.scalar_one_or_none.return_value = MagicMock(timezone="UTC")
-        mock_db.execute.side_effect = [user_result, state_result, prefs_result, word_result, phrase_result]
+        mock_db.execute.side_effect = [user_result, state_result, word_result, phrase_result, prefs_result]
 
         class FrozenDateTime(datetime):
             @classmethod
@@ -431,7 +431,7 @@ class TestQueueDue:
         prefs_result.scalar_one_or_none.return_value = MagicMock(timezone="UTC")
         word_result = MagicMock()
         word_result.all.return_value = [(future_state.entry_id, "candidate")]
-        mock_db.execute.side_effect = [user_result, state_result, prefs_result, word_result]
+        mock_db.execute.side_effect = [user_result, state_result, word_result, prefs_result]
 
         response = await client.get(
             "/api/reviews/admin/queue/grouped?effective_now=2026-10-05T09:00:00%2B00:00",
