@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import AdminReviewQueuePage from "@/app/admin/review-queue/page";
+import AdminReviewQueueBucketPage from "@/app/admin/review-queue/[bucket]/page";
 import { cookies } from "next/headers";
 
 jest.mock("next/headers", () => ({
@@ -147,5 +148,53 @@ describe("AdminReviewQueuePage", () => {
     expect(
       await screen.findByText(/admin access required\. sign in as an admin account/i),
     ).toBeInTheDocument();
+  });
+
+  it("omits empty admin diagnostics rows on the real admin bucket page", async () => {
+    mockFetchJson({
+      generated_at: "2026-10-05T09:00:00+00:00",
+      bucket: "7d",
+      count: 1,
+      sort: "text",
+      order: "desc",
+      debug: {
+        effective_now: "2026-10-05T09:00:00+00:00",
+      },
+      items: [
+        {
+          queue_item_id: "queue-1",
+          entry_id: "word-1",
+          entry_type: "word",
+          text: "candidate",
+          status: "learning",
+          next_review_at: "2026-10-05T09:00:00+00:00",
+          last_reviewed_at: "2026-10-04T09:00:00+00:00",
+          success_streak: 5,
+          lapse_count: 2,
+          times_remembered: 6,
+          exposure_count: 8,
+          history: [],
+          target_type: "meaning",
+          target_id: "meaning-1",
+          recheck_due_at: null,
+          next_due_at: null,
+          last_outcome: "correct_tested",
+          relearning: false,
+          relearning_trigger: null,
+        },
+      ],
+    });
+
+    render(
+      await AdminReviewQueueBucketPage({
+        params: Promise.resolve({ bucket: "7d" }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(await screen.findByText("candidate")).toBeInTheDocument();
+    expect(screen.getByText(/target_type: meaning/i)).toBeInTheDocument();
+    expect(screen.queryByText("next_due_at: none")).not.toBeInTheDocument();
+    expect(screen.queryByText("recheck_due_at: none")).not.toBeInTheDocument();
   });
 });

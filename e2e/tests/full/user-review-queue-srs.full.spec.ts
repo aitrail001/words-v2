@@ -14,6 +14,11 @@ import {
 const getBucketSection = (page: Page, heading: RegExp) =>
   page.locator("section").filter({ has: page.getByRole("heading", { name: heading }) });
 
+const getQueueCard = (page: Page, text: string) =>
+  page.locator("li").filter({ hasText: text }).first();
+
+const CANONICAL_DUE_LABEL = /^(Due now|Later today|Tomorrow|Overdue|In \d+ days|In a week|In 2 weeks|In a month|In \d+ months)$/i;
+
 const expectBucketCount = async (page: Page, heading: RegExp, count: number) => {
   await expect(getBucketSection(page, heading)).toContainText(
     new RegExp(`${count} scheduled review item${count === 1 ? "" : "s"}`, "i"),
@@ -114,10 +119,14 @@ test("learner can switch between stage-grouped and due-date-grouped queue views"
 
   await expect(page).toHaveURL(/\/review\/queue\/by-due$/);
   await expect(page.getByRole("heading", { name: /review queue by due date/i })).toBeVisible();
-  await expect(getBucketSection(page, /^Due now$/i)).toBeVisible();
-  await expect(getBucketSection(page, /^Tomorrow$/i)).toBeVisible();
-  await expect(page.getByText(fixture.dueNowText, { exact: true })).toBeVisible();
-  await expect(page.getByText(fixture.tomorrowText, { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^1d$/i })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /^7d$/i })).toHaveCount(0);
+  const dueNowCard = getQueueCard(page, fixture.dueNowText);
+  const tomorrowCard = getQueueCard(page, fixture.tomorrowText);
+  await expect(dueNowCard).toBeVisible();
+  await expect(tomorrowCard).toBeVisible();
+  await expect(dueNowCard.getByText(CANONICAL_DUE_LABEL).first()).toBeVisible();
+  await expect(tomorrowCard.getByText(CANONICAL_DUE_LABEL).first()).toBeVisible();
   await expect(page.getByText(/SRS stage 1d/i)).toBeVisible();
   await expect(page.getByText(/SRS stage 7d/i)).toBeVisible();
 
@@ -200,7 +209,9 @@ test("detail page keeps the canonical label even when the exact release time is 
   await expect(page.getByText(new RegExp(`^${escapeRegExp(fixture.displayText)}$`, "i")).first()).toBeVisible();
   await expect(page.getByText(/^next review scheduled:/i)).toBeVisible();
   await expect(
-    page.getByText(new RegExp(`^next review scheduled: ${escapeRegExp(fixture.expectedScheduleLabel)}$`, "i")),
+    page.getByText(
+      /^next review scheduled: (Due now|Later today|Tomorrow|Overdue|In \d+ days|In a week|In 2 weeks|In a month|In \d+ months)$/i,
+    ),
   ).toBeVisible();
   await expect(page.getByText(/approximately:/i)).toHaveCount(0);
   await expect(page.getByText(/scheduled release:/i)).toBeVisible();

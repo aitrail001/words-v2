@@ -1432,6 +1432,41 @@ class ReviewService:
         state.cadence_step = cadence_step_for_bucket(resolved_bucket)
         state.stability = max(0.15, float(resolved_interval_days or state.stability or 1))
 
+    async def _repair_active_review_state_schedule(
+        self,
+        *,
+        user_id: uuid.UUID,
+        state: EntryReviewState,
+    ) -> bool:
+        if self._state_has_supported_schedule(state):
+            return False
+
+        self._normalize_active_review_state_schedule(state)
+        resolved_bucket = self._resolve_srs_bucket(state=state)
+        if resolved_bucket == "known":
+            return False
+
+        prefs = await self._get_user_review_preferences(user_id)
+        user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
+        reviewed_at = self._schedule_anchor_reviewed_at(state=state)
+        schedule_value = self._resolve_official_schedule_value(
+            resolved_bucket=resolved_bucket,
+            resolved_outcome=getattr(state, "last_outcome", None),
+            schedule_override=None,
+        )
+        state.due_review_date = due_review_date_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone=user_timezone,
+            bucket=schedule_value,
+        )
+        state.min_due_at_utc = min_due_at_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone=user_timezone,
+            bucket=schedule_value,
+        )
+        state.recheck_due_at = None
+        return True
+
     async def _ensure_entry_review_state(
         self,
         *,
@@ -2588,6 +2623,60 @@ class ReviewService:
     def _resolve_grouped_queue_due_at(state: EntryReviewState) -> datetime | None:
         return ReviewService._effective_due_at(state)
 
+    @staticmethod
+    def _format_due_label_from_day_delta(day_delta: int) -> str:
+        if day_delta < 0:
+            return "Overdue"
+        if day_delta == 0:
+            return "Later today"
+        if day_delta == 1:
+            return "Tomorrow"
+        if day_delta < 7:
+            return f"In {day_delta} days"
+        if day_delta < 14:
+            return "In a week"
+        if day_delta < 21:
+            return "In 2 weeks"
+        if day_delta < 45:
+            return "In a month"
+        return f"In {max(2, (day_delta + 15) // 30)} months"
+
+    @classmethod
+    def _resolve_due_label_and_day_delta_for_state(
+        cls,
+        state: EntryReviewState,
+        *,
+        now: datetime,
+        user_timezone: str | None = None,
+    ) -> tuple[str, int]:
+        resolved_now = cls._normalize_bucket_datetime(now) or datetime.now(timezone.utc)
+        if cls._uses_official_review_day_schedule(state, user_timezone=user_timezone):
+            current_review_date = effective_review_date(
+                instant_utc=resolved_now,
+                user_timezone=user_timezone or "UTC",
+            )
+            day_delta = (state.due_review_date - current_review_date).days
+            if day_delta < 0:
+                return ("Overdue", 0)
+            if day_delta == 0:
+                min_due_at = cls._normalize_bucket_datetime(getattr(state, "min_due_at_utc", None))
+                if min_due_at is not None and min_due_at <= resolved_now:
+                    return ("Due now", 0)
+                return ("Later today", 0)
+            return (cls._format_due_label_from_day_delta(day_delta), day_delta)
+
+        due_at = cls._resolve_grouped_queue_due_at(state)
+        if due_at is None:
+            return ("Later today", 0)
+        day_delta = (due_at.date() - resolved_now.date()).days
+        if day_delta < 0:
+            return ("Overdue", 0)
+        if day_delta == 0:
+            if due_at <= resolved_now:
+                return ("Due now", 0)
+            return ("Later today", 0)
+        return (cls._format_due_label_from_day_delta(day_delta), day_delta)
+
     @classmethod
     def _classify_review_bucket_for_state(
         cls,
@@ -2719,15 +2808,23 @@ class ReviewService:
         state: EntryReviewState,
         *,
         include_debug_fields: bool = False,
+        now: datetime | None = None,
+        user_timezone: str | None = None,
     ) -> dict[str, Any]:
         due_at = self._resolve_grouped_queue_due_at(state)
         bucket = self._resolve_srs_bucket(state=state)
+        due_label, _ = self._resolve_due_label_and_day_delta_for_state(
+            state,
+            now=now or datetime.now(timezone.utc),
+            user_timezone=user_timezone,
+        )
         payload = {
             "queue_item_id": str(state.id),
             "entry_id": str(state.entry_id),
             "entry_type": self._normalize_entry_type(state.entry_type),
             "text": self._normalize_prompt_text(getattr(state, "entry_text", None)) or "Unavailable",
             "status": getattr(state, "learner_status", None) or "learning",
+            "due_label": due_label,
             "next_review_at": due_at.isoformat() if due_at is not None else None,
             "due_review_date": getattr(state, "due_review_date", None).isoformat()
             if getattr(state, "due_review_date", None) is not None
@@ -2802,9 +2899,9 @@ class ReviewService:
         *,
         states: list[EntryReviewState],
         now: datetime,
+        user_timezone: str | None = None,
         include_debug_fields: bool = False,
     ) -> dict[str, list[dict[str, Any]]]:
-        del now
         groups: dict[str, list[dict[str, Any]]] = {bucket: [] for bucket in REVIEW_BUCKET_ORDER}
         for state in states:
             bucket = self._resolve_srs_bucket(state=state)
@@ -2814,6 +2911,8 @@ class ReviewService:
                 self._serialize_grouped_queue_row(
                     state,
                     include_debug_fields=include_debug_fields,
+                    now=now,
+                    user_timezone=user_timezone,
                 )
             )
         return groups
@@ -2833,28 +2932,12 @@ class ReviewService:
             bucket = cls._resolve_srs_bucket(state=state)
             if bucket == "known":
                 continue
-            due_bucket = cls._classify_review_bucket_for_state(
+            label, due_in_days = cls._resolve_due_label_and_day_delta_for_state(
                 state,
                 now=now,
                 user_timezone=user_timezone,
             )
-            if due_bucket in {"overdue", "due_now"}:
-                due_in_days = 0
-                label = "Due now"
-                group_key = "due_now"
-            elif due_bucket == "later_today":
-                due_in_days = 0
-                label = "Later today"
-                group_key = "later_today"
-            elif due_bucket == "tomorrow":
-                due_in_days = 1
-                label = "Tomorrow"
-                group_key = "tomorrow"
-            else:
-                due_at = cls._resolve_grouped_queue_due_at(state)
-                due_in_days = max((due_at.date() - now.date()).days, 0) if due_at is not None else 0
-                label = f"In {due_in_days} days"
-                group_key = f"in_{due_in_days}_days"
+            group_key = label.lower().replace(" ", "_")
 
             group = grouped.setdefault(
                 group_key,
@@ -2916,11 +2999,16 @@ class ReviewService:
             for state in await self._list_active_queue_states(user_id=user_id, now=resolved_now)
             if self._state_has_supported_schedule(state)
         ]
+        user_timezone = None
+        if any(self._state_has_official_review_day_fields(state) for state in states):
+            prefs = await self._get_user_review_preferences(user_id)
+            user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
         for state in states:
             self._normalize_active_review_state_schedule(state)
         groups = self._group_review_queue_rows(
             states=states,
             now=resolved_now,
+            user_timezone=user_timezone,
             include_debug_fields=include_debug_fields,
         )
 
@@ -2961,6 +3049,8 @@ class ReviewService:
             serialize_row=lambda state, include_debug: self._serialize_grouped_queue_row(
                 state,
                 include_debug_fields=include_debug,
+                now=resolved_now,
+                user_timezone=user_timezone,
             ),
         )
 
@@ -3029,6 +3119,10 @@ class ReviewService:
             for state in await self._list_active_queue_states(user_id=user_id, now=resolved_now)
             if self._state_has_supported_schedule(state)
         ]
+        user_timezone = None
+        if any(self._state_has_official_review_day_fields(state) for state in states):
+            prefs = await self._get_user_review_preferences(user_id)
+            user_timezone = self._resolve_user_timezone(getattr(prefs, "timezone", None))
         bucket_states = [
             state
             for state in states
@@ -3043,6 +3137,8 @@ class ReviewService:
                     **self._serialize_grouped_queue_row(
                         state,
                         include_debug_fields=include_debug_fields,
+                        now=resolved_now,
+                        user_timezone=user_timezone,
                     ),
                     "success_streak": int(state.success_streak or 0),
                     "lapse_count": int(state.lapse_count or 0),
@@ -3114,6 +3210,12 @@ class ReviewService:
             )
             await self.db.commit()
         self._normalize_active_review_state_schedule(state)
+        repaired_schedule = await self._repair_active_review_state_schedule(
+            user_id=user_id,
+            state=state,
+        )
+        if repaired_schedule:
+            await self.db.commit()
         if not self._state_has_supported_schedule(state):
             return None
         user_timezone = None

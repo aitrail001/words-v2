@@ -147,6 +147,7 @@ export type ReviewQueueItem = {
   entry_type: KnowledgeEntryType;
   text: string;
   status: KnowledgeStatus;
+  due_label?: string | null;
   next_review_at?: string | null;
   due_review_date?: string | null;
   min_due_at_utc?: string | null;

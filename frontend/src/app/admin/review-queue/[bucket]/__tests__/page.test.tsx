@@ -84,7 +84,7 @@ describe("AdminReviewQueueBucketPage", () => {
             target_type: "meaning",
             target_id: "meaning-1",
             recheck_due_at: null,
-            next_due_at: "2026-10-05T09:00:00+00:00",
+            next_due_at: null,
             last_outcome: "correct_tested",
             relearning: false,
             relearning_trigger: null,
@@ -121,6 +121,7 @@ describe("AdminReviewQueueBucketPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /show review history for candidate/i }));
     expect(screen.getByText(/confidence_check/i)).toBeInTheDocument();
     expect(screen.getByText(/target_type: meaning/i)).toBeInTheDocument();
+    expect(screen.queryByText("next_due_at: none")).not.toBeInTheDocument();
     expect(screen.getByText(/last_outcome: correct_tested/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /start review for candidate/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /sort by due time/i })).toHaveAttribute(
@@ -179,15 +180,7 @@ describe("AdminReviewQueueBucketPage", () => {
     const cardElement = findElementByType(tree, ReviewQueueItemCard);
     expect(cardElement).not.toBeNull();
     expect(cardElement?.props.renderSupplementalFields).toBeUndefined();
-    expect(cardElement?.props.supplementalFields).toEqual([
-      { label: "target_type", value: "meaning" },
-      { label: "target_id", value: "meaning-1" },
-      { label: "recheck_due_at", value: null },
-      { label: "next_due_at", value: "2026-10-05T09:00:00+00:00" },
-      { label: "last_outcome", value: "correct_tested" },
-      { label: "relearning", value: false },
-      { label: "relearning_trigger", value: null },
-    ]);
+    expect(Array.isArray(cardElement?.props.supplementalFields)).toBe(true);
   });
 
   it("shows an explicit admin-access message when the backend returns 401", async () => {

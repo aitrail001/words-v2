@@ -681,6 +681,10 @@ export function KnowledgeEntryDetailPage({
       : null;
   const shouldShowReviewScheduleCard =
     matchingReviewReveal !== null || learnerScheduledReviewSummary !== null;
+  const learningInvariantWarning =
+    detail.status === "learning" && !detailReviewQueue
+      ? "Review state is unavailable for this learning entry. The entry should have a review queue record before it can show the next step."
+      : null;
   const scheduledReviewMessage = matchingReviewReveal
     ? "Next review scheduled: Scheduled time will be set when you continue review."
     : `Next review scheduled: ${learnerScheduledReviewSummary}`;
@@ -1007,6 +1011,15 @@ export function KnowledgeEntryDetailPage({
                 <p className="mt-2 text-sm leading-6 text-[#5e4a74]">{activeUsageNote}</p>
               </div>
             )}
+
+            {learningInvariantWarning ? (
+              <div
+                role="alert"
+                className="rounded-[0.65rem] border border-amber-200 bg-amber-50 px-3 py-3 text-sm leading-6 text-amber-900"
+              >
+                {learningInvariantWarning}
+              </div>
+            ) : null}
 
             {(activeRegister || activePrimaryDomain || activeSecondaryDomains.length > 0) && (
               <div className="flex flex-wrap gap-2 border-t border-[#ebedf5] pt-2">

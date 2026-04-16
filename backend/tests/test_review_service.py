@@ -226,6 +226,10 @@ class TestEntryQueueSchedule:
         assert state.due_review_date == due_review_date
         assert state.min_due_at_utc == min_due_at_utc
 
+    def test_due_label_month_rounding_matches_frontend_half_up_behavior(self):
+        assert ReviewService._format_due_label_from_day_delta(74) == "In 2 months"
+        assert ReviewService._format_due_label_from_day_delta(75) == "In 3 months"
+
     @pytest.mark.asyncio
     async def test_get_entry_queue_schedule_returns_canonical_schedule_for_created_learning_entry(
         self, review_service, mock_db
@@ -323,6 +327,103 @@ class TestEntryQueueSchedule:
         )
 
         assert payload is None
+
+    @pytest.mark.asyncio
+    async def test_get_entry_queue_schedule_repairs_existing_learning_state_missing_canonical_schedule(
+        self, review_service, mock_db, monkeypatch
+    ):
+        user_id = uuid.uuid4()
+        entry_id = uuid.uuid4()
+        reviewed_at = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        learner_status = LearnerEntryStatus(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            status="learning",
+        )
+        learner_status_result = MagicMock()
+        learner_status_result.scalar_one_or_none.return_value = learner_status
+        legacy_state = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+            stability=1.0,
+            difficulty=0.5,
+            srs_bucket="1d",
+        )
+        legacy_state.last_reviewed_at = reviewed_at
+        state_result = MagicMock()
+        state_result.scalar_one_or_none.return_value = legacy_state
+        mock_db.execute.side_effect = [learner_status_result, state_result]
+        monkeypatch.setattr(review_module, "datetime", _frozen_datetime_class(reviewed_at))
+
+        payload = await review_service.get_entry_queue_schedule(
+            user_id=user_id,
+            entry_type="word",
+            entry_id=entry_id,
+        )
+
+        expected_due_at = min_due_at_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone="UTC",
+            bucket="1d",
+        )
+        assert legacy_state.due_review_date == due_review_date_for_bucket(
+            reviewed_at_utc=reviewed_at,
+            user_timezone="UTC",
+            bucket="1d",
+        )
+        assert legacy_state.min_due_at_utc == expected_due_at
+        assert payload == {
+            "queue_item_id": str(legacy_state.id),
+            "due_review_date": legacy_state.due_review_date.isoformat(),
+            "min_due_at_utc": expected_due_at.isoformat(),
+            "recheck_due_at": None,
+            "current_schedule_value": "1d",
+            "current_schedule_label": "Tomorrow",
+            "schedule_options": [
+                {"value": "1d", "label": "Tomorrow", "is_default": True},
+                {"value": "2d", "label": "In 2 days", "is_default": False},
+                {"value": "3d", "label": "In 3 days", "is_default": False},
+                {"value": "5d", "label": "In 5 days", "is_default": False},
+                {"value": "7d", "label": "In 1 week", "is_default": False},
+                {"value": "14d", "label": "In 2 weeks", "is_default": False},
+                {"value": "30d", "label": "In 1 month", "is_default": False},
+                {"value": "90d", "label": "In 3 months", "is_default": False},
+                {"value": "180d", "label": "In 6 months", "is_default": False},
+                {"value": "known", "label": "Known", "is_default": False},
+            ],
+        }
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_grouped_review_queue_excludes_unscheduled_learning_rows(
+        self, review_service
+    ):
+        now = datetime(2026, 4, 5, 9, 0, tzinfo=timezone.utc)
+        user_id = uuid.uuid4()
+        unscheduled = EntryReviewState(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            entry_type="word",
+            entry_id=uuid.uuid4(),
+            target_type="meaning",
+            target_id=uuid.uuid4(),
+            stability=1,
+            difficulty=0.5,
+        )
+        _set_canonical_schedule(unscheduled, None)
+        unscheduled.entry_text = "judicial"
+        unscheduled.learner_status = "learning"
+        unscheduled.srs_bucket = "1d"
+
+        review_service._list_active_queue_states = AsyncMock(return_value=[unscheduled])
+
+        payload = await review_service.get_grouped_review_queue(user_id=user_id, now=now)
+
+        assert payload["total_count"] == 0
+        assert payload["groups"] == []
 
 
 class TestQueueDue:
@@ -841,6 +942,7 @@ class TestGroupedQueue:
                             "entry_type": "word",
                             "text": "alpha",
                             "status": "learning",
+                            "due_label": "Due now",
                             "next_review_at": overdue.min_due_at_utc.isoformat(),
                             "due_review_date": overdue.due_review_date.isoformat(),
                             "min_due_at_utc": overdue.min_due_at_utc.isoformat(),
@@ -859,6 +961,7 @@ class TestGroupedQueue:
                             "entry_type": "phrase",
                             "text": "break down",
                             "status": "learning",
+                            "due_label": "Tomorrow",
                             "next_review_at": tomorrow.min_due_at_utc.isoformat(),
                             "due_review_date": tomorrow.due_review_date.isoformat(),
                             "min_due_at_utc": tomorrow.min_due_at_utc.isoformat(),
@@ -970,6 +1073,7 @@ class TestGroupedQueue:
                         "entry_type": "word",
                         "text": "alpha",
                         "status": "learning",
+                        "due_label": "Later today",
                         "next_review_at": learning_state.min_due_at_utc.isoformat(),
                         "due_review_date": learning_state.due_review_date.isoformat(),
                         "min_due_at_utc": learning_state.min_due_at_utc.isoformat(),
@@ -1115,6 +1219,7 @@ class TestGroupedQueue:
                         "entry_type": "word",
                         "text": "alpha",
                         "status": "learning",
+                        "due_label": "Later today",
                         "next_review_at": valid_state.min_due_at_utc.isoformat(),
                         "due_review_date": valid_state.due_review_date.isoformat(),
                         "min_due_at_utc": valid_state.min_due_at_utc.isoformat(),
@@ -1293,6 +1398,7 @@ class TestGroupedQueue:
                         "entry_type": "phrase",
                         "text": "jump the gun",
                         "status": "learning",
+                        "due_label": "In 2 days",
                         "next_review_at": "2026-04-07T10:00:00+00:00",
                         "due_review_date": future_state.due_review_date.isoformat(),
                         "min_due_at_utc": future_state.min_due_at_utc.isoformat(),
@@ -1348,6 +1454,8 @@ class TestGroupedQueue:
 
         assert [group["group_key"] for group in payload["groups"]] == ["due_now", "later_today"]
         assert [group["count"] for group in payload["groups"]] == [1, 1]
+        assert payload["groups"][0]["items"][0]["due_label"] == "Due now"
+        assert payload["groups"][1]["items"][0]["due_label"] == "Later today"
 
     @pytest.mark.asyncio
     async def test_get_grouped_review_queue_bucket_detail_sorts_by_requested_order(

@@ -223,6 +223,7 @@ class GroupedQueueItemResponse(BaseModel):
     entry_type: str
     text: str
     status: str
+    due_label: str | None = None
     next_review_at: datetime | None = None
     due_review_date: str | None = None
     min_due_at_utc: datetime | None = None
@@ -246,6 +247,7 @@ class GroupedQueueItemResponse(BaseModel):
             "entry_type": self.entry_type,
             "text": self.text,
             "status": self.status,
+            "due_label": self.due_label,
             "success_streak": self.success_streak,
             "lapse_count": self.lapse_count,
             "times_remembered": self.times_remembered,
@@ -296,7 +298,6 @@ class DueGroupedQueueResponse(BaseModel):
 class AdminGroupedQueueItemResponse(GroupedQueueItemResponse):
     target_type: str | None = None
     target_id: str | None = None
-    next_due_at: datetime | None = None
     last_outcome: str | None = None
     relearning: bool | None = None
     relearning_trigger: str | None = None
@@ -308,8 +309,6 @@ class AdminGroupedQueueItemResponse(GroupedQueueItemResponse):
             payload["target_type"] = self.target_type
         if self.target_id is not None:
             payload["target_id"] = self.target_id
-        if self.next_due_at is not None:
-            payload["next_due_at"] = self.next_due_at
         if self.last_outcome is not None:
             payload["last_outcome"] = self.last_outcome
         if self.relearning is not None:
