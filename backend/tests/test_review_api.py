@@ -303,7 +303,9 @@ class TestQueueDue:
         ]
         phrase_result = MagicMock()
         phrase_result.all.return_value = [(phrase_state.entry_id, "break down")]
-        mock_db.execute.side_effect = [user_result, state_result, word_result, phrase_result]
+        prefs_result = MagicMock()
+        prefs_result.scalar_one_or_none.return_value = MagicMock(timezone="UTC")
+        mock_db.execute.side_effect = [user_result, state_result, prefs_result, word_result, phrase_result]
 
         class FrozenDateTime(datetime):
             @classmethod
@@ -324,11 +326,13 @@ class TestQueueDue:
         assert data["groups"][0]["items"][0]["text"] == "persistence"
         assert data["groups"][0]["items"][0]["status"] == "learning"
         assert data["groups"][0]["items"][0]["bucket"] == "1d"
+        assert data["groups"][0]["items"][0]["due_label"] == "Later today"
         assert "target_type" not in data["groups"][0]["items"][0]
         assert len(data["groups"]) == 2
         assert data["groups"][1]["bucket"] == "7d"
         assert data["groups"][1]["items"][0]["entry_type"] == "phrase"
         assert data["groups"][1]["items"][0]["text"] == "break down"
+        assert data["groups"][1]["items"][0]["due_label"] == "Tomorrow"
 
     @pytest.mark.asyncio
     async def test_get_grouped_review_queue_by_due_success(
@@ -423,9 +427,11 @@ class TestQueueDue:
         future_state.srs_bucket = "180d"
         state_result = MagicMock()
         state_result.all.return_value = [(future_state, "learning")]
+        prefs_result = MagicMock()
+        prefs_result.scalar_one_or_none.return_value = MagicMock(timezone="UTC")
         word_result = MagicMock()
         word_result.all.return_value = [(future_state.entry_id, "candidate")]
-        mock_db.execute.side_effect = [user_result, state_result, word_result]
+        mock_db.execute.side_effect = [user_result, state_result, prefs_result, word_result]
 
         response = await client.get(
             "/api/reviews/admin/queue/grouped?effective_now=2026-10-05T09:00:00%2B00:00",
@@ -437,6 +443,7 @@ class TestQueueDue:
         assert data["debug"]["effective_now"] == "2026-10-05T09:00:00+00:00"
         assert data["groups"][0]["bucket"] == "180d"
         assert data["groups"][0]["items"][0]["text"] == "candidate"
+        assert data["groups"][0]["items"][0]["due_label"] == "Due now"
         assert data["groups"][0]["items"][0]["target_type"] == "meaning"
 
     @pytest.mark.asyncio
