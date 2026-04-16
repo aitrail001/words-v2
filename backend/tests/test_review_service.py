@@ -226,6 +226,10 @@ class TestEntryQueueSchedule:
         assert state.due_review_date == due_review_date
         assert state.min_due_at_utc == min_due_at_utc
 
+    def test_due_label_month_rounding_matches_frontend_half_up_behavior(self):
+        assert ReviewService._format_due_label_from_day_delta(74) == "In 2 months"
+        assert ReviewService._format_due_label_from_day_delta(75) == "In 3 months"
+
     @pytest.mark.asyncio
     async def test_get_entry_queue_schedule_returns_canonical_schedule_for_created_learning_entry(
         self, review_service, mock_db

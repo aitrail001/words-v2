@@ -2639,7 +2639,7 @@ class ReviewService:
             return "In 2 weeks"
         if day_delta < 45:
             return "In a month"
-        return f"In {max(2, round(day_delta / 30))} months"
+        return f"In {max(2, (day_delta + 15) // 30)} months"
 
     @classmethod
     def _resolve_due_label_and_day_delta_for_state(
