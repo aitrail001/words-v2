@@ -223,6 +223,7 @@ class GroupedQueueItemResponse(BaseModel):
     entry_type: str
     text: str
     status: str
+    due_label: str | None = None
     next_review_at: datetime | None = None
     due_review_date: str | None = None
     min_due_at_utc: datetime | None = None
@@ -246,6 +247,7 @@ class GroupedQueueItemResponse(BaseModel):
             "entry_type": self.entry_type,
             "text": self.text,
             "status": self.status,
+            "due_label": self.due_label,
             "success_streak": self.success_streak,
             "lapse_count": self.lapse_count,
             "times_remembered": self.times_remembered,

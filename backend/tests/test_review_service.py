@@ -938,6 +938,7 @@ class TestGroupedQueue:
                             "entry_type": "word",
                             "text": "alpha",
                             "status": "learning",
+                            "due_label": "Due now",
                             "next_review_at": overdue.min_due_at_utc.isoformat(),
                             "due_review_date": overdue.due_review_date.isoformat(),
                             "min_due_at_utc": overdue.min_due_at_utc.isoformat(),
@@ -956,6 +957,7 @@ class TestGroupedQueue:
                             "entry_type": "phrase",
                             "text": "break down",
                             "status": "learning",
+                            "due_label": "Tomorrow",
                             "next_review_at": tomorrow.min_due_at_utc.isoformat(),
                             "due_review_date": tomorrow.due_review_date.isoformat(),
                             "min_due_at_utc": tomorrow.min_due_at_utc.isoformat(),
@@ -1067,6 +1069,7 @@ class TestGroupedQueue:
                         "entry_type": "word",
                         "text": "alpha",
                         "status": "learning",
+                        "due_label": "Later today",
                         "next_review_at": learning_state.min_due_at_utc.isoformat(),
                         "due_review_date": learning_state.due_review_date.isoformat(),
                         "min_due_at_utc": learning_state.min_due_at_utc.isoformat(),
@@ -1212,6 +1215,7 @@ class TestGroupedQueue:
                         "entry_type": "word",
                         "text": "alpha",
                         "status": "learning",
+                        "due_label": "Later today",
                         "next_review_at": valid_state.min_due_at_utc.isoformat(),
                         "due_review_date": valid_state.due_review_date.isoformat(),
                         "min_due_at_utc": valid_state.min_due_at_utc.isoformat(),
@@ -1390,6 +1394,7 @@ class TestGroupedQueue:
                         "entry_type": "phrase",
                         "text": "jump the gun",
                         "status": "learning",
+                        "due_label": "In 2 days",
                         "next_review_at": "2026-04-07T10:00:00+00:00",
                         "due_review_date": future_state.due_review_date.isoformat(),
                         "min_due_at_utc": future_state.min_due_at_utc.isoformat(),
@@ -1445,6 +1450,8 @@ class TestGroupedQueue:
 
         assert [group["group_key"] for group in payload["groups"]] == ["due_now", "later_today"]
         assert [group["count"] for group in payload["groups"]] == [1, 1]
+        assert payload["groups"][0]["items"][0]["due_label"] == "Due now"
+        assert payload["groups"][1]["items"][0]["due_label"] == "Later today"
 
     @pytest.mark.asyncio
     async def test_get_grouped_review_queue_bucket_detail_sorts_by_requested_order(

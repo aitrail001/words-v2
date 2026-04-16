@@ -312,7 +312,7 @@ export function ReviewQueueItemCard({
     REVIEWABLE_BUCKETS.includes(resolvedBucket) &&
     isDueNow;
   const [historyOpen, setHistoryOpen] = useState(false);
-  const dueLabel = formatReviewQueueDueLabel(item) ?? "Due now";
+  const dueLabel = item.due_label ?? formatReviewQueueDueLabel(item) ?? "Due now";
   const exactDueLabel = exactDueAt ? formatReviewQueueTime(exactDueAt) : null;
   const history = item.history ?? [];
   const successStreak = item.success_streak ?? 0;
