@@ -6,11 +6,11 @@
 
 ## Invariant Checklist
 
-- [ ] learner `learning` entries always have coherent next-step UI
-- [ ] queue, detail, and admin schedule meaning agree
-- [ ] admin diagnostics contain no dead legacy fields
-- [ ] detail endpoints and queue endpoints serialize consistent review state
-- [ ] gates cover every confirmed inconsistency class
+- [x] learner `learning` entries always have coherent next-step UI
+- [x] queue, detail, and admin schedule meaning agree
+- [x] admin diagnostics contain no dead legacy fields
+- [x] detail endpoints and queue endpoints serialize consistent review state
+- [x] gates cover every confirmed inconsistency class
 
 ## Findings
 
@@ -50,3 +50,16 @@
   - `versus` entry state `a640393b-5fba-4e17-ba41-fa988893248a` and meaning state `a8abf0b5-4da5-4c03-9c59-9854e2bfeda5`
 - **Expected invariant:** queue, detail, and admin schedule meaning agree
 - **Notes:** those four rows have the expected `Australia/Melbourne` canonical schedule (`due_review_date='2026-04-16'`, `min_due_at_utc='2026-04-15T18:00:00+00:00'` for a `1d` bucket), while the earlier `judicial`, `the`, and `lgbt` duplicates are missing the same fields entirely. The split suggests schedule population is inconsistent across creation paths or over time.
+
+## Resolution Summary
+
+- Repaired stale learning-state schedules at the review-service source so existing `learning` entries with missing canonical fields are backfilled before queue payload construction.
+- Removed dead admin/API `next_due_at` serialization and stopped the admin bucket page from reintroducing it as a diagnostic row.
+- Kept audit-relevant admin diagnostics such as `target_type` and `target_id` visible when missing, while omitting only truly dead or intentionally absent fields.
+- Added a learner-facing invariant warning on detail pages when a `learning` entry is rendered without a `review_queue`.
+- Added backend and frontend regression coverage for the inconsistent states found in local live data.
+
+## Residual Risk
+
+- The branch repairs schedule construction and user-facing rendering, but it does not perform a one-off data migration to rewrite every already-persisted stale row in the long-lived local databases.
+- `scripts/debug/review_srs_invariant_audit.py` remains the right tool to re-check `admin@admin.com` after future state changes or after any manual data repair.

@@ -32,13 +32,21 @@ class AdminQueuePageError extends Error {
 }
 
 function buildAdminSupplementalFields(item: AdminReviewQueueItem) {
-  const fields: Array<{ label: string; value: boolean | string | null | undefined }> = [
-    { label: "target_type", value: item.target_type },
-    { label: "target_id", value: item.target_id },
-    { label: "last_outcome", value: item.last_outcome },
-    { label: "relearning", value: item.relearning },
-    { label: "relearning_trigger", value: item.relearning_trigger },
-  ];
+  const fields: Array<{ label: string; value: boolean | string | null | undefined }> = [];
+
+  // These two fields stay visible even when absent because missing target metadata
+  // is itself useful operator signal during the review-state audit.
+  fields.push({ label: "target_type", value: item.target_type });
+  fields.push({ label: "target_id", value: item.target_id });
+  if (Object.prototype.hasOwnProperty.call(item, "last_outcome")) {
+    fields.push({ label: "last_outcome", value: item.last_outcome });
+  }
+  if (Object.prototype.hasOwnProperty.call(item, "relearning")) {
+    fields.push({ label: "relearning", value: item.relearning });
+  }
+  if (Object.prototype.hasOwnProperty.call(item, "relearning_trigger")) {
+    fields.push({ label: "relearning_trigger", value: item.relearning_trigger });
+  }
 
   if (item.recheck_due_at) {
     fields.splice(2, 0, { label: "recheck_due_at", value: item.recheck_due_at });
